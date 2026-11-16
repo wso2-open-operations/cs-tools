@@ -1046,7 +1046,11 @@ paths:
       description: >
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
-        effect. Supported by the ServiceNow data source only.
+        effect. Escalating needs an escalation role (escalator, CS engineer or
+        admin). De-escalating is allowed for somebody an admin named (Settings
+        > User management > Escalation access), who needs no escalation role,
+        or for a lead of the case's ABT team, who does. Supported by the
+        ServiceNow data source only.
       operationId: postCasesIdEscalations
       parameters:
         - name: id
@@ -2563,6 +2567,147 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      operationId: listCaseDeescalators
+      description: >
+        Backed by entity-service. Admin-only. They may de-escalate any case besides the leads of the case's own ABT
+        team, who keep that ability for their team's cases.
+      responses:
+        "200":
+          description: The grants (userId, name, email, grantedBy, grantedOn, active).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deescalators:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string, format: uuid }
+                        name: { type: string }
+                        email: { type: string }
+                        grantedBy: { type: string }
+                        grantedOn: { type: string, format: date-time }
+                        active: { type: boolean }
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only; the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (the entity service has no database for it).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      operationId: putCaseDeescalator
+      description: >
+        Admin-only. The person must be active internal staff. Idempotent. Audited by the entity service.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID, or refused by the entity service with its reason, e.g. the person is not active internal staff).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      operationId: deleteCaseDeescalator
+      description: >
+        Admin-only. Idempotent. A team lead keeps the ability to de-escalate their own team's cases.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /teams/{id}/lead:
     post:
       summary: Assign a user as the team's one lead.

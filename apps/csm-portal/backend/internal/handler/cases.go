@@ -261,40 +261,42 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 	return action, true
 }
 
-// callerIsCaseTeamLead reports whether the caller is one of the case's ABT
-// team leads (entity-service's teamLeads: team_member role 'lead' on the
-// account's CRE team) -- the only people authorized to de-escalate it.
-// Escalating is open to any internal engineer (PermEscalate); only
-// de-escalation is gated this way.
+// deescalationStanding reports how the caller stands to de-escalate the case:
+// isLead is true when they are one of its ABT team leads (entity-service's
+// teamLeads: team_member role 'lead' on the account's CRE team), isNamed when
+// an admin named them as allowed to de-escalate any case (entity-service's
+// deescalators, set in Settings > User management > Escalation access).
 //
-// Fails closed (returns false) on any lookup/parse error or when the case's
-// team has no lead. Matches by the caller's platform user id first (GET
-// /users/me's own id against a lead's id, both platform UUIDs), falling back
-// to a case-insensitive email match when either id is empty.
-func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user *middleware.UserInfo) bool {
+// Fails closed (false, false) on any lookup/parse error or when neither list
+// holds anyone. Matches by the caller's platform user id first (GET
+// /users/me's own id against a listed person's id, both platform UUIDs),
+// falling back to a case-insensitive email match when either id is empty.
+func (h *CaseHandler) deescalationStanding(r *http.Request, caseID string, user *middleware.UserInfo) (isLead, isNamed bool) {
 	raw, err := h.entity.SearchCaseEscalations(r.Context(), caseID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
-		return false
+		return false, false
+	}
+	type person struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
 	}
 	var history struct {
-		TeamLeads []struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-		} `json:"teamLeads"`
+		TeamLeads    []person `json:"teamLeads"`
+		Deescalators []person `json:"deescalators"`
 	}
 	if err := json.Unmarshal(raw, &history); err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations: parse response failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
-		return false
+		return false, false
 	}
-	if len(history.TeamLeads) == 0 {
-		return false
+	if len(history.TeamLeads) == 0 && len(history.Deescalators) == 0 {
+		return false, false
 	}
 
 	callerRaw, err := h.entity.GetUserMe(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetUserMe failed while checking de-escalation authorization", "userID", user.UserID, "err", err)
-		return false
+		return false, false
 	}
 	var caller struct {
 		ID    string `json:"id"`
@@ -302,24 +304,34 @@ func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user 
 	}
 	if err := json.Unmarshal(callerRaw, &caller); err != nil {
 		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed while checking de-escalation authorization", "userID", user.UserID, "err", err)
-		return false
+		return false, false
 	}
 
-	for _, lead := range history.TeamLeads {
-		if caller.ID != "" && lead.ID != "" && caller.ID == lead.ID {
+	same := func(p person) bool {
+		if caller.ID != "" && p.ID != "" && caller.ID == p.ID {
 			return true
 		}
 		// Only fall back to email when an id is unavailable on either side --
 		// two different platform users must never be treated as the same
 		// person just because both ids happen to be missing and their emails
 		// happen to match by coincidence or staleness on one side.
-		if (caller.ID == "" || lead.ID == "") &&
-			caller.Email != "" && lead.Email != "" &&
-			strings.EqualFold(caller.Email, lead.Email) {
-			return true
+		return (caller.ID == "" || p.ID == "") &&
+			caller.Email != "" && p.Email != "" &&
+			strings.EqualFold(caller.Email, p.Email)
+	}
+	for _, p := range history.TeamLeads {
+		if same(p) {
+			isLead = true
+			break
 		}
 	}
-	return false
+	for _, p := range history.Deescalators {
+		if same(p) {
+			isNamed = true
+			break
+		}
+	}
+	return isLead, isNamed
 }
 
 // maxRequestBodyBytes caps incoming request bodies at 1 MiB to prevent memory DoS.
@@ -1629,9 +1641,22 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if action == "DEESCALATE" && !h.callerIsCaseTeamLead(r, caseID, user) {
-		writeError(w, http.StatusForbidden, ErrMsgForbidden)
-		return
+	// This route is registered at the base viewing permission (PermView), not
+	// PermEscalate, because somebody an admin named as allowed to de-escalate
+	// needs no escalation role. Escalating, and a team lead's de-escalation,
+	// still need PermEscalate, checked here; a nil guard fails closed.
+	holdsEscalate := h.access != nil && h.access.Permits(PermEscalate, user.Roles)
+	if action != "DEESCALATE" {
+		if !holdsEscalate {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
+	} else {
+		isLead, isNamed := h.deescalationStanding(r, caseID, user)
+		if !isNamed && !(isLead && holdsEscalate) {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
 	}
 
 	// This route's permission (PermEscalate) is also held by roles that

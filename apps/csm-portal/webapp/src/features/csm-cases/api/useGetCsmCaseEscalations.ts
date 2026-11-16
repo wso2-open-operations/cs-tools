@@ -25,6 +25,7 @@ const EMPTY_HISTORY: CaseEscalationHistory = {
   escalations: [],
   currentNotifiedUsers: [],
   teamLeads: [],
+  deescalators: [],
 };
 
 /**
@@ -61,6 +62,11 @@ export function useGetCsmCaseEscalations(
           email: u.email,
         })),
         teamLeads: (response?.teamLeads ?? []).map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+        })),
+        deescalators: (response?.deescalators ?? []).map((u) => ({
           id: u.id,
           name: u.name,
           email: u.email,

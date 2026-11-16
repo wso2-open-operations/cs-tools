@@ -1320,6 +1320,27 @@ export interface BeCaseEscalationSearchResponse {
   /** The leads of the case's account's CRE (ABT) team -- the only users who
    * may de-escalate the case. */
   teamLeads?: BeCaseEscalationNotifiedUser[];
+  /** Users an admin named as allowed to de-escalate any case, besides the
+   * team leads above. */
+  deescalators?: BeCaseEscalationNotifiedUser[];
+}
+
+/** One person an admin named as allowed to de-escalate any case
+ * (`GET /case-escalation-access/deescalators`). `active` is false when the
+ * holder is no longer active internal staff: listed so it can be removed, but
+ * it lets nobody de-escalate. */
+export interface BeCaseDeescalator {
+  userId: string;
+  name: string;
+  email: string;
+  grantedBy: string;
+  grantedOn: string;
+  active: boolean;
+}
+
+/** Response of `GET /case-escalation-access/deescalators`. */
+export interface BeCaseDeescalatorsResponse {
+  deescalators: BeCaseDeescalator[];
 }
 
 /**

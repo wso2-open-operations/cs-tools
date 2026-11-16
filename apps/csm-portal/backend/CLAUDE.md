@@ -742,6 +742,17 @@ total}` untouched.
   `TestGetChangeRequestApprovals_PassesAssignmentGroupThrough` (`groups_test.go`) and
   `TestGetGroupSendsGetToGroupsID` (`internal/entity/customer_client_test.go`).
 
+## De-escalation: team leads and the admin-named list
+
+`POST /cases/{id}/escalations` is registered at `PermView`, not `PermEscalate`, and `CaseHandler.CreateCaseEscalation`
+checks `PermEscalate` itself (through the access guard; a nil guard fails closed): escalating needs it. De-escalating
+(`DEESCALATE`) is allowed for somebody an admin named (`deescalators`), who needs **no** escalation role, or for one of
+the case's ABT team leads (`teamLeads`), who still needs `PermEscalate`. Both lists come from entity-service's
+`GET /cases/{id}/escalations` (`deescalationStanding`); matched by platform id, else case-insensitive email when an id
+is missing. It fails closed on any lookup error. The admin names them through `CaseEscalationAccessHandler`
+(`GET /case-escalation-access/deescalators`, `PUT`/`DELETE .../{userId}`), all `PermAdmin`, forwarded to
+entity-service, which checks the admin role again from the caller's token and keeps its own refusal reason.
+
 ## MTTR report (`GET /reports/mttr`) backs the dashboard builder's `mttr` resourceType
 
 A thin `PermView` proxy of entity-service's own `GET /reports/mttr` (`MTTRReportHandler`,

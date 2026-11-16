@@ -8522,6 +8522,11 @@ type CaseEscalationHistory struct {
 	// the account has no CRE team, the team has no lead, or the data source
 	// cannot resolve them.
 	TeamLeads []EscalationNotifiedUser `json:"teamLeads"`
+	// Deescalators are the active internal users an admin has named as
+	// allowed to de-escalate any case (role case_deescalator), besides the
+	// case's own team leads. Always present, an empty array when none is
+	// named or the data source cannot resolve them.
+	Deescalators []EscalationNotifiedUser `json:"deescalators"`
 }
 
 // --- case-grouped time cards (ServiceNow data source only) ---

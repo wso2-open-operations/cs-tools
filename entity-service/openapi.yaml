@@ -11474,6 +11474,140 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      description: >
+        Everyone holding the `case_deescalator` role, one entry per person, with who granted
+        it and when. They may de-escalate any case besides the leads of the case's own ABT
+        team. CSM admin only (a user token; a service credential is refused). Postgres only.
+      operationId: listCaseDeescalators
+      responses:
+        "200":
+          description: The grants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseDeescalators'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a CSM admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      description: >
+        Grants the `case_deescalator` role. CSM admin only. The person must be active internal
+        staff. Granting what is already held changes nothing. Audited.
+      operationId: grantCaseDeescalator
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The person ("user" id).
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: The user id is not a UUID, or the person is not active internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a CSM admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      description: >
+        Removes the `case_deescalator` role. CSM admin only. Removing what is not held is not an
+        error. A team lead keeps the ability to de-escalate their own team's cases. Audited.
+      operationId: revokeCaseDeescalator
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The person ("user" id).
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: The user id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a CSM admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/rota-access/admins/{family}/{userId}:
     put:
       summary: Make somebody a rota admin for one family.
@@ -37112,9 +37246,28 @@ components:
         but callers should send the upper-case form.
       enum: [ESCALATE, DEESCALATE]
 
+    CaseDeescalators:
+      type: object
+      required: [deescalators]
+      properties:
+        deescalators:
+          type: array
+          items:
+            type: object
+            required: [userId, name, email, grantedBy, grantedOn, active]
+            properties:
+              userId: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: string }
+              grantedBy: { type: string }
+              grantedOn: { type: string, format: date-time }
+              active:
+                type: boolean
+                description: False when the holder is not active internal staff; the grant is listed so it can be removed but lets nobody de-escalate.
+
     CaseEscalationHistory:
       type: object
-      required: [escalations, total, currentNotifiedUsers, teamLeads]
+      required: [escalations, total, currentNotifiedUsers, teamLeads, deescalators]
       properties:
         escalations:
           type: array
@@ -37136,8 +37289,15 @@ components:
             $ref: '#/components/schemas/EscalationNotifiedUser'
           description: >-
             The leads of the case's account's CRE (ABT) team. Only these users may de-escalate
-            the case from the CSM portal. Empty when the account has no CRE team or the team
-            has no lead.
+            the case from the CSM portal, besides `deescalators`. Empty when the account has no
+            CRE team or the team has no lead.
+        deescalators:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationNotifiedUser'
+          description: >-
+            Active internal users an admin named as allowed to de-escalate any case (role
+            `case_deescalator`), besides the case's team leads. Empty when none is named.
 
     CaseEscalationCreateRequest:
       description: >
