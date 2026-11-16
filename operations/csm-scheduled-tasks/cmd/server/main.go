@@ -65,6 +65,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/rotareminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
@@ -248,6 +250,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service product-regression-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The weekly SLA breach report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/sla-breaches).
+	slaBreachReportClient, err := slabreachreport.NewClient(slabreachreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service sla-breach-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -671,6 +687,59 @@ func main() {
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
 					return regressionscan.SendReport(regressionReportClient, email,
 						v, orRecipients(to, rec), cc, regressionCaseLinkBase, alertsEnabled)
+				}),
+		})
+	}
+
+	// The weekly SLA breach reports: last week's breached clocks on the
+	// covered SLA definitions. There are TWO source reports, separate
+	// definitions with different stage and onboarding-status filters, so
+	// each variant is its own task and its own email.
+	//
+	// Default schedule 10:00 Monday India Standard Time, from the source
+	// scheduled report (Run Weekly, Mon, Time 10:00:00). Its Time zone
+	// field reads "-- None --", meaning the ServiceNow instance's own
+	// default; that default is IST, confirmed with the report's owner
+	// rather than assumed. These cron strings are UTC, so 10:00 IST is
+	// 30 4 * * 1. Audience, schedule and the debug divert all resolve by
+	// task name like every other report.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, for the same reason
+	// the regression reports leave them nil: the engine mails task.To on
+	// every failed attempt and retries a failed period every tick, and
+	// the audience here is leadership mail groups. Failures go to
+	// ALERT_RECIPIENTS alone; the tasks are carried to the EMAIL_BASE_URL
+	// check by name instead.
+	slaBreachDefinitions := slabreachscan.Definitions()
+	slaBreachCaseLinkBase := strings.TrimRight(os.Getenv("SLA_BREACH_REPORT_LINK_BASE_URL"), "/")
+	if slaBreachCaseLinkBase != "" {
+		if err := httpsec.RequireSecureURL(slaBreachCaseLinkBase); err != nil {
+			slog.Error("invalid SLA_BREACH_REPORT_LINK_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant()} {
+		v = slabreachscan.ApplyStageOverride(v)
+		name := slabreachscan.TaskName(v)
+		to, cc := recipientsFor(recipientOverrides, name)
+		if len(to) > 0 {
+			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
+		}
+		v, to, cc := v, to, cc
+		regressionTasks = append(regressionTasks, registry.Task{
+			Name:     name,
+			Schedule: scheduleFor(scheduleOverrides, name, "30 4 * * 1"),
+			Handler: slabreachscan.SendReport(slaBreachReportClient,
+				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
+				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled, time.Time{}),
+			// --from-date/--to-date name the week, --recipients/--cc the
+			// audience, of a manual run-now only; see slaBreachRunNow.
+			RunNowFlags: slaBreachRunNowFlags,
+			RunNowNarrow: slaBreachRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, week time.Time, rec []string) func(ctx context.Context) error {
+					return slabreachscan.SendReport(slaBreachReportClient, email,
+						v, slaBreachDefinitions, orRecipients(to, rec), cc,
+						slaBreachCaseLinkBase, alertsEnabled, week)
 				}),
 		})
 	}
