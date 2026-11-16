@@ -172,6 +172,7 @@ export const ApiQueryKeys = {
   CSM_ADMIN_TEAM_DETAIL: "csm-admin-team-detail",
   CSM_ADMIN_TEAM_MEMBERS: "csm-admin-team-members",
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
+  CSM_ADMIN_CASE_DEESCALATORS: "csm-admin-case-deescalators",
   CSM_PRODUCT_REPO_MAPPING: "csm-product-repo-mapping",
   SAVED_FILTER_VIEWS: "saved-filter-views",
 } as const;

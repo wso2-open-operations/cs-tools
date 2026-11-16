@@ -167,6 +167,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	caseEscalationAccessHandler := handler.NewCaseEscalationAccessHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -620,6 +621,12 @@ func main() {
 	// incident call-escalation ladder pages for this team -- see that repo's
 	// own CLAUDE.md.
 	route("POST /teams/{id}/lead", handler.PermAdmin, teamHandler.AssignLead)
+	// Admin-only: who may de-escalate any case besides the leads of the case's
+	// own ABT team (Admin > Escalation access). entity-service checks the
+	// caller's admin role again from their token.
+	route("GET /case-escalation-access/deescalators", handler.PermAdmin, caseEscalationAccessHandler.ListDeescalators)
+	route("PUT /case-escalation-access/deescalators/{userId}", handler.PermAdmin, caseEscalationAccessHandler.PutDeescalator)
+	route("DELETE /case-escalation-access/deescalators/{userId}", handler.PermAdmin, caseEscalationAccessHandler.DeleteDeescalator)
 	route("GET /accounts/{id}", handler.PermViewSharedEntity, accountHandler.GetAccount)
 	// Admin-only: CRE/SRE team is a temporary override of ServiceNow's own
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other

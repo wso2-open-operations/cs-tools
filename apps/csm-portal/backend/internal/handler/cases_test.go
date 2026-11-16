@@ -2730,6 +2730,31 @@ func TestCreateCaseEscalation(t *testing.T) {
 		}
 	})
 
+	t.Run("de-escalation is allowed for somebody an admin named, though not the case's team lead", func(t *testing.T) {
+		var upstreamCalled bool
+		client := &mockEntityCaseClient{
+			searchCaseEscalationsFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"escalations":[{"id":"e-0"}],"total":1,"currentNotifiedUsers":[],"teamLeads":[{"id":"u-2","email":"lead@example.com"}],"deescalators":[{"id":"u-1","email":"agent@example.com"}]}`), nil
+			},
+			getUserMeFn: func(_ context.Context) ([]byte, error) {
+				return []byte(`{"id":"u-1","email":"agent@example.com"}`), nil
+			},
+			createCaseEscalationFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				upstreamCalled = true
+				return []byte(`{"id":"e-1","level":"1","action":"DEESCALATE"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseEscalation(w, r)
+		assertStatus(t, w, http.StatusCreated)
+		if !upstreamCalled {
+			t.Error("upstream CreateCaseEscalation was not called for a named de-escalator")
+		}
+	})
+
 	t.Run("de-escalation is allowed for one of the case's team leads, matched by email when id is empty", func(t *testing.T) {
 		var upstreamCalled bool
 		client := &mockEntityCaseClient{

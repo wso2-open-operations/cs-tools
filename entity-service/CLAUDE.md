@@ -544,6 +544,19 @@ set, or it will silently read as empty.
 `internal/domain/mttr_report.go`, `internal/repository/mttr_report_repo.go`,
 `internal/service/mttr_report_service.go`, `internal/handler/mttr_report_handler.go`.
 
+## Who may de-escalate a case: team leads and the `case_deescalator` role
+
+De-escalating is allowed for the leads of the case's own ABT team (`team_member` role `lead` on
+`account.cre_team_id`, `teamLeads` on `GET /cases/{id}/escalations`) **and** for anyone an admin named: holders of
+the stored role `case_deescalator` (migration 0293), returned as `deescalators` (active internal users only) on the
+same response, so the portal decides from one read. A CSM admin manages the list through
+`GET /case-escalation-access/deescalators` and `PUT`/`DELETE /case-escalation-access/deescalators/{userId}`
+(`CaseEscalationAccessService`): all three need a user token that is a CSM admin (a token role from
+`AUTH_ADMIN_ROLES`, or the stored `admin` role), as for rota access; a grant needs an active internal user; both
+changes are idempotent and audited. A holder who stops being active internal staff is listed as `active: false` (so
+it can be removed) and is left out of `deescalators`. Escalating is unchanged (any internal engineer).
+entity-service does not enforce de-escalation itself, as before: csm-portal-backend decides from this response.
+
 ## Salesforce Account ingest
 
 `POST /salesforce/events` accepts the ASB envelope `{eventType, entity, referenceId}`

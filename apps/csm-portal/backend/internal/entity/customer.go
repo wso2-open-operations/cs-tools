@@ -1235,6 +1235,24 @@ func (c *CustomerEntityClient) GetRotaAccess(ctx context.Context) ([]byte, error
 	return c.do(ctx, http.MethodGet, "/team-schedule/rota-access", nil)
 }
 
+// ListCaseDeescalators calls GET /case-escalation-access/deescalators on the
+// entity service: the people an admin named as allowed to de-escalate any
+// case. entity-service requires a CSM admin's user token. Response is returned
+// as raw JSON.
+func (c *CustomerEntityClient) ListCaseDeescalators(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/case-escalation-access/deescalators", nil)
+}
+
+// PutCaseDeescalator calls PUT /case-escalation-access/deescalators/{userId}.
+func (c *CustomerEntityClient) PutCaseDeescalator(ctx context.Context, userID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPut, "/case-escalation-access/deescalators/"+url.PathEscape(userID), nil)
+}
+
+// DeleteCaseDeescalator calls DELETE /case-escalation-access/deescalators/{userId}.
+func (c *CustomerEntityClient) DeleteCaseDeescalator(ctx context.Context, userID string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, "/case-escalation-access/deescalators/"+url.PathEscape(userID), nil)
+}
+
 // PutRotaAdmin calls PUT /team-schedule/rota-access/admins/{family}/{userId}.
 func (c *CustomerEntityClient) PutRotaAdmin(ctx context.Context, family, userID string) ([]byte, error) {
 	return c.do(ctx, http.MethodPut, "/team-schedule/rota-access/admins/"+url.PathEscape(family)+"/"+url.PathEscape(userID), nil)

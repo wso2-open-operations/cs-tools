@@ -372,6 +372,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// rest of the Team Schedule.
 	var rotaGenerateHandler *handler.RotaGenerateHandler
 	var rotaAccessHandler *handler.RotaAccessHandler
+	// Who may de-escalate any case; set once the database is available.
+	var caseEscalationAccessHandler *handler.CaseEscalationAccessHandler
 	var scheduleReminderHandler *handler.ScheduleReminderHandler
 	var rotaReminderSettingsHandler *handler.RotaReminderSettingsHandler
 	var rotaReminderRequestHandler *handler.RotaReminderRequestHandler
@@ -1464,6 +1466,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// The ABT team leads (who may de-escalate) live in Postgres team data
 		// whatever DATA_SOURCE is.
 		caseEscalationSvc = service.WithCaseTeamLeads(caseEscalationSvc, escalationRepo)
+		// Besides them, the people an admin named (role case_deescalator).
+		caseEscalationAccessRepo := repository.NewCaseEscalationAccessRepository(db)
+		caseEscalationSvc = service.WithCaseDeescalators(caseEscalationSvc, caseEscalationAccessRepo)
+		caseEscalationAccessHandler = handler.NewCaseEscalationAccessHandler(
+			service.NewCaseEscalationAccessService(caseEscalationAccessRepo, accessSvc, cfg.AuthAdminRoles),
+		)
 	}
 	caseEscalationHandler := handler.NewCaseEscalationHandler(caseEscalationSvc)
 
@@ -2341,6 +2349,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /team-schedule/absences/{id}", scheduleHandler.DeleteScheduleAbsence)
 		mux.HandleFunc("POST /team-schedule/absence-kinds", scheduleHandler.CreateScheduleAbsenceKind)
 		mux.HandleFunc("DELETE /team-schedule/absence-kinds/{code}", scheduleHandler.DeleteScheduleAbsenceKind)
+	}
+	if caseEscalationAccessHandler != nil {
+		// Who may de-escalate any case besides the case's team leads. The
+		// service requires a CSM admin's user token for all three.
+		mux.HandleFunc("GET /case-escalation-access/deescalators", caseEscalationAccessHandler.ListDeescalators)
+		mux.HandleFunc("PUT /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.GrantDeescalator)
+		mux.HandleFunc("DELETE /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.RevokeDeescalator)
 	}
 	if rotaAccessHandler != nil {
 		// Who holds a rota admin role or marks a team's rota, and changing

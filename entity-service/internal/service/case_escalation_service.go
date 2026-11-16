@@ -44,6 +44,25 @@ type caseEscalationService struct {
 	// wired via WithCaseTeamLeads (a Postgres-backed deployment); TeamLeads
 	// is then always empty.
 	teamLeads caseTeamLeadReader
+	// deescalators resolves the people an admin named as allowed to
+	// de-escalate any case. nil unless wired via WithCaseDeescalators.
+	deescalators caseDeescalatorReader
+}
+
+// caseDeescalatorReader is what caseEscalationService needs from
+// repository.CaseEscalationAccessRepository for Deescalators.
+type caseDeescalatorReader interface {
+	ListDeescalators(ctx context.Context) ([]domain.CaseDeescalatorGrant, error)
+}
+
+// WithCaseDeescalators attaches the lookup GET /cases/{id}/escalations returns
+// as Deescalators -- the people besides the team leads who may de-escalate. A
+// no-op if svc is not a *caseEscalationService or r is nil.
+func WithCaseDeescalators(svc CaseEscalationService, r caseDeescalatorReader) CaseEscalationService {
+	if cs, ok := svc.(*caseEscalationService); ok && r != nil {
+		cs.deescalators = r
+	}
+	return svc
 }
 
 // caseTeamLeadReader is what caseEscalationService needs from
@@ -115,11 +134,27 @@ func (s *caseEscalationService) SearchCaseEscalations(ctx context.Context, caseI
 		teamLeads = leads
 	}
 
+	deescalators := []domain.EscalationNotifiedUser{}
+	if s.deescalators != nil {
+		grants, err := s.deescalators.ListDeescalators(ctx)
+		if err != nil {
+			return domain.CaseEscalationHistory{}, err
+		}
+		for _, g := range grants {
+			if !g.Active {
+				continue
+			}
+			name, email := g.Name, g.Email
+			deescalators = append(deescalators, domain.EscalationNotifiedUser{ID: g.UserID, UserName: email, Name: &name, Email: &email})
+		}
+	}
+
 	return domain.CaseEscalationHistory{
 		Escalations:          escalations,
 		Total:                total,
 		CurrentNotifiedUsers: currentNotifiedUsers,
 		TeamLeads:            teamLeads,
+		Deescalators:         deescalators,
 	}, nil
 }
 

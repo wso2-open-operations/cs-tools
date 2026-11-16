@@ -742,17 +742,21 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
-  // De-escalating is restricted to the case's ABT team leads (the backend
-  // enforces the same check -- this is a client-side affordance only,
+  // De-escalating is restricted to the case's ABT team leads and the people
+  // an admin named (Settings > Escalation access); the backend enforces the
+  // same check -- this is a client-side affordance only,
   // matching every other role/permission check in this app). Matched by
   // platform id first (currentUser.id against a lead's own id, the same
   // identity space the backend's own check uses), falling back to a
   // case-insensitive email match against the signed-in user's ID token claim
   // when either id is unavailable -- mirrors the BFF's own
-  // callerIsCaseTeamLead exactly.
+  // callerMayDeescalate exactly.
   const callerId = currentUser?.id;
   const callerEmail = claims?.email?.toLowerCase();
-  const callerIsCaseTeamLead = (escalationHistory?.teamLeads ?? []).some(
+  const callerIsCaseTeamLead = [
+    ...(escalationHistory?.teamLeads ?? []),
+    ...(escalationHistory?.deescalators ?? []),
+  ].some(
     (u) => {
       if (callerId && u.id && callerId === u.id) return true;
       if ((!callerId || !u.id) && callerEmail && u.email) {

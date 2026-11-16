@@ -261,33 +261,37 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 	return action, true
 }
 
-// callerIsCaseTeamLead reports whether the caller is one of the case's ABT
-// team leads (entity-service's teamLeads: team_member role 'lead' on the
-// account's CRE team) -- the only people authorized to de-escalate it.
-// Escalating is open to any internal engineer (PermEscalate); only
-// de-escalation is gated this way.
+// callerMayDeescalate reports whether the caller may de-escalate the case: one
+// of its ABT team leads (entity-service's teamLeads: team_member role 'lead' on
+// the account's CRE team), or somebody an admin named as allowed to
+// de-escalate any case (entity-service's deescalators, set in Admin >
+// Escalation access). Escalating is open to any internal engineer
+// (PermEscalate); only de-escalation is gated this way.
 //
-// Fails closed (returns false) on any lookup/parse error or when the case's
-// team has no lead. Matches by the caller's platform user id first (GET
+// Fails closed (returns false) on any lookup/parse error or when neither list
+// holds anyone. Matches by the caller's platform user id first (GET
 // /users/me's own id against a lead's id, both platform UUIDs), falling back
 // to a case-insensitive email match when either id is empty.
-func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user *middleware.UserInfo) bool {
+func (h *CaseHandler) callerMayDeescalate(r *http.Request, caseID string, user *middleware.UserInfo) bool {
 	raw, err := h.entity.SearchCaseEscalations(r.Context(), caseID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
 		return false
 	}
+	type person struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	}
 	var history struct {
-		TeamLeads []struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-		} `json:"teamLeads"`
+		TeamLeads    []person `json:"teamLeads"`
+		Deescalators []person `json:"deescalators"`
 	}
 	if err := json.Unmarshal(raw, &history); err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations: parse response failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
 		return false
 	}
-	if len(history.TeamLeads) == 0 {
+	allowed := append(append([]person{}, history.TeamLeads...), history.Deescalators...)
+	if len(allowed) == 0 {
 		return false
 	}
 
@@ -305,7 +309,7 @@ func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user 
 		return false
 	}
 
-	for _, lead := range history.TeamLeads {
+	for _, lead := range allowed {
 		if caller.ID != "" && lead.ID != "" && caller.ID == lead.ID {
 			return true
 		}
@@ -1629,7 +1633,7 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if action == "DEESCALATE" && !h.callerIsCaseTeamLead(r, caseID, user) {
+	if action == "DEESCALATE" && !h.callerMayDeescalate(r, caseID, user) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
