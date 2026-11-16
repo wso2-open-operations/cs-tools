@@ -1212,9 +1212,16 @@ func (f *fakeEntityClockStatus) GetClockState(_ context.Context, caseID, clockTy
 		return clockState{}, f.err
 	}
 	if slaID != "" {
-		if state, ok := f.statesBySLAID[slaID]; ok {
-			return state, nil
+		// Mirrors the real entity-service: a non-empty slaId that matches no
+		// row for this (workItemId, target) reports Found=false, never the
+		// case/type default -- a test that passes a wrong or stale slaID
+		// must see a miss, not have it silently pass by matching whatever
+		// the ambiguous default happens to be.
+		state, ok := f.statesBySLAID[slaID]
+		if !ok {
+			return clockState{Found: false}, nil
 		}
+		return state, nil
 	}
 	return f.states[caseID+"|"+clockType], nil
 }
@@ -1942,19 +1949,28 @@ func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *t
 // belongs to -- there is no live clock left to alert about either way -- so
 // this must suppress even though entity-service's row is a different
 // incarnation from this wake entry's own.
+//
+// meta.SLAID is set here, matching the real production scenario: by the
+// time a severity change's own ReviseClocks call has run (synchronously, in
+// the same Handle call that triggered it), the clock's own SLAID is already
+// known, so GetClockState is asked about this EXACT row, not entity-service's
+// ambiguous "most recently started" default -- see
+// TestTick_EmptySLAID_DifferentIncarnationButTerminal_StillFailsOpen for the
+// (deliberately different) empty-SLAID case this does NOT cover.
 func TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
 	pub := &fakePublisher{}
 	e := newTestEngine(st, chat, pub)
 
+	const rowID = "the-cancelled-row"
 	redisStartedAt := time.Now().Add(-4 * time.Hour)
 	entityStartedOn := time.Now().Add(-time.Minute)
-	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"case-1|response": {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &entityStartedOn},
+	e.entity = &fakeEntityClockStatus{statesBySLAID: map[string]clockState{
+		rowID: {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &entityStartedOn, ID: rowID},
 	}}
 
-	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt}
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt, SLAID: rowID}
 	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
 
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
@@ -1965,6 +1981,48 @@ func TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses(t
 	}
 	if pub.calls != 0 {
 		t.Errorf("publisher calls = %d, want 0", pub.calls)
+	}
+}
+
+// TestTick_EmptySLAID_DifferentIncarnationButTerminal_StillFailsOpen is the
+// regression guard for a second CodeRabbit-caught gap in the fix above: the
+// terminal-check-first branch only applies when meta.SLAID is non-empty --
+// for a clock Redis hasn't learned an SLAID for yet (predates this field, or
+// was registered before its first reconciliation), GetClockState falls back
+// to entity-service's own ambiguous "most recently started" row. entity-service
+// genuinely lets two policies both have a live clock on the same target at
+// once (confirmed live, not theoretical), so that ambiguous row could be a
+// terminal SIBLING policy's, not the one this wake entry is actually about.
+// Without this guard, the terminal check would wrongly finalize a
+// still-genuinely-due tier and lose its alert permanently (finishTier
+// advances the cursor). This must instead fall through to the
+// incarnation-mismatch check and fail open -- exactly the behavior this
+// whole verifyTierStillDue check had before the SLAID mechanism existed, so
+// an empty-SLAID clock is no worse off than it always was.
+func TestTick_EmptySLAID_DifferentIncarnationButTerminal_StillFailsOpen(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+
+	redisStartedAt := time.Now().Add(-4 * time.Hour)
+	entityStartedOn := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		// The slaID-less default answers with a terminal row -- but since
+		// meta.SLAID is empty below, this must NOT be trusted as "this
+		// wake entry's own clock is resolved": it could be an unrelated
+		// sibling policy's row.
+		"case-1|response": {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &entityStartedOn},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt} // SLAID left empty
+	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) == 0 {
+		t.Error("chat calls = none, want at least one -- with no SLAID to disambiguate, a terminal row must not be trusted as this wake entry's own clock; must fail open")
 	}
 }
 

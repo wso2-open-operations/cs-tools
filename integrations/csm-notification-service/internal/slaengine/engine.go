@@ -1152,24 +1152,51 @@ func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType strin
 	case !state.Found:
 		slog.WarnContext(ctx, "slaengine: entity-service has no record of this clock, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return tierDue, state
-	case isTerminalSLAStage(state.Stage) && !state.HasBreached:
-		// Checked before the incarnation comparison below, deliberately: a
-		// severity change cancels the old clock and registers a fresh one
-		// (ReviseClocks), so the SAME wake entry that is "due" here can be
-		// about an incarnation entity-service has already moved past. A
-		// terminal, unbreached stage is unambiguous regardless of whose
-		// incarnation it belongs to -- there is no live clock left to alert
-		// about either way -- so this must not be skipped by the
-		// incarnation-mismatch fail-open branch just below. Confirmed as a
-		// real production false alert: a clock cancelled at 59% (severity
-		// changed) still sent a 75% breach Chat alert, because the old
-		// branch ordering let the incarnation mismatch win and fail open
-		// before this check ever ran.
+	case meta.SLAID != "" && isTerminalSLAStage(state.Stage) && !state.HasBreached:
+		// Checked before the incarnation comparison below, deliberately --
+		// but ONLY when meta.SLAID is known, which is what makes this safe:
+		// GetClockState was called WITH that id (see the call above), so
+		// state is guaranteed to be about the EXACT clock this wake entry
+		// tracks, not an ambiguous "whichever row is most recently
+		// started" guess. A severity change cancels the old clock and
+		// registers a fresh one (ReviseClocks), so the SAME wake entry that
+		// is "due" here can be about an incarnation entity-service has
+		// already moved past -- a terminal, unbreached stage for THIS exact
+		// row is unambiguous regardless of whose incarnation it belongs to,
+		// so this must not be skipped by the incarnation-mismatch fail-open
+		// branch just below. Confirmed as a real production false alert: a
+		// clock cancelled at 59% (severity changed) still sent a 75% breach
+		// Chat alert, because the old branch ordering let the incarnation
+		// mismatch win and fail open before this check ever ran.
+		//
+		// A CodeRabbit review on that fix caught the gap this guard closes:
+		// without requiring meta.SLAID, this branch would also fire for a
+		// clock whose SLAID isn't known yet (never registered with one, or
+		// a case this engine hasn't reconciled since this field shipped) --
+		// GetClockState then falls back to its own ambiguous default, and
+		// entity-service genuinely does let two policies both have an open
+		// clock on the same target at once (confirmed live, not
+		// theoretical). A terminal SIBLING policy's row could then wrongly
+		// finalize a DIFFERENT, still genuinely due policy's tier,
+		// permanently losing that alert. Requiring meta.SLAID here means an
+		// empty-SLAID clock falls through to the incarnation check next,
+		// exactly reproducing this function's behavior from before this
+		// whole SLAID mechanism existed -- a real regression risk closed,
+		// not just a documented one.
 		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
 		return tierResolved, state
 	case !isSameClockIncarnation(state.StartedOn, meta.StartedAt):
 		slog.WarnContext(ctx, "slaengine: entity-service is tracking a different clock incarnation than this wake entry, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return tierDue, state
+	case isTerminalSLAStage(state.Stage) && !state.HasBreached:
+		// Reached only when meta.SLAID was empty (the branch above requires
+		// it) and the row turned out to be the SAME incarnation anyway --
+		// the ordinary case when there's genuinely only one policy backing
+		// this target, which is still the common case. Safe for the
+		// identical reason the original, pre-SLAID version of this check
+		// was safe: incarnation match already confirmed above.
+		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
+		return tierResolved, state
 	case state.IsPaused && !state.HasBreached:
 		slog.WarnContext(ctx, "slaengine: entity-service shows this clock currently paused but this engine's own redis copy did not know, correcting it — this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier)
 		e.setPaused(ctx, caseID, clockType, true)
