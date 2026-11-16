@@ -189,11 +189,13 @@ export default function AsyncUserIdMultiSelect({
       isOptionEqualToValue={(opt, val) => opt.id === val.id}
       slotProps={{ listbox: { onScroll: handleListboxScroll } }}
       onChange={(_event, next) => {
+        // A still-unresolved selection carries its raw id as its label; caching
+        // that would mark it named and stop its lookup, so it is skipped here
+        // and in `onNamesResolved`.
+        const resolved = next.filter((o) => o.id !== currentUserId && o.name !== o.id);
         setPickedNames((prev) => {
           const m = new Map(prev);
-          next.forEach((o) => {
-            if (o.id !== currentUserId) m.set(o.id, o.name);
-          });
+          resolved.forEach((o) => m.set(o.id, o.name));
           return m;
         });
         // Bubble the picked name(s) up before the caller's `values` change
@@ -201,9 +203,7 @@ export default function AsyncUserIdMultiSelect({
         // (to survive this component unmounting on e.g. a tab switch)
         // learns names this search just resolved, not only names the
         // caller's own data already knew.
-        onNamesResolved?.(
-          next.filter((o) => o.id !== currentUserId).map((o) => [o.id, o.name]),
-        );
+        onNamesResolved?.(resolved.map((o) => [o.id, o.name]));
         onChange(next.map((o) => o.id));
       }}
       inputValue={input}

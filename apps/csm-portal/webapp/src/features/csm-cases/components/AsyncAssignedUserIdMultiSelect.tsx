@@ -141,9 +141,13 @@ export default function AsyncAssignedUserIdMultiSelect({
       isOptionEqualToValue={(opt, val) => opt.id === val.id}
       slotProps={{ listbox: { onScroll: handleListboxScroll } }}
       onChange={(_event, next) => {
+        // A still-unresolved selection carries its raw id as its label; caching
+        // that would mark it named and stop its lookup, so it is skipped.
         setPickedNames((prev) => {
           const m = new Map(prev);
-          next.forEach((o) => m.set(o.id, o.name));
+          next.forEach((o) => {
+            if (o.name !== o.id) m.set(o.id, o.name);
+          });
           return m;
         });
         onChange(next.map((o) => o.id));
