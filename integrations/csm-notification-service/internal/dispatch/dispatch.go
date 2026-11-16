@@ -323,10 +323,10 @@ type Dispatcher struct {
 	// state" email (project.reactivated); set via WithACPReactivation. Empty
 	// sends with no CC. Dropped in EMAIL_DEBUG_MODE, like defaultCSMEmailCC.
 	acpReactivationCC []string
-	// acpInternalDomain is the only domain the "Back to Open state" email is
-	// sent to ("@wso2.com" in production; set via WithACPReactivation): it
-	// is an internal notice. Empty means "@wso2.com".
-	acpInternalDomain string
+	// acpInternalDomains are the only domains the "Back to Open state" email
+	// is sent to (ACP_INTERNAL_EMAIL_DOMAINS, set via WithACPReactivation):
+	// it is an internal notice. Empty means "@wso2.com".
+	acpInternalDomains []string
 	// acpReactivationLedger, when set, records the "Back to Open state"
 	// emails already sent (Redis), so a redelivery never sends one twice.
 	acpReactivationLedger ReactivationLedger
@@ -453,11 +453,11 @@ func NewDispatcher(email emailSender, googleChat googleChatSender, call callSend
 }
 
 // WithACPReactivation sets the CC list of the "Back to Open state" email
-// (project.reactivated) and the only domain it may be sent to ("@wso2.com"
-// in production), and returns d for chaining.
-func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Dispatcher {
+// (project.reactivated) and the only domains it may be sent to ("@wso2.com"
+// when none), and returns d for chaining.
+func (d *Dispatcher) WithACPReactivation(cc []string, internalDomains []string) *Dispatcher {
 	d.acpReactivationCC = cc
-	d.acpInternalDomain = internalDomain
+	d.acpInternalDomains = internalDomains
 	return d
 }
 
