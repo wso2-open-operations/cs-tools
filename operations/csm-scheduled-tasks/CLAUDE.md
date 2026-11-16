@@ -215,6 +215,7 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 | Task | Default schedule | Announces |
 |---|---|---|
 | `rota_weekday_reminder` | `30 3 * * 0-4` (09:00 Colombo, Sun–Thu) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): always tomorrow, so **Monday from Sunday** |
+| `rota_weekday_mark_check` | `30 11 * * 0-3,6` (17:00 Colombo, Sat–Wed) | nothing to the rota: the evening before each `rota_weekday_reminder` run, tells the rota admins when a weekday rotation of the day that run will announce is short (see "Weekday rota check" below) |
 | `rota_weekend_notice` | `30 3 * * 1-4` (09:00 Colombo, Mon–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once (on Monday when it is already marked); until then the rota admins are asked every morning |
 | `rota_weekend_reminder` | `30 3 * * 5` (09:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
@@ -327,6 +328,18 @@ schedules assume `TZ=UTC` like every other here.
   so a test event never stands in for or blocks the real one; and the weekend's send record is
   neither read nor written, so the real reminders are unaffected. Works in every environment,
   production included, and needs no `ROTA_REMINDER_REDIRECT_TO`.
+- **Weekday rota check, and the rota admins on every weekday reminder.** A weekday reminder is never
+  held back. `rota_weekday_mark_check` runs at 17:00 IST the evening before each
+  `rota_weekday_reminder` run and checks the day it will announce (`NextWorkingDay` of tomorrow:
+  Saturday checks Monday, Wednesday Friday). A shift with fewer people than
+  `ROTA_REMINDER_WEEKDAY_REQUIRED` (default `CRE_EVENING=7`; people on leave are not counted, the
+  on-call variant does not count, one person counts once) gets one email to the family's rota admins
+  (`GET /team-schedule/rota-admins/{family}`; the task's alert audience when there are none) with a
+  Day | Rotation | Marked | Needed table; a fully marked day sends nothing. The weekday switch on the
+  card applies; the minimums are not on the card. Then every weekday reminder, scheduled and Send now,
+  copies (Cc) the rota admins, the email carrying the invitation included, and never makes them guests
+  of the event (`Config.Admins` / `AdminCopy`); the plain `copyTo` copy skips them. A failed admin read
+  is logged and the reminders go without the copy. "Send a test to me" copies nobody.
 - **Only a fully marked weekend is announced.** `ROTA_REMINDER_WEEKEND_REQUIRED` (default
   `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) is how many people each shift needs on each day; the on-call
   variant does not count. Until that holds, `rota_weekend_notice` emails the family's rota admins
@@ -1113,6 +1126,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `ROTA_REMINDER_COPY_TASK_RECIPIENTS` | No (default `false`) | Also copies each task's `SUB_CRON_RECIPIENTS` on every reminder |
 | `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
+| `ROTA_REMINDER_WEEKDAY_REQUIRED` | No (default `CRE_EVENING=7`) | `CODE=N` pairs: how many people each weekday shift needs; `rota_weekday_mark_check` tells the rota admins the evening before when one is short |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the Americas On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
