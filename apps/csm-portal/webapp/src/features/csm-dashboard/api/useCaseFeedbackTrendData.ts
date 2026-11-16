@@ -179,7 +179,11 @@ export function useCaseFeedbackTrendData(
   const config = WIDGET_RESOURCE_CONFIG.case_feedback;
 
   const resolvedFilters = resolveRelativeDateFilters(baseFilters);
-  const bucket = resolveEffectiveBucket(groupBy?.bucket, resolvedFilters);
+  // `"severity"` is the mttr widget's bucket, resolved by `useMttrReportData`;
+  // it is never a feedback bucket, so treat it like "no bucket" here.
+  const rawBucket = groupBy?.bucket;
+  const feedbackBucket = rawBucket === "severity" ? undefined : rawBucket;
+  const bucket = resolveEffectiveBucket(feedbackBucket, resolvedFilters);
 
   const query = useQuery({
     queryKey: [
