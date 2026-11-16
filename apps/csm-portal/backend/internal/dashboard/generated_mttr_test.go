@@ -29,13 +29,14 @@ func mttrDashboard(widgets ...string) string {
 }
 
 // TestParseGenerated_AcceptsMTTRWidgets: the only shape an MTTR widget may
-// take -- pie/bar with groupBy.bucket "severity" -- with and without a CRE
-// team restriction.
+// take -- bar only (never pie: the six bands overlap, so they can't be
+// wedges of one whole) with groupBy.bucket "severity" -- with and without a
+// CRE team restriction.
 func TestParseGenerated_AcceptsMTTRWidgets(t *testing.T) {
 	raw := mttrDashboard(
 		`{"id":"mttr-3m","displayName":"MTTR (Last 3 Months)","resourceType":"mttr","shape":"bar","gridWidth":6,
 		  "query":{"months":"3"},"groupBy":{"bucket":"severity"}}`,
-		`{"id":"mttr-rigel","displayName":"Rigel: MTTR by Severity","resourceType":"mttr","shape":"pie","gridWidth":6,
+		`{"id":"mttr-rigel","displayName":"Rigel: MTTR by Severity","resourceType":"mttr","shape":"bar","gridWidth":6,
 		  "query":{"months":"12","creTeamIds":["rigel"]},"groupBy":{"bucket":"severity"}}`,
 	)
 	d, err := ParseGenerated([]byte(raw))
@@ -51,19 +52,24 @@ func TestParseGenerated_AcceptsMTTRWidgets(t *testing.T) {
 }
 
 // TestParseGenerated_RejectsInvalidMTTRWidgets: an unknown months value, a
-// missing groupBy, a groupBy.field, count/list/line shapes, and slices are
-// all refused -- an MTTR widget has no record to count or list, and its one
-// bucket is fixed.
+// missing months, a missing groupBy, a groupBy.field, count/list/pie/line
+// shapes, and slices are all refused -- an MTTR widget has no record to
+// count or list, its one bucket is fixed, and its bands overlap so a pie
+// would never be meaningful.
 func TestParseGenerated_RejectsInvalidMTTRWidgets(t *testing.T) {
 	cases := []string{
 		`{"id":"bad-months","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
 		  "query":{"months":"2"},"groupBy":{"bucket":"severity"}}`,
+		`{"id":"no-months","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
+		  "query":{},"groupBy":{"bucket":"severity"}}`,
 		`{"id":"no-group","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
 		  "query":{"months":"3"},"slices":[{"label":"S1","query":{"months":"3"}}]}`,
 		`{"id":"wrong-field","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
 		  "query":{"months":"3"},"groupBy":{"field":"severity"}}`,
 		`{"id":"a-count","displayName":"x","resourceType":"mttr","shape":"count","gridWidth":3,
 		  "query":{"months":"3"}}`,
+		`{"id":"a-pie","displayName":"x","resourceType":"mttr","shape":"pie","gridWidth":6,
+		  "query":{"months":"3"},"groupBy":{"bucket":"severity"}}`,
 	}
 	for i, raw := range cases {
 		if _, err := ParseGenerated([]byte(mttrDashboard(raw))); err == nil {

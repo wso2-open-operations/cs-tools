@@ -755,11 +755,15 @@ untouched.
 `WidgetTemplate.resourceType` resolves to a real search endpoint, even one with no standalone
 list page (`task`, `case_feedback`); `mttr` has none — `GET /reports/mttr` only ever returns
 the one fixed six-band aggregate, never a page of individual records. `internal/dashboard`'s
-`ResourceMTTR` rules (`generated_resources.go`) reflect that: shapes `pie`/`bar` only, `groupBy`
-only (`noSlices: true` — a severity band isn't something a query filter can isolate, so there's
+`ResourceMTTR` rules (`generated_resources.go`) reflect that: shape `bar` only, never `pie` (the
+six bands overlap — S1-S4 and S1-S3 are sums of the individual ones — so they can never be wedges
+of one whole, and `DashboardPieChart`'s percentage, `slice.value / total`, would divide hours by a
+case count anyway, which is meaningless even setting the overlap aside), `groupBy` only
+(`noSlices: true` — a severity band isn't something a query filter can isolate, so there's
 no per-band slice to hand-author), and its one bucket, `"severity"`, is fixed rather than
-chosen (`buckets: []string{"severity"}`). `registry.go`'s `validGroupByBuckets` carries
-`"severity"` alongside `case_feedback`'s own bucket names. A generated widget's `creTeamIds`
+chosen (`buckets: []string{"severity"}`, `requiredFlat: []string{"months"}` — there is no default
+window). `registry.go`'s `validGroupByBuckets` carries `"severity"` alongside `case_feedback`'s own
+bucket names. A generated widget's `creTeamIds`
 (team keys/names, same vocabulary as a case's `creTeam` filter) are resolved to real CRE group
 ids once, right after generation, by `dashboardTeams.resolveMTTRTeams` (`dashboard_teams.go`) —
 the `mttr`-specific sibling of `resolveTimeCardTeams`; CRE-only, since an MTTR widget has no SRE
