@@ -106,7 +106,7 @@ import ScheduleSkeleton, { TabStripSkeleton } from "../components/ScheduleSkelet
 import { rotaIsLoading } from "../utils/rotaLoading";
 import "../teamSchedule.css";
 import { teamDisplayName } from "../utils/teamDisplayName";
-import { addKindRefusal } from "../utils/tagRefusal";
+import { addKindRefusal, deleteKindRefusal } from "../utils/tagRefusal";
 /** What the banner says when an edit is refused: the server's own reason where
  *  it gave one a lead can act on -- the person is not on that team, or already
  *  holds an overlapping window -- and that nothing moved either way. */
@@ -1195,19 +1195,13 @@ export default function CsmTeamSchedulePage(): JSX.Element {
       },
     );
 
-  /** Delete a tag a lead added. The picker stays open and shows why when the
-   *  server refuses -- most often because the tag is still in use. */
+  /** Delete a tag a lead added. The picker stays open and shows the server's
+   *  reason when it refuses: still in use, or whose tag it is. */
   const removeKind = (code: string): Promise<void> =>
     deleteKind.mutateAsync(code).then(
       () => undefined,
       (err: unknown) => {
-        throw new Error(
-          err instanceof BackendApiError && err.status === 409
-            ? "That tag is still used on the rota. Remove those entries first."
-            : err instanceof BackendApiError && err.status === 403
-              ? "Only a team lead can delete a tag, and never a built-in one."
-              : "The tag was not deleted. Try again.",
-        );
+        throw new Error(deleteKindRefusal(err));
       },
     );
 

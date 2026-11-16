@@ -690,17 +690,11 @@ func (s *scheduleService) DeleteAbsenceKind(ctx context.Context, code string) er
 	if err != nil {
 		return err
 	}
-	// A rota admin or lead deletes only their own family's tags; a portal
-	// admin who runs no rota (whether or not they lead a team) may delete any
-	// custom tag.
-	families, portalAdmin, err := s.tagFamilies(ctx)
+	families, allowShared, err := s.tagDeleteScope(ctx)
 	if err != nil {
 		return err
 	}
-	if len(families) == 0 && !portalAdmin {
-		return errNoTagFamily
-	}
-	return s.repo.DeleteAbsenceKind(ctx, code, email, families)
+	return s.repo.DeleteAbsenceKind(ctx, code, email, families, allowShared)
 }
 
 // requireAnyTeamLead is the gate for the shared tag catalogue: an internal
