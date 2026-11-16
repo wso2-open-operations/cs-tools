@@ -305,116 +305,220 @@ func RenderRotaReminder(data RotaReminderData) string {
 }
 
 // WeekendRotaData is the weekend rota's summary email (internal/rotareminder
-// builds it): each day's team, then each rotation defined once. Every text
-// value is plain text, escaped here.
+// builds it): a short introduction, one plain table per rota day with a row
+// per window (Rotation and its hours | the family's team | the support team),
+// then the rotation definitions. Every text value is plain text, escaped here.
 type WeekendRotaData struct {
-	Intro string
-	// Days are the teams, one per rota day ("Saturday Team").
+	// Intro is the opening sentence; Checklist the points under it.
+	Intro     string
+	Checklist []string
+	// Days are the tables, one per rota day, in order.
 	Days []WeekendRotaDay
-	// SupportTitle heads another family's turns listed after the teams
-	// ("SRE Weekend Support"), SupportDays one entry per day ("Saturday");
-	// nothing is written when SupportDays is empty.
-	SupportTitle string
-	SupportDays  []WeekendRotaDay
-	// Definitions are the rotations, each once.
+	// TeamTitle and SupportTitle head the day tables' team columns ("CRE
+	// Team", "SRE Team"). The support column is left out when no row on any
+	// day has support people.
+	TeamTitle, SupportTitle string
+	// Definitions are the rotation definitions table: one row per window.
 	Definitions []RotationDefinition
-	// ZoneNotes are the small print under the table: what each zone name
-	// means, and a coming daylight saving change.
+	// ZoneNotes are the small print under the definitions: what each zone
+	// name means, and a coming daylight saving change.
 	ZoneNotes []string
-	// AfterTable are paragraphs written after the definitions (what is not
-	// yet marked, the calendar invitations).
-	AfterTable  []string
+	// Notes are written as a list after the tables (what is not yet
+	// marked).
+	Notes       []string
 	ScheduleURL string
 	// IntendedFor is set only when reminders are redirected (see
 	// RotaReminderData).
 	IntendedFor []string
 }
 
-// WeekendRotaDay is one day's team: "Name (Rotation)" per person.
+// WeekendRotaDay is one day's table: its heading ("Saturday, 14 November")
+// and a row per window.
 type WeekendRotaDay struct {
-	Title  string
-	People []string
+	Title string
+	Rows  []WeekendRotaRow
+}
+
+// WeekendRotaRow is one window of a day: its rotation, its hours that day on
+// its own clock ("06:00 AM – 09:00 PM IST"), the family's people on it, and
+// the support people whose turns fall in it, by their rotation.
+type WeekendRotaRow struct {
+	Rotation, Hours string
+	Team            []string
+	Support         []WeekendRotaGroup
 }
 
 // RotationDefinition is one row of the rotation definitions table.
 type RotationDefinition struct {
 	Rotation, Members, LocalTime, UTCWindow, Role string
-	// RoleNote is small print under the role (how a long window is shared);
-	// empty for none.
+	// RoleNote is small print under the role; empty for none.
 	RoleNote string
 }
 
-// RenderWeekendRota writes the weekend summary in the layout the CRE weekend
-// emails have always had: the teams, the rotation definitions, the handover
-// request.
+// WeekendRotaGroup is one support rotation inside a row: its name, its hours
+// and its people.
+type WeekendRotaGroup struct {
+	Rotation, Hours string
+	People          []string
+}
+
+// Colours of the weekend summary: greys only, so it stays a plain message
+// rather than a branded template.
+const (
+	weekendMuted  = "#555555"
+	weekendBorder = "#d9d9d9"
+	weekendShade  = "#f5f5f5"
+)
+
+// RenderWeekendRota writes the weekend summary: the greeting and what to do,
+// one table per day, the rotation definitions and zone notes, the other
+// notes, the handover request, the Team Schedule link and the sign-off.
 func RenderWeekendRota(data WeekendRotaData) string {
 	var b strings.Builder
-	b.WriteString(`<div style="font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:20px;">` + "\n")
+	b.WriteString(`<div style="font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:20px; max-width:900px;">` + "\n")
 	if len(data.IntendedFor) > 0 {
 		fmt.Fprintf(&b, "<p><i>[Test copy] Not sent to the rota. This email would have been sent to: %s.</i></p>\n",
 			escapeHTML(strings.Join(data.IntendedFor, ", ")))
 	}
-	fmt.Fprintf(&b, "<p>Hello team,</p>\n<p>%s</p>\n", escapeHTML(data.Intro))
+	fmt.Fprintf(&b, "<p>Hello Team,</p>\n<p>%s</p>\n", escapeHTML(data.Intro))
+	writeList(&b, data.Checklist)
+	withSupport := false
 	for _, d := range data.Days {
-		fmt.Fprintf(&b, "<p style=\"margin-bottom:4px;\"><b>%s</b></p>\n<p style=\"margin-top:0;\">", escapeHTML(d.Title))
-		for i, p := range d.People {
+		for _, r := range d.Rows {
+			withSupport = withSupport || len(r.Support) > 0
+		}
+	}
+	for _, d := range data.Days {
+		writeWeekendDay(&b, d, data.TeamTitle, data.SupportTitle, withSupport)
+	}
+	writeDefinitions(&b, data.Definitions)
+	if len(data.ZoneNotes) > 0 {
+		fmt.Fprintf(&b, `<p style="color:%s; font-size:12px; margin-top:6px;">`, weekendMuted)
+		for i, n := range data.ZoneNotes {
 			if i > 0 {
 				b.WriteString("<br/>")
 			}
-			b.WriteString(escapeHTML(p))
+			b.WriteString(escapeHTML(n))
 		}
 		b.WriteString("</p>\n")
 	}
-	if len(data.SupportDays) > 0 {
-		fmt.Fprintf(&b, "<p style=\"margin-bottom:4px;\"><b>%s</b></p>\n", escapeHTML(data.SupportTitle))
-		for _, d := range data.SupportDays {
-			fmt.Fprintf(&b, "<p style=\"margin-top:0;\"><b>%s:</b> ", escapeHTML(d.Title))
-			for i, p := range d.People {
-				if i > 0 {
-					b.WriteString("<br/>")
-				}
-				b.WriteString(escapeHTML(p))
-			}
-			b.WriteString("</p>\n")
-		}
+	if len(data.Notes) > 0 {
+		b.WriteString(`<p style="margin:20px 0 6px;"><b>Notes</b></p>` + "\n")
+		writeList(&b, data.Notes)
 	}
-	if len(data.Definitions) > 0 {
-		b.WriteString("<p style=\"margin-bottom:4px;\"><b>Rotation Definitions</b></p>\n")
-		b.WriteString(`<table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse; font-size:14px; border-color:#dddddd;">` + "\n")
-		b.WriteString(`<tr style="background:#f2f2f2;"><th align="left">Rotation</th><th align="left">Local time</th><th align="left">UTC window</th><th align="left">Role</th></tr>` + "\n")
-		for _, r := range data.Definitions {
-			role := orDash(escapeHTML(r.Role))
-			if r.RoleNote != "" {
-				role += `<br/><span style="color:#666666; font-size:12px;">` + escapeHTML(r.RoleNote) + `</span>`
-			}
-			fmt.Fprintf(&b, `<tr><td>%s<br/><span style="color:#666666; font-size:12px;">%s</span></td><td>%s</td><td>%s</td><td>%s</td></tr>`+"\n",
-				orDash(escapeHTML(r.Rotation)), escapeHTML(r.Members), orDash(escapeHTML(r.LocalTime)), orDash(escapeHTML(r.UTCWindow)), role)
-		}
-		b.WriteString("</table>\n")
-		if len(data.ZoneNotes) > 0 {
-			b.WriteString(`<p style="color:#666666; font-size:12px; margin-top:4px;">`)
-			for i, n := range data.ZoneNotes {
-				if i > 0 {
-					b.WriteString("<br/>")
-				}
-				b.WriteString(escapeHTML(n))
-			}
-			b.WriteString("</p>\n")
-		}
-	}
-	for _, p := range data.AfterTable {
-		fmt.Fprintf(&b, "<p>%s</p>\n", escapeHTML(p))
-	}
-	b.WriteString("<p style=\"margin-bottom:4px;\"><b>Handover</b></p>\n" +
-		"<p style=\"margin-top:0;\">Please ensure a proper handover to the next team or team member before signing off.</p>\n" +
-		"<p>This will help ensure there are no gaps in operational coverage during the weekends. More importantly, we truly appreciate " +
-		"the team's commitment and ownership in supporting our customers and making sure they are well taken care of. Your dedication " +
-		"and teamwork are greatly appreciated.</p>\n")
+	b.WriteString(`<p style="margin:20px 0 6px;"><b>Handover</b></p>` + "\n" +
+		`<p style="margin-top:0;">Please ensure a proper handover to the next team or team member before signing off. ` +
+		"This will help ensure there are no gaps in operational coverage during the weekends.</p>\n" +
+		"<p>More importantly, we truly appreciate the team's commitment and ownership in supporting our customers and making " +
+		"sure they are well taken care of. Your dedication and teamwork are greatly appreciated.</p>\n")
 	if data.ScheduleURL != "" {
 		b.WriteString("<p>" + strings.TrimSpace(scheduleLink(data.ScheduleURL)) + "</p>\n")
 	}
-	b.WriteString(`<p style="color:#666666; font-size:12px;">This is an auto-generated email. Please do not reply to this email.</p>` + "\n</div>\n")
+	b.WriteString("<p>Regards,<br/>CSM Team Schedule</p>\n")
+	fmt.Fprintf(&b, `<p style="color:%s; font-size:12px;">This is an auto-generated email. Please do not reply to this email.</p>`+"\n</div>\n", weekendMuted)
 	return b.String()
+}
+
+// writeList writes items as a bulleted list; nothing when there are none.
+func writeList(b *strings.Builder, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(`<ul style="margin:0 0 16px; padding-left:20px;">` + "\n")
+	for _, it := range items {
+		fmt.Fprintf(b, `<li style="margin-bottom:4px;">%s</li>`+"\n", escapeHTML(it))
+	}
+	b.WriteString("</ul>\n")
+}
+
+// writeWeekendDay writes one day's table: a header row, then a row per
+// window: the rotation with that day's hours under it, the family's people
+// one per line, and, when withSupport, the support people in it, each
+// support rotation's names with its name and hours under them.
+func writeWeekendDay(b *strings.Builder, d WeekendRotaDay, teamTitle, supportTitle string, withSupport bool) {
+	cell := `<td valign="top" style="padding:8px 10px; border:1px solid ` + weekendBorder + `;">%s</td>`
+	small := `<br/><span style="color:` + weekendMuted + `; font-size:12px;">%s</span>`
+	fmt.Fprintf(b, `<p style="margin:20px 0 6px; font-size:15px;"><b>%s</b></p>`+"\n", escapeHTML(d.Title))
+	fmt.Fprintf(b, `<table width="100%%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%%; font-size:14px;">`+"\n")
+	// Fixed widths, so every day's table lines up with the others.
+	heads := []struct{ name, width string }{{"Rotation", "40%"}, {teamTitle, "60%"}}
+	if withSupport {
+		heads = []struct{ name, width string }{{"Rotation", "30%"}, {teamTitle, "35%"}, {supportTitle, "35%"}}
+	}
+	b.WriteString("<tr>")
+	for _, h := range heads {
+		fmt.Fprintf(b, `<th align="left" width="%s" style="background:%s; padding:8px 10px; border:1px solid %s;">%s</th>`,
+			h.width, weekendShade, weekendBorder, escapeHTML(h.name))
+	}
+	b.WriteString("</tr>\n")
+	names := func(people []string) string {
+		out := make([]string, 0, len(people))
+		for _, p := range people {
+			out = append(out, escapeHTML(p))
+		}
+		return strings.Join(out, "<br/>")
+	}
+	if len(d.Rows) == 0 {
+		fmt.Fprintf(b, `<tr><td colspan="%d" style="padding:8px 10px; border:1px solid %s; color:%s;"><i>Nobody rostered</i></td></tr>`+"\n",
+			len(heads), weekendBorder, weekendMuted)
+	}
+	for _, r := range d.Rows {
+		rotation := orDash(escapeHTML(r.Rotation))
+		if r.Hours != "" {
+			rotation += fmt.Sprintf(small, escapeHTML(r.Hours))
+		}
+		b.WriteString("<tr>")
+		fmt.Fprintf(b, cell, rotation)
+		fmt.Fprintf(b, cell, orDash(names(r.Team)))
+		if withSupport {
+			var groups []string
+			for _, g := range r.Support {
+				label := g.Rotation
+				if g.Hours != "" {
+					label += ", " + g.Hours
+				}
+				groups = append(groups, names(g.People)+fmt.Sprintf(small, escapeHTML(label)))
+			}
+			fmt.Fprintf(b, cell, orDash(strings.Join(groups, "<br/><br/>")))
+		}
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</table>\n")
+}
+
+// writeDefinitions writes the rotation definitions table: each rotation with
+// its member count under it, its hours on its own clock and in UTC, and its
+// role with any note under it. Nothing when there are none.
+func writeDefinitions(b *strings.Builder, defs []RotationDefinition) {
+	if len(defs) == 0 {
+		return
+	}
+	cell := `<td valign="top" style="padding:8px 10px; border:1px solid ` + weekendBorder + `;">%s</td>`
+	small := `<br/><span style="color:` + weekendMuted + `; font-size:12px;">%s</span>`
+	b.WriteString(`<p style="margin:20px 0 6px; font-size:15px;"><b>Rotation Definitions</b></p>` + "\n")
+	b.WriteString(`<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:14px;">` + "\n<tr>")
+	for _, h := range []struct{ name, width string }{{"Rotation", "30%"}, {"Local time", "25%"}, {"UTC window", "15%"}, {"Role", "30%"}} {
+		fmt.Fprintf(b, `<th align="left" width="%s" style="background:%s; padding:8px 10px; border:1px solid %s;">%s</th>`,
+			h.width, weekendShade, weekendBorder, h.name)
+	}
+	b.WriteString("</tr>\n")
+	for _, r := range defs {
+		rotation := orDash(escapeHTML(r.Rotation))
+		if r.Members != "" {
+			rotation += fmt.Sprintf(small, escapeHTML(r.Members))
+		}
+		role := orDash(escapeHTML(r.Role))
+		if r.RoleNote != "" {
+			role += fmt.Sprintf(small, escapeHTML(r.RoleNote))
+		}
+		b.WriteString("<tr>")
+		fmt.Fprintf(b, cell, rotation)
+		fmt.Fprintf(b, cell, orDash(escapeHTML(r.LocalTime)))
+		fmt.Fprintf(b, cell, orDash(escapeHTML(r.UTCWindow)))
+		fmt.Fprintf(b, cell, role)
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</table>\n")
 }
 
 // scheduleLink is the sentence pointing at the Team Schedule, with the address
