@@ -20,13 +20,13 @@ import { joinStaffName, stripStaffNameMarker } from "./staffNameMarker";
 
 describe("stripStaffNameMarker", () => {
   it("removes the trailing circled W, lowercase or uppercase", () => {
-    expect(stripStaffNameMarker("Rashmika Silva ⓦ")).toBe("Rashmika Silva");
-    expect(stripStaffNameMarker("Rashmika Silva Ⓦ")).toBe("Rashmika Silva");
-    expect(stripStaffNameMarker("Hesara Perera (Intern) Ⓦ")).toBe("Hesara Perera (Intern)");
+    expect(stripStaffNameMarker("First Last ⓦ")).toBe("First Last");
+    expect(stripStaffNameMarker("First Last Ⓦ")).toBe("First Last");
+    expect(stripStaffNameMarker("First Last (Intern) Ⓦ")).toBe("First Last (Intern)");
   });
 
   it("leaves other names alone and tolerates nothing", () => {
-    expect(stripStaffNameMarker("Rashmika Silva")).toBe("Rashmika Silva");
+    expect(stripStaffNameMarker("First Last")).toBe("First Last");
     expect(stripStaffNameMarker(undefined)).toBe("");
     expect(stripStaffNameMarker(null)).toBe("");
     expect(stripStaffNameMarker("ⓦ")).toBe("");
@@ -35,19 +35,19 @@ describe("stripStaffNameMarker", () => {
 
 describe("joinStaffName", () => {
   it("strips each part before joining, so a marker on the first name is caught too", () => {
-    expect(joinStaffName("Jane Ⓦ", "Doe")).toBe("Jane Doe");
-    expect(joinStaffName("Jane", "Doe ⓦ")).toBe("Jane Doe");
-    expect(joinStaffName(undefined, "Doe")).toBe("Doe");
+    expect(joinStaffName("First Ⓦ", "Last")).toBe("First Last");
+    expect(joinStaffName("First", "Last ⓦ")).toBe("First Last");
+    expect(joinStaffName(undefined, "Last")).toBe("Last");
     expect(joinStaffName(null, null)).toBe("");
   });
 });
 
 describe("initialsOf", () => {
   it("reads only the first two words, without the marker", () => {
-    expect(initialsOf("Rashmika Silva")).toBe("RS");
-    expect(initialsOf("Rashmika Silva ⓦ")).toBe("RS");
-    expect(initialsOf("Mary Jane Watson")).toBe("MJ");
-    expect(initialsOf("Rashmika")).toBe("R");
+    expect(initialsOf("First Last")).toBe("FL");
+    expect(initialsOf("First Last ⓦ")).toBe("FL");
+    expect(initialsOf("First Middle Last")).toBe("FM");
+    expect(initialsOf("Single")).toBe("S");
     expect(initialsOf("ⓦ")).toBe("?");
     expect(initialsOf("")).toBe("?");
   });

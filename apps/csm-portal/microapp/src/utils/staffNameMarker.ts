@@ -16,7 +16,7 @@
 
 /**
  * Some internal (WSO2 staff) users carry a trailing circled "W" in their
- * stored name (e.g. "Jane Doe ⓦ") — upstream data, not something this
+ * stored name (e.g. "First Last ⓦ") — upstream data, not something this
  * codebase writes (see `apps/customer-portal/webapp/src/utils/pdfText.ts`'s
  * identical marker for the PDF-export equivalent of this same fix). Seen as
  * either the lowercase (U+24E6, "ⓦ") or uppercase (U+24CC, "Ⓦ") circled
@@ -42,7 +42,7 @@ export function stripStaffNameMarker(name: string | null | undefined): string {
  * non-empty ones with a space. Deliberately NOT `stripStaffNameMarker(
  * \`${firstName} ${lastName}\`)` — stripping only once, after joining,
  * misses the marker whenever it's actually a trailing word of `firstName`
- * (e.g. firstName "Jane Ⓦ", lastName "Doe" joins to "Jane Ⓦ Doe", with the
+ * (e.g. firstName "First Ⓦ", lastName "Last" joins to "First Ⓦ Last", with the
  * marker now in the middle of the combined string, past where the
  * trailing-anchored regex looks).
  */
