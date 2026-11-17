@@ -61,7 +61,8 @@ func (h *AlertCoreHandler) MutedIncidents(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsNotConfigured)
 		return
 	}
-	id := r.PathValue("id")
+	// alert-core stores rule ids lower-case and compares them as text.
+	id := strings.ToLower(r.PathValue("id"))
 	if !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
@@ -76,7 +77,9 @@ func (h *AlertCoreHandler) MutedCounts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsNotConfigured)
 		return
 	}
-	raw := r.URL.Query().Get("ids")
+	// alert-core stores rule ids lower-case, compares them as text and keys the
+	// counts by the ids sent: lower-case them so a case-only difference never reads 0.
+	raw := strings.ToLower(r.URL.Query().Get("ids"))
 	if raw == "" {
 		writeError(w, http.StatusBadRequest, errMsgIDsRequired)
 		return
