@@ -30,6 +30,8 @@ import { AttachmentPreviewDialog, RichText, SectionCard } from "@components/shar
 import { useLayout } from "@context/layout";
 import { cases } from "@src/services/cases";
 import { CASE_STATE_IDS } from "@src/config/constants";
+import { useMe } from "@context/me";
+import { getSendBackToWso2Action } from "@src/utils/caseActions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { Comment } from "@components/features/detail";
@@ -89,6 +91,8 @@ export default function CaseDetailPage() {
     onError: () => notify.error("Failed to update case. Please try again."),
   });
 
+  const { isInternalUser } = useMe();
+
   const closedStateKey = CASE_STATE_IDS.CLOSED;
   const waitingOnWso2StateKey = CASE_STATE_IDS.WAITING_ON_WSO2;
   const solutionProposedStateKey = CASE_STATE_IDS.SOLUTION_PROPOSED;
@@ -109,6 +113,7 @@ export default function CaseDetailPage() {
 
   const menuOptions = data
     ? getCaseMenuOptions(data.statusId, {
+        isInternalUser,
         stateKeys: {
           closed: closedStateKey,
           waitingOnWso2: waitingOnWso2StateKey,
@@ -415,6 +420,7 @@ function AttachmentCard({
 function getCaseMenuOptions(
   statusId: string | undefined,
   context: {
+    isInternalUser: boolean;
     stateKeys: Partial<{
       closed: number;
       waitingOnWso2: number;
@@ -428,7 +434,7 @@ function getCaseMenuOptions(
     onCreateRelated: () => void;
   }>,
 ): MenuOptionProps[] {
-  const { stateKeys, ...actions } = context;
+  const { stateKeys, isInternalUser, ...actions } = context;
   const currentStatusId = statusId ? Number(statusId) : undefined;
   const isSolutionProposed = currentStatusId === stateKeys.solutionProposed;
   const isClosed = currentStatusId === stateKeys.closed;
@@ -444,10 +450,9 @@ function getCaseMenuOptions(
       onClick: isSolutionProposed ? actions?.onAcceptSolution : actions?.onResolve,
     },
     {
-      label: "Reject Solution",
+      ...getSendBackToWso2Action(isSolutionProposed, isAwaitingInfo, isInternalUser),
       color: "error",
       icon: <CircleX />,
-      hidden: !isSolutionProposed && !isAwaitingInfo,
       onClick: actions?.onRejectSolution,
     },
     {
