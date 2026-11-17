@@ -112,8 +112,8 @@ An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`
 with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
 with `groupBy.bucket` (section 5d) or rating `slices` (no `line`). An `mttr` widget is **only** a `bar`
 with `groupBy.bucket` (section 5f), or a `count` of one band with no `groupBy` — never `list`, `pie`,
-`slices`, `groupBy.field` or `line` (there is no MTTR record to list, and the bands overlap — S1-S4 and
-S1-S3 are sums of the individual ones — so they can never be pie wedges of one whole).
+`slices`, `groupBy.field` or `line` (there is no MTTR record to list, and the bars are averages, not parts
+of one whole, so never a pie).
 
 Fields that belong to one shape must not appear on another (`listLimit`/`sortBy` on lists only,
 `slices`/`groupBy` on pie/bar only, `days`/`series`/`startDate`/`endDate`/`bucket` on line only).
@@ -616,41 +616,38 @@ records: there is no "MTTR record" to count or list, only this one server-side a
 | `months` | One of `"1"`, `"3"`, `"6"`, `"12"` — the trailing window, in months, counted back from today. **Exactly one of `months` and `days` is required**, never both. |
 | `days` | Only `"7"` — "last 7 days", "this week", "past week" (the trailing 7 days, not the calendar week). There is no other day count and no `startDate`/`endDate`: a different period ("this quarter", "last 45 days") is not expressible; use the closest window (7 days or 1/3/6/12 months) and say so in `note` (section 1). |
 | `creTeamIds` | Optional, 1 to 20 team **keys** from the Teams section ("Rigel's MTTR", "MTTR for Sirius and Draco"). Only CRE teams (the same field a case's `creTeam` filter uses) — an SRE team here is not expressible. Leave it out for every team. There is no `"__current_team__"` for MTTR. |
-| `bands` | Optional, which bars to draw, in the order listed: any of `"S1-S4"`, `"S1-S3"`, `"S0"`, `"S1"`, `"S2"`, `"S3"`, `"S4"`. Leave it out for every band. **"S1-S4", "S1 to S4", "all severities", "S1, S2, S3 and S4" mean the four individual bars: `["S1","S2","S3","S4"]`.** Use `"S1-S4"`/`"S1-S3"` in the list only when the request asks for the combined (overall) average ("overall MTTR", "combined S1-S3"). |
+| `bands` | Which bars to draw, in the order listed: any of `"S0"`, `"S1"`, `"S2"`, `"S3"`, `"S4"`. **Always set it, and always one band per severity, never a combined bar.** For "MTTR", "MTTR for cases", "MTTR by severity", "S1 to S4", "S1-S4", "all severities" use `["S1","S2","S3","S4"]` (four separate bars). Add `"S0"` only when S0 or catastrophic is asked ("S0 to S4" is `["S0","S1","S2","S3","S4"]`). Never use `"S1-S4"` or `"S1-S3"` as a band: there is no combined or overall MTTR bar. |
+| `unit` | Optional, how the times are shown: `"hours"` (the default) or `"days"`. Use `"days"` whenever the request says days or "in days" ("MTTR in days", "show it in days"); otherwise leave it out. |
 
 Grouping is **always** on the server with `"groupBy": {"bucket": "severity"}` on a `bar` — never a
-`pie` (the six bands overlap: S1-S4 and S1-S3 are sums of the individual ones, so they can never be
-wedges of one whole). `"severity"` is the only bucket value there is, and every MTTR widget carries
-it: the one call always answers with all seven bands at once (in this order); `bands` picks which to show —
+`pie` (the bars are averages, not parts of one whole). `"severity"` is the only bucket value there is, and
+every MTTR widget carries it. `bands` picks which severities to show:
 
 | Band | Shows |
 |---|---|
-| `S1-S4` | the average resolution time across every S1-S4 case |
-| `S1-S3` | the average across S1, S2 and S3 only |
-| `S0` | S0 (catastrophic) cases only |
-| `S1` | S1 (critical) cases only |
-| `S2` | S2 (high) cases only |
-| `S3` | S3 (medium) cases only |
-| `S4` | S4 (low) cases only |
+| `S0` | S0 (catastrophic) cases |
+| `S1` | S1 (critical) cases |
+| `S2` | S2 (high) cases |
+| `S3` | S3 (medium) cases |
+| `S4` | S4 (low) cases |
 
 **As a number, not a chart** ("MTTR as a number", "just the number", "average resolution time of S1"):
 a `count` with `query.bands` naming exactly **one** band and no `groupBy`; it shows that band's average
-in hours. One number per band, so "S1 to S4 as numbers" is four `count` widgets (`gridWidth` 3 each).
-"MTTR by severity" with no band named shows every band side by side; "MTTR for S1 to S4" or "S1, S2,
-S3, S4" is the same `bar` widget with `"bands": ["S1","S2","S3","S4"]`; a single band ("S1 MTTR") is
-`"bands": ["S1"]`. There is no `slices`/per-band-widget shape for MTTR. The values are average hours.
-`S0` (catastrophic) is its own band: "S0 to S4" is `["S0","S1","S2","S3","S4"]`, and the combined `S1-S4`/`S1-S3` bars never include it.
+in the chosen unit. One number per band, so "S1 to S4 as numbers" is four `count` widgets (`gridWidth` 3
+each). A single band ("S1 MTTR") as a chart is `"bands": ["S1"]`. There is no `slices`/per-band-widget
+shape for MTTR. The values are average hours, or days with `"unit": "days"`.
 
 ```json
 { "id": "mttr-last-3-months", "displayName": "MTTR (Last 3 Months)", "resourceType": "mttr",
-  "shape": "bar", "gridWidth": 6, "query": { "months": "3" },
+  "shape": "bar", "gridWidth": 6, "query": { "months": "3", "bands": ["S1", "S2", "S3", "S4"] },
   "groupBy": { "bucket": "severity" } }
 ```
 
 ```json
 { "id": "mttr-rigel-by-severity", "displayName": "Rigel: MTTR by Severity (Last 6 Months)",
   "resourceType": "mttr", "shape": "bar", "gridWidth": 6,
-  "query": { "months": "6", "creTeamIds": ["rigel"] }, "groupBy": { "bucket": "severity" } }
+  "query": { "months": "6", "creTeamIds": ["rigel"], "bands": ["S1", "S2", "S3", "S4"] },
+  "groupBy": { "bucket": "severity" } }
 ```
 
 ```json
@@ -665,8 +662,8 @@ S3, S4" is the same `bar` widget with `"bands": ["S1","S2","S3","S4"]`; a single
 ```
 
 ```json
-{ "id": "mttr-s1-s4", "displayName": "MTTR by Severity (Last 3 Months)", "resourceType": "mttr",
-  "shape": "bar", "gridWidth": 12, "query": { "months": "3", "bands": ["S1", "S2", "S3", "S4"] },
+{ "id": "mttr-in-days", "displayName": "MTTR by Severity in Days (Last 3 Months)", "resourceType": "mttr",
+  "shape": "bar", "gridWidth": 12, "query": { "months": "3", "unit": "days", "bands": ["S1", "S2", "S3", "S4"] },
   "groupBy": { "bucket": "severity" } }
 ```
 
@@ -832,11 +829,12 @@ Never set both `slices` and `groupBy`.
 | "very dissatisfied feedback", "1-star ratings", "unhappy customers' comments" | a `list` with `rating 1` (or `1` and `2` as two widgets); "5-star" is `rating 5` |
 | "number of feedback responses", "how many ratings" | a `count` with `{}` |
 | CSAT for a period ("this quarter", "last 30 days"), by account, team or engineer | not expressible yet (section 1) |
-| "MTTR", "mean time to resolution", "resolution time", "average time to resolve" | `resourceType: "mttr"` (section 5f), a `bar` with `"groupBy": {"bucket": "severity"}`; default `months: "3"` unless the request names a window |
+| "MTTR", "mean time to resolution", "resolution time", "average time to resolve" | `resourceType: "mttr"` (section 5f), a `bar` with `"groupBy": {"bucket": "severity"}`; default `months: "3"` unless the request names a window, and always `"bands": ["S1","S2","S3","S4"]` (separate bars, never a combined one) unless it names other severities |
 | "MTTR for the last 7 days / this week" | `days` `"7"` (section 5f) |
 | "MTTR for the last month / quarter / 6 months / year" | `months` `"1"` / `"3"` / `"6"` / `"12"`; "quarter" and "year" are the closest of these (3 and 12), note what differs |
 | "Rigel's MTTR", "MTTR for team Sirius" | `creTeamIds` with that team's key(s) |
-| "MTTR of S1-S4 cases", "MTTR for S1, S2, S3, S4" | `bands` `["S1","S2","S3","S4"]` (section 5f) |
+| "MTTR of S1-S4 cases", "MTTR for S1, S2, S3, S4" | `bands` `["S1","S2","S3","S4"]`, four separate bars (section 5f) |
+| "MTTR in days", "show MTTR in days" | `"unit": "days"` (section 5f); otherwise leave `unit` out (hours) |
 | "MTTR as a number", "just the number", one band's average | `count` with `bands` of that one band (section 5f) |
 | MTTR for a single case, account, project or engineer; MTTR over time | not expressible (section 5f) |
 | "accounts", "customers" (as organisations), "clients" | `resourceType: "account"` (section 5c); "customers" adds `lifeCycle "Customer"` |
@@ -933,6 +931,10 @@ Never set both `slices` and `groupBy`.
 | editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
 | a trend or cases per day / week / month as a bar | that `line` with `"chart": "bar"` (section 4) |
 | editing a `line` widget: "show it as bars" / "as a line" | set `"chart": "bar"` / remove `chart` |
+| editing an `mttr` widget: "show it in days", "in days" | set `"unit": "days"` in its `query`, keeping everything else |
+| editing an `mttr` widget: "show it in hours", "back to hours" | remove `unit` from its `query` (hours is the default) |
+| editing an `mttr` **bar** widget: "add S0", "only S1 and S2", "without S4" | change its `bands` list (separate severities only), keeping everything else |
+| editing an `mttr` **count** widget (it shows exactly one band): "add S0", "also S2" | keep it and add another `count` widget for that severity (a count never holds two bands); "S2 instead" changes its one band; "remove it" removes the widget |
 | a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
@@ -1035,11 +1037,11 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `["__current_user__"]`; `ownerEmails` only addresses the request gave, never with `unowned`; `countryNames` never with `countryUnknown`; `playbookAnswers` and
     `playbookUnanswered` only with `playbookTask`, never together, and every code from the "PLG playbook
     answers" section; never an organisation `line`.
-14. An `mttr` widget: a flat `query` with only one of `months` (`"1"`/`"3"`/`"6"`/`"12"`) or `days` (`"7"`) and
-    `creTeamIds` (CRE team keys only) and `bands` (which bars to show; "S1-S4" means
-    `["S1","S2","S3","S4"]`); shape `bar` (never `pie` — the bands overlap, so
-    they can never be wedges of one whole) with `groupBy: {"bucket": "severity"}`, or `count` with
-    exactly one band in `bands` and no `groupBy` — never `list`, `slices`, `groupBy.field` or `line`.
+14. An `mttr` widget: a flat `query` with only one of `months` (`"1"`/`"3"`/`"6"`/`"12"`) or `days` (`"7"`),
+    `creTeamIds` (CRE team keys only), `bands` (always set: one entry per severity, `["S1","S2","S3","S4"]` by
+    default, `"S0"` added only when asked, never `"S1-S4"` or `"S1-S3"`) and `unit` (`"days"` only when days
+    are asked); shape `bar` (never `pie`) with `groupBy: {"bucket": "severity"}`, or `count` with exactly one
+    band in `bands` and no `groupBy` — never `list`, `slices`, `groupBy.field` or `line`.
 15. The output is a single JSON object.
 16. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).

@@ -3302,6 +3302,21 @@ describe("DashboardWidgetTile: PLG data the user may not read", () => {
       });
     });
 
+    it("shape count: shows the band in days when the widget's unit is days", async () => {
+      getResponseMock.mockResolvedValue({ json: async () => mttrReport });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="mttr_days"
+          displayName="MTTR S1 days"
+          resourceType="mttr"
+          shape="count"
+          filters={{ months: "1", unit: "days", bands: ["S1"] }}
+        />,
+      );
+      // 3435.85 h is about 143.16 days.
+      await waitFor(() => expect(screen.getByText("143.16 d")).toBeInTheDocument());
+    });
+
     it("shape bar: puts a short label on each bar, and says how many cases the shown bars cover", async () => {
       getResponseMock.mockResolvedValue({ json: async () => mttrReport });
       renderWithClient(

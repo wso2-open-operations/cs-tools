@@ -29,6 +29,9 @@ import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/
  * chart's left-to-right order never depends on object key enumeration. */
 const BAND_ORDER: readonly string[] = ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"];
 
+/** The bars drawn when a widget names none: S1 to S4, each its own bar. */
+const DEFAULT_BANDS: readonly string[] = ["S1", "S2", "S3", "S4"];
+
 function bandSortIndex(band: string): number {
   const i = BAND_ORDER.indexOf(band);
   return i === -1 ? BAND_ORDER.length : i;
@@ -93,11 +96,15 @@ export function useMttrReportData(
     ? (baseFilters.creTeamIds.filter((v): v is string => typeof v === "string") as string[])
     : [];
   // Optional: which bars to draw, in the order listed. The one report call
-  // always answers with all six bands; this only narrows what is shown, so it
-  // is deliberately not part of the query key.
-  const wantedBands = Array.isArray(baseFilters.bands)
+  // answers with every band; this only narrows what is shown, so it is
+  // deliberately not part of the query key. With none named, the four
+  // severities S1 to S4 are drawn, each its own bar.
+  const namedBands = Array.isArray(baseFilters.bands)
     ? baseFilters.bands.filter((v): v is string => typeof v === "string")
     : [];
+  const wantedBands = namedBands.length > 0 ? namedBands : DEFAULT_BANDS;
+  // Optional display unit: the report is in hours; "days" divides by 24.
+  const hoursPerUnit = baseFilters.unit === "days" ? 24 : 1;
   const active = !!groupBy?.bucket && (!!months || !!days);
   const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
 
@@ -126,14 +133,13 @@ export function useMttrReportData(
   const isError = active && query.isError;
 
   const bands: BeMttrReportBand[] = query.data?.bands ?? [];
-  const shown =
-    wantedBands.length > 0 ? bands.filter((b) => wantedBands.includes(b.band)) : bands;
+  const shown = bands.filter((b) => wantedBands.includes(b.band));
   const sorted = [...shown].sort((a, b) => bandSortIndex(a.band) - bandSortIndex(b.band));
   const slices: PieSliceResult[] = sorted.map((b) => ({
     label: b.band,
     query: {},
     navigable: false,
-    value: b.avgResolutionHours,
+    value: b.avgResolutionHours / hoursPerUnit,
   }));
   // How many cases the shown bars cover: the individual severities shown,
   // added up (S1-S4/S1-S3 are sums of those, so counting them too would count

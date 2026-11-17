@@ -86,6 +86,22 @@ func TestParseGenerated_MTTRCount(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_MTTRUnit: "unit" is hours or days.
+func TestParseGenerated_MTTRUnit(t *testing.T) {
+	for _, u := range []string{"hours", "days"} {
+		ok := mttrDashboard(`{"id":"u","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
+		  "query":{"months":"3","unit":"` + u + `","bands":["S1","S2","S3","S4"]},"groupBy":{"bucket":"severity"}}`)
+		if _, err := ParseGenerated([]byte(ok)); err != nil {
+			t.Errorf("unit %q: %v", u, err)
+		}
+	}
+	bad := mttrDashboard(`{"id":"u","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
+	  "query":{"months":"3","unit":"weeks"},"groupBy":{"bucket":"severity"}}`)
+	if _, err := ParseGenerated([]byte(bad)); err == nil {
+		t.Fatal("unit weeks was accepted, want an error")
+	}
+}
+
 // TestParseGenerated_MTTRWindow: a widget names exactly one of months or days
 // (days only "7").
 func TestParseGenerated_MTTRWindow(t *testing.T) {
