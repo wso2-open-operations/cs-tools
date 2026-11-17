@@ -56,8 +56,10 @@ func NewMTTRReportRepository(db *Scoped) MTTRReportRepository {
 // (a case can leave and re-enter it -- a rejected proposal bounces it back
 // for more work before a later one sticks -- so MAX(created_on) picks the
 // entry that actually reflects when the case was resolved, not an earlier
-// proposal that didn't hold), keeps only the cases whose last entry falls
-// in the requested window, and sums the resolution time per severity.
+// proposal that didn't hold), keeps only the cases that were created in the
+// requested window AND whose last entry falls in it, and sums the resolution
+// time per severity. A case opened before the window and resolved inside it is
+// left out, so a month's figure is about the cases opened that month.
 //
 // The LOWER(new_value) IN (...) list matches both casings
 // work_item_activity actually carries in practice (confirmed directly
@@ -93,6 +95,7 @@ SELECT c.severity::text,
   JOIN "case" c ON c.id = wi.id
   LEFT JOIN account a ON a.id = wi.account_id
  WHERE fsp.entered_on >= $1 AND fsp.entered_on < $2
+   AND wi.created_on >= $1
    AND c.state IN ('SOLUTION_PROPOSED', 'CLOSED')
    AND c.severity IN ('S0', 'S1', 'S2', 'S3', 'S4')
    AND (cardinality($3::uuid[]) = 0 OR a.cre_team_id = ANY($3::uuid[]))

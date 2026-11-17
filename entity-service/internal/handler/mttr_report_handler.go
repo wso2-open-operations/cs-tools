@@ -44,8 +44,8 @@ func NewMTTRReportHandler(svc service.MTTRReportService) *MTTRReportHandler {
 // by severity band (S1-S4, S1-S3, S1, S2, S3, S4) and measures, for each,
 // the average time from a case's creation to the LAST time it entered
 // Solution Proposed (so a rejected-then-reproposed case is measured against
-// the proposal that actually stuck), over cases whose last such entry falls
-// within the window.
+// the proposal that actually stuck), over cases created in the window whose
+// last such entry also falls within it.
 func (h *MTTRReportHandler) GetMTTRReport(w http.ResponseWriter, r *http.Request) {
 	rawMonths := r.URL.Query().Get("months")
 	rawDays := r.URL.Query().Get("days")

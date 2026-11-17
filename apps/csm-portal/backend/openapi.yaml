@@ -8444,8 +8444,8 @@ paths:
         S4 -- the two combined bands never include S0), the average time in hours from a case's creation to
         the LAST time it entered Solution Proposed (a rejected proposal bounces a case
         back for more work before a later one sticks, so the last entry, not the first,
-        is when it was actually resolved), over cases whose last such entry falls within
-        the window. creTeamId may repeat to restrict to one or more CRE teams; omitted,
+        is when it was actually resolved), over cases created in the window whose last such
+        entry also falls within it (a case opened before the window is not counted). creTeamId may repeat to restrict to one or more CRE teams; omitted,
         every team is included. Same read audience as the other aggregate widgets
         (e.g. POST /cases/feedback/aggregate).
       operationId: getMTTRReport

@@ -144,6 +144,10 @@ func TestMTTRReportIntegration(t *testing.T) {
 	s2Proposed := caseRow(mttrAccountID, ago(20), "S2")
 	entered(s2Proposed, "SOLUTION_PROPOSED", ago(15))
 	setState(s2Proposed, "SOLUTION_PROPOSED")
+	// S2 opened before the window and resolved inside it: not counted (the
+	// report is about cases opened in the window).
+	s2Older := caseRow(mttrAccountID, ago(100), "S2")
+	entered(s2Older, "SOLUTION_PROPOSED", ago(5))
 	// S2 with no activity at all: must not be counted.
 	caseRow(mttrAccountID, ago(10), "S2")
 
@@ -195,11 +199,21 @@ func TestMTTRReportIntegration(t *testing.T) {
 		t.Errorf("team-filtered S1 = %+v, want count 1 (only the team account's case), total ~%d seconds", got, 5*86400)
 	}
 
-	// The window's start is inclusive, its end exclusive.
+	// The window's start is inclusive, its end exclusive. The case must also
+	// have been created inside the window, so it is moved to exactly the start.
+	exec(`UPDATE work_item SET created_on = $1 WHERE id = $2`, windowStart, s4Outside)
 	exec(`UPDATE work_item_activity SET created_on = $1 WHERE work_item_id = $2`, windowStart, s4Outside)
 	if atStart, err := repo.SeverityStats(ctx, windowStart, windowEnd, nil); err != nil || statsBySeverity(atStart)["S4"].CaseCount != 1 {
-		t.Errorf("an entry exactly at windowStart must be included: err=%v stats=%v", err, atStart)
+		t.Errorf("a case created and resolved exactly at windowStart must be included: err=%v stats=%v", err, atStart)
 	}
+	// Created a second before the window, resolved inside it: left out.
+	exec(`UPDATE work_item SET created_on = $1 WHERE id = $2`, windowStart.Add(-time.Second), s4Outside)
+	if before, err := repo.SeverityStats(ctx, windowStart, windowEnd, nil); err != nil {
+		t.Fatalf("SeverityStats (created before windowStart): %v", err)
+	} else if _, ok := statsBySeverity(before)["S4"]; ok {
+		t.Errorf("a case created before windowStart must be excluded even when resolved inside it, got %+v", statsBySeverity(before)["S4"])
+	}
+	exec(`UPDATE work_item SET created_on = $1 WHERE id = $2`, windowStart, s4Outside)
 	exec(`UPDATE work_item_activity SET created_on = $1 WHERE work_item_id = $2`, windowEnd, s4Outside)
 	if atEnd, err := repo.SeverityStats(ctx, windowStart, windowEnd, nil); err != nil {
 		t.Fatalf("SeverityStats (at windowEnd): %v", err)
