@@ -54,4 +54,18 @@ describe("ProjectSuspendedNoticePage", () => {
       window.config = originalConfig;
     }
   });
+
+  it("encodes a # in the billing link but shows the address unchanged", () => {
+    const originalConfig = window.config;
+    window.config = { ...originalConfig, CUSTOMER_PORTAL_BILLING_EMAIL: "billing#accounts@acme.example" };
+    try {
+      render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
+      expect(screen.getByRole("link", { name: "billing#accounts@acme.example" })).toHaveAttribute(
+        "href",
+        "mailto:billing%23accounts@acme.example",
+      );
+    } finally {
+      window.config = originalConfig;
+    }
+  });
 });
