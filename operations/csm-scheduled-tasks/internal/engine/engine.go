@@ -131,7 +131,9 @@ func (e *Engine) attempt(ctx context.Context, task registry.Task, now time.Time)
 	}
 
 	slog.InfoContext(ctx, "csm-scheduled-tasks: running", "task", task.Name, "period", period, "attempt", claim.Run.AttemptCount)
-	if handlerErr := task.Handler(ctx); handlerErr != nil {
+	// The handler gets the period claimed here, so one that depends on its
+	// period does not re-derive it from a later clock (schedule.WithPeriod).
+	if handlerErr := task.Handler(schedule.WithPeriod(ctx, period)); handlerErr != nil {
 		e.recordFailure(ctx, task, period, claim.Run.ID, claim.Run.AttemptCount, handlerErr, now)
 		return true
 	}

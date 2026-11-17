@@ -17,6 +17,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 )
 
 // TaskName is the registry (and SUB_CRON_SCHEDULES / SUB_CRON_RECIPIENTS)
@@ -96,7 +97,10 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 		}
 
 		clock := opts.Now
-		if opts.Anchor != nil {
+		if p, ok := schedule.PeriodFromContext(ctx); ok {
+			// The period the engine claimed for this run.
+			clock = func() time.Time { return p }
+		} else if opts.Anchor != nil {
 			clock = opts.Anchor
 		}
 		asOf := runDate(clock)

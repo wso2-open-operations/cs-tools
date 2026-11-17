@@ -504,6 +504,7 @@ func TestReportRunNowRecipientsWinOverDebugList(t *testing.T) {
 
 func TestReportTasksTakeRecipientFlags(t *testing.T) {
 	want := []string{
+		"deprecated_product_usage_report",
 		"cs_worklogs_daily_report", "cs_worklogs_weekly_report", "migration_case_report",
 		"open_cases_report", "stale_cases_report", "unresolved_products_digest",
 		"query_hours_usage_notifications", "query_hours_weekly_report",

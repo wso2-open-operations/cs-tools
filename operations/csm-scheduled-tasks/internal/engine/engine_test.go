@@ -27,6 +27,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 )
 
 // fakeLedger allows every claim at the given attempt count and records the
@@ -120,5 +121,25 @@ func TestEngine_NotDueTaskIsNotLoggedAtInfo(t *testing.T) {
 	}
 	if !strings.Contains(out, "ran=0") || !strings.Contains(out, "registered=1") {
 		t.Errorf("tick summary missing:\n%s", out)
+	}
+}
+
+// The handler is given the period the engine claimed, even when it runs
+// after the next firing has passed on the clock (a slow earlier task).
+func TestEngine_HandlerGetsTheClaimedPeriod(t *testing.T) {
+	now := time.Date(2026, 12, 7, 4, 29, 0, 0, time.UTC) // just before Monday's 04:30 firing
+	var got time.Time
+	var ok bool
+	task := registry.Task{Name: "monthly_report", Schedule: "30 4 * * 1", Handler: func(ctx context.Context) error {
+		got, ok = schedule.PeriodFromContext(ctx)
+		return nil
+	}}
+	New([]registry.Task{task}, &fakeLedger{attemptCount: 1}, &fakeEmail{}, time.Hour, nil, true).Tick(context.Background(), now)
+	want, err := schedule.PeriodKey(task.Schedule, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !got.Equal(want) {
+		t.Errorf("handler period = %v, %v; want the claimed %v", got, ok, want)
 	}
 }
