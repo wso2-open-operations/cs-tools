@@ -96,8 +96,20 @@ func renderSLABreachRows(rows []slabreachreport.Row, caseLinkBase string, loc *t
 		return fmt.Sprintf(`<tr><td colspan="%d" style="padding:16px 10px; text-align:center; color:#8a8f98;">No SLA breaches this week.</td></tr>`, slaBreachRowColumns)
 	}
 	const cell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; word-wrap:break-word;">%s</td>`
-	// The case number and the breach date are single tokens; breaking
-	// either across two lines doubles the row height and helps nobody.
+	// The case id is one unbroken token and the table is
+	// table-layout:fixed, so its column can never widen to fit a long
+	// one. Under white-space:nowrap an id wider than the column does not
+	// clip or wrap -- it overflows and paints across the next cell
+	// (AUTOMATIONTESTCUSMSSUB-100, 26 characters, over WSO2 Product).
+	// Break it instead: the only ids long enough to wrap are exactly the
+	// ones that would otherwise collide. word-break:break-all is the
+	// property Outlook's Word engine honours, overflow-wrap:anywhere the
+	// one everything else prefers; both are set so neither family has to
+	// fall back to overflowing.
+	const idCell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; word-break:break-all; overflow-wrap:anywhere;">%s</td>`
+	// The elapsed percentage is short whatever the value ("446%%",
+	// "21420%%"), so it keeps nowrap: it cannot overflow, and breaking it
+	// would only cost a line.
 	const nowrapCell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; white-space:nowrap;">%s</td>`
 
 	var b strings.Builder
@@ -109,7 +121,7 @@ func renderSLABreachRows(rows []slabreachreport.Row, caseLinkBase string, loc *t
 				slaBreachRowColumns, orDash(escapeHTML(team)), slaBreachTeamCount(rows, i))
 		}
 		b.WriteString("<tr>")
-		fmt.Fprintf(&b, nowrapCell, slaBreachCaseLink(caseLinkBase, row))
+		fmt.Fprintf(&b, idCell, slaBreachCaseLink(caseLinkBase, row))
 		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Product)))
 		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.CaseType)))
 		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Priority)))
