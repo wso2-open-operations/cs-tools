@@ -29,17 +29,25 @@ const dto = (createdBy: CaseCommentDto["createdBy"]): CaseCommentDto => ({
 
 describe("toComment", () => {
   it("flags a comment whose author the backend resolved as internal", () => {
-    expect(toComment(dto({ id: "u1", email: "a@wso2.com", name: "Rashmika Silva", isInternal: true }))).toMatchObject({
-      createdBy: "Rashmika Silva",
+    expect(
+      toComment(dto({ id: "u1", email: "staff@example.com", name: "First Last", isInternal: true })),
+    ).toMatchObject({
+      createdBy: "First Last",
       createdByIsInternal: true,
     });
   });
 
   it("does not flag a customer, an unresolved author, or a plain-string author", () => {
     expect(
-      toComment(dto({ id: "u2", email: "c@acme.com", name: "Customer", isInternal: false })).createdByIsInternal,
+      toComment(dto({ id: "u2", email: "customer@example.com", name: "Customer User", isInternal: false }))
+        .createdByIsInternal,
     ).toBe(false);
-    expect(toComment(dto({ id: null, email: "x@acme.com", name: "X" })).createdByIsInternal).toBe(false);
-    expect(toComment(dto("Someone"))).toMatchObject({ createdBy: "Someone", createdByIsInternal: false });
+    expect(toComment(dto({ id: null, email: "unresolved@example.com", name: "Unresolved" })).createdByIsInternal).toBe(
+      false,
+    );
+    expect(toComment(dto("Plain String Author"))).toMatchObject({
+      createdBy: "Plain String Author",
+      createdByIsInternal: false,
+    });
   });
 });
