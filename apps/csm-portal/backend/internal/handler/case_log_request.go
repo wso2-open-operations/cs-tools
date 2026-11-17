@@ -35,7 +35,7 @@ import (
 const logCollectionEventType = "request_logs"
 
 // Question ids of the "Component Log Request" catalog item. Entity-service
-// migration 0292 fixes them, so they are the same in every environment.
+// migration 0298 fixes them, so they are the same in every environment.
 const (
 	clusterQuestionID     = "f239e6be-0b03-49e9-8d66-4ea06858f161"
 	environmentQuestionID = "81f21d11-4ecd-43cb-ad44-256532137748"
