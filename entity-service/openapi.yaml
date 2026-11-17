@@ -13212,8 +13212,7 @@ paths:
         LAST time it entered Solution Proposed (a rejected proposal bounces
         a case back for more work before a later one sticks, so the last
         entry, not the first, is when the case was actually resolved), over
-        cases created in the trailing window whose last such entry also falls
-        within it (a case opened before the window is not counted).
+        cases whose last such entry falls within the trailing window.
         `creTeamId` may repeat to restrict to one or more CRE teams; omitted,
         every team is included. Not offered when this deployment's cases are
         served from the other data source.
