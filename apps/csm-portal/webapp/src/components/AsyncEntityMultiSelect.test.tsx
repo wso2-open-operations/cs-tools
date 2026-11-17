@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
 
@@ -59,5 +59,39 @@ describe("AsyncEntityMultiSelect — known labels", () => {
 
     expect(screen.getByText("Choreo SRE Team")).toBeInTheDocument();
     expect(screen.queryByText("group-1")).not.toBeInTheDocument();
+  });
+
+  // Regression: picking another value while a restored one's name was still
+  // loading cached the restored one's raw id as its label, which then
+  // outranked the name once it arrived.
+  it("still takes a restored value's name that arrives after another value was picked", () => {
+    const useSearchCab = () => ({
+      data: [{ id: "group-2", name: "CAB Approval" }],
+      isFetching: false,
+      isError: false,
+    });
+    const onChange = vi.fn();
+    const withValues = (values: string[], knownLabels?: Record<string, string>) => (
+      <AsyncEntityMultiSelect<Item>
+        id="test-multi"
+        label="Assignment group"
+        values={values}
+        onChange={onChange}
+        useSearch={useSearchCab}
+        getId={(i) => i.id}
+        getLabel={(i) => i.name}
+        knownLabels={knownLabels}
+        compactSelectedValues
+      />
+    );
+    const { rerender } = render(withValues(["group-1"]));
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Assignment group" }));
+    fireEvent.click(screen.getByRole("option", { name: "CAB Approval" }));
+    expect(onChange).toHaveBeenCalledWith(["group-1", "group-2"]);
+
+    rerender(withValues(["group-1", "group-2"], { "group-1": "Choreo SRE Team" }));
+
+    expect(screen.getByText("Choreo SRE Team, CAB Approval")).toBeInTheDocument();
   });
 });
