@@ -17,6 +17,9 @@
 import type { CommentDto } from "@src/types";
 import { commentContentToHtml } from "./commentContent";
 
+/** The author shown for a comment that has none, as in the webapp (SYSTEM_AUTHOR_LABEL). */
+export const SYSTEM_AUTHOR_LABEL = "System";
+
 /** One entry of a case's activity feed (POST /cases/{id}/activities/search). */
 export interface CaseActivityEntry {
   id: string;
@@ -48,7 +51,7 @@ export function toCommentDto(entry: CaseActivityEntry): CommentDto {
     content: commentContentToHtml(entry.content),
     type: "comment",
     createdOn: entry.createdOn,
-    createdBy: entry.createdByFullName?.trim() || entry.createdBy?.trim() || "",
+    createdBy: entry.createdByFullName?.trim() || entry.createdBy?.trim() || SYSTEM_AUTHOR_LABEL,
     isEscalated: "false",
     hasInlineAttachments: false,
     inlineAttachments: [],
