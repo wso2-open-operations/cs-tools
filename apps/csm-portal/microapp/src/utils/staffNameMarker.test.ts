@@ -15,6 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
+import { initialsOf } from "./initials";
 import { joinStaffName, stripStaffNameMarker } from "./staffNameMarker";
 
 describe("stripStaffNameMarker", () => {
@@ -38,5 +39,16 @@ describe("joinStaffName", () => {
     expect(joinStaffName("Jane", "Doe ⓦ")).toBe("Jane Doe");
     expect(joinStaffName(undefined, "Doe")).toBe("Doe");
     expect(joinStaffName(null, null)).toBe("");
+  });
+});
+
+describe("initialsOf", () => {
+  it("reads only the first two words, without the marker", () => {
+    expect(initialsOf("Rashmika Silva")).toBe("RS");
+    expect(initialsOf("Rashmika Silva ⓦ")).toBe("RS");
+    expect(initialsOf("Mary Jane Watson")).toBe("MJ");
+    expect(initialsOf("Rashmika")).toBe("R");
+    expect(initialsOf("ⓦ")).toBe("?");
+    expect(initialsOf("")).toBe("?");
   });
 });
