@@ -933,7 +933,8 @@ Never set both `slices` and `groupBy`.
 | editing a `line` widget: "show it as bars" / "as a line" | set `"chart": "bar"` / remove `chart` |
 | editing an `mttr` widget: "show it in days", "in days" | set `"unit": "days"` in its `query`, keeping everything else |
 | editing an `mttr` widget: "show it in hours", "back to hours" | remove `unit` from its `query` (hours is the default) |
-| editing an `mttr` widget: "add S0", "only S1 and S2", "without S4" | change its `bands` list (separate severities only), keeping everything else |
+| editing an `mttr` **bar** widget: "add S0", "only S1 and S2", "without S4" | change its `bands` list (separate severities only), keeping everything else |
+| editing an `mttr` **count** widget (it shows exactly one band): "add S0", "also S2" | keep it and add another `count` widget for that severity (a count never holds two bands); "S2 instead" changes its one band; "remove it" removes the widget |
 | a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
