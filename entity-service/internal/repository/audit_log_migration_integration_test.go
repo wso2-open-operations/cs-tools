@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -180,9 +181,12 @@ func TestAuditMigration_ATempTableCannotShadowTheRegistry(t *testing.T) {
 	defer conn.Release()
 
 	// A temp table is searched before any schema unless pg_temp is listed last.
-	schema := auditSchema(t, pool)
+	var schema string
+	if err := conn.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatalf("current_schema: %v", err)
+	}
 	for _, sql := range []string{
-		"CREATE TEMP TABLE audit_config (LIKE " + schema + ".audit_config INCLUDING DEFAULTS)",
+		"CREATE TEMP TABLE audit_config (LIKE " + pgx.Identifier{schema, "audit_config"}.Sanitize() + " INCLUDING DEFAULTS)",
 		`INSERT INTO pg_temp.audit_config (schema_name, table_name, key_columns)
 		   VALUES ('` + schema + `', 'zz_audit_test_shadow', '{id}')`,
 	} {

@@ -375,12 +375,14 @@ BEGIN
                 CONTINUE;
             END IF;
 
+            -- The schema goes in as an argument, never into the format string.
             EXECUTE format(
-                'CREATE TABLE __SCHEMA__.%I PARTITION OF __SCHEMA__.csm_audit_log FOR VALUES FROM (%L) TO (%L)',
-                partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
+                'CREATE TABLE %1$I.%2$I PARTITION OF %1$I.csm_audit_log FOR VALUES FROM (%3$L) TO (%4$L)',
+                __SCHEMA_LIT__, partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
             EXECUTE format(
-                'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON __SCHEMA__.%I
-                   FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()', partition_name);
+                'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON %I.%I
+                   FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()',
+                __SCHEMA_LIT__, partition_name);
             created_count := created_count + 1;
         END IF;
     END LOOP;
@@ -423,7 +425,7 @@ BEGIN
            AND pg_get_expr(c.relpartbound, c.oid) <> 'DEFAULT'
            AND (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1]::timestamptz <= cutoff
     LOOP
-        EXECUTE format('ALTER TABLE __SCHEMA__.csm_audit_log DETACH PARTITION __SCHEMA__.%I', old_partition);
+        EXECUTE format('ALTER TABLE %1$I.csm_audit_log DETACH PARTITION %1$I.%2$I', __SCHEMA_LIT__, old_partition);
         RETURN NEXT old_partition;
     END LOOP;
 END $$;
