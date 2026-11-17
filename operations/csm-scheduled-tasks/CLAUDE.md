@@ -34,7 +34,10 @@ either it's fixed or its own next period supersedes it.
    atomically decides allow/deny: a period this task hasn't seen before first supersedes any other
    still-open row for the same task, then claims fresh; an existing row whose retry time has
    arrived is bumped and claimed; anything else is denied.
-3. If allowed, run `Task.Handler`, then report back via `PATCH /scheduled-tasks/attempts/{id}`
+3. If allowed, run `Task.Handler` with the claimed period in its context (`schedule.WithPeriod`; a handler that
+   depends on its period reads it with `schedule.PeriodFromContext` rather than re-deriving it from the clock, which
+   after slow earlier tasks in the same tick can already be the next period), then report back via
+   `PATCH /scheduled-tasks/attempts/{id}`
    (one endpoint for both outcomes, `internal/ledger.Client.Complete`/`Fail` on the Go side) —
    `Complete` (success) or `Fail` (failure —
    sets `nextRetryOn`, never a permanent give-up state).
@@ -923,7 +926,7 @@ csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 -
 
 **Recipient override (`--recipients`, `--cc`).** Valid for every report task: the two CS Worklogs reports,
 `migration_case_report`, `open_cases_report`, `stale_cases_report`, `unresolved_products_digest`, the three
-`product_regression_report_*` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
+`product_regression_report_*`, `eol_product_usage_report` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
 refuses to run if one of them is registered without the hook, `tasksMissingReportRunNow`). One mechanism: each task's
 `RunNowNarrow` is `reportRunNow(normal, raw, build)` (the CS Worklogs ones `worklogsRunNow`, which also takes the window
 flags), and `build` is the task's own handler constructor, so the scheduled `Handler` is untouched. With
@@ -967,6 +970,7 @@ reading the handlers' code and doc comments (a judgement, not a test):
 - **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
   `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
   `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports,
+  `eol_product_usage_report` (a run-now sends whatever the date),
   `time_card_report` (customer-facing: a repeat mails every contact of the project again).
   `unresolved_products_digest` also mails every run it finds anything.
 - **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
@@ -991,6 +995,16 @@ the run-now is safe beside the scheduled run for the reason above: entity-servic
 `--limit` may not exceed `AUTOCLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
 `AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
 the logs (`run-now: ...`).
+
+## Audit log maintenance
+
+**`audit_log_maintenance`** (default `0 1 * * *`, daily at 01:00 UTC) is the daily upkeep of entity-service's field-level audit log (its migration `0295`). It is a trigger, not a calculator: `internal/auditlog.Client` calls `POST /audit-log/maintenance` (service credentials only: this component's client id must be in entity-service's `M2M_CLIENT_IDS`), and the work runs in the database. Entity-service creates the coming monthly partitions, checks the log's health and puts back audit triggers that were missing or disabled; its own CLAUDE.md ("Audit log maintenance") has the details. This is the only scheduler of that upkeep: entity-service has none of its own.
+
+A 200 from entity-service means the steps ran, not that all is well, so `auditlog.Maintenance` reads the lists in the response and **returns an error for any of them**: a step that could not run (`stepErrors`), a health problem (rows in the catch-all partition, fewer than two future months), a trigger that was repaired (the history had a gap while it was off) or one still wrong after the repair. The error names each, the engine mails it, and the next tick retries. The upkeep is safe to repeat, so the retry succeeds once nothing is wrong any more, which is also how a repaired trigger stops alerting.
+
+**Off unless `AUDIT_LOG_MAINTENANCE_ENABLED=true`** (default false): neither the client nor the task is created otherwise. Turn it on only once entity-service has `CSM_AUDIT_LOG_ENABLED=true` (without it the endpoint answers 404), migration `0295` applied and its database role has `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health()` and `audit_reconcile(boolean)`; before that every run fails and mails. A failed audit write fails the business write, so once the audit log is in use, a stopped upkeep is an outage a few months out: alert on `SELECT count(*) FROM audit_partition_health()` too, which does not depend on this task.
+
+Retiring old partitions is not part of this task. An admin does it monthly with `audit_retire_partitions` (see entity-service's CLAUDE.md).
 
 ## Usage rollups
 
@@ -1025,6 +1039,67 @@ yesterday, so a report that reaches PCT late, or a night this task did not run, 
 next run. Both rollups are idempotent (a rerun over unchanged rows writes nothing), so the overlap
 costs nothing. One failing day or month does not stop the others; the handler returns every failure
 together and the engine retries the whole run. Days and months are UTC, so run with `TZ=UTC`.
+
+## PLG signups from Moesif
+
+**`plg_moesif_sync`** (default `*/15 * * * *`) lands WSO2 Cloud signups in the PLG portal. Moesif is the
+source of truth: a registration event (`metadata.initiating_product`, once per user) and each later
+subscription event (`metadata.product`) become one registration, by company id, user id and product,
+posted to entity-service's `POST /plg/registrations/ingest`. entity-service maps the product name to a
+portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
+
+- **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
+  `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only
+  refreshes what is stored, and a failed or superseded period is covered by the next run as long as the
+  outage is shorter than the window. The handler reads the wall clock, not the period start. Startup
+  refuses a window shorter than the schedule's longest gap between runs plus `DRIVER_INTERVAL`
+  (`schedule.LongestGap`), since events in between would never be read, and a schedule limited to
+  certain days of the month, months or years, whose gaps an eight-day sample cannot bound.
+- **Failures.** An event with no company id or product, or one entity-service rejects, is recorded in
+  `plg_ingest_failure` under its Moesif event id, by ids only; entity-service keeps one open row per
+  event id (a partial unique index, migration 0288), so later runs do not repeat it. Neither fails the
+  run, but a failure that cannot be recorded does, after every other failure was attempted. Moesif or entity-service unreachable,
+  or a window larger than `PLG_MOESIF_SYNC_MAX_PAGES` pages, fails it (retried and alerted as usual).
+- **Personal data.** Only time, action, user id, company id and the product fields are requested from
+  Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
+- **`internal/moesif`** is the shared Management API client (event search with `search_after` paging).
+  Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
+  sub-crons run one after another.
+
+## PLG registration validation
+
+**`plg_registration_validation`** (default `20 * * * *`) fills each product's registration playbook from
+its Moesif activity. **Off unless `PLG_REGISTRATION_VALIDATION_ENABLED=true`**, and a dry run (derive and
+log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. Only `AGENT_PLATFORM` (Moesif
+platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the others when they do.
+
+- **Each run**: `POST /plg/registrations/validation-queue` lists the product's REGISTRATION pairings signed
+  up within `WINDOW_HOURS` (12) plus `GRACE_HOURS` (24); Moesif is read for 50 companies per query
+  (company id, time and action only); `internal/plgactivity` counts the user's actions in the first
+  `WINDOW_HOURS` after signup; one `PUT /plg/pairings/{id}/registration-validation` per pairing writes the
+  summary and values. entity-service attaches the playbook, never overwrites an engineer's value, and
+  closes and abandons the pairing when the outcome is EXCLUDED. This client's id must be in
+  entity-service's `M2M_CLIENT_IDS`.
+- **Rules**: Agent Manager has no onboarding wizard, so the onboarding tasks are left to the engineer.
+  An action is any Agent Manager action, deletions included; `registered-gateway` and
+  `rotated-gateway-token` are not (the platform emits them minutes after signup), nor are account events
+  such as `Select Subscription Plan`. `ELIGIBLE_ACTIONS` (10) or more is ELIGIBLE and HIGH;
+  `MODERATE_ACTIONS` (5) or more is MODERATE, fewer LOW, none NONE, all MONITOR. A CORPORATE email is
+  ELIGIBLE; INTERNAL or DISPOSABLE is EXCLUDED.
+- **Email classification**, when the pairing has none or UNKNOWN: the owner's email is read from the
+  Cloud Directory API (`CLOUD_API_*`), kept in memory only, and reduced to its domain and a role-mailbox
+  flag (`admin@`, `test+1@`). Only the domain goes to the CSM AI service's
+  `POST /ai/email-domains/classify`; a PERSONAL domain with a role mailbox becomes DISPOSABLE. A Directory
+  or AI failure leaves it unset for the next run. Off, with a warning at start, unless
+  `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain.
+- **Queue order**: pairings never validated come first, then the least recently validated, so a
+  queue over `QueueLimit` (1000) cannot starve the same pairings every run.
+- **Stale exclusions**: entity-service abandons only when the classification the run will hold still
+  excludes (an engineer may have changed it since the queue was read). Otherwise it writes nothing and
+  answers `stale`; the job counts it and the next run decides again. A zero `WINDOW_HOURS` fails the run.
+- **Failures**: Moesif or the queue failing fails the run. A failed write is logged and the others go
+  on; the run then fails naming at most 10 pairing ids. A product without an active registration
+  playbook is skipped with a warning.
 
 ## Unresolved products digest
 
@@ -1144,12 +1219,18 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
+| `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
+| `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `AGENT_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
+| `CSM_AI_SERVICE_BASE_URL` / `CSM_AI_SERVICE_SCOPES` | No | The CSM AI service, called with the shared `OAUTH2_*` credentials, for the registration validation's email classification |
+| `CLOUD_API_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` / `_USER_EMAIL_PATH` | With `CLOUD_API_BASE_URL` (path default `/users/{userId}/email`) | The Cloud Directory API (the CSM portal's Directory client) for the owner's email. The secret is a Choreo secret: never commit it |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
@@ -1177,7 +1258,7 @@ version rule differs. A deprecated version whose EOL date has passed is in both 
 - **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
   as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
   sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
-  run's period key (`Options.Anchor`, `periodStart` in `cmd/server/main.go`), not the clock: the engine retries a
+  run's claimed period (`schedule.PeriodFromContext`; `Options.Anchor` only outside the engine), not the clock: the engine retries a
   failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
   A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
   report can then be sent by hand with `--run-now=deprecated_product_usage_report`. A `--run-now` sends whatever the
@@ -1232,6 +1313,41 @@ unit mail groups, and a failed period is retried on every tick, so failure alert
 `ALERT_RECIPIENTS` only.
 `PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
 (`<prefix>/<case number>`); unset keeps the plain text the PDF had.
+
+## Monthly EOL product usage report
+
+`internal/eolusagescan.SendReport`, registered as **`eol_product_usage_report`**, is the port of the previous system's *EOL
+Product Version Usage Monthly Report*: the customers still running a product version past its EOL date in an active
+Primary Production deployment, mailed to the people who should act on it. entity-service builds the list (`GET
+/reports/eol-product-usage?asOf=YYYY-MM-DD`, client in `internal/eolusagereport`; the joins and the EOL rule live
+there) and this task mails it through its own template (`internal/notify/templates/eol_product_usage_report.html`,
+`notify.RenderEolProductUsageReport`): the introduction the previous mail carried, then one table per region, each
+account's cells (account, CS ABT, account manager, technical owner) spanning its rows; there is no Region column, as each region has its own heading and table and each project's cell
+spanning its versions.
+
+- **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
+  sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
+  run's claimed period (`schedule.PeriodFromContext`; `Options.Anchor` only outside the engine), not the clock: the engine retries a
+  failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
+  A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
+  report can then be sent by hand with `--run-now=eol_product_usage_report`. A `--run-now` sends whatever
+  the date (`Options.AnyDay`). A `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use
+  `--run-now` with `--recipients` to test on another day.
+- **Report date.** The report is fetched as of the run's Monday in Asia/Colombo, so a retry later in the week lists
+  the same versions.
+- **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
+  audience agreed with CS (account managers, technical owners and leadership see the same list). It is internal
+  only.
+- **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
+  account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
+  To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
+  `To`/`Cc` nil for the same reason as theirs: failures go to `ALERT_RECIPIENTS` alone, never to every account
+  manager on each retry; `eolUsageTaskWithRecipients` carries its audience to the startup `EMAIL_BASE_URL` check.
+- **No EOL usage.** Unlike the regression reports, an empty report **is sent**: a short "no customers are using EOL
+  product versions" note to the configured to/cc only, so the leadership group knows the report ran.
+- `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset
+  keeps plain text, and a non-https value refuses to start.
 
 ## Monthly time card report
 

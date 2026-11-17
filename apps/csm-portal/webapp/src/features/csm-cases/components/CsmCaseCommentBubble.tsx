@@ -639,6 +639,9 @@ export default function CsmCaseCommentBubble({
             "& p": { m: 0 },
             "& p + p": { mt: 0.75 },
             "& ul, & ol": { ml: 3, my: 0.5 },
+            // The editor's wrapper item around a nested list has no marker of its own
+            // (older comments carry only the class, newer ones also an inline style).
+            "& li.editor-list-item-nested": { listStyleType: "none" },
             "& code": {
               bgcolor: "background.default",
               px: 0.5,

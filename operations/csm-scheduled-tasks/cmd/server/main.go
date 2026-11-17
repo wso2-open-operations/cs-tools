@@ -43,12 +43,15 @@ import (
 	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/auditlog"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/holidayreminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
@@ -57,8 +60,11 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/moesif"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgvalidation"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -250,6 +256,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The EOL product usage report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/eol-product-usage).
+	eolUsageReportClient, err := eolusagereport.NewClient(eolusagereport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service EOL-product-usage-report client", "err", err)
+		os.Exit(1)
+	}
+
 	// The CS Worklogs reports' own client. Same deployment and
 	// credentials, separate client for the same reason as the others: a
 	// distinct endpoint whose timeout differs materially. A weekly report
@@ -296,6 +316,27 @@ func main() {
 		}
 	}
 
+	// The audit log upkeep's own client: the same deployment and credentials, one
+	// service-only endpoint. Off by default: entity-service needs
+	// CSM_AUDIT_LOG_ENABLED=true (else the endpoint answers 404), migration 0295
+	// applied and the database role granted EXECUTE on the audit functions first,
+	// or every daily run fails.
+	auditLogMaintenanceEnabled := envBool("AUDIT_LOG_MAINTENANCE_ENABLED", false)
+	var auditLogClient *auditlog.Client
+	if auditLogMaintenanceEnabled {
+		auditLogClient, err = auditlog.NewClient(auditlog.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service audit log client", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// The usage rollups' own client: the same deployment and credentials, two
 	// internal-only endpoints. Off by default for the reason documented on the
 	// task registration below.
@@ -312,6 +353,94 @@ func main() {
 		if err != nil {
 			slog.Error("failed to construct entity-service usage rollup client", "err", err)
 			os.Exit(1)
+		}
+	}
+
+	// PLG signups from Moesif: the Moesif reader and the PLG ingest client.
+	// Off by default; MOESIF_API_KEY is required once it is on.
+	plgMoesifSyncEnabled := envBool("PLG_MOESIF_SYNC_ENABLED", false)
+	plgValidationEnabled := envBool("PLG_REGISTRATION_VALIDATION_ENABLED", false)
+	var (
+		moesifClient        *moesif.Client
+		plgSignupsClient    *plgsignups.Client
+		plgValidationClient *plgvalidation.Client
+	)
+	if plgMoesifSyncEnabled || plgValidationEnabled {
+		moesifClient, err = moesif.NewClient(moesif.Config{
+			BaseURL: envString("MOESIF_BASE_URL", moesif.DefaultBaseURL),
+			APIKey:  mustEnv("MOESIF_API_KEY"),
+			Timeout: envDuration("MOESIF_TIMEOUT", 30*time.Second),
+		})
+		if err != nil {
+			slog.Error("failed to construct Moesif client", "err", err)
+			os.Exit(1)
+		}
+		plgSignupsClient, err = plgsignups.NewClient(plgsignups.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG ingest client", "err", err)
+			os.Exit(1)
+		}
+		plgValidationClient, err = plgvalidation.NewClient(plgvalidation.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG validation client", "err", err)
+			os.Exit(1)
+		}
+	}
+	// Email domain classification: the owner's email from the Cloud Directory
+	// API, the domain to the CSM AI service. Off unless both are configured.
+	var (
+		plgDirectory  *plgvalidation.DirectoryClient
+		plgClassifier *plgvalidation.AIClient
+	)
+	if plgValidationEnabled && os.Getenv("CSM_AI_SERVICE_BASE_URL") != "" && os.Getenv("CLOUD_API_BASE_URL") != "" {
+		plgClassifier, err = plgvalidation.NewAIClient(plgvalidation.Config{
+			BaseURL:      os.Getenv("CSM_AI_SERVICE_BASE_URL"),
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       splitComma(os.Getenv("CSM_AI_SERVICE_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("failed to construct CSM AI service client", "err", err)
+			os.Exit(1)
+		}
+		plgDirectory, err = plgvalidation.NewDirectoryClient(plgvalidation.DirectoryConfig{
+			Config: plgvalidation.Config{
+				BaseURL:      os.Getenv("CLOUD_API_BASE_URL"),
+				TokenURL:     mustEnv("CLOUD_API_TOKEN_URL"),
+				ClientID:     mustEnv("CLOUD_API_CLIENT_ID"),
+				ClientSecret: mustEnv("CLOUD_API_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CLOUD_API_SCOPES")),
+			},
+			UserEmailPath: envString("CLOUD_API_USER_EMAIL_PATH", "/users/{userId}/email"),
+		})
+		if err != nil {
+			slog.Error("failed to construct Cloud Directory client", "err", err)
+			os.Exit(1)
+		}
+	} else if plgValidationEnabled {
+		slog.Warn("plg registration validation: email classification is off; set CSM_AI_SERVICE_BASE_URL and CLOUD_API_BASE_URL")
+	}
+	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM"))
+	if plgValidationEnabled {
+		for i, p := range plgValidationProducts {
+			plgValidationProducts[i] = strings.ToUpper(p)
+			if _, ok := plgvalidation.Platforms[plgValidationProducts[i]]; !ok {
+				slog.Error("PLG_REGISTRATION_VALIDATION_PRODUCTS names a product with no Moesif platform", "product", p)
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -540,10 +669,17 @@ func main() {
 	const availabilityTaskName = "availability_recalculation"
 	availabilityTo, availabilityCc := recipientsFor(recipientOverrides, availabilityTaskName)
 
+	const auditLogMaintenanceTaskName = "audit_log_maintenance"
+	auditLogMaintenanceTo, auditLogMaintenanceCc := recipientsFor(recipientOverrides, auditLogMaintenanceTaskName)
+
 	const usageRollupDailyTaskName = "usage_rollup_daily"
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
 	const usageRollupMonthlyTaskName = "usage_rollup_monthly"
 	usageRollupMonthlyTo, usageRollupMonthlyCc := recipientsFor(recipientOverrides, usageRollupMonthlyTaskName)
+	const plgMoesifSyncTaskName = "plg_moesif_sync"
+	plgMoesifSyncTo, plgMoesifSyncCc := recipientsFor(recipientOverrides, plgMoesifSyncTaskName)
+	const plgValidationTaskName = "plg_registration_validation"
+	plgValidationTo, plgValidationCc := recipientsFor(recipientOverrides, plgValidationTaskName)
 	const unresolvedProductsTaskName = "unresolved_products_digest"
 	unresolvedProductsTo, unresolvedProductsCc := recipientsFor(recipientOverrides, unresolvedProductsTaskName)
 	unresolvedProductsEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, unresolvedProductsTaskName))
@@ -709,6 +845,59 @@ func main() {
 		})
 	}
 
+	// The monthly EOL product usage report: the customers still running a
+	// product version past its EOL date in an active Primary Production
+	// deployment, mailed on the first Monday of the month at 10:00 IST
+	// (04:30 UTC; the schedule fires every Monday and the handler sends only
+	// on the 1st to the 7th). To is its SUB_CRON_RECIPIENTS "to" (the CS
+	// leadership group) plus every listed account's manager and technical
+	// owner; with no "to" the task skips and succeeds. A month with no EOL
+	// usage still sends a short note to the configured to/cc.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the regression
+	// reports: failures go to ALERT_RECIPIENTS alone, never to the account
+	// managers on every retry. eolUsageTaskWithRecipients carries its
+	// audience to the EMAIL_BASE_URL check below for the same reason.
+	//
+	// EOL_USAGE_REPORT_PORTAL_BASE_URL optionally links account and project
+	// names to their CSM portal pages (<base>/customers/accounts/<id>); a
+	// non-https value refuses to start, as every URL here does.
+	eolUsagePortalBase := strings.TrimRight(os.Getenv("EOL_USAGE_REPORT_PORTAL_BASE_URL"), "/")
+	if eolUsagePortalBase != "" {
+		if err := httpsec.RequireSecureURL(eolUsagePortalBase); err != nil {
+			slog.Error("invalid EOL_USAGE_REPORT_PORTAL_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	eolUsageTo, eolUsageCc := recipientsFor(recipientOverrides, eolusagescan.TaskName)
+	var eolUsageTaskWithRecipients []string
+	if len(eolUsageTo) > 0 {
+		eolUsageTaskWithRecipients = append(eolUsageTaskWithRecipients, eolusagescan.TaskName)
+	}
+	eolUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, eolusagescan.TaskName))
+	eolUsageSchedule := scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule)
+	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled}
+	// A scheduled run (and its retries) takes its date from the period the
+	// engine claimed (schedule.PeriodFromContext); Anchor is the fallback for
+	// a run outside the engine, such as a tryout. A run-now below keeps the
+	// clock.
+	eolUsageScheduled := eolUsageOptions
+	eolUsageScheduled.Anchor = periodStart(eolUsageSchedule)
+	eolUsageTask := registry.Task{
+		Name:     eolusagescan.TaskName,
+		Schedule: eolUsageSchedule,
+		Handler:  eolusagescan.SendReport(eolUsageReportClient, eolUsageEmail, eolUsageTo, eolUsageCc, eolUsageScheduled),
+		// --recipients/--cc of a manual run-now only; see reportRunNow. A
+		// run-now sends whatever the date: it is asked for on purpose.
+		RunNowFlags: reportRunNowFlags,
+		RunNowNarrow: reportRunNow(eolUsageEmail, emailClient,
+			func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				opts := eolUsageOptions
+				opts.AnyDay = true
+				return eolusagescan.SendReport(eolUsageReportClient, email, orRecipients(eolUsageTo, rec), eolUsageCc, opts)
+			}),
+	}
+
 	// The weekly SLA breach reports: last week's breached clocks on the
 	// covered SLA definitions. There are TWO source reports, separate
 	// definitions with different stage and onboarding-status filters, so
@@ -815,8 +1004,10 @@ func main() {
 	deprecatedUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, deprecatedusagescan.TaskName))
 	deprecatedUsageSchedule := scheduleFor(scheduleOverrides, deprecatedusagescan.TaskName, deprecatedusagescan.DefaultSchedule)
 	deprecatedUsageOptions := deprecatedusagescan.Options{PortalBaseURL: deprecatedUsagePortalBase, EmailsEnabled: alertsEnabled}
-	// A scheduled run (and its retries) decides "first Monday" from its
-	// period, and is dated the day it runs; a run-now below sends on any day.
+	// A scheduled run (and its retries) decides "first Monday" from the
+	// period the engine claimed (schedule.PeriodFromContext; Anchor is the
+	// fallback outside the engine, such as a tryout) and is dated the day it
+	// runs; a run-now below sends on any day.
 	deprecatedUsageScheduled := deprecatedUsageOptions
 	deprecatedUsageScheduled.Anchor = periodStart(deprecatedUsageSchedule)
 	deprecatedUsageTask := registry.Task{
@@ -1111,6 +1302,7 @@ func main() {
 		// which send them seconds after the change rather than on this tick.
 	}
 	tasks = append(tasks, regressionTasks...)
+	tasks = append(tasks, eolUsageTask)
 
 	// Registered only when enabled, rather than registered-and-inert, so the
 	// ledger shows no run at all for a task that is switched off -- an inert
@@ -1164,6 +1356,21 @@ func main() {
 		})
 	}
 
+	// The audit log's daily upkeep: creates the coming monthly partitions, checks
+	// the log's health and puts back missing audit triggers, all inside entity-service.
+	// Daily at 01:00 UTC. It is safe to repeat, so a failed run is simply tried again.
+	// It fails, and so is mailed, when it found a health problem, repaired a trigger
+	// (its history had a gap) or could not repair one.
+	if auditLogMaintenanceEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     auditLogMaintenanceTaskName,
+			Schedule: scheduleFor(scheduleOverrides, auditLogMaintenanceTaskName, "0 1 * * *"),
+			Handler:  auditlog.Maintenance(auditLogClient),
+			To:       auditLogMaintenanceTo,
+			Cc:       auditLogMaintenanceCc,
+		})
+	}
+
 	// Rebuilds the daily and monthly usage rows from the hourly and daily ones --
 	// the Go replacement for ServiceNow's UsageAggregator. The arithmetic is
 	// set-based SQL in entity-service (migration 0245); these tasks only trigger it.
@@ -1201,6 +1408,77 @@ func main() {
 				Cc:       usageRollupMonthlyCc,
 			},
 		)
+	}
+
+	// PLG signups from Moesif, every 15 minutes by default. A run reads a
+	// window of at least two driver intervals (and 2 hours), so a missed or
+	// failed run is covered by the next; ingest is idempotent, so the overlap
+	// is harmless. The handler reads the wall clock, not the period start: the
+	// window must end now to catch the newest signups.
+	if plgMoesifSyncEnabled {
+		window := max(2*driverInterval, 2*time.Hour)
+		if minutes := envInt("PLG_MOESIF_SYNC_WINDOW_MINUTES", 0); minutes > 0 {
+			window = time.Duration(minutes) * time.Minute
+		}
+		// There is no cursor: a window shorter than the longest time between two
+		// runs (the schedule's gap, plus up to one driver interval of delay) loses events.
+		plgMoesifSyncSchedule := scheduleFor(scheduleOverrides, plgMoesifSyncTaskName, "*/15 * * * *")
+		gap, err := schedule.LongestGap(plgMoesifSyncSchedule, time.Now().UTC())
+		if err != nil {
+			slog.Error("plg moesif sync: invalid schedule", "err", err)
+			os.Exit(1)
+		}
+		if window < gap+driverInterval {
+			slog.Error("PLG_MOESIF_SYNC_WINDOW_MINUTES is shorter than the time between runs; events would be missed",
+				"window", window, "needed", gap+driverInterval)
+			os.Exit(1)
+		}
+		events := splitComma(os.Getenv("PLG_MOESIF_SYNC_EVENTS"))
+		if len(events) == 0 {
+			events = plgsignups.DefaultEvents
+		}
+		productFields := splitComma(os.Getenv("PLG_MOESIF_SYNC_PRODUCT_FIELDS"))
+		if len(productFields) == 0 {
+			productFields = plgsignups.DefaultProductFields
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     plgMoesifSyncTaskName,
+			Schedule: plgMoesifSyncSchedule,
+			Handler: plgsignups.Sync(moesifClient, plgSignupsClient, plgsignups.Options{
+				Events:        events,
+				ProductFields: productFields,
+				Window:        window,
+				BatchSize:     envInt("PLG_MOESIF_SYNC_BATCH_SIZE", 100),
+				MaxPages:      envInt("PLG_MOESIF_SYNC_MAX_PAGES", 100),
+			}, time.Now),
+			To: plgMoesifSyncTo,
+			Cc: plgMoesifSyncCc,
+		})
+	}
+
+	// Registration playbooks filled from Moesif activity, hourly, after the
+	// signups sync. A dry run (the default) derives and logs, writes nothing.
+	if plgValidationEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     plgValidationTaskName,
+			Schedule: scheduleFor(scheduleOverrides, plgValidationTaskName, "20 * * * *"),
+			Handler: plgvalidation.Run(moesifClient, plgValidationClient, plgvalidation.Options{
+				Products: plgValidationProducts,
+				Window:   time.Duration(envInt("PLG_REGISTRATION_VALIDATION_WINDOW_HOURS", 12)) * time.Hour,
+				Thresholds: plgvalidation.Thresholds{
+					Eligible: envInt("PLG_REGISTRATION_VALIDATION_ELIGIBLE_ACTIONS", 10),
+					Moderate: envInt("PLG_REGISTRATION_VALIDATION_MODERATE_ACTIONS", 5),
+				},
+				Grace:    time.Duration(envInt("PLG_REGISTRATION_VALIDATION_GRACE_HOURS", 24)) * time.Hour,
+				DryRun:   envBool("PLG_REGISTRATION_VALIDATION_DRY_RUN", true),
+				MaxPages: envInt("PLG_REGISTRATION_VALIDATION_MAX_PAGES", 100),
+				// Typed nils would make the interfaces non-nil.
+				Directory:  directoryOrNil(plgDirectory),
+				Classifier: classifierOrNil(plgClassifier),
+			}, time.Now),
+			To: plgValidationTo,
+			Cc: plgValidationCc,
+		})
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
@@ -1512,12 +1790,14 @@ func main() {
 	// just the standing ALERT_RECIPIENTS audience. Skipped entirely when
 	// ALERTS_ENABLED=false — no email will ever be sent in that case, so an
 	// unset EMAIL_BASE_URL isn't a misconfiguration.
-	// The product regression reports keep their audience out of task.To (see
-	// their registration above), so it is checked here by name instead.
-	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
+	// The product regression reports and the EOL product usage report keep
+	// their audience out of task.To (see their registration above), so it is
+	// checked here by name instead.
+	reportTasksWithOwnRecipients := append(append([]string{}, regressionTasksWithRecipients...), eolUsageTaskWithRecipients...)
+	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(reportTasksWithOwnRecipients) > 0) {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
-			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+			"reportTasksWithOwnRecipients", reportTasksWithOwnRecipients)
 		os.Exit(1)
 	}
 
@@ -2110,4 +2390,18 @@ func loadDotEnv(path string) {
 	if err := scanner.Err(); err != nil {
 		slog.Warn("loadDotEnv: error reading .env file", "err", err)
 	}
+}
+
+func directoryOrNil(c *plgvalidation.DirectoryClient) plgvalidation.Directory {
+	if c == nil {
+		return nil
+	}
+	return c
+}
+
+func classifierOrNil(c *plgvalidation.AIClient) plgvalidation.DomainClassifier {
+	if c == nil {
+		return nil
+	}
+	return c
 }

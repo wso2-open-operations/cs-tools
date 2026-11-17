@@ -87,9 +87,12 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | `product_regression_report_apim`, `product_regression_report_iam`, `product_regression_report_integration` | `30 3 1 * *` each | Always (each sends only with a `to`) | Monthly regression case report per business unit (`GET /reports/product-regressions`), grouped by product. A month with no regression cases sends nothing. Product lists can be replaced with `PRODUCT_REGRESSION_REPORT_PRODUCTS`. |
 | `cloud_status_webhooks` | `*/5 * * * *` | Only if `CLOUD_STATUS_ENABLED=true` | Asks entity-service which service-status transitions owe an outbound webhook, posts each to its configured status-dashboard base URL, and records delivery. |
 | `availability_recalculation` | `0 3 * * *` | Only if `AVAILABILITY_RECALC_ENABLED=true` | Triggers entity-service to recompute service availability figures; fails the run on a partial sweep or an empty subject list. The arithmetic runs in entity-service. |
+| `audit_log_maintenance` | `0 1 * * *` | Only if `AUDIT_LOG_MAINTENANCE_ENABLED=true` | Triggers entity-service to create the audit log's coming monthly partitions, check its health and put back missing audit triggers. Fails (and is mailed) when a step could not run, or it found a health problem, repaired a trigger or could not repair one. |
 | `usage_rollup_daily` | `30 0 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild the daily usage rows of the last `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` days (default 2) before today from the hourly rows. The arithmetic runs in the database. |
 | `usage_rollup_monthly` | `30 1 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild last month's and the current month's monthly usage rows from the daily rows. |
+| `plg_moesif_sync` | `*/15 * * * *` | Only if `PLG_MOESIF_SYNC_ENABLED=true` | Reads WSO2 Cloud registration and subscription events from Moesif and lands each in the PLG portal by company id, user id and product. Rejected events are recorded once in `plg_ingest_failure`. |
 | `unresolved_products_digest` | `0 6 * * *` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the deployment nodes seen in the last 24 hours whose reported product or version is not in the product catalogue (from entity-service's `GET /instances/unresolved-products`). Sends nothing on a day with nothing to report. |
+| `eol_product_usage_report` | `30 4 * * 1` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the monthly EOL product usage report on the first Monday (the schedule fires every Monday; it sends only on the 1st to the 7th; a failed run retries until the next Monday and still sends as of the first Monday): customers running a product version past its EOL date in an active Primary Production deployment (from entity-service's `GET /reports/eol-product-usage`), one table per region, to each listed account's manager and technical owner plus its `to` (the CS leadership group). A month with none sends a short note to its `to`/`cc`. |
 | `rota_weekday_reminder` | `30 3 * * 0-4` | When `EMAIL_BASE_URL` is set; scheduled sends also need the weekday switch on the portal's Rota Access card | Emails the people on the next working day's rotation windows at 09:00 IST the day before (Sunday announces Monday), one email per window with a calendar invitation. |
 | `rota_weekend_notice` | `30 3 * * 1-4` | Same as above, weekend switch | Once the coming weekend is fully marked, sends the weekend summary and one invitation per team per day, once. Until then it asks the rota admins each morning (09:00 IST, Monday to Thursday). |
 | `rota_weekend_reminder` | `30 3 * * 5` | Same as above, weekend switch | Friday 09:00 IST re-send of the weekend summary, with updated invitations and cancellations. Sends even when not fully marked, listing the gaps. |
@@ -158,7 +161,7 @@ csm-scheduled-tasks --run-now=stale_cases_report --recipients=jane.doe@example.c
 
 Tasks: `cs_worklogs_daily_report`, `cs_worklogs_weekly_report`, `migration_case_report`, `open_cases_report`,
 `stale_cases_report`, `unresolved_products_digest`, `product_regression_report_apim`, `_iam`, `_integration`,
-`query_hours_usage_notifications` and `query_hours_weekly_report`. Failure alerts to `ALERT_RECIPIENTS` and the rota
+`eol_product_usage_report`, `query_hours_usage_notifications` and `query_hours_weekly_report`. Failure alerts to `ALERT_RECIPIENTS` and the rota
 reminders are not affected.
 
 - `--recipients` replaces the whole audience for that one run: the real To and the real Cc are both never
@@ -231,6 +234,8 @@ csm-scheduled-tasks/
 │   ├── worklogreport/            # Client, wire types and audience resolver for the CS Worklogs reports
 │   ├── worklogsreport/           # Handlers for cs_worklogs_daily_report and cs_worklogs_weekly_report
 │   ├── acp/                      # Handler for acp_closure, and the ACP rules and clients (closure, sweep, recipients, notify, entity, salesentity, ...)
+│   ├── moesif/                   # Moesif Management API client shared by the Moesif sub-crons
+│   ├── plgsignups/               # Client + handler for plg_moesif_sync
 │   ├── notify/                   # Email client and HTML templates (alert, stale/open case reports, CS Worklogs, migration case scan)
 │   ├── httpsec/                  # Shared https-only URL guard and redirect guard for the HTTP clients
 │   └── apierror/                 # Typed upstream-error wrapper shared by the clients
@@ -334,12 +339,21 @@ treated as unset, except where noted. All example values are placeholders.
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No | `180` | The age, in days, a migration must reach before `migration_case_report` lists it. | `180` |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | empty | The support portal's case page prefix; the migration case scan links each issue to `<prefix>/<case UUID>`. Unset leaves the keys as plain text. Must be https. | `https://support.example.com/cases` |
 | `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | empty | The CSM portal's base URL; the deprecated product usage report links each account and project to its page (`<base>/customers/accounts/<id>`). Unset leaves plain text. Must be https. | `https://csm.example.com` |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | empty | The CSM portal's base URL; the EOL product usage report links each account and project to its page (`<base>/customers/accounts/<id>`). Unset leaves plain text. Must be https. | `https://csm.example.com` |
 | `SUB_CRON_SCHEDULES` | No | empty | JSON object overriding task schedules by name: `{"<task>": "<cron>"}`. Unlisted tasks keep their built-in default. An invalid cron expression stops startup. | `{"housekeeping_cleanup":"0 4 * * *"}` |
 | `DRIVER_INTERVAL` | No | `1h` | Expected invocation cadence; must match the platform trigger. Go duration syntax, must be positive. Used as the default retry backoff and to size the orphaned-claim safety margin. | `15m` |
 | `HOUSEKEEPING_RETENTION_DAYS` | No | `30` | Days of resolved ledger history kept by `housekeeping_cleanup`. Plain positive integer, not a duration string. | `30` |
 | `AVAILABILITY_RECALC_ENABLED` | No | `false` | Registers `availability_recalculation`. Enable only once no other process writes the same availability data, otherwise rows can be duplicated. | `true` |
+| `AUDIT_LOG_MAINTENANCE_ENABLED` | No | `false` | Registers `audit_log_maintenance`. Enable only once entity-service has `CSM_AUDIT_LOG_ENABLED=true`, migration `0295` applied and its database role has `EXECUTE` on the audit functions; until then every daily run fails. | `true` |
 | `USAGE_ROLLUP_ENABLED` | No | `false` | Registers `usage_rollup_daily` and `usage_rollup_monthly`. Enable only once ServiceNow's usage aggregation jobs and csm-sync-service's mirroring of the same tables are off, otherwise the rows are fought over. | `true` |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No | `2` | How many days before today the daily rollup rebuilds each night. | `3` |
+| `PLG_MOESIF_SYNC_ENABLED` | No | `false` | Registers `plg_moesif_sync`. | `true` |
+| `MOESIF_API_KEY` | When `PLG_MOESIF_SYNC_ENABLED=true` | – | **Secret.** Moesif Management API token, shared by every Moesif sub-cron. | – |
+| `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` | No | `https://api.moesif.com` / `30s` | Moesif API host and the ceiling on one call. | – |
+| `PLG_MOESIF_SYNC_WINDOW_MINUTES` | No | 2 × `DRIVER_INTERVAL`, at least 120 | How far back each run reads. Keep it above the interval so a missed run is covered. | `120` |
+| `PLG_MOESIF_SYNC_EVENTS` | No | registration and subscription events | Comma-separated `action_name`s that mark a signup. | – |
+| `PLG_MOESIF_SYNC_PRODUCT_FIELDS` | No | `metadata.initiating_product,metadata.product` | Where an event holds the product; the first present wins. | – |
+| `PLG_MOESIF_SYNC_BATCH_SIZE` / `PLG_MOESIF_SYNC_MAX_PAGES` | No | `100` / `100` | Registrations per ingest call; pages of 100 events per run. | – |
 | `ACP_ENABLED` | No | `false` | Registers `acp_closure`. No other `ACP_*` setting is read while false. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. | `true` |
 | `ACP_DRY_RUN` | No | `true` | Decide and log, write nothing to CSM or Salesforce. A malformed value is true. `false` needs `ACP_EMAIL_SEND_ENABLED=true` (startup refuses otherwise). With `ACP_EMAIL_SEND_ENABLED=true` too, a dry run records nothing and would send the same notices on every run, so startup refuses it unless `acp_closure` has a `debug` list in `SUB_CRON_RECIPIENTS`. A `TRYOUT_TASK=acp_closure` without `ACP_TEST_PROJECT_ID` is always a dry run. | `false` |
 | `ACP_EMAIL_SEND_ENABLED` | No | `false` | Sends the notices for real (needs `EMAIL_BASE_URL` and `EMAIL_FROM_ADDRESS`); false logs them. `ALERTS_ENABLED=false` turns `acp_closure` into a dry run without emails. A `debug` list for `acp_closure` in `SUB_CRON_RECIPIENTS` redirects every notice; startup refuses one with `ACP_DRY_RUN=false` unless `ACP_TEST_PROJECT_ID` is set. | `true` |

@@ -426,7 +426,14 @@ export function htmlToPdfPlainText(html: string): string {
       out += "\n";
       return;
     }
-    if (el.tagName === "LI") out += "• ";
+    // A nested list's wrapper item (only a sub-list inside) has no bullet of its own.
+    const isListWrapper =
+      el.tagName === "LI" &&
+      Array.from(el.childNodes).every(
+        (c) => (c.nodeType === Node.TEXT_NODE && !(c.textContent ?? "").trim()) || (c as Element).tagName === "UL" || (c as Element).tagName === "OL",
+      ) &&
+      el.querySelector(":scope > ul, :scope > ol") !== null;
+    if (el.tagName === "LI" && !isListWrapper) out += "• ";
     el.childNodes.forEach(walk);
     if (PDF_BLOCK_TAGS.has(el.tagName)) out += "\n";
   };

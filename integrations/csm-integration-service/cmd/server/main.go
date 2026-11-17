@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/alertcore"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/middleware"
@@ -80,6 +81,18 @@ func main() {
 	itServiceHandler := handler.NewITServiceHandler(entityClient)
 	alertIncidentMappingHandler := handler.NewAlertIncidentMappingHandler(entityClient)
 	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(entityClient)
+	// sre-alert-core-service's read API (muted alerts, alert field values), for the
+	// CSM portal. Optional: unset, those routes answer 503 and nothing else changes.
+	alertCoreHandler := handler.NewAlertCoreHandler(nil)
+	if c := alertcore.NewClient(alertcore.Config{
+		BaseURL: os.Getenv("ALERT_CORE_BASE_URL"),
+		Token:   os.Getenv("ALERT_CORE_API_TOKEN"),
+	}); c != nil {
+		alertCoreHandler = handler.NewAlertCoreHandler(c)
+	} else {
+		// Never log the URL or the token.
+		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set, or the base URL is not https (http only for loopback); the muted-alerts and alert-field-values routes answer 503")
+	}
 	cloudStatusHandler := handler.NewCloudStatusHandler(entityClient)
 	catalogHandler := handler.NewCatalogHandler(entityClient)
 
@@ -111,6 +124,9 @@ func main() {
 	mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
 	mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
 	mux.HandleFunc("GET /alert-mute-rules/active", alertMuteRuleHandler.ListActiveAlertMuteRules)
+	mux.HandleFunc("GET /alert-mute-rules/muted-counts", alertCoreHandler.MutedCounts)
+	mux.HandleFunc("GET /alert-mute-rules/{id}/muted-incidents", alertCoreHandler.MutedIncidents)
+	mux.HandleFunc("GET /alert-field-values", alertCoreHandler.FieldValues)
 	mux.HandleFunc("POST /deployed-products/search", catalogHandler.SearchDeployedProducts)
 	mux.HandleFunc("POST /deployments/search", catalogHandler.SearchDeployments)
 	mux.HandleFunc("POST /products/search", catalogHandler.SearchProducts)

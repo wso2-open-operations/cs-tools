@@ -392,6 +392,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
+	var eolProductUsageReportHandler *handler.EolProductUsageReportHandler
 	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
@@ -1755,10 +1756,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Monthly deprecated product usage report: customers running a
 		// product version whose support status is Deprecated in Primary
 		// Production, for the scheduled task that mails it to account
-		// managers and CS leadership.
-		deprecatedProductUsageReportHandler = handler.NewDeprecatedProductUsageReportHandler(
-			service.NewDeprecatedProductUsageReportService(
-				repository.NewDeprecatedProductUsageReportRepository(repository.NewScoped(db))))
+		// managers and CS leadership. It reads deployed products from
+		// Postgres, so it is offered only when they are read from Postgres
+		// (UsageReadRoute): in any other mode the route is absent and the
+		// task fails loudly instead of mailing an incomplete report.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			deprecatedProductUsageReportHandler = handler.NewDeprecatedProductUsageReportHandler(
+				service.NewDeprecatedProductUsageReportService(
+					repository.NewDeprecatedProductUsageReportRepository(repository.NewScoped(db))))
+		}
 		// Long-open cases report: the cases still being worked on after a
 		// given age, in two tables by their project's onboarding status. It
 		// reads the Postgres case tables only, so it is not offered when cases
@@ -1806,6 +1812,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewProductRegressionReportService(
 				repository.NewProductRegressionReportRepository(repository.NewScoped(db)),
 				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
+		// Monthly EOL product usage report: customers running a product
+		// version past its EOL date in Primary Production, for the scheduled
+		// task that mails it to account managers and CS leadership. Offered
+		// only when deployed products are read from Postgres, for the same
+		// reason as the deprecated product usage report above.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			eolProductUsageReportHandler = handler.NewEolProductUsageReportHandler(
+				service.NewEolProductUsageReportService(
+					repository.NewEolProductUsageReportRepository(repository.NewScoped(db))))
+		}
 		// Weekly SLA breach report: the clocks that breached last week, split
 		// into the onboarding and CRE sections the source report mailed as two
 		// attachments, for the scheduled task that mails it.
@@ -2380,6 +2396,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	if eolProductUsageReportHandler != nil {
+		// internalOnly: the report names customers and their deployments.
+		mux.HandleFunc("GET /reports/eol-product-usage", internalOnly(accessSvc, eolProductUsageReportHandler.GetEolProductUsageReport))
 	}
 	if slaBreachReportHandler != nil {
 		// internalOnly, same reasoning as the regression report above: the
@@ -3061,6 +3081,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		closeRedis()
 	}
 
+	// The audit log's upkeep (migration 0295), called daily by csm-scheduled-tasks.
+	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
+	// EXECUTE on the audit_* functions for the application's database role.
+	if db != nil && cfg.AuditLogEnabled {
+		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
+			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead))
+		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))
+	}
+
 	// PLG Customer Success Portal. Every repository, service, handler and route
 	// it needs is in plg_routes.go — this is the only part of entity-service's
 	// own wiring the merge touches.
@@ -3072,7 +3101,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// query of every PLG request. Not registering means those paths 404, which
 	// is the truthful answer where PLG has no data to serve.
 	if db != nil {
-		registerPLGRoutes(mux, db)
+		registerPLGRoutes(mux, db, accessSvc)
 	}
 
 	return middleware.CorrelationID(

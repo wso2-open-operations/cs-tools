@@ -52,4 +52,25 @@ describe("ChatMessageCard", () => {
       screen.queryByRole("button", { name: /show less/i }),
     ).not.toBeInTheDocument();
   });
+  describe("nested list wrapper", () => {
+    // The CSM portal editor exports a nested list as a wrapper <li> that only
+    // holds the sub-list; old comments carry just the class, so the card hides
+    // its marker (otherwise an empty bullet shows before the sub-list).
+    const NESTED =
+      '<ul><li value="1">Parent</li><li value="2" class="editor-list-item-nested"><ul><li value="1">Child</li></ul></li></ul>';
+
+    it("hides the marker of the nested-list wrapper li", () => {
+      const { container } = renderCard({ htmlContent: NESTED });
+      const wrapper = container.querySelector("li.editor-list-item-nested");
+      expect(wrapper).not.toBeNull();
+      expect(getComputedStyle(wrapper as Element).listStyleType).toBe("none");
+    });
+
+    it("keeps the bullet on a normal li", () => {
+      const { container } = renderCard({ htmlContent: NESTED });
+      const normal = container.querySelector("li:not(.editor-list-item-nested)");
+      expect(normal).not.toBeNull();
+      expect(getComputedStyle(normal as Element).listStyleType).not.toBe("none");
+    });
+  });
 });

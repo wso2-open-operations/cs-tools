@@ -509,6 +509,7 @@ func TestReportTasksTakeRecipientFlags(t *testing.T) {
 		"open_cases_report", "stale_cases_report", "unresolved_products_digest",
 		"query_hours_usage_notifications", "query_hours_weekly_report",
 		"product_regression_report_apim", "product_regression_report_iam", "product_regression_report_integration",
+		"eol_product_usage_report",
 	}
 	got := reportTaskNames()
 	slices.Sort(got)

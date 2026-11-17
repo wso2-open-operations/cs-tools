@@ -31,6 +31,12 @@ interface PasteFormatDialogProps {
   onRemoveFormatting: () => void;
   /** Dismiss without inserting anything (e.g. Escape or backdrop click). */
   onClose: () => void;
+  /**
+   * `"html"` (default): the paste carries source formatting; the confirm button is
+   * "Keep Formatting". `"markdown"`: the pasted text looks like Markdown; the confirm
+   * button is "Paste as Markdown" (it still calls `onKeepFormatting`).
+   */
+  variant?: "html" | "markdown";
 }
 
 /**
@@ -44,7 +50,29 @@ export default function PasteFormatDialog({
   onKeepFormatting,
   onRemoveFormatting,
   onClose,
+  variant = "html",
 }: PasteFormatDialogProps): JSX.Element {
+  if (variant === "markdown") {
+    return (
+      <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
+        <DialogTitle>Paste as Markdown?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            The text you pasted looks like Markdown. Paste it with the formatting
+            applied (headings, lists, code, links, tables), or as plain text with
+            the Markdown symbols kept as typed.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onRemoveFormatting}>Remove Formatting</Button>
+          <Button variant="contained" onClick={onKeepFormatting} autoFocus>
+            Paste as Markdown
+          </Button>
+        </DialogActions>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Paste formatted content?</DialogTitle>

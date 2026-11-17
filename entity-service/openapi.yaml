@@ -13843,6 +13843,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/eol-product-usage:
+    get:
+      summary: >-
+        Monthly EOL product usage report: customers running a product version past its EOL date in Primary Production.
+      description: >
+        One entry per (project, product version) where an active deployed product of an active
+        PRIMARY_PRODUCTION deployment runs a version whose support EOL date is before asOf,
+        grouped by the account's region (ignoring case; accounts with no region last), then account and project.
+        Customers who have left are not listed: deleted accounts, inactive projects and projects WSO2 has closed.
+        A version run by several Primary Production deployments of one project is listed once.
+        Internal callers only; the scheduled task that mails the report is the expected caller.
+      operationId: getEolProductUsageReport
+      tags: [Reports]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Report date, YYYY-MM-DD; a version is EOL when its EOL date is before it. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EolProductUsageReport'
+        "400":
+          description: asOf is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/sla-breaches:
     get:
       summary: >-
@@ -20617,6 +20669,59 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /audit-log/maintenance:
+    post:
+      summary: Run the audit log's upkeep (service credentials only).
+      description: |
+        Registered only when CSM_AUDIT_LOG_ENABLED=true; otherwise the route does not exist and answers 404.
+
+        Called daily by csm-scheduled-tasks. Creates the coming monthly partitions of the audit log,
+        checks the log's health, and puts back audit triggers that are missing or disabled on registered
+        tables. Safe to repeat. It tries every step even if one fails.
+
+        A 200 means the request was handled, not that everything is fine: read the lists. Health
+        problems, unresolved triggers and step errors need a person. A repaired trigger was off for a while, so the history had a
+        gap. Retiring old partitions is not part of this; an admin does that by hand.
+      responses:
+        "200":
+          description: The upkeep ran; the body says what it found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogMaintenanceResponse'
+        "400":
+          description: The request has a body that is not empty or a single JSON object (the call takes no options).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The audit log is switched off (CSM_AUDIT_LOG_ENABLED is not true).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: |
+            Unexpected failure, for example the request was cancelled. A step that could not run is
+            not a 500: it is reported in stepErrors with a 200, so the other steps' results are kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /instances/usage-rollups/daily:
     post:
       summary: Recompute one UTC day's daily usage rows from the hourly rows (internal callers only).
@@ -21248,6 +21353,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /plg/organizations/identities:
+    post:
+      summary: What is stored to identify each organisation.
+      description: >-
+        For the CSM portal's reveal: company id, name, email and owner per organisation.
+        Name and email are null for a cloud organisation. Unknown ids are absent.
+      operationId: plgOrganizationIdentities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgOrganizationIdentitiesRequest"
+      responses:
+        "200":
+          description: The organisations found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgOrganizationIdentitiesResponse"
+        "400":
+          description: Bad request — no ids, more than 50, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found. Unknown ids are left out of the answer rather than refused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -21339,10 +21488,9 @@ paths:
         - name: organizationId
           in: path
           required: true
-          description: "The organisation's id."
+          description: "The organisation's record id or its Cloud organisation id (moesifCompanyId); the record id wins."
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: The organisation.
@@ -21882,7 +22030,7 @@ paths:
   /plg/registrations/search:
     post:
       summary: Search registrations.
-      description: "`acknowledged` filters over `acknowledged_on IS NULL` rather than a stored flag."
+      description: "`acknowledged` filters over `acknowledged_on IS NULL` rather than a stored flag. Matching registrations are grouped by organisation and paged by organisation, newest registration first. `unacknowledgedOnly` also hides abandoned registrations."
       operationId: plgSearchRegistrations
       requestBody:
         required: true
@@ -22405,6 +22553,109 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/registrations/validation-queue:
+    post:
+      summary: Pairings for the registration validation job.
+      description: >
+        Pairings of one product in REGISTRATION, registered at or after
+        `registeredAfter`, oldest first. Ids only. Service credentials only: a
+        user token gets 403.
+      operationId: plgValidationQueue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgValidationQueueRequest"
+      responses:
+        "200":
+          description: The pairings to validate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgValidationQueueResult"
+        "400":
+          description: Missing productCode or registeredAfter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found — an unknown product code answers an empty queue rather than 404.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/pairings/{orgPlatformId}/registration-validation:
+    put:
+      summary: Write the registration job's results for one pairing.
+      description: >
+        One transaction: attaches the product's active registration playbook
+        when none is attached (added_by NULL), replaces the activity summary,
+        and writes each value marked VALIDATION. A value an engineer set
+        (MANUAL), a code the run lacks, and every value of a closed run are
+        skipped and reported. INITIATE_PLAYBOOK takes true only;
+        CLOSE_PLAYBOOK is refused as a value. With `abandon`, an EXCLUDED
+        outcome the job wrote also closes the run and moves the pairing to
+        ABANDONED, with a history row. Service credentials only: a user token
+        gets 403.
+      operationId: plgApplyRegistrationValidation
+      parameters:
+        - name: orgPlatformId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgApplyValidationRequest"
+      responses:
+        "200":
+          description: Written; read `skipped` for what was left alone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgApplyValidationResult"
+        "400":
+          description: An invalid summary, CLOSE_PLAYBOOK as a value, abandon without EXCLUDED, or a value the task cannot hold. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such pairing, or no active registration playbook for its product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The pairing has left REGISTRATION.
           content:
             application/json:
               schema:
@@ -36329,6 +36580,84 @@ components:
           type: string
           format: date-time
           nullable: true
+    EolProductUsageReport:
+      type: object
+      required: [generatedOn, asOf, totalVersions, totalAccounts, regions]
+      properties:
+        generatedOn: {type: string, format: date-time}
+        asOf: {type: string, format: date}
+        totalVersions:
+          type: integer
+          description: (project, product version) entries listed.
+        totalAccounts: {type: integer}
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageRegion'
+    EolProductUsageRegion:
+      type: object
+      required: [region, accounts]
+      properties:
+        region:
+          type: string
+          nullable: true
+          description: The account's region; null for accounts with no region (listed last).
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageAccount'
+    EolProductUsageAccount:
+      type: object
+      required: [accountId, accountName, csAbt, region, projects]
+      properties:
+        accountId: {type: string, format: uuid}
+        accountName: {type: string}
+        csAbt:
+          type: string
+          nullable: true
+          description: The account's CRE (ABT) team name; null when it has none.
+        region: {type: string, nullable: true}
+        accountManager:
+          $ref: '#/components/schemas/EolProductUsagePerson'
+        technicalOwner:
+          $ref: '#/components/schemas/EolProductUsagePerson'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageProject'
+    EolProductUsagePerson:
+      type: object
+      nullable: true
+      description: Null when the account has none; a name or email the user record lacks is left out.
+      properties:
+        name: {type: string}
+        email: {type: string}
+    EolProductUsageProject:
+      type: object
+      required: [projectId, projectName, projectKey, versions]
+      properties:
+        projectId: {type: string, format: uuid}
+        projectName: {type: string}
+        projectKey:
+          type: string
+          nullable: true
+          description: Null when the project has none.
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageVersion'
+    EolProductUsageVersion:
+      type: object
+      required: [productVersionId, productName, version, eolDate]
+      properties:
+        productVersionId: {type: string, format: uuid}
+        productName: {type: string}
+        version: {type: string}
+        supportStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        eolDate: {type: string, format: date}
     SLABreachRow:
       type: object
       description: >-
@@ -37650,6 +37979,45 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
+    AuditTriggerProblem:
+      type: object
+      properties:
+        schema:
+          type: string
+        table:
+          type: string
+        problem:
+          type: string
+
+    AuditLogMaintenanceResponse:
+      type: object
+      properties:
+        partitionsCreated:
+          type: integer
+          description: Monthly partitions this run created.
+        healthProblems:
+          type: array
+          description: Rows in the catch-all partition, or fewer than two future months.
+          items:
+            type: string
+        repairedTriggers:
+          type: array
+          description: Triggers that were missing or disabled and have been put back.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        unresolvedTriggers:
+          type: array
+          description: Triggers that are still wrong after the repair.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        stepErrors:
+          type: array
+          description: |
+            Steps that could not run at all, in words that carry no database detail (the full error
+            is in the service log). The other steps still ran and are reported above.
+          items:
+            type: string
+
     ErrorResponse:
       type: object
       description: >-
@@ -44633,8 +45001,14 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -44692,11 +45066,13 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
         createdOn:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         registeredName:
           nullable: true
@@ -44717,6 +45093,15 @@ components:
           type: string
         moesifCompanyId:
           type: string
+          description: The Cloud organisation id.
+        cloudUserId:
+          type: string
+          nullable: true
+          description: The Cloud user id of the organisation's owner.
+        emailClassification:
+          type: string
+          nullable: true
+          description: The owner's email classification from a registration playbook, the most recently set one.
         fieldsInherited:
           type: boolean
         platformCards:
@@ -44769,7 +45154,12 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
+        moesifCompanyId:
+          nullable: true
+          type: string
+          description: The company id.
         product:
           type: object
           properties:
@@ -44805,6 +45195,7 @@ components:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         subscriptionTier:
           type: string
@@ -44979,6 +45370,7 @@ components:
                 format: date-time
     PlgRegistrationSearchResponse:
       type: object
+      description: One item per organisation; total counts organisations.
       properties:
         registrations:
           type: array
@@ -44992,7 +45384,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -45004,6 +45401,7 @@ components:
                   name:
                     type: string
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -45025,6 +45423,37 @@ components:
                     type: string
                   name:
                     type: string
+              platforms:
+                type: array
+                description: >
+                  The organisation's matching registrations, newest first. The
+                  top-level registration fields are the newest one's.
+                items:
+                  type: object
+                  properties:
+                    orgPlatformId:
+                      type: string
+                      format: uuid
+                    product:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        code:
+                          type: string
+                        name:
+                          type: string
+                    registeredOn:
+                      type: string
+                      format: date-time
+                    lifecycleStage:
+                      type: string
+                    stageName:
+                      type: string
+                    isNew:
+                      type: boolean
+                      description: Not acknowledged yet.
         total:
           type: integer
         limit:
@@ -45343,7 +45772,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -45475,6 +45909,132 @@ components:
         plg_ingest_failure directly (WHERE resolved_on IS NULL, which the table
         carries a partial index for).
       properties: {}
+    PlgValidationQueueRequest:
+      type: object
+      required: [productCode, registeredAfter]
+      properties:
+        productCode:
+          type: string
+          example: AGENT_PLATFORM
+        registeredAfter:
+          type: string
+          format: date-time
+        limit:
+          type: integer
+          description: Default 200, at most 1000.
+    PlgValidationQueueResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              orgPlatformId:
+                type: string
+                format: uuid
+              companyId:
+                type: string
+              ownerUserId:
+                type: string
+                nullable: true
+              registeredOn:
+                type: string
+                format: date-time
+              emailClassification:
+                type: string
+                nullable: true
+                description: The stored REGISTERED_EMAIL_CLASSIFICATION code, whoever set it.
+              lastValidatedOn:
+                type: string
+                format: date-time
+                nullable: true
+    PlgApplyValidationRequest:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: object
+          required: [windowStart, windowEnd]
+          properties:
+            windowStart:
+              type: string
+              format: date-time
+            windowEnd:
+              type: string
+              format: date-time
+            firstEventOn:
+              type: string
+              format: date-time
+              nullable: true
+            lastEventOn:
+              type: string
+              format: date-time
+              nullable: true
+            eventCount:
+              type: integer
+            actionCounts:
+              type: object
+              additionalProperties:
+                type: integer
+            furthestStep:
+              type: string
+              nullable: true
+        values:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [code]
+            description: The one value field the task's type takes, or none to clear it.
+            properties:
+              code:
+                type: string
+              boolValue:
+                type: boolean
+              numberValue:
+                type: number
+              textValue:
+                type: string
+              checkedCodes:
+                type: array
+                items:
+                  type: string
+        abandon:
+          type: boolean
+          description: Close the run and move the pairing to ABANDONED. Needs ELIGIBILITY_ASSESSMENT_OUTCOME = EXCLUDED among the values.
+    PlgApplyValidationResult:
+      type: object
+      properties:
+        playbookRunId:
+          type: string
+          format: uuid
+        attached:
+          type: boolean
+          description: True when this call attached the registration playbook.
+        written:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              reason:
+                type: string
+                enum: [MANUAL, MISSING, CLOSED]
+        abandoned:
+          type: boolean
+          description: True when this call closed the run and moved the pairing to ABANDONED.
+        stale:
+          type: boolean
+          description: >
+            True when the exclusion no longer matched the classification the run
+            holds (an engineer changed it); nothing was written and the next run
+            decides again.
     PlgRunTaskShape:
       type: object
       properties:
@@ -45570,6 +46130,42 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationIdentitiesRequest:
+      type: object
+      required: [organizationIds]
+      properties:
+        organizationIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    PlgOrganizationIdentitiesResponse:
+      type: object
+      properties:
+        identities:
+          type: array
+          items:
+            type: object
+            properties:
+              organizationId:
+                type: string
+                format: uuid
+              moesifCompanyId:
+                nullable: true
+                type: string
+              organizationName:
+                nullable: true
+                type: string
+              registeredEmail:
+                nullable: true
+                type: string
+              ownerUserId:
+                nullable: true
+                type: string
+                format: uuid
+                description: The owner's WSO2 Cloud user id; resolves a cloud organisation's email.
     PlgPatchOrganizationRequest:
       type: object
       required:
@@ -46046,18 +46642,15 @@ components:
     PlgIngestRegistration:
       type: object
       description: >-
-        One registration, already in the portal's own terms. The caller — the
-        webhook-queue service — has resolved the analytics source's field names
-        and platform words through its source map before sending this, so
-        `initiatedPlatform` must already be a `plg_product.code` and not
-        whatever the source calls it.
-      required:
-        - organizationName
-        - registeredEmail
+        One registration. Moesif: initiatedPlatform plus a stored name and email.
+        WSO2 Cloud: initiatingProduct, companyId and userId; nothing identifying
+        is stored.
       properties:
         organizationName:
           type: string
-          description: Unique. A redelivered registration is a no-op because of it.
+          description: >-
+            Unique. A redelivered registration is a no-op because of it.
+            Ignored for a WSO2 Cloud signup.
         registeredEmail:
           type: string
           format: email
@@ -46074,12 +46667,23 @@ components:
             matching no `plg_product.code` rejects the whole registration, the
             organisation included, because they land in one transaction.
           example: IAM
+        initiatingProduct:
+          type: string
+          description: >-
+            A Cloud signup's entry point, case-insensitive: wso2cloud or core (WSO2 Cloud),
+            agent-manager, api-platform, integration-platform or identity-platform. Makes the registration a Cloud
+            one. Unknown, or naming another product than initiatedPlatform, fails it.
+          example: api-platform
         countryName:
           type: string
         companyNameFromDomain:
           type: string
         companyId:
           type: string
+        userId:
+          type: string
+          format: uuid
+          description: The owner's WSO2 Cloud user UUID; the first one sent is kept. Optional.
         firstName:
           type: string
         lastName:
