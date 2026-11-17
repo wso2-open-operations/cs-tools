@@ -198,6 +198,39 @@ describe("useMttrReportData", () => {
     expect(result.current.slices.map((s) => s.value)).toEqual([2, 170 / 24]);
   });
 
+  it("leaves a severity with no cases off the chart and names it, instead of drawing a 0", async () => {
+    getResponseMock.mockResolvedValue(
+      jsonResponse({
+        generatedOn: "2026-11-16T00:00:00Z",
+        windowMonths: 1,
+        windowStart: "2026-10-16T00:00:00Z",
+        windowEnd: "2026-11-16T00:00:00Z",
+        creTeamIds: [],
+        bands: [
+          { band: "S1", caseCount: 0, avgResolutionHours: 0 },
+          { band: "S2", caseCount: 2, avgResolutionHours: 0.14 },
+          { band: "S3", caseCount: 0, avgResolutionHours: 0 },
+          { band: "S4", caseCount: 0, avgResolutionHours: 0 },
+        ],
+      }),
+    );
+    const { result } = renderHook(
+      () =>
+        useMttrReportData(
+          "mttr_no_data",
+          { months: "1" },
+          { bucket: "severity" },
+          undefined,
+          undefined,
+        ),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.slices.map((s) => s.label)).toEqual(["S2"]);
+    expect(result.current.emptyLabels).toEqual(["S1", "S3", "S4"]);
+    expect(result.current.total).toBe(2);
+  });
+
   it("appends a repeated creTeamId per team", async () => {
     getResponseMock.mockResolvedValue(
       jsonResponse({

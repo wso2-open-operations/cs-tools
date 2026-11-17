@@ -135,7 +135,10 @@ export function useMttrReportData(
   const bands: BeMttrReportBand[] = query.data?.bands ?? [];
   const shown = bands.filter((b) => wantedBands.includes(b.band));
   const sorted = [...shown].sort((a, b) => bandSortIndex(a.band) - bandSortIndex(b.band));
-  const slices: PieSliceResult[] = sorted.map((b) => ({
+  // A severity with no resolved cases has no time to show; it is left off the
+  // chart (a 0 would read as "resolved instantly") and named in a caption.
+  const emptyLabels = sorted.filter((b) => b.caseCount === 0).map((b) => b.band);
+  const slices: PieSliceResult[] = sorted.filter((b) => b.caseCount > 0).map((b) => ({
     label: b.band,
     query: {},
     navigable: false,
@@ -150,5 +153,5 @@ export function useMttrReportData(
       ? shownSingles.reduce((n, b) => n + b.caseCount, 0)
       : (shown[0]?.caseCount ?? 0);
 
-  return { slices, total, isLoading, isError };
+  return { slices, total, isLoading, isError, emptyLabels };
 }

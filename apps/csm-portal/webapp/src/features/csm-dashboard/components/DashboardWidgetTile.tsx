@@ -641,7 +641,9 @@ function DashboardWidgetTile({
   // Thousands separators for shape "count"'s big number -- used both in the
   // visible Typography and the tile's aria-label, so both stay in sync.
   const formattedCount = isMttrCount
-    ? mttrUnitFormatters(filters.unit).value(mttrData.slices[0]?.value ?? 0)
+    ? mttrData.slices[0]
+      ? mttrUnitFormatters(filters.unit).value(mttrData.slices[0].value)
+      : "–"
     : (data?.total ?? 0).toLocaleString();
 
   if (!config) {
@@ -1045,6 +1047,14 @@ function DashboardWidgetTile({
                 {...(shape === "bar" && resourceType === "mttr" ? { formatLabel: mttrUnitFormatters(filters.unit).label } : {})}
               />
             )}
+            {resourceType === "mttr" &&
+              !pieData.isLoading &&
+              !pieData.isError &&
+              (pieData.emptyLabels?.length ?? 0) > 0 && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                  No resolved cases for {pieData.emptyLabels?.join(", ")} in this period.
+                </Typography>
+              )}
           </Box>
         </Box>
       </Card>

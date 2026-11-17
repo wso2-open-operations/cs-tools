@@ -3317,6 +3317,54 @@ describe("DashboardWidgetTile: PLG data the user may not read", () => {
       await waitFor(() => expect(screen.getByText("143.16 d")).toBeInTheDocument());
     });
 
+    it("shape count: shows a dash, not 0 h, for a severity with no cases", async () => {
+      getResponseMock.mockResolvedValue({
+        json: async () => ({
+          ...mttrReport,
+          bands: [{ band: "S1", caseCount: 0, avgResolutionHours: 0 }],
+        }),
+      });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="mttr_none"
+          displayName="MTTR S1 none"
+          resourceType="mttr"
+          shape="count"
+          filters={{ months: "1", bands: ["S1"] }}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText("–")).toBeInTheDocument());
+      expect(screen.queryByText("0 h")).not.toBeInTheDocument();
+    });
+
+    it("shape bar: names the severities with no cases under the chart instead of drawing 0h bars", async () => {
+      getResponseMock.mockResolvedValue({
+        json: async () => ({
+          ...mttrReport,
+          bands: [
+            { band: "S1", caseCount: 0, avgResolutionHours: 0 },
+            { band: "S2", caseCount: 2, avgResolutionHours: 0.14 },
+            { band: "S3", caseCount: 0, avgResolutionHours: 0 },
+          ],
+        }),
+      });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="mttr_gaps"
+          displayName="MTTR with gaps"
+          resourceType="mttr"
+          shape="bar"
+          filters={{ months: "1", bands: ["S1", "S2", "S3"] }}
+          groupBy={{ bucket: "severity" }}
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByText(/No resolved cases for S1, S3 in this period/)).toBeInTheDocument(),
+      );
+      expect(screen.queryByText(/bar:S1:/)).not.toBeInTheDocument();
+      expect(screen.getByText(/bar:S2:/)).toBeInTheDocument();
+    });
+
     it("shape bar: puts a short label on each bar, and says how many cases the shown bars cover", async () => {
       getResponseMock.mockResolvedValue({ json: async () => mttrReport });
       renderWithClient(

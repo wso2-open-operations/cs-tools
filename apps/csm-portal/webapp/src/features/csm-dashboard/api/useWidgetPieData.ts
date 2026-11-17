@@ -55,6 +55,10 @@ export interface PieSliceResult extends BeDashboardPieSlice {
 
 export interface WidgetPieData {
   slices: PieSliceResult[];
+  /** Labels of bars that have no data (an MTTR severity with no resolved
+   * cases): left out of `slices` so no "0h" bar reads as an instant
+   * resolution, and named by the tile instead. Only the MTTR hook sets it. */
+  emptyLabels?: string[];
   total: number;
   isLoading: boolean;
   isError: boolean;
