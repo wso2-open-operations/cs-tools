@@ -15,24 +15,71 @@
 // under the License.
 
 import type { ReactNode } from "react";
-import { Box, Card, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import { Avatar, Badge, Box, Card, Skeleton, Stack, Typography, colors } from "@wso2/oxygen-ui";
+import { Headset } from "@wso2/oxygen-ui-icons-react";
+import { stringAvatar } from "@utils/others";
 
 interface CommentProps {
   children: string | ReactNode;
   author: string;
   timestamp: string;
+  /** The author is a support engineer: their avatar carries a headset badge. */
+  isInternal?: boolean;
 }
 
-export function Comment({ children, author, timestamp }: CommentProps) {
+/**
+ * The author's avatar: their initials, and for a support engineer a small headset badge, as in the
+ * webapp's activity tab. The backend resolves the author's own user type and sends it as a flag, so
+ * nothing here guesses from the name. A customer, an unresolved author and Novera get the plain avatar.
+ */
+function AuthorAvatar({ name, isInternal }: { name: string; isInternal: boolean }) {
+  return (
+    <Badge
+      overlap="circular"
+      anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+      invisible={!isInternal}
+      badgeContent={
+        isInternal ? (
+          <Box
+            component="span"
+            role="img"
+            aria-label="Technical Team"
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 16,
+              height: 16,
+              borderRadius: "50%",
+              bgcolor: "common.white",
+              color: colors.blue[700],
+              boxShadow: 1,
+            }}
+          >
+            <Headset size={12} strokeWidth={2.5} />
+          </Box>
+        ) : undefined
+      }
+      sx={{ flexShrink: 0 }}
+    >
+      <Avatar sx={{ width: 32, height: 32, fontSize: "0.75rem" }}>{stringAvatar(name) || "?"}</Avatar>
+    </Badge>
+  );
+}
+
+export function Comment({ children, author, timestamp, isInternal = false }: CommentProps) {
   return (
     <Card component={Stack} sx={{ bgcolor: "background.default" }}>
-      <Stack p={1}>
-        <Typography variant="body2" fontWeight="medium">
-          {author}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {timestamp}
-        </Typography>
+      <Stack direction="row" alignItems="center" gap={1.25} p={1}>
+        <AuthorAvatar name={author} isInternal={isInternal} />
+        <Stack sx={{ minWidth: 0 }}>
+          <Typography variant="body2" fontWeight="medium">
+            {author}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {timestamp}
+          </Typography>
+        </Stack>
       </Stack>
       <Box bgcolor="background.paper" p={1}>
         <Typography variant="body2">{children}</Typography>
