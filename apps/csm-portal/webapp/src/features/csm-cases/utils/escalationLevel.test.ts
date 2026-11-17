@@ -17,6 +17,8 @@
 import { describe, expect, it } from "vitest";
 import {
   canDeescalate,
+  showDeescalateAction,
+  showEscalateAction,
   canEscalateFurther,
   escalationLevelColor,
   escalationLevelLabel,
@@ -71,5 +73,38 @@ describe("isEscalationLevelUnset / canEscalateFurther / canDeescalate", () => {
     expect(canDeescalate("0")).toBe(false);
     expect(canDeescalate("1")).toBe(true);
     expect(canDeescalate("5")).toBe(true);
+  });
+});
+
+describe("showDeescalateAction", () => {
+  it("shows for a case team lead regardless of portal role", () => {
+    // The helper takes no role input: a lead without an escalation role
+    // still gets the button at any set level.
+    expect(showDeescalateAction(true, "1")).toBe(true);
+    expect(showDeescalateAction(true, "5")).toBe(true);
+  });
+
+  it("hides for a non-lead, even one who holds an escalation role", () => {
+    expect(showDeescalateAction(false, "3")).toBe(false);
+  });
+
+  it("hides for a lead when the case is not escalated", () => {
+    expect(showDeescalateAction(true, "0")).toBe(false);
+    expect(showDeescalateAction(true, null)).toBe(false);
+  });
+});
+
+describe("showEscalateAction", () => {
+  it("shows for a caller with the escalation capability below the top level", () => {
+    expect(showEscalateAction(true, "0")).toBe(true);
+    expect(showEscalateAction(true, "4")).toBe(true);
+  });
+
+  it("hides for a caller without the capability, even a team lead", () => {
+    expect(showEscalateAction(false, "0")).toBe(false);
+  });
+
+  it("hides at the top level", () => {
+    expect(showEscalateAction(true, "5")).toBe(false);
   });
 });

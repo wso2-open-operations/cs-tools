@@ -33,6 +33,24 @@ const mockShellState = {
   expandedMenus: {},
 };
 
+// AppLayout reads the user details query; stub it so no QueryClient/Logger provider is needed.
+vi.mock("@features/settings/api/useGetUserDetails", () => ({
+  default: () => ({ data: undefined, error: null, isLoading: false }),
+}));
+
+vi.mock("@context/error-page/ErrorPageContext", () => ({
+  useErrorPageContext: () => ({ isErrorPageDisplayed: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
   const actual = (await importOriginal()) as any;
   await import("react");
@@ -152,6 +170,8 @@ vi.mock("@components/side-nav-bar/SideBar", async () => ({
 describe("AppLayout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom does not implement Element.scrollTo (used for scroll-to-top on route change).
+    Element.prototype.scrollTo = vi.fn();
     mockLocation.pathname = "/dashboard";
     mockShellState.sidebarCollapsed = false;
     mockShellState.expandedMenus = {};

@@ -319,11 +319,11 @@ describe("RotaAccessTab", () => {
       render(<RotaAccessTab teams={twoTeams} />);
       fireEvent.click(screen.getByRole("tab", { name: "SRE" }));
       const teams = screen.getByRole("tablist", { name: "Team" });
-      expect(within(teams).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Apollo3", "IaaS1"]);
+      expect(within(teams).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Apollo3", "IAAS1"]);
       expect(screen.getByRole("list", { name: "Apollo members" })).toBeInTheDocument();
-      fireEvent.click(within(teams).getByRole("tab", { name: /IaaS/ }));
+      fireEvent.click(within(teams).getByRole("tab", { name: /IAAS/ }));
       expect(screen.queryByRole("list", { name: "Apollo members" })).toBeNull();
-      expect(within(screen.getByRole("list", { name: "IaaS members" })).getByText("Mina")).toBeInTheDocument();
+      expect(within(screen.getByRole("list", { name: "IAAS members" })).getByText("Mina")).toBeInTheDocument();
     });
 
     it("filters a big team's members by name or email", () => {

@@ -286,6 +286,7 @@ export default function UpdateHistoryPanel({
                         <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
                           <TextField
                             label="Update level"
+                            required
                             value={editForm.updateLevel}
                             onChange={(e) =>
                               setEditForm((prev) => ({ ...prev, updateLevel: e.target.value }))
@@ -300,6 +301,7 @@ export default function UpdateHistoryPanel({
                           />
                           <TextField
                             label="Date"
+                            required
                             value={editForm.date}
                             onChange={(e) => setEditForm((prev) => ({ ...prev, date: e.target.value }))}
                             size="small"
@@ -400,6 +402,7 @@ export default function UpdateHistoryPanel({
         <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
           <TextField
             label="Update level"
+            required
             value={form.updateLevel}
             onChange={(e) => setForm((prev) => ({ ...prev, updateLevel: e.target.value }))}
             size="small"
@@ -412,6 +415,7 @@ export default function UpdateHistoryPanel({
           />
           <TextField
             label="Date"
+            required
             value={form.date}
             onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))}
             size="small"

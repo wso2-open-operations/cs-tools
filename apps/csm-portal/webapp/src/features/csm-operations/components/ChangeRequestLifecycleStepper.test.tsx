@@ -457,3 +457,61 @@ describe("ChangeRequestLifecycleStepper — an Emergency change", () => {
     expect(stage("Assess")).toHaveTextContent("Assess, done");
   });
 });
+
+describe("ChangeRequestLifecycleStepper — a Standard change", () => {
+  const noCustomerSteps = { type: "standard", customerApprovalRequired: false, customerReviewRequired: false };
+
+  it("goes New, Scheduled, Implement, Review, Closed, with Assess and Authorize not taken rather than upcoming", () => {
+    render(<ChangeRequestLifecycleStepper state="new" {...noCustomerSteps} />);
+    expect(readout()).toEqual([
+      "New, current",
+      "Assess, not taken",
+      "Authorize, not taken",
+      "Scheduled, upcoming",
+      "Implement, upcoming",
+      "Review, upcoming",
+      "Rollback, not taken",
+      "Closed, upcoming",
+      "Canceled, not taken",
+    ]);
+  });
+
+  it("goes New, Customer Approval, Scheduled when the customer's approval is required", () => {
+    render(<ChangeRequestLifecycleStepper state="customer_approval" type="standard" customerApprovalRequired customerReviewRequired={false} />);
+    expect(readout()).toEqual([
+      "New, done",
+      "Assess, not taken",
+      "Authorize, not taken",
+      "Customer Approval, current",
+      "Scheduled, upcoming",
+      "Implement, upcoming",
+      "Review, upcoming",
+      "Rollback, not taken",
+      "Closed, upcoming",
+      "Canceled, not taken",
+    ]);
+  });
+
+  it("draws the skipped stages with the dashed not-taken marker and line, and fills the line on into Scheduled", async () => {
+    render(<ChangeRequestLifecycleStepper state="scheduled" {...noCustomerSteps} />);
+    const segments = (label: string): string[] =>
+      Array.from(stage(label).querySelectorAll("[data-segment]")).map((c) => c.getAttribute("data-segment") ?? "");
+    expect(segments("Assess")[0]).toBe("dashed");
+    expect(segments("Authorize")[0]).toBe("dashed");
+    expect(segments("Scheduled")[0]).toBe("filled");
+    fireEvent.mouseOver(stage("Authorize"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Internal authorization obtained \(not taken\)$/);
+  });
+
+  it("a Normal change of the same shape still shows Assess and Authorize as upcoming", () => {
+    render(<ChangeRequestLifecycleStepper state="new" type="normal" customerApprovalRequired={false} customerReviewRequired={false} />);
+    expect(stage("Assess")).toHaveTextContent("Assess, upcoming");
+    expect(stage("Authorize")).toHaveTextContent("Authorize, upcoming");
+  });
+
+  it("an Emergency change still skips Assess only", () => {
+    render(<ChangeRequestLifecycleStepper state="new" type="emergency" customerApprovalRequired={false} customerReviewRequired={false} />);
+    expect(stage("Assess")).toHaveTextContent("Assess, not taken");
+    expect(stage("Authorize")).toHaveTextContent("Authorize, upcoming");
+  });
+});

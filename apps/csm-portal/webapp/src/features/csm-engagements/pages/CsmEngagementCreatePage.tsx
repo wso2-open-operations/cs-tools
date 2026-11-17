@@ -35,6 +35,7 @@ import {
   preCreateImagesErrorMessage,
   usePreCreateInlineImages,
 } from "@features/csm-cases/api/usePreCreateInlineImages";
+import RequiredMark from "@components/RequiredMark";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
@@ -348,6 +349,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
               sx={{ display: "block", mb: 0.5 }}
             >
               Description
+              <RequiredMark />
             </Typography>
             <Box role="group" aria-labelledby="engagement-description-label">
               <Editor
@@ -359,6 +361,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
                 toolbarVariant="full"
                 disabled={submitting}
                 onImageUpload={descriptionImages.onImageUpload}
+                ariaRequired
               />
             </Box>
           </Grid>

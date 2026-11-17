@@ -36,13 +36,27 @@ func NewLongOpenCaseReportHandler(svc service.LongOpenCaseReportService) *LongOp
 	return &LongOpenCaseReportHandler{svc: svc}
 }
 
-// GetLongOpenCaseReport handles GET /reports/long-open-cases?olderThanDays=N.
+// GetLongOpenCaseReport handles GET /reports/long-open-cases?olderThanDays=N
+// and GET /reports/long-open-cases?variant=open-before-yesterday.
 //
 // olderThanDays is optional and defaults to the service's thirty days. The
 // report is built for the current instant; the scheduled task that mails it
 // is the only expected caller.
 func (h *LongOpenCaseReportHandler) GetLongOpenCaseReport(w http.ResponseWriter, r *http.Request) {
 	var req domain.LongOpenCaseReportRequest
+	if v := r.URL.Query().Get("variant"); v != "" {
+		if v != domain.LongOpenCaseReportVariantOpenBeforeYesterday {
+			writeServiceError(w, r, &apierror.ValidationError{
+				Msg: "variant must be omitted or " + domain.LongOpenCaseReportVariantOpenBeforeYesterday})
+			return
+		}
+		if r.URL.Query().Get("olderThanDays") != "" {
+			writeServiceError(w, r, &apierror.ValidationError{
+				Msg: "olderThanDays cannot be combined with variant " + v})
+			return
+		}
+		req.Variant = v
+	}
 	if raw := r.URL.Query().Get("olderThanDays"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > service.LongOpenCaseReportMaxOlderThanDays {

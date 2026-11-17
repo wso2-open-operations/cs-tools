@@ -48,6 +48,7 @@ vi.mock("@features/project-details/utils/projectDetails", () => ({
   getSubscriptionColor: vi.fn((status) =>
     status === SUBSCRIPTION_STATUS.EXPIRED ? "error" : "success",
   ),
+  getRemainingDays: vi.fn((end) => (end === "expired-date" ? 0 : 30)),
   calculateProgress: vi.fn((_start, end) =>
     end === "expired-date" ? 100 : 50,
   ),
@@ -64,12 +65,14 @@ describe("SubscriptionDetails", () => {
     render(<SubscriptionDetails {...defaultProps} />);
 
     expect(screen.getByText("Subscription Period")).toBeInTheDocument();
-    expect(screen.getByText(SUBSCRIPTION_STATUS.ACTIVE)).toBeInTheDocument();
+    // An active subscription shows no status chip; only non-active states do.
+    expect(screen.queryByText(SUBSCRIPTION_STATUS.ACTIVE)).toBeNull();
     expect(screen.getByText("Start")).toBeInTheDocument();
     expect(screen.getByText("Jan 1, 2023")).toBeInTheDocument();
     expect(screen.getByText("End")).toBeInTheDocument();
     expect(screen.getByText("Dec 31, 2024")).toBeInTheDocument();
-    expect(screen.getByText(/Expires on/)).toBeInTheDocument();
+    expect(screen.getByText("Remaining")).toBeInTheDocument();
+    expect(screen.getByText("30 days")).toBeInTheDocument();
   });
 
   it("should render linear progress with correct value", () => {

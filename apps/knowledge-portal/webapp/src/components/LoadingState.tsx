@@ -16,15 +16,7 @@
 
 import { Box, CircularProgress, Stack } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-const VISUALLY_HIDDEN = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  overflow: "hidden",
-  clip: "rect(0 0 0 0)",
-  whiteSpace: "nowrap",
-} as const;
+import { VISUALLY_HIDDEN_SX } from "@components/visuallyHidden";
 
 interface LoadingStateProps {
   /** Text announced to assistive tech (the status region is otherwise silent). */
@@ -39,7 +31,7 @@ export default function LoadingState({
   return (
     <Stack alignItems="center" role="status" sx={{ py }}>
       <CircularProgress size={28} aria-hidden />
-      <Box component="span" sx={VISUALLY_HIDDEN}>
+      <Box component="span" sx={VISUALLY_HIDDEN_SX}>
         {label}
       </Box>
     </Stack>

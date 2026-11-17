@@ -38,6 +38,10 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
 vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => ({ email: "agent@example.test" }),
 }));
+// The PLG rows mask the name and email; nothing is revealed here.
+vi.mock("@features/plg/api/hooks", () => ({
+  useCompanyReveal: () => ({ identity: undefined }),
+}));
 
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -271,10 +275,9 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     expect(within(picker).getByText("Severity")).toBeInTheDocument();
   });
 
-  it("service_request: does not offer a Severity column in the picker, unlike case", () => {
-    // Severity is a support-case concept; a widget for any other case-family
-    // resourceType sharing this same renderer must not offer a column that
-    // would only ever render "—".
+  it("service_request: offers a Severity column in the picker, like case", () => {
+    // A service request carries an internal S1-S4 severity, so the shared
+    // case-family renderer offers the column for it too.
     const Renderer = WIDGET_LIST_RENDERERS.service_request;
     renderRenderer(
       <Renderer
@@ -283,6 +286,25 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
         isLoading={false}
       />,
       "/operations/service-requests/:id",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
+    const picker = screen.getByRole("list", { name: "Customise columns" });
+    expect(within(picker).getByText("Severity")).toBeInTheDocument();
+  });
+
+  it("security_report_analysis: does not offer a Severity column in the picker", () => {
+    // Severity is not a concept for every case-family type; a widget for one
+    // without it sharing this same renderer must not offer a column that
+    // would only ever render "—".
+    const Renderer = WIDGET_LIST_RENDERERS.security_report_analysis;
+    renderRenderer(
+      <Renderer
+        resourceType="security_report_analysis"
+        items={[{ id: "sra-1", caseNumber: "CS0000003", subject: "Report" }]}
+        isLoading={false}
+      />,
+      "/security-center/:id",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
@@ -491,6 +513,7 @@ describe("plg_organization list", () => {
   const acme = {
     id: "org-1",
     organizationName: "Acme",
+    moesifCompanyId: "01a1ba70-b841-718f-86f2-56d0de00d195",
     registeredEmail: "a@acme.test",
     registeredName: null,
     registeredOn: "2026-02-03T10:00:00Z",
@@ -534,8 +557,10 @@ describe("plg_organization list", () => {
 
   it("shows each product with its lifecycle stage, the owner and the registration date", () => {
     renderAt([acme]);
-    expect(screen.getByText("Acme")).toBeInTheDocument();
-    expect(screen.getByText("a@acme.test")).toBeInTheDocument();
+    expect(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email hidden")).toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    expect(screen.queryByText("a@acme.test")).not.toBeInTheDocument();
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("API Platform")).toBeInTheDocument();
     expect(screen.getByText("Registration")).toBeInTheDocument();
@@ -559,7 +584,7 @@ describe("plg_organization list", () => {
 
   it("opens the organisation's PLG page, passing the page's own state as parentState", () => {
     renderAt([acme]);
-    fireEvent.click(screen.getByText("Acme"));
+    fireEvent.click(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195"));
     expect(screen.getByTestId("state-probe").textContent).toBe(
       `/plg/organizations/org-1 ${JSON.stringify({
         from: "/dashboard/preview/plg-organizations?w=w-1",
@@ -588,6 +613,7 @@ describe("plg_registration list", () => {
     orgPlatformId: "op-1",
     organizationId: "org-1",
     organizationName: "Acme",
+    moesifCompanyId: "01a1ba70-b841-718f-86f2-56d0de00d195",
     product: { id: "p-1", code: "IAM", name: "Identity" },
     registeredEmail: "a@acme.test",
     registeredName: null,
@@ -618,7 +644,8 @@ describe("plg_registration list", () => {
 
   it("shows the organisation, product, stage and owner", () => {
     renderAt([registration]);
-    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195")).toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("Activated")).toBeInTheDocument();
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
@@ -626,7 +653,7 @@ describe("plg_registration list", () => {
 
   it("opens the product's tab on the organisation's PLG page, passing the page's own state as parentState", () => {
     renderAt([registration]);
-    fireEvent.click(screen.getByText("Acme"));
+    fireEvent.click(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195"));
     expect(screen.getByTestId("state-probe").textContent).toBe(
       `/plg/organizations/org-1/IAM ${JSON.stringify({
         from: "/dashboard/preview/plg-registrations?w=w-1",

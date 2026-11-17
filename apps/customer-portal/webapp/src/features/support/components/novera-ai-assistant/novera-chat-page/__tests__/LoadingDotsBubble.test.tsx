@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import LoadingDotsBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/LoadingDotsBubble";
@@ -26,7 +26,13 @@ describe("LoadingDotsBubble", () => {
         <LoadingDotsBubble />
       </ThemeProvider>,
     );
-    expect(container.querySelector(".MuiPaper-root")).toBeTruthy();
+    // No paper bubble wrapper any more: a polite status region with the Novera
+    // header (bot icon + label) above the pulsing dots.
+    expect(container.querySelector(".MuiPaper-root")).toBeNull();
+    expect(
+      screen.getByRole("status", { name: "Novera is preparing a response" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Novera")).toBeInTheDocument();
     expect(container.querySelector("svg")).toBeTruthy();
   });
 });

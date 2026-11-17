@@ -38,6 +38,7 @@ import {
   preCreateImagesErrorMessage,
   usePreCreateInlineImages,
 } from "@features/csm-cases/api/usePreCreateInlineImages";
+import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -344,7 +345,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
               color="text.secondary"
               sx={{ display: "block", mb: 0.5 }}
             >
-              Description *
+              Description
+              <RequiredMark />
             </Typography>
             <Box role="group" aria-labelledby="sra-description-label">
               <Editor
@@ -356,6 +358,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
                 toolbarVariant="full"
                 disabled={submitting}
                 onImageUpload={descriptionImages.onImageUpload}
+                ariaRequired
               />
             </Box>
           </Grid>
@@ -366,7 +369,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
               color="text.secondary"
               sx={{ display: "block", mb: 0.5 }}
             >
-              Attachments *
+              Attachments
+              <RequiredMark />
             </Typography>
             <AttachmentsField
               attachments={attachments}

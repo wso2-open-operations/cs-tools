@@ -96,11 +96,16 @@ const LOADED: Settings = {
   updatedOn: "2026-10-01T09:30:00Z",
 };
 
-const lkField = () => screen.getByLabelText("People needed on LK Weekend each day");
-const americasField = () => screen.getByLabelText("People needed on Americas Weekend each day");
-const startField = () => screen.getByLabelText("Start");
-const endField = () => screen.getByLabelText("End");
-const zoneField = () => screen.getByLabelText("Time zone");
+// The required fields' labels end in an aria-hidden asterisk: role queries
+// (which use the accessible name) are unaffected, and a time input, which has
+// no role, is found by its label from the start.
+const LK = "People needed on LK Weekend each day";
+const AMERICAS = "People needed on Americas Weekend each day";
+const lkField = () => screen.getByRole("spinbutton", { name: LK });
+const americasField = () => screen.getByRole("spinbutton", { name: AMERICAS });
+const startField = () => screen.getByLabelText(/^Start\b/);
+const endField = () => screen.getByLabelText(/^End\b/);
+const zoneField = () => screen.getByRole("combobox", { name: "Time zone" });
 const copyField = () => screen.getByLabelText("Cc on reminder emails");
 
 /** Picks a member in a Cc picker: type part of the name, choose the match. */
@@ -183,17 +188,29 @@ describe("RotaReminderSettings", () => {
     expect(automatic.getByRole("checkbox", { name: "Attach calendar invitations" })).toBeInTheDocument();
 
     const weekend = within(screen.getByRole("group", { name: "Weekend rota" }));
-    expect(weekend.getByLabelText("People needed on LK Weekend each day")).toBeInTheDocument();
-    expect(weekend.getByLabelText("People needed on Americas Weekend each day")).toBeInTheDocument();
+    expect(weekend.getByRole("spinbutton", { name: LK })).toBeInTheDocument();
+    expect(weekend.getByRole("spinbutton", { name: AMERICAS })).toBeInTheDocument();
     const hours = within(weekend.getByRole("group", { name: "Americas Weekend and Americas On-call hours" }));
-    expect(hours.getByLabelText("Start")).toBeInTheDocument();
-    expect(hours.getByLabelText("End")).toBeInTheDocument();
-    expect(hours.getByLabelText("Time zone")).toBeInTheDocument();
+    expect(hours.getByLabelText(/^Start\b/)).toBeInTheDocument();
+    expect(hours.getByLabelText(/^End\b/)).toBeInTheDocument();
+    expect(hours.getByRole("combobox", { name: "Time zone" })).toBeInTheDocument();
 
     const copies = within(screen.getByRole("group", { name: "Cc" }));
     expect(copies.getByLabelText("Cc on reminder emails")).toHaveAttribute("role", "combobox");
     expect(copies.getByLabelText("Cc on calendar invitations")).toHaveAttribute("role", "combobox");
     expect(copies.getByLabelText("Cc on weekend reminders only")).toHaveAttribute("role", "combobox");
+  });
+
+  it("marks the head counts, the hours and the time zone required, and the copies optional", () => {
+    render(<RotaReminderSettings />);
+    for (const field of [lkField(), americasField(), startField(), endField(), zoneField()]) {
+      expect(field).toBeRequired();
+      const label = document.querySelector(`label[for="${field.id}"]`);
+      expect(label?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    }
+    const copy = copyField();
+    expect(copy).not.toBeRequired();
+    expect(document.querySelector(`label[for="${copy.id}"] .MuiFormLabel-asterisk`)).toBeNull();
   });
 
   it("saves the whole body: both windows set, other saved codes kept, addresses trimmed and deduped", () => {
@@ -379,7 +396,7 @@ describe("RotaReminderSettings", () => {
 
   it("a first save sends only the minimum that was changed", () => {
     render(<RotaReminderSettings />);
-    fireEvent.change(screen.getByLabelText("People needed on LK Weekend each day"), { target: { value: "4" } });
+    fireEvent.change(lkField(), { target: { value: "4" } });
     fireEvent.click(saveButton());
     expect(lastBody()).toMatchObject({ weekendRequired: { CRE_WEEKEND: 4 }, windows: {} });
   });

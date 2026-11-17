@@ -19,7 +19,11 @@ import { describe, expect, it, vi } from "vitest";
 import { OutstandingIncidentsChart } from "@features/dashboard/components/charts/OutstandingIncidentsChart";
 
 // Mock @wso2/oxygen-ui
-vi.mock("@wso2/oxygen-ui", () => ({
+vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
+  // Keep the real palette (dashboard constants read colors.pink etc. at import time).
+  const actual = await importOriginal<typeof import("@wso2/oxygen-ui")>();
+  return {
+    ...actual,
   Box: ({ children, sx }: any) => <div style={sx}>{children}</div>,
   Typography: ({ children, variant }: any) => (
     <div data-testid={`typography-${variant}`}>{children}</div>
@@ -33,6 +37,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
     <div data-testid="skeleton" data-variant={variant}></div>
   ),
   colors: {
+    ...actual.colors,
     blue: { 500: "#3B82F6" },
     brown: { 500: "#795548" },
     common: { white: "#FFFFFF" },
@@ -43,7 +48,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
     red: { 500: "#EF4444" },
     yellow: { 600: "#EAB308" },
   },
-}));
+  };
+});
 
 // Mock @wso2/oxygen-ui-charts-react
 vi.mock("@wso2/oxygen-ui-charts-react", () => ({

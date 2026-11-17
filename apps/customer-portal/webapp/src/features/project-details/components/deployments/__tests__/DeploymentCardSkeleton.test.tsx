@@ -53,19 +53,19 @@ describe("DeploymentCardSkeleton", () => {
     expect(circularSkeletons.length).toBeGreaterThan(0);
   });
 
-  it("should render within a Card component", () => {
+  it("should render within an outlined Paper", () => {
     const { container } = render(<DeploymentCardSkeleton />);
 
-    // Should be wrapped in a Card
-    const card = container.querySelector(".MuiCard-root");
-    expect(card).toBeInTheDocument();
+    // The skeleton mirrors the accordion's bordered container (not a Card).
+    const paper = container.querySelector(".MuiPaper-root.MuiPaper-outlined");
+    expect(paper).toBeInTheDocument();
+    expect(container.querySelector(".MuiCard-root")).toBeNull();
   });
 
-  it("should render within CardContent", () => {
+  it("should render a divider between each section of the details placeholder", () => {
     const { container } = render(<DeploymentCardSkeleton />);
 
-    const cardContent = container.querySelector(".MuiCardContent-root");
-    expect(cardContent).toBeInTheDocument();
+    expect(container.querySelectorAll(".MuiDivider-root").length).toBe(4);
   });
 
   it("should match the layout structure of the actual DeploymentCard", () => {

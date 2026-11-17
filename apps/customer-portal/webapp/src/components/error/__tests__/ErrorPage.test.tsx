@@ -28,4 +28,21 @@ describe("ErrorPage", () => {
     render(<ErrorPage illustration="/x.svg" illustrationAlt="error" description="Oops" />);
     expect(screen.getByText("Oops")).toBeInTheDocument();
   });
+
+  it("renders the actions slot when provided", () => {
+    render(
+      <ErrorPage
+        illustration="/x.svg"
+        illustrationAlt="error"
+        description="Oops"
+        actions={<button type="button">Go back</button>}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
+  });
+
+  it("renders no button when actions is omitted", () => {
+    render(<ErrorPage illustration="/x.svg" illustrationAlt="error" description="Oops" />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
 });

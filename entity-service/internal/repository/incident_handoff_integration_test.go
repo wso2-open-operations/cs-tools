@@ -80,7 +80,7 @@ func inProgressIncident(t *testing.T, pool *pgxpool.Pool) string {
 		t.Fatalf("CreateIncident: %v", err)
 	}
 	state := "IN_PROGRESS"
-	if err := repo.UpdateIncidentLifecycle(ctx, resp.Incident.ID, repository.IncidentLifecycleUpdate{State: &state}, "jane.doe@test.local"); err != nil {
+	if _, err := repo.UpdateIncidentLifecycle(ctx, resp.Incident.ID, repository.IncidentLifecycleUpdate{State: &state}, "jane.doe@test.local"); err != nil {
 		t.Fatalf("move to In Progress: %v", err)
 	}
 	return resp.Incident.ID

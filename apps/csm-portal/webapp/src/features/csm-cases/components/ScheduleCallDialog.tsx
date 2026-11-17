@@ -30,6 +30,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import type { BeCallRequestView } from "@api/backend/types";
 import {
   formatDateTimeLocal,
@@ -180,10 +181,13 @@ export function ScheduleCallDialog({
 
           {preferredTimes.length > 0 && (
             <Box>
-              <Typography variant="body2" sx={{ mb: 0.5 }}>
+              <Typography id="schedule-call-time-label" variant="body2" sx={{ mb: 0.5 }}>
                 Choose a time
+                <RequiredMark />
               </Typography>
               <RadioGroup
+                aria-labelledby="schedule-call-time-label"
+                aria-required
                 value={selectedTime}
                 onChange={(e) => {
                   setSelectedTime(e.target.value);

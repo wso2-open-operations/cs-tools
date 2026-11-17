@@ -24,6 +24,7 @@ import { getNextOffset, trailingEmptyPages } from "@api/pagination";
 import { useArticleSearch } from "@api/useKb";
 
 vi.mock("@api/backend/client", () => ({
+  countArticles: vi.fn(),
   searchArticles: vi.fn(),
   listKnowledgeBases: vi.fn(),
   getArticle: vi.fn(),

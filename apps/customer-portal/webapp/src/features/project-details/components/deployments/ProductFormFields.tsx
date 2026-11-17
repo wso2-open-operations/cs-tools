@@ -19,6 +19,7 @@ import type { JSX } from "react";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import { paginatedSelectMenuListProps } from "@utils/common";
 import type { UseProductFormResult } from "@features/project-details/components/deployments/useProductForm";
+import { formatVersionWithProfile } from "@features/project-details/utils/deploymentProfile";
 
 export type ProductFormFieldsProps = Pick<
   UseProductFormResult,
@@ -146,7 +147,7 @@ export function ProductFormFields({
           <MenuItem value="">Select</MenuItem>
           {versions.map((v) => (
             <MenuItem key={v.id} value={v.id}>
-              {v.version}
+              {formatVersionWithProfile(v.version, v.deploymentProfile)}
             </MenuItem>
           ))}
           <SelectMenuLoadMoreRow

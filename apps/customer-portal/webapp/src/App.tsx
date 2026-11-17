@@ -58,6 +58,7 @@ import NonPartnerGuard from "@layouts/NonPartnerGuard";
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
 import Error404Page from "@components/error/Error404Page";
+import ErrorRecoveryAction from "@components/error/ErrorRecoveryAction";
 import ErrorLayout from "@layouts/ErrorLayout";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
@@ -84,7 +85,7 @@ export default function App(): JSX.Element {
                 path="/403"
                 element={
                   <ErrorLayout>
-                    <Error403Page />
+                    <Error403Page actions={<ErrorRecoveryAction />} />
                   </ErrorLayout>
                 }
               />
@@ -92,7 +93,7 @@ export default function App(): JSX.Element {
                 path="/404"
                 element={
                   <ErrorLayout>
-                    <Error404Page />
+                    <Error404Page actions={<ErrorRecoveryAction />} />
                   </ErrorLayout>
                 }
               />
@@ -329,7 +330,7 @@ export default function App(): JSX.Element {
                 path="*"
                 element={
                   <ErrorLayout>
-                    <Error404Page />
+                    <Error404Page actions={<ErrorRecoveryAction />} />
                   </ErrorLayout>
                 }
               />

@@ -14,18 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import { type JSX, type ReactNode } from "react";
 import ErrorPage from "./ErrorPage";
 import illustration from "@assets/error/error-403.svg";
 
 interface Error403PageProps {
   message?: string;
   error?: unknown;
+  actions?: ReactNode;
 }
 
 export default function Error403Page({
   message,
   error,
+  actions,
 }: Error403PageProps): JSX.Element {
   return (
     <ErrorPage
@@ -33,6 +35,7 @@ export default function Error403Page({
       illustrationAlt="403 forbidden illustration"
       description={message ?? "You don't have permission to access this page."}
       error={error}
+      actions={actions}
     />
   );
 }

@@ -22,6 +22,11 @@ import { useCustomerPermissions } from "@hooks/useCustomerPermissions";
 
 vi.mock("@hooks/useCustomerPermissions");
 
+// ErrorLayout (used for the 403 page) renders portal banners, which run a query.
+vi.mock("@components/portal-banners/PortalBanners", () => ({
+  default: () => null,
+}));
+
 describe("CustomerRoleGuard", () => {
   beforeEach(() => {
     vi.clearAllMocks();

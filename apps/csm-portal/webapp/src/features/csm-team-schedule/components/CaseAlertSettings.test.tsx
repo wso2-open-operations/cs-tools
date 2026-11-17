@@ -230,10 +230,10 @@ describe("CaseAlertSettings", () => {
 
   it("adds a redirect and removes one as changes, saved together on Submit", async () => {
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
-    fireEvent.change(screen.getByLabelText("When an incident is assigned to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "When an incident is assigned to" }), {
       target: { value: "Asgardeo" },
     });
-    fireEvent.change(screen.getByLabelText("send its alerts to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "send its alerts to" }), {
       target: { value: "team:apollo" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -269,10 +269,10 @@ describe("CaseAlertSettings", () => {
     });
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
     expect(screen.getAllByRole("option", { name: "Apollo" })).toHaveLength(2); // the group list and the target list
-    fireEvent.change(screen.getByLabelText("When an incident is assigned to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "When an incident is assigned to" }), {
       target: { value: `\u0000ag:${IAAS}` },
     });
-    fireEvent.change(screen.getByLabelText("send its alerts to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "send its alerts to" }), {
       target: { value: "team:apollo" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -295,13 +295,13 @@ describe("CaseAlertSettings", () => {
       routeOptions: { ...base.routeOptions!, assignmentGroups: [{ id: IAAS, name: "WSO2 IaaS Team" }] },
     });
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
-    fireEvent.change(screen.getByLabelText("When an incident is assigned to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "When an incident is assigned to" }), {
       target: { value: "\u0000other" },
     });
-    fireEvent.change(screen.getByLabelText("Assignment group name"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Assignment group name" }), {
       target: { value: "wso2 iaas team" },
     });
-    fireEvent.change(screen.getByLabelText("send its alerts to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "send its alerts to" }), {
       target: { value: "team:apollo" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -331,24 +331,38 @@ describe("CaseAlertSettings", () => {
 
   it("redirects an SRE assignment group that is not a CSM Portal team, typed by name", async () => {
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
-    fireEvent.change(screen.getByLabelText("When an incident is assigned to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "When an incident is assigned to" }), {
       target: { value: "\u0000other" },
     });
-    fireEvent.change(screen.getByLabelText("send its alerts to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "send its alerts to" }), {
       target: { value: "team:apollo" },
     });
     // No name typed yet: nothing to add.
     expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Assignment group name"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Assignment group name" }), {
       target: { value: "  WSO2 IaaS Team " },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByText(/^Added to this tab's changes:/)).toHaveTextContent(
       "Added to this tab's changes: redirect from WSO2 IaaS Team to Apollo. Submit to save them.",
     );
-    expect(screen.queryByLabelText("Assignment group name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Assignment group name" })).not.toBeInTheDocument();
     await submit();
     expect(saveRoute.mutateAsync).toHaveBeenCalledWith({ ladder: "SRE", groupName: "WSO2 IaaS Team", teamKey: "apollo" });
+  });
+
+  it("marks the redirect's group, a typed group name and where it goes required", () => {
+    render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
+    const from = screen.getByRole("combobox", { name: "When an incident is assigned to" });
+    const to = screen.getByRole("combobox", { name: "send its alerts to" });
+    for (const field of [from, to]) {
+      expect(field).toBeRequired();
+      expect(field.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    }
+    fireEvent.change(from, { target: { value: "\u0000other" } });
+    const typed = screen.getByRole("textbox", { name: "Assignment group name" });
+    expect(typed).toBeRequired();
+    expect(typed.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toBeInTheDocument();
   });
 
   it("sends an SME team's incidents to a whole rota, picked from lists", async () => {
@@ -356,7 +370,7 @@ describe("CaseAlertSettings", () => {
     expect(
       screen.getByText("Every team on the SaaS SRE rota"),
     ).toBeInTheDocument();
-    const from = screen.getByLabelText("When an incident is assigned to");
+    const from = screen.getByRole("combobox", { name: "When an incident is assigned to" });
     // SRE and SME teams for the SRE ladder; never a CRE team.
     expect(
       within(from).getByRole("option", { name: "Apollo" }),
@@ -368,7 +382,7 @@ describe("CaseAlertSettings", () => {
       within(from).queryByRole("option", { name: "Vega" }),
     ).not.toBeInTheDocument();
     fireEvent.change(from, { target: { value: "Asgardeo" } });
-    fireEvent.change(screen.getByLabelText("send its alerts to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "send its alerts to" }), {
       target: { value: "rota:SRE_SAAS" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -378,7 +392,7 @@ describe("CaseAlertSettings", () => {
 
   it("offers the ladder's own teams, then whole rotas, as where alerts go", async () => {
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
-    const to = screen.getByLabelText("send its alerts to");
+    const to = screen.getByRole("combobox", { name: "send its alerts to" });
     expect(
       within(to).getByRole("option", { name: "Apollo" }),
     ).toBeInTheDocument();
@@ -388,7 +402,7 @@ describe("CaseAlertSettings", () => {
     expect(
       within(to).queryByRole("option", { name: "Vega" }),
     ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("When an incident is assigned to"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "When an incident is assigned to" }), {
       target: { value: "Asgardeo" },
     });
     fireEvent.change(to, { target: { value: "team:apollo" } });
@@ -493,7 +507,7 @@ describe("CaseAlertSettings", () => {
       canManage: { view: true, roomLadders: ["CRE"], routeLadders: ["CRE"] },
     });
     render(<CaseAlertSettings layout="full" chain="CRE" />);
-    const from = screen.getByLabelText("When a case is assigned to");
+    const from = screen.getByRole("combobox", { name: "When a case is assigned to" });
     expect(
       within(from).getByRole("option", { name: "Vega" }),
     ).toBeInTheDocument();
@@ -501,7 +515,7 @@ describe("CaseAlertSettings", () => {
       within(from).queryByRole("option", { name: "Asgardeo" }),
     ).not.toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("send its alerts to")).queryByRole("group", {
+      within(screen.getByRole("combobox", { name: "send its alerts to" })).queryByRole("group", {
         name: "A whole rota",
       }),
     ).not.toBeInTheDocument();
@@ -654,8 +668,8 @@ describe("Where each assignment group's alerts go", () => {
       ],
     });
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
-    const from = screen.getByLabelText("When an incident is assigned to");
-    const to = screen.getByLabelText("send its alerts to");
+    const from = screen.getByRole("combobox", { name: "When an incident is assigned to" });
+    const to = screen.getByRole("combobox", { name: "send its alerts to" });
     fireEvent.click(within(groupRow("U2 SRE Group")).getByRole("button", { name: "Redirect U2 SRE Group" }));
     expect(from).toHaveValue(`\u0000ag:${U2}`);
     expect(to).toHaveValue("");
@@ -695,6 +709,6 @@ describe("Where each assignment group's alerts go", () => {
     settings.data = withGroups({ canManage: { view: true, roomLadders: ["SRE"], routeLadders: [] } });
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
     expect(within(groupRow("U2 SRE Group")).queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("When an incident is assigned to")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "When an incident is assigned to" })).not.toBeInTheDocument();
   });
 });

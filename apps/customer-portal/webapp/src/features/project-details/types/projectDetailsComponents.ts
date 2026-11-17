@@ -240,7 +240,10 @@ export type UpdateHistoryTabFormState = {
 
 export type UpdateHistoryTabProps = {
   updates: ProductUpdate[];
+  /** Key the update levels are looked up under (the profile's stream when it has one). */
   productName: string;
+  /** Product's own key, used when `productName`'s stream has no levels for this version. */
+  fallbackProductName?: string;
   productVersion: string;
   isLoading?: boolean;
   onSaveUpdates: (updates: ProductUpdate[]) => Promise<void>;

@@ -572,7 +572,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 		        dp.description, dp.update_level_info, pr.sf_id, COALESCE(dp.active, TRUE),
 		        d.id, d.name, d.type::TEXT,
 		        p.id, p.name, p.code,
-		        pv.id, pv.version, pv.release_date, pv.support_eol_date
+		        pv.id, pv.version, pv.release_date, pv.support_eol_date, pv.deployment_profile
 		 FROM deployed_product dp
 		 JOIN deployment d ON dp.deployment_id = d.id
 		 JOIN product p ON dp.product_id = p.id
@@ -608,7 +608,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 		for rows.Next() {
 			var dp domain.DeployedProductView
 			// Version fields are nullable (LEFT JOIN).
-			var pvID, pvName *string
+			var pvID, pvName, pvProfile *string
 			var pvReleaseDate, pvEoLDate *time.Time
 			// update_level_info is nullable JSONB; decoded below into
 			// dp.Updates once the row is scanned.
@@ -621,7 +621,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 				&dp.Description, &updateLevelInfo, &dp.ProjectSfID, &dp.Active,
 				&dp.Deployment.ID, &dp.Deployment.Name, &deploymentType,
 				&dp.Product.ID, &dp.Product.Name, &dp.Product.Abbreviation,
-				&pvID, &pvName, &pvReleaseDate, &pvEoLDate,
+				&pvID, &pvName, &pvReleaseDate, &pvEoLDate, &pvProfile,
 			); err != nil {
 				return fmt.Errorf("scan deployed product: %w", err)
 			}
@@ -632,10 +632,11 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 			}
 			if pvID != nil {
 				dp.Version = &domain.DeployedProductVersionRef{
-					ID:             *pvID,
-					Name:           *pvName,
-					ReleasedDate:   pvReleaseDate,
-					SupportEoLDate: pvEoLDate,
+					ID:                *pvID,
+					Name:              *pvName,
+					ReleasedDate:      pvReleaseDate,
+					SupportEoLDate:    pvEoLDate,
+					DeploymentProfile: pvProfile,
 				}
 			}
 			dp.Category = lowercaseCategory(dp.Category)
@@ -843,9 +844,17 @@ const createDeployedProductFromServiceNowQuery = `
 		$4, $5, TRUE,
 		$6, $7,
 		$8::uuid, $9::uuid, $10::uuid, $11::uuid,
-		$12::text::deployed_product_category_enum
+		COALESCE($12::text::deployed_product_category_enum, (` + projectTypeDefaultCategorySQL + `$8::uuid))
 	)
 	RETURNING id, created_on, created_by`
+
+// projectTypeDefaultCategorySQL, followed by the project id and a closing
+// parenthesis, is the default category of a project's type (migration 0291),
+// or NULL when the type has none or the project has no type. The create uses
+// it as the category when the request names none.
+const projectTypeDefaultCategorySQL = `SELECT pt.default_deployed_product_category
+		FROM project p JOIN project_type pt ON pt.id = p.project_type_id
+		WHERE p.id = `
 
 // CreateDeployedProductFromServiceNow implements DeployedProductRepository.
 // name/life_cycle_stage/life_cycle_stage_status/update_level_info are left
@@ -855,7 +864,8 @@ const createDeployedProductFromServiceNowQuery = `
 // sources rather than inventing values ServiceNow itself doesn't set on
 // create. product_category is the one exception: see
 // domain.CreateDeployedProductRequest.Category's own doc comment for why
-// it's written here despite having no SN-side equivalent.
+// it's written here despite having no SN-side equivalent. Without a category
+// in the request it is the project type's default.
 func (r *deployedProductRepo) CreateDeployedProductFromServiceNow(ctx context.Context, req domain.CreateDeployedProductRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployedProduct, error) {
 	var category *string
 	if req.Category != nil {

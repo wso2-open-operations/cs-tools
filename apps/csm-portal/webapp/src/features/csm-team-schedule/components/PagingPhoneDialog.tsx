@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useId, useRef, useState, type JSX, type KeyboardEvent } from "react";
+import RequiredMark from "@components/RequiredMark";
 import type { PagingChainMember } from "../types";
 import { validateE164 } from "../utils/pagingPhone";
 
@@ -112,12 +113,14 @@ export default function PagingPhoneDialog({ mode, member, busy, error, onSave, o
             </h3>
             <label htmlFor={inputId} className="cp-lbl">
               Mobile number (with country code)
+              <RequiredMark />
             </label>
             <input
               ref={inputRef}
               id={inputId}
               className="cp-input"
               type="tel"
+              required
               inputMode="tel"
               autoComplete="off"
               placeholder="+94771234567"

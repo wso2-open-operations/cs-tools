@@ -100,6 +100,7 @@ type SearchRequest struct {
 	KnowledgeBaseID string     `json:"knowledgeBaseId,omitempty"`
 	States          []string   `json:"states,omitempty"`
 	SearchQuery     string     `json:"searchQuery,omitempty"`
+	PublicOnly      bool       `json:"publicOnly,omitempty"`
 	Pagination      Pagination `json:"pagination"`
 }
 
@@ -172,7 +173,7 @@ func (c *Client) ListKnowledgeBases(ctx context.Context) ([]KnowledgeBase, error
 	var out struct {
 		KnowledgeBases []KnowledgeBase `json:"knowledgeBases"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/knowledge-bases", nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/knowledge-bases?publicOnly=true", nil, &out); err != nil {
 		return nil, err
 	}
 	return out.KnowledgeBases, nil

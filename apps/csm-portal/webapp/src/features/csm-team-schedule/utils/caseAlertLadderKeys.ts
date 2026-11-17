@@ -730,6 +730,24 @@ export function parseDraft(spec: LadderKeySpec, draft: LadderDraft): ParsedDraft
   }
 }
 
+/** Whether parseDraft refuses an empty value for this key, so its editor marks
+ *  the box required: a number, a word, a duration or a choice. A list, SHIFT=n
+ *  pairs, a team map, the per-team mailing lists and an email box (empty means
+ *  no Cc) may be left empty; a switch is never empty; a head's name and email
+ *  are both needed, and its editor says so. */
+export function ladderValueRequired(spec: LadderKeySpec): boolean {
+  switch (spec.editor) {
+    case "bool":
+    case "list":
+    case "shiftCounts":
+    case "teamMap":
+    case "teamEmails":
+      return false;
+    default:
+      return spec.inputType !== "email";
+  }
+}
+
 /** The values the alert service runs with from its file and that are not
  *  saved here yet, ready to save in one go. A head the file leaves unnamed is
  *  left out: there is nothing to save for it. */

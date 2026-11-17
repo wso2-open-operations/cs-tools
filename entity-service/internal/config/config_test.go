@@ -1533,6 +1533,57 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	}
 }
 
+// TestLoad_OpenBeforeYesterdayReportSets pins the open-before-yesterday
+// variant's two project type sets: the defaults, trimming, and a blank value
+// falling back to the default.
+func TestLoad_OpenBeforeYesterdayReportSets(t *testing.T) {
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", "")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", " , ")
+	c := Load()
+	if want := []string{"Subscription", "Managed Cloud Subscription"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("default project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"Cloud Support"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("default product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", " A , ,B")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", "C")
+	c = Load()
+	if want := []string{"A", "B"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"C"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+}
+
+// TestConfig_Validate_ServiceRequestDefaultSeverity: unset means S4 and is
+// valid; S1-S4 (any case, surrounding space ignored) are valid; anything else,
+// S0 included, refuses to start.
+func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
+	for _, v := range []string{"", "S1", "s2", " S3 ", "S4"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		if err := c.Validate(); err != nil {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: unexpected error %v", v, err)
+		}
+	}
+	for _, v := range []string{"S0", "S5", "critical", "4", "S"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "SERVICE_REQUEST_DEFAULT_SEVERITY") {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: error = %v, want one naming the variable", v, err)
+		}
+	}
+	if got, _ := NormalizeServiceRequestSeverity(""); got != "S4" {
+		t.Errorf("unset normalizes to %q, want S4", got)
+	}
+	if got, _ := NormalizeServiceRequestSeverity(" s2 "); got != "S2" {
+		t.Errorf("\" s2 \" normalizes to %q, want S2", got)
+	}
+}
+
 // TestConfig_Validate_PublicHolidaySourcesAllOrNothing checks that the holiday
 // calendar and HR entity connections each validate only when all four settings
 // are given or none are.

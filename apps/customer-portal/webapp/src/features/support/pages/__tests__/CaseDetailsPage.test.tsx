@@ -45,6 +45,10 @@ vi.mock("@features/support/api/useGetCaseDetails", () => ({
   default: () => mockUseGetCaseDetails(),
 }));
 
+vi.mock("@features/support/api/useCaseActivityStream", () => ({
+  useCaseActivityStream: vi.fn(),
+}));
+
 vi.mock("@case-details-details/CaseDetailsContent", () => ({
   default: ({
     isLoading,

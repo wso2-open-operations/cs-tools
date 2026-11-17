@@ -58,7 +58,7 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-vi.mock("@api/useAuthApiClient", () => ({
+vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: vi.fn(),
 }));
 

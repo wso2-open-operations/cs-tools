@@ -528,6 +528,46 @@ describe("CasesFilterBar — 'SRE Team' control (mirrors 'CRE Team')", () => {
   });
 });
 
+describe("CasesFilterBar — 'Sales Region' control (opt-in)", () => {
+  it("is not rendered unless showSalesRegionFilter is passed", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+    expect(screen.queryByRole("combobox", { name: "Sales Region" })).not.toBeInTheDocument();
+  });
+
+  it("renders the static region options and writes the selection to salesRegions", async () => {
+    const { onChange } = renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      showSalesRegionFilter: true,
+    });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Sales Region" }));
+    expect(await screen.findByRole("option", { name: "APAC" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "LATAM" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "EMEA" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ salesRegions: ["EMEA"] }));
+  });
+
+  // The region is not an Advanced-builder row, and the open Advanced panel
+  // suppresses the regular chips, so without these a selected region would
+  // filter results with nothing on screen showing it.
+  it("keeps a selected region visible as a chip while the Advanced panel is open", () => {
+    renderBar(
+      { ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] },
+      vi.fn(),
+      { showSalesRegionFilter: true },
+    );
+
+    expect(screen.getByText("Advanced filters")).toBeInTheDocument();
+    expect(screen.getByText("Sales Region: EMEA")).toBeInTheDocument();
+  });
+
+  it("shows no region chip in Advanced mode on views without the control", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] });
+
+    expect(screen.queryByText("Sales Region: EMEA")).not.toBeInTheDocument();
+  });
+});
+
 // The tri-state include/exclude toggle (digiops-cs#2907) was removed —
 // Simple mode's "State" control is now a plain include-only multi-select,
 // same as every other Simple-mode field (Severity, Case type, ...).
@@ -979,5 +1019,47 @@ describe("CasesFilterBar — per-consumer hidden Simple-mode controls", () => {
       screen.queryByRole("combobox", { name: "SRE Team" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Severity" })).toBeInTheDocument();
+  });
+});
+
+describe("CasesFilterBar — severity options", () => {
+  function simpleSeverityOptions(): string[] {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Severity" }));
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  }
+
+  it("Simple mode offers S0-S4 by default", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+    expect(simpleSeverityOptions()).toEqual(["S0", "S1", "S2", "S3", "S4"]);
+  });
+
+  it("Simple mode offers only the passed options (no S0) for a service-request list", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      severityOptions: ["S1", "S2", "S3", "S4"].map((v) => ({
+        value: v as "S1" | "S2" | "S3" | "S4",
+        label: v,
+      })),
+    });
+    expect(simpleSeverityOptions()).toEqual(["S1", "S2", "S3", "S4"]);
+  });
+
+  it("Advanced mode offers the same passed options (no S0)", () => {
+    // `tags` has no Simple control, so this mounts straight into Advanced mode.
+    renderBar({ ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"], severities: ["S1"] }, vi.fn(), {
+      severityOptions: ["S1", "S2", "S3", "S4"].map((v) => ({
+        value: v as "S1" | "S2" | "S3" | "S4",
+        label: v,
+      })),
+    });
+    expect(screen.getByText("Advanced filters")).toBeInTheDocument();
+    const valueBoxes = screen.getAllByRole("combobox", { name: "Value(s)" });
+    // The severity row is the first typed row in catalogue order.
+    fireEvent.mouseDown(valueBoxes[0]);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+    ]);
   });
 });

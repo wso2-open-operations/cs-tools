@@ -26,6 +26,7 @@ import {
   useState,
   type JSX,
 } from "react";
+import RequiredMark from "@components/RequiredMark";
 import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } from "../types";
 import { escalationGrid } from "../utils/rota";
 import { INDIA_HOURS_CODE, REGULAR_HOURS_CODE } from "../utils/standingDay";
@@ -1045,13 +1046,17 @@ export default function CellPicker({
                   <fieldset className="tf-group">
                     <legend>What the roster shows</legend>
                     <label>
-                      <span>Name</span>
+                      <span>
+                        Name
+                        <RequiredMark />
+                      </span>
                       <input
                         value={tag.label}
                         placeholder={`e.g. SRE, WFH (up to ${TAG_NAME_MAX} characters)`}
                         onChange={(e) => setTag({ ...tag, label: e.target.value })}
                         aria-label="Tag name"
                         aria-describedby="pk-name-help"
+                        aria-required="true"
                       />
                     </label>
                     <p className="pk-note tf-help" id="pk-name-help">

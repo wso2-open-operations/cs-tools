@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import { type JSX, type ReactNode } from "react";
 import { Box, Stack, Typography } from "@wso2/oxygen-ui";
 import TrackingIdCopy from "./TrackingIdCopy";
 
@@ -25,6 +25,9 @@ interface ErrorPageProps {
   /** Pass the raw error object through so a "Tracking ID" copy affordance can
    *  render when it carries a correlation ID — see {@link TrackingIdCopy}. */
   error?: unknown;
+  /** Optional recovery action(s), e.g. a button back to a page the user can
+   *  access. Rendered under the description, above the tracking ID. */
+  actions?: ReactNode;
 }
 
 export default function ErrorPage({
@@ -32,6 +35,7 @@ export default function ErrorPage({
   illustrationAlt,
   description,
   error,
+  actions,
 }: ErrorPageProps): JSX.Element {
   return (
     <Box
@@ -63,6 +67,7 @@ export default function ErrorPage({
             {description}
           </Typography>
         )}
+        {actions}
         <TrackingIdCopy error={error} />
       </Stack>
     </Box>

@@ -375,7 +375,7 @@ describe("CallsPanel", () => {
                 scheduleTime: "2024-11-05 14:00:00",
                 createdOn: "2024-10-29 10:00:00",
                 updatedOn: "2024-10-29 10:00:00",
-                state: { id: "1", label: "Pending on WSO2" },
+                state: { id: "pending_on_wso2", label: "Pending on WSO2" },
               },
             ],
           },
@@ -426,7 +426,7 @@ describe("CallsPanel", () => {
       scheduleTime: "2024-11-05 14:00:00",
       createdOn: "2024-10-29 10:00:00",
       updatedOn: "2024-10-29 10:00:00",
-      state: { id: "1", label: "Pending on WSO2" },
+      state: { id: "pending_on_wso2", label: "Pending on WSO2" },
     };
     vi.mocked(useGetCallRequests).mockReturnValue({
       isPending: false,
@@ -679,7 +679,7 @@ describe("CallsPanel", () => {
     expect(Number.isNaN(sentPayload.stateKey)).toBe(false);
   });
 
-  it("should show pagination like attachments and fetch next page when changing page", async () => {
+  it("should show table pagination and fetch next page when changing page", async () => {
     const mockFetchNextPage = vi.fn();
     const tenCalls = Array.from({ length: 10 }, (_, i) => ({
       id: `call-${i + 1}`,
@@ -719,11 +719,10 @@ describe("CallsPanel", () => {
         caseStatusLabel="Work In Progress"
       />);
 
-    expect(
-      screen.getByRole("navigation", { name: /pagination/i }),
-    ).toBeInTheDocument();
+    // ListPagination renders an MUI TablePagination ("1-10 of 25" + prev/next).
+    expect(screen.getByText(/1.10 of 25/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Go to page 2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Go to next page/i }));
 
     await waitFor(() => expect(mockFetchNextPage).toHaveBeenCalled());
   });

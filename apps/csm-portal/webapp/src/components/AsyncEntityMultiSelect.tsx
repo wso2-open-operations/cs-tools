@@ -43,6 +43,9 @@ export interface AsyncEntityMultiSelectProps<T> {
   values: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  /** Marks the field required (asterisk + `aria-required`). Display only: the
+   * caller still owns validation. */
+  required?: boolean;
   helperText?: string;
   /** Same shape as `AsyncEntitySelect`'s `useSearch` — see its doc comment for
    * the stable-reference requirement (rules of hooks). */
@@ -79,6 +82,7 @@ export default function AsyncEntityMultiSelect<T>({
   values,
   onChange,
   disabled,
+  required,
   helperText,
   useSearch,
   getId,
@@ -196,6 +200,7 @@ export default function AsyncEntityMultiSelect<T>({
           label={label}
           slotProps={shrinkLabel ? { inputLabel: { ...params.InputLabelProps, shrink: true } } : undefined}
           placeholder={values.length ? undefined : placeholder}
+          required={required}
           error={isError}
           helperText={isError ? "Search failed." : helperText}
         />

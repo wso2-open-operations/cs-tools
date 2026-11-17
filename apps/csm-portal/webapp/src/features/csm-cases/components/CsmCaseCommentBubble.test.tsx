@@ -655,6 +655,40 @@ describe("CsmCaseCommentBubble", () => {
       );
     });
 
+    it("keeps Save disabled while the edit is empty, so a cleared comment is not saved", () => {
+      mockCurrentUser.mockReturnValue({ email: "jane.doe@example.com" });
+      const onEditComment = vi.fn().mockResolvedValue(undefined);
+      renderWithProviders(
+        <CsmCaseCommentBubble
+          comment={makeComment({
+            authorEmail: "jane.doe@example.com",
+            bodyHtml: "<p>Original text</p>",
+          })}
+          onEditComment={onEditComment}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Comment actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Edit/ }));
+      fireEvent.click(screen.getByText("HTML source"));
+      const sourceField = screen.getByPlaceholderText("<p>Type HTML here…</p>");
+      const save = screen.getByRole("button", { name: "Save" });
+      expect(save).toBeEnabled();
+
+      // What a cleared rich editor emits; the backend only refuses "".
+      fireEvent.change(sourceField, { target: { value: "<p><br></p>" } });
+      expect(save).toBeDisabled();
+      fireEvent.change(sourceField, { target: { value: "<p>&nbsp; </p>" } });
+      expect(save).toBeDisabled();
+      fireEvent.click(save);
+      expect(onEditComment).not.toHaveBeenCalled();
+
+      // An inline image with no text is still a comment.
+      fireEvent.change(sourceField, {
+        target: { value: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' },
+      });
+      expect(save).toBeEnabled();
+    });
+
     it("reverts to the unedited view on Cancel without calling onEditComment", () => {
       mockCurrentUser.mockReturnValue({ email: "jane.doe@example.com" });
       const onEditComment = vi.fn();

@@ -119,6 +119,13 @@ export const searchArticles = (
     signal,
   });
 
+/**
+ * Number of published articles in one knowledge base. With a knowledge base
+ * filter the backend's `total` is exact, so a page of one is enough.
+ */
+export const countArticles = (knowledgeBaseId: string, signal?: AbortSignal): Promise<number> =>
+  searchArticles({ knowledgeBaseId, limit: 1 }, signal).then((response) => response.total);
+
 export const getArticle = (id: string, signal?: AbortSignal): Promise<KBArticle> =>
   request<KBArticle>(`/public/kb-articles/${encodeURIComponent(id)}`, { signal });
 

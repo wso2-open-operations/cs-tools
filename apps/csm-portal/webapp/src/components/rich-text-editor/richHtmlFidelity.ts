@@ -36,6 +36,7 @@
  *   what the editor itself emits, and the `style` it writes on every `<img>`
  *   is its own too, so content it wrote never trips this (a test feeds the
  *   editor's real output through here to keep it that way);
+ * - so is `list-style-type` on a nested-list wrapper item (`li.editor-list-item-nested`);
  * - table elements are skipped because the editor deliberately keeps their
  *   styling across a round trip (see `stripLexicalTableStylingFromHtml`);
  * - a `<div>` with no styling only becomes a paragraph, which loses structure
@@ -93,7 +94,15 @@ export function htmlNeedsSourceEditing(html: string): boolean {
     // style is never a sign the content came from somewhere else.
     if (tag === "img") continue;
     const styled = declaredProperties(el.getAttribute("style") ?? "");
-    if (styled.some((property) => !EDITOR_OWN_STYLE_PROPERTIES.has(property))) return true;
+    // The editor marks its nested-list wrapper item `list-style-type: none` on export.
+    const nestedWrapper = tag === "li" && el.classList.contains("editor-list-item-nested");
+    if (
+      styled.some(
+        (property) =>
+          !EDITOR_OWN_STYLE_PROPERTIES.has(property) && !(nestedWrapper && property === "list-style-type"),
+      )
+    )
+      return true;
   }
   return false;
 }

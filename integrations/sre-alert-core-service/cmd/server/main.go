@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -33,12 +34,14 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	schema "alert-core-service"
+	"alert-core-service/internal/api"
 	"alert-core-service/internal/auth"
 	"alert-core-service/internal/config"
 	"alert-core-service/internal/csm"
 	"alert-core-service/internal/engine"
 	"alert-core-service/internal/hub"
 	"alert-core-service/internal/model"
+	"alert-core-service/internal/muterule"
 	"alert-core-service/internal/notify"
 	"alert-core-service/internal/pglock"
 	"alert-core-service/internal/poll"
@@ -120,6 +123,17 @@ func main() {
 		ChatThreadingEnabled: depCfg.Notify.ChatThreadingEnabled,
 	}
 	notifier := notify.New(base.With("component", "notify"), csmClient, notifyCfg)
+	ruleRefresh := depCfg.Notify.MuteRuleRefreshInterval.Duration()
+	var rules *muterule.Cache
+	var ruleMatcher engine.RuleMatcher // stays a nil interface without CSM, which turns muting off
+	if csmClient != nil {
+		rules = muterule.NewCache(base.With("component", "muterule"), csmClient.ActiveAlertMuteRules, depCfg.Notify.MuteRuleMaxStaleness.Duration())
+		ruleMatcher = rules
+		// One fetch before alerts flow, so a restart doesn't deliver what an active rule mutes; a failure here only means nothing is muted yet.
+		initCtx, cancel := context.WithTimeout(context.Background(), ruleRefresh)
+		_ = rules.Refresh(initCtx)
+		cancel()
+	}
 	eng := engine.New(base.With("component", "engine"), incidents, notifier, engine.Config{
 		Defaults:             defaults,
 		DedupWindow:          depCfg.Engine.DedupWindow.Duration(),
@@ -128,6 +142,8 @@ func main() {
 		ChatThreadingEnabled: depCfg.Notify.ChatThreadingEnabled,
 		ChatFallbackDelay:    depCfg.Notify.ChatFallbackDelay.Duration(),
 		DeliveryConcurrency:  depCfg.Notify.DeliveryConcurrency,
+		Rules:                ruleMatcher,
+		MuteRecheckInterval:  ruleRefresh,
 		CSMRetry: engine.CSMRetryConfig{
 			BaseDelay:  depCfg.Notify.CSMRetryBaseDelay.Duration(),
 			Multiplier: depCfg.Notify.CSMRetryMultiplier,
@@ -163,6 +179,9 @@ func main() {
 		poller.Run(pollCtx)
 	}()
 	go retention.Run(pollCtx)
+	if rules != nil {
+		go rules.Run(pollCtx, ruleRefresh)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +202,17 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	// mutez is 503 while the alert mute rule cache is stale (muting has failed open: alerts a rule should mute page
+	// again), so an uptime monitor can alert on an entity-service / csm-integration outage during maintenance. Not a
+	// readiness or liveness probe: restarting the pod does not fix it. 200 when muting is off.
+	mux.HandleFunc("GET /mutez", func(w http.ResponseWriter, r *http.Request) {
+		if stale, age := rules.Stale(); stale {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "alert mute rules stale (age %s)\n", age.Round(time.Second))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	// livez skips Postgres so a DB blip doesn't trigger pod restarts via the liveness probe.
 	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -197,6 +227,24 @@ func main() {
 		os.Exit(1)
 	}
 	mux.Handle("/alertz", auth.RequireWakeToken(wakeToken, base.With("component", "auth"))(http.HandlerFunc(h.ServeAlert)))
+	// The CSM portal backend reads which incidents each alert mute rule muted, with its own shared token.
+	apiToken := strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN"))
+	switch {
+	case apiToken == "":
+		logger.Warn("ALERT_CORE_API_TOKEN not set; the read API rejects every call, so the CSM portal cannot list muted alerts")
+	case len(apiToken) < auth.MinWakeTokenLen:
+		logger.Error("ALERT_CORE_API_TOKEN is too short; generate one with openssl rand -hex 32", "min_length", auth.MinWakeTokenLen)
+		os.Exit(1)
+	case apiToken == wakeToken:
+		// Alert senders hold the wake token; the same value would also open the read API to them.
+		logger.Error("ALERT_CORE_API_TOKEN must differ from ALERT_CORE_WAKE_TOKEN; generate a separate one with openssl rand -hex 32")
+		os.Exit(1)
+	}
+	apiHandler := api.New(base.With("component", "api"), incidents)
+	requireAPIToken := auth.RequireToken(apiToken, "api token", base.With("component", "auth"))
+	mux.Handle("GET /alert-mute-rules/{id}/muted-incidents", requireAPIToken(http.HandlerFunc(apiHandler.MutedIncidents)))
+	mux.Handle("GET /alert-field-values", requireAPIToken(http.HandlerFunc(apiHandler.FieldValues)))
+	mux.Handle("GET /alert-mute-rules/muted-counts", requireAPIToken(http.HandlerFunc(apiHandler.MutedCounts)))
 
 	port := os.Getenv("PORT")
 	if port == "" {

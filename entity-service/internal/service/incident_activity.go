@@ -37,6 +37,29 @@ func (s *incidentService) recordIncidentFieldChanges(ctx context.Context, req do
 	s.writeIncidentFieldChanges(ctx, req.ID, incidentFieldChanges(req, before, after), actorEmail)
 }
 
+// afterChildIncidentsResolved does for each child incident the parent's update resolved
+// (IncidentRepository.UpdateIncidentLifecycle's cascade) what UpdateIncident does for the parent
+// after its commit: the state and resolution code activity rows, attributed to the same actor,
+// and incident.acknowledged for a child that left NEW, so its call escalation stops. Best-effort,
+// like the parent's.
+func (s *incidentService) afterChildIncidentsResolved(ctx context.Context, children []repository.ResolvedChildIncident, actorEmail string) {
+	resolved := string(domain.IncidentStateResolved)
+	for _, c := range children {
+		changes := []repository.IncidentFieldChange{
+			{Field: "state", OldValue: incidentEnumLabel(&c.PreviousState), NewValue: incidentEnumLabel(&resolved)},
+		}
+		if derefString(c.PreviousResolutionCode) != derefString(c.ResolutionCode) {
+			changes = append(changes, repository.IncidentFieldChange{
+				Field: "resolution_code", OldValue: incidentEnumLabel(c.PreviousResolutionCode), NewValue: incidentEnumLabel(c.ResolutionCode),
+			})
+		}
+		s.writeIncidentFieldChanges(ctx, c.ID, changes, actorEmail)
+		if c.PreviousState == string(domain.IncidentStateNew) {
+			publishIncidentAcknowledgedEvent(ctx, s.eventPublisher, c.ID, c.PreviousState, resolved)
+		}
+	}
+}
+
 // recordHandoffFieldChanges writes the activity-feed entries for a specialist handoff that has
 // already committed: the assignment group it moved and the assignee it cleared. Best-effort and
 // skipped without a baseline, as recordIncidentFieldChanges.

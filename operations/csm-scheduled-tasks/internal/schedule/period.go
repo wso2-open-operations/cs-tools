@@ -56,3 +56,36 @@ func PeriodKey(expr string, now time.Time) (time.Time, error) {
 	// that firing IS the period this tick belongs to, not the one before it.
 	return gronx.PrevTickBefore(expr, now, true)
 }
+
+// LongestGap is the longest time between two consecutive firings of expr over
+// the eight days after from. It refuses an expression that restricts the day
+// of month, month or year: the rest repeat every week, so eight days see every gap.
+func LongestGap(expr string, from time.Time) (time.Duration, error) {
+	if !gronx.IsValid(expr) {
+		return 0, fmt.Errorf("schedule: invalid cron expression %q", expr)
+	}
+	segs, err := gronx.Segments(expr) // seconds, minute, hour, day of month, month, day of week[, year]
+	if err != nil {
+		return 0, err
+	}
+	for _, i := range []int{3, 4, 6} {
+		if i < len(segs) && segs[i] != "*" && segs[i] != "?" {
+			return 0, fmt.Errorf("schedule: %q is limited to certain days of the month, months or years", expr)
+		}
+	}
+	end := from.Add(8 * 24 * time.Hour)
+	prev, err := gronx.NextTickAfter(expr, from, false)
+	if err != nil {
+		return 0, err
+	}
+	var longest time.Duration
+	for prev.Before(end) {
+		next, err := gronx.NextTickAfter(expr, prev, false)
+		if err != nil {
+			return 0, err
+		}
+		longest = max(longest, next.Sub(prev))
+		prev = next
+	}
+	return longest, nil
+}

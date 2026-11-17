@@ -51,6 +51,7 @@ export default function CsmEngagementsPage(): JSX.Element {
       lockedFilters={{ caseTypes: ["engagement"] }}
       hideTypeFilter
       showEngagementTypeFilter
+      showSalesRegionFilter
       detailBasePath="/engagements"
       hideSeverityColumn
       enableColumnCustomization

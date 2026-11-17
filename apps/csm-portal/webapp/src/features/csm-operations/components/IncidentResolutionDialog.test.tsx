@@ -36,6 +36,7 @@ describe("IncidentResolutionDialog", () => {
         onSubmit={() => {}}
       />,
     );
+    expect(screen.getByText("A resolution is required to move this incident to Resolved.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /move to resolved/i })).toBeDisabled();
 
     chooseOption("incident-resolution-code-label", /^solved \(work around\)$/i);
@@ -80,5 +81,55 @@ describe("IncidentResolutionDialog", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("says resolving also resolves the open child incidents", () => {
+    render(
+      <IncidentResolutionDialog
+        target="RESOLVED"
+        isSubmitting={false}
+        openChildCount={2}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "This will also resolve 2 open child incidents (and their own open children). Children without a resolution of their own get this one.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the singular for one open child incident", () => {
+    render(
+      <IncidentResolutionDialog
+        target="RESOLVED"
+        isSubmitting={false}
+        openChildCount={1}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByText(/this will also resolve 1 open child incident \(/i)).toBeInTheDocument();
+  });
+
+  it("says nothing about children when there are none open", () => {
+    render(
+      <IncidentResolutionDialog target="RESOLVED" isSubmitting={false} onClose={() => {}} onSubmit={() => {}} />,
+    );
+    expect(screen.queryByText(/child incident/i)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about children on Close, which does not cascade", () => {
+    render(
+      <IncidentResolutionDialog
+        target="CLOSED"
+        isSubmitting={false}
+        openChildCount={3}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/child incident/i)).not.toBeInTheDocument();
   });
 });

@@ -14,37 +14,43 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { Box, Chip, Skeleton, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
-import { useIsSkillManager } from "@features/csm-skills/api/useSkillManager";
-import AllSkillsTab from "@features/csm-skills/components/AllSkillsTab";
+import { useSkillCapabilities } from "@features/csm-skills/api/useSkillManagement";
 import MySkillsTab from "@features/csm-skills/components/MySkillsTab";
-import SkillManagerTab from "@features/csm-skills/components/SkillManagerTab";
+import SkillCatalogueBrowser from "@features/csm-skills/components/SkillCatalogueBrowser";
+import SkillAdministrationTab from "@features/csm-skills/components/SkillAdministrationTab";
+import SkillDirectoryTab from "@features/csm-skills/components/SkillDirectoryTab";
 
-const TAB_IDS = ["my", "all", "manager"] as const;
+// "manager" is the old Skill Manager tab's id: a link to it lands on the directory.
+const TAB_IDS = ["my", "all", "directory", "admin", "manager"] as const;
 type SkillsTabId = (typeof TAB_IDS)[number];
 
 /**
- * Skills: a skills profile for every CS engineer, the catalogue, and (for
- * managers) a people-by-skill search.
+ * Skills: a skills profile for every CS engineer (with requests for skills the
+ * catalogue lacks), the read-only catalogue, and, for those who hold the
+ * capability, the Skill Directory (people by skill) and Administration
+ * (reviewing requests, managing skills and categories).
  *
- * Two controls are hidden from callers who lack them, a deliberate exception
- * to this app's "show it and let the backend reject it" default, by explicit
- * product decision: the Skill Manager tab (shown only when the manager search
- * answers instead of refusing with 403) and the catalogue's create/edit/
- * deactivate actions (admins only). The backend remains the real gate.
+ * The Directory and Administration tabs are hidden from callers who lack them,
+ * a deliberate exception to this app's "show it and let the backend reject it"
+ * default, by explicit product decision. Which tabs show comes from
+ * GET /skills/me/capabilities; the backend remains the real gate on every call.
  */
 export default function CsmSkillsPage(): JSX.Element {
-  const { isAdmin } = usePortalAccess();
-  const manager = useIsSkillManager();
+  const caps = useSkillCapabilities();
   const { activeTab, setActiveTab } = useQueryParamTabs<SkillsTabId>(TAB_IDS, "my");
 
-  const isManager = manager.data === true;
-  // A link to ?tab=manager waits for the probe instead of flashing another tab.
-  const waitingOnManager = activeTab === "manager" && manager.isPending;
-  const shown: SkillsTabId = activeTab === "manager" && !isManager ? "my" : activeTab;
+  const capabilities = caps.data;
+  const canDirectory = capabilities?.canViewDirectory === true;
+  const canAdmin = capabilities?.canReviewRequests === true || capabilities?.canManageCatalogue === true;
+  const wanted: SkillsTabId = activeTab === "manager" ? "directory" : activeTab;
+  // A link to a gated tab waits for the capabilities instead of flashing another tab.
+  const waiting = (wanted === "directory" || wanted === "admin") && caps.isPending;
+  const shown: SkillsTabId =
+    (wanted === "directory" && !canDirectory) || (wanted === "admin" && !canAdmin) ? "my" : wanted;
+  const pending = capabilities?.pendingRequestCount ?? 0;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -53,29 +59,44 @@ export default function CsmSkillsPage(): JSX.Element {
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
           aria-label="Skills tabs"
-          value={waitingOnManager ? false : shown}
+          value={waiting ? false : shown}
           onChange={(_, id: SkillsTabId) => setActiveTab(id)}
           variant="scrollable"
           scrollButtons="auto"
         >
           <Tab value="my" label="My Skills" id="skills-tab-my" aria-controls="skills-panel" />
           <Tab value="all" label="All Skills" id="skills-tab-all" aria-controls="skills-panel" />
-          {isManager && (
-            <Tab value="manager" label="Skill Manager" id="skills-tab-manager" aria-controls="skills-panel" />
+          {canDirectory && (
+            <Tab value="directory" label="Skill Directory" id="skills-tab-directory" aria-controls="skills-panel" />
+          )}
+          {canAdmin && (
+            <Tab
+              value="admin"
+              id="skills-tab-admin"
+              aria-controls="skills-panel"
+              label={
+                <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+                  Administration
+                  {pending > 0 && <Chip size="small" color="warning" label={pending} aria-label={`${pending} pending requests`} />}
+                </Box>
+              }
+            />
           )}
         </Tabs>
       </Box>
 
       <Box role="tabpanel" id="skills-panel" aria-labelledby={`skills-tab-${shown}`}>
-        {waitingOnManager ? (
+        {waiting ? (
           <Skeleton variant="rounded" height={160} aria-label="Loading" />
         ) : shown === "my" ? (
           <MySkillsTab />
         ) : shown === "all" ? (
-          <AllSkillsTab isAdmin={isAdmin} />
-        ) : (
-          <SkillManagerTab />
-        )}
+          <SkillCatalogueBrowser canViewPeople={canDirectory} />
+        ) : shown === "directory" ? (
+          <SkillDirectoryTab />
+        ) : capabilities ? (
+          <SkillAdministrationTab capabilities={capabilities} />
+        ) : null}
       </Box>
     </Box>
   );

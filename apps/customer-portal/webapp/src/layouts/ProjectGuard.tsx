@@ -76,6 +76,8 @@ function ProjectGuardContent(): JSX.Element {
         <ApiErrorState
           error={error}
           fallbackMessage="Unable to load project details. Please try again later."
+          accessMessage="You don't have access to this project, or it doesn't exist."
+          showRecoveryAction
         />
       </Box>
     );

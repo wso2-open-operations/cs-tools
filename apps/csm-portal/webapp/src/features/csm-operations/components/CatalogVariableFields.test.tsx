@@ -23,10 +23,13 @@ import type { BeCatalogItemVariable } from "@api/backend/types";
 // field, which none of these assertions touch — stub it to a marker so the
 // suite stays a fast, focused test of control selection.
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: () => <div data-testid="rich-text-editor" />,
+  default: ({ ariaRequired }: { ariaRequired?: boolean }) => (
+    <div data-testid="rich-text-editor" aria-required={ariaRequired ? "true" : undefined} />
+  ),
 }));
 
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
+import { getFirstEmptyRequiredField } from "@features/csm-operations/utils/catalogVariables";
 
 /** Opens a MUI select by its accessible name and returns its option list. */
 function openSelect(name: RegExp | string): HTMLElement {
@@ -297,5 +300,70 @@ describe("CatalogVariableFields — SR variable metadata (mandatory/readOnly/max
     );
 
     expect(screen.queryByText("Not a valid email")).not.toBeInTheDocument();
+  });
+});
+
+describe("CatalogVariableFields — rich-text Description", () => {
+  const DESCRIPTION: BeCatalogItemVariable = {
+    id: "66666666-6666-6666-6666-666666666666",
+    questionText: "Description",
+    order: 100,
+    type: "multi_line_text",
+  };
+
+  it("puts the required asterisk on its caption and aria-required on the editor when mandatory", () => {
+    renderFields([{ ...DESCRIPTION, mandatory: true }]);
+
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByTestId("rich-text-editor")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("shows neither when the variable is optional", () => {
+    renderFields([{ ...DESCRIPTION, mandatory: false }]);
+
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(caption.textContent).not.toContain("*");
+    expect(screen.getByTestId("rich-text-editor")).not.toHaveAttribute("aria-required");
+  });
+
+  it("shows neither on a read-only variable, even a mandatory one, since its editor is disabled", () => {
+    renderFields([{ ...DESCRIPTION, mandatory: true, readOnly: true }]);
+
+    expect(screen.getByText("Description").querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(screen.getByTestId("rich-text-editor")).not.toHaveAttribute("aria-required");
+  });
+});
+
+describe("CatalogVariableFields — read-only variables", () => {
+  it("does not mark a mandatory read-only field required, whatever its kind, since it is disabled", () => {
+    renderFields([
+      { ...NOTES, id: "ro-text", questionText: "Read-only notes", mandatory: true, readOnly: true },
+      { ...TARGET_CLOUD, id: "ro-choice", questionText: "Read-only cloud", mandatory: true, readOnly: true },
+      { ...NOTES, id: "rw-text", questionText: "Editable notes", mandatory: true },
+    ]);
+
+    const notes = screen.getByLabelText(/read-only notes/i);
+    expect(notes).toBeDisabled();
+    expect(notes).not.toBeRequired();
+    const cloud = screen.getByRole("combobox", { name: /read-only cloud/i });
+    expect(cloud).toHaveAttribute("aria-disabled", "true");
+    expect(cloud).not.toBeRequired();
+    // The same kind of variable, editable, is marked.
+    expect(screen.getByLabelText(/editable notes/i)).toBeRequired();
+  });
+
+  it("agrees with the submit gate on an empty mandatory read-only field: no mark, no block", () => {
+    const variables = [
+      { ...NOTES, id: "ro-text", questionText: "Read-only notes", mandatory: true, readOnly: true },
+      { ...NOTES, id: "rw-text", questionText: "Editable notes", mandatory: true },
+    ];
+    renderFields(variables);
+
+    expect(screen.getByLabelText(/read-only notes/i)).not.toBeRequired();
+    // The only field that blocks is the one that carries the mark.
+    expect(getFirstEmptyRequiredField(variables, {})).toBe("Editable notes");
+    expect(getFirstEmptyRequiredField(variables, { "rw-text": "filled" })).toBeNull();
   });
 });

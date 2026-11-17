@@ -97,12 +97,41 @@ type CaseTypeTransferResult struct {
 	PreviousType     string
 	PreviousSeverity *domain.CaseSeverity
 	Type             string
-	// Severity is set only when the new type is "case".
-	Severity  *domain.CaseSeverity
-	State     *domain.CaseState
-	WorkState *domain.CaseWorkState
-	UpdatedOn time.Time
-	ProjectID string
+	// Severity is the severity stored on the new row: set when the new type is
+	// "case" (the caller's) or "service_request" (carried over, see
+	// SeverityDowngrade); nil otherwise.
+	Severity *domain.CaseSeverity
+	// SeverityDowngrade is set when a case at catastrophic (S0) moved to a
+	// service request, which cannot hold S0, and was stored as critical (S1).
+	SeverityDowngrade *SeverityDowngrade
+	State             *domain.CaseState
+	WorkState         *domain.CaseWorkState
+	UpdatedOn         time.Time
+	ProjectID         string
+}
+
+// SeverityDowngrade records a severity that was lowered by a transfer.
+type SeverityDowngrade struct {
+	From domain.CaseSeverity
+	To   domain.CaseSeverity
+}
+
+// serviceRequestSeverityOnTransfer decides the severity a service request gets
+// when the work item moves into that type. A case's S1-S4 carries over
+// unchanged; S0 (not allowed on a service request) becomes S1 and is reported;
+// a source with no severity (a case row without one, or any non-case type)
+// becomes S4, the same default a new service request gets.
+func serviceRequestSeverityOnTransfer(previousType string, carried *string) (label string, downgrade *SeverityDowngrade) {
+	if previousType != "case" || carried == nil {
+		return "S4", nil
+	}
+	switch *carried {
+	case "S0":
+		return "S1", &SeverityDowngrade{From: domain.CaseSeverityCatastrophic, To: domain.CaseSeverityCritical}
+	case "S1", "S2", "S3", "S4":
+		return *carried, nil
+	}
+	return "S4", nil
 }
 
 // caseTypeToWorkItemType maps a transfer target to work_item.type.
@@ -158,12 +187,12 @@ type carriedCaseFields struct {
 }
 
 // readCarriedCaseFieldsSQL reads the common columns of the extension row of
-// each type, locking it. severity exists on "case" only. All five tables carry
+// each type, locking it. severity exists on "case" and service_request. All five tables carry
 // work_state and resolution_code since migration 0184.
 func readCarriedCaseFieldsSQL(previousType string) string {
 	ext := caseTypeExtensions[previousType]
 	severity := "NULL::TEXT"
-	if previousType == "case" {
+	if previousType == "case" || previousType == "service_request" {
 		severity = "severity::TEXT"
 	}
 	return fmt.Sprintf(`SELECT state::TEXT, close_notes, cause::TEXT, closed_by_user_id::TEXT, closed_on, resolved_on,
@@ -189,6 +218,9 @@ func insertTransferredCaseSQL(target string) string {
 	case "engagement":
 		return fmt.Sprintf(`INSERT INTO %s (%s, type, payment_type)
 	VALUES (%s, $12::engagement_type_enum, $13::engagement_payment_type_enum)`, ext.table, commonCols, common)
+	case "service_request":
+		return fmt.Sprintf(`INSERT INTO %s (%s, severity)
+	VALUES (%s, $12::case_severity_enum)`, ext.table, commonCols, common)
 	default:
 		return fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, ext.table, commonCols, common)
 	}
@@ -335,6 +367,11 @@ func (r *caseRepo) TransferCaseType(ctx context.Context, plan CaseTypeTransfer, 
 			return fmt.Errorf("transfer case type: read %s row: %w", previousType, err)
 		}
 		var previousSeverity *domain.CaseSeverity
+		var downgrade *SeverityDowngrade
+		var srSeverity string
+		if plan.TargetType == "service_request" {
+			srSeverity, downgrade = serviceRequestSeverityOnTransfer(previousType, carried.severity)
+		}
 		if carried.severity != nil {
 			if s, ok := caseSeverityFromEnum[*carried.severity]; ok {
 				previousSeverity = &s
@@ -363,6 +400,8 @@ func (r *caseRepo) TransferCaseType(ctx context.Context, plan CaseTypeTransfer, 
 			insertArgs = append(insertArgs, targetSeverity, targetIssueType)
 		case "engagement":
 			insertArgs = append(insertArgs, targetEngagementType, targetPaymentType)
+		case "service_request":
+			insertArgs = append(insertArgs, srSeverity)
 		}
 		if _, err := tx.Exec(ctx, insertTransferredCaseSQL(plan.TargetType), insertArgs...); err != nil {
 			return fmt.Errorf("transfer case type: insert %s row: %w", plan.TargetType, err)
@@ -384,7 +423,9 @@ func (r *caseRepo) TransferCaseType(ctx context.Context, plan CaseTypeTransfer, 
 		//    severity change crosses that line, and a transfer crosses it the same
 		//    way when it moves an S4 case out of "case" or an S4 case in. It runs in
 		//    a savepoint: a failing statement would otherwise abort the transfer.
-		oldLow := previousSeverity != nil && *previousSeverity == domain.CaseSeverityLow
+		//    Only a "case" source counts: a service request's severity is internal
+		//    and has no bearing on billing.
+		oldLow := previousType == "case" && previousSeverity != nil && *previousSeverity == domain.CaseSeverityLow
 		newLow := plan.TargetType == "case" && plan.Severity != nil && *plan.Severity == domain.CaseSeverityLow
 		if oldLow != newLow {
 			if sp, spErr := tx.Begin(ctx); spErr == nil {
@@ -424,8 +465,13 @@ func (r *caseRepo) TransferCaseType(ctx context.Context, plan CaseTypeTransfer, 
 			UpdatedOn:        updatedOn,
 			ProjectID:        stringOrEmpty(projectID),
 		}
-		if plan.TargetType == "case" {
+		switch plan.TargetType {
+		case "case":
 			result.Severity = plan.Severity
+		case "service_request":
+			sv := caseSeverityFromEnum[srSeverity]
+			result.Severity = &sv
+			result.SeverityDowngrade = downgrade
 		}
 		switch {
 		case remoteState != nil:

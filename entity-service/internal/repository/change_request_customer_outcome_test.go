@@ -124,6 +124,8 @@ func TestClassifyExternalPatch(t *testing.T) {
 			"customerApprovalRequired": func(r *domain.PatchChangeRequestRequest) { r.CustomerApprovalRequired = &no },
 			"deploymentIds":            func(r *domain.PatchChangeRequestRequest) { r.DeploymentIDs = &[]string{} },
 			"implementationPlan":       func(r *domain.PatchChangeRequestRequest) { r.ImplementationPlan = new(*string) },
+			// The deviation from the implementation plan is internal: staff record it.
+			"implementationDeviation": func(r *domain.PatchChangeRequestRequest) { r.ImplementationDeviation = &start },
 			// WSO2's answer to a proposed time is never a customer's to send.
 			"confirmCustomerUpdatedDate": func(r *domain.PatchChangeRequestRequest) { r.ConfirmCustomerUpdatedDate = &start },
 			"expectedCustomerUpdatedOn":  func(r *domain.PatchChangeRequestRequest) { r.ExpectedCustomerUpdatedOn = &start },
@@ -156,7 +158,7 @@ func TestClassifyExternalPatch(t *testing.T) {
 		covered := map[string]bool{
 			"Title": true, "Description": true, "ProjectID": true, "State": true, "Impact": true, "AssignedTeamID": true,
 			"RequestApproval": true, "OnHold": true, "Comment": true, "WorkNote": true, "CustomerApprovalRequired": true,
-			"DeploymentIDs": true, "ImplementationPlan": true,
+			"DeploymentIDs": true, "ImplementationPlan": true, "ImplementationDeviation": true,
 			"ConfirmCustomerUpdatedDate": true, "ExpectedCustomerUpdatedOn": true,
 		}
 		typ := reflect.TypeOf(domain.PatchChangeRequestRequest{})

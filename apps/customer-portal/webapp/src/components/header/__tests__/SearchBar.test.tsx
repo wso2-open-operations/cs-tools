@@ -21,6 +21,7 @@ import SearchBar from "@components/header/SearchBar";
 vi.mock("react-router", () => ({
   useNavigate: () => vi.fn(),
   useParams: () => ({ projectId: "proj-1" }),
+  useLocation: () => ({ pathname: "/proj-1/dashboard", search: "" }),
 }));
 
 vi.mock("@hooks/useDebouncedValue", () => ({
@@ -32,6 +33,21 @@ vi.mock("@api/useGetProjectCases", () => ({
     data: { pages: [{ cases: [] }] },
     isLoading: false,
     isError: false,
+  }),
+}));
+
+vi.mock("@api/useGetProjectFilters", () => ({
+  default: () => ({ data: { changeRequestStates: [] } }),
+}));
+
+vi.mock("@features/operations/api/useGetChangeRequests", () => ({
+  useGetChangeRequestsInfinite: () => ({
+    data: { pages: [{ changeRequests: [] }] },
+    isLoading: false,
+    isError: false,
+    fetchNextPage: vi.fn(),
+    hasNextPage: false,
+    isFetchingNextPage: false,
   }),
 }));
 
@@ -56,7 +72,7 @@ describe("SearchBar", () => {
     render(<SearchBar projectId="proj-1" />);
 
     const searchInput = screen.getByPlaceholderText(
-      "Search cases, tickets, or users",
+      "What are you looking for?",
     );
     expect(searchInput).toBeInTheDocument();
   });

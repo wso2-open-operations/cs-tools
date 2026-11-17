@@ -564,11 +564,15 @@ ON CONFLICT (id) DO UPDATE SET
   requested_by_user_id = EXCLUDED.requested_by_user_id, justification = EXCLUDED.justification,
   customer_approval_required = EXCLUDED.customer_approval_required,
   customer_review_required = EXCLUDED.customer_review_required,
-  -- whatever a spec or a manual walk-through stamped on the way (a customer's proposed time and WSO2's answer to it included)
+  -- whatever a spec or a manual walk-through stamped on the way (a customer's proposed time, the record of who
+  -- proposed it (migration 0249), WSO2's answer to it and the deviation from the implementation plan (migration
+  -- 0245, which a change put back to New would otherwise carry into Request Approval) included)
   approval = NULL, is_customer_approval_required = NULL, is_customer_review_required = NULL,
   start_on = NULL, end_on = NULL, closed_by_user_id = NULL, closed_on = NULL,
   is_on_hold = NULL, on_hold_reason = NULL, customer_group_id = NULL,
-  customer_updated_on = NULL, customer_updated_date_confirmation = NULL;
+  customer_updated_on = NULL, customer_updated_date_confirmation = NULL,
+  customer_proposed_by_user_id = NULL, customer_proposed_for = NULL, customer_proposed_on = NULL,
+  implementation_deviation = NULL;
 
 INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status, checkpoint_label) VALUES
   ('00000000-0000-0000-0000-000000001005', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000000901', 'REQUESTED', 'Peer Approval'),

@@ -19,6 +19,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
+vi.mock("@features/support/api/useCreatePendingVerification", () => ({
+  useCreatePendingVerification: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@features/support/api/useVerifyPendingVerification", () => ({
+  useVerifyPendingVerification: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("@api/useGetProjectFilters", () => ({
   default: () => ({
     data: {
@@ -64,6 +81,13 @@ const useCustomerPermissionsMock = vi.fn(() => ({
 vi.mock("@hooks/useCustomerPermissions", () => ({
   useCustomerPermissions: () => useCustomerPermissionsMock(),
 }));
+
+// The "Open Related Case" window is 60 days from closure, so a fixed date rots.
+// Build a closedOn (UTC, "YYYY-MM-DD HH:mm:ss") a few days before now instead.
+function recentClosedOn(daysAgo = 5): string {
+  const d = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
 
 function renderActionRow(
   props: Partial<Parameters<typeof CaseDetailsActionRow>[0]> = {},
@@ -191,7 +215,7 @@ describe("CaseDetailsActionRow", () => {
   it("should render Open Related Case for recently closed cases", () => {
     renderActionRow({
       statusLabel: "Closed",
-      closedOn: "2026-05-15 10:00:00",
+      closedOn: recentClosedOn(),
       onOpenRelatedCase: vi.fn(),
     });
     expect(
@@ -215,7 +239,7 @@ describe("CaseDetailsActionRow", () => {
     const onOpenRelatedCase = vi.fn();
     renderActionRow({
       statusLabel: "Closed",
-      closedOn: "2026-05-15 10:00:00",
+      closedOn: recentClosedOn(),
       onOpenRelatedCase,
     });
     fireEvent.click(screen.getByRole("button", { name: "Open Related Case" }));

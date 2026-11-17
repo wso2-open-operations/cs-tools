@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen, fireEvent } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NoveraChatPage from "@features/support/pages/NoveraChatPage";
 
 const mockNavigate = vi.fn();
@@ -117,6 +117,10 @@ describe("NoveraChatPage", () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("should render chat composition shell", () => {
     render(<NoveraChatPage />);
     expect(screen.getByText("MessageList")).toBeInTheDocument();
@@ -124,19 +128,32 @@ describe("NoveraChatPage", () => {
   });
 
   it("should navigate back and create-case branches", async () => {
+    // Create Case waits (bounded, CONVERSATION_ID_WAIT_MS = 3000) for the
+    // conversation id before navigating, so drive the timer instead of real time.
+    vi.useFakeTimers();
     render(<NoveraChatPage />);
     fireEvent.click(screen.getByText("Back Chat"));
     fireEvent.click(screen.getByText("Create Case"));
 
     expect(mockNavigate).toHaveBeenCalledWith(-1);
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith(
-        "/projects/project-1/support/chat/create-case",
-        expect.objectContaining({
-          state: expect.objectContaining({ messages: expect.any(Array) }),
-        }),
-      );
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      "/projects/project-1/support/chat/create-case",
+      expect.anything(),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
     });
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/projects/project-1/support/chat/create-case",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          messages: expect.any(Array),
+          conversationId: null,
+        }),
+      }),
+    );
   });
 });
 

@@ -37,7 +37,7 @@ describe("projectDetails utils", () => {
 
     it("should handle empty or null input", () => {
       expect(formatProjectDate("")).toBe("");
-      // @ts-ignore - testing runtime behavior for null
+      // @ts-expect-error - testing runtime behavior for null
       expect(formatProjectDate(null)).toBe("");
     });
 
@@ -54,7 +54,7 @@ describe("projectDetails utils", () => {
 
     it("should handle empty or null input", () => {
       expect(formatProjectDateTime("")).toBe("");
-      // @ts-ignore - testing runtime behavior
+      // @ts-expect-error - testing runtime behavior
       expect(formatProjectDateTime(null)).toBe("");
     });
 
@@ -83,24 +83,23 @@ describe("projectDetails utils", () => {
   });
 
   describe("getSLAStatusColor", () => {
-    it("should return 'success' for 'All Good' or 'Good'", () => {
+    it("should return 'success' for 'All Good'", () => {
       expect(getSLAStatusColor("All Good")).toBe("success");
       expect(getSLAStatusColor("all good")).toBe("success");
-      expect(getSLAStatusColor("Good")).toBe("success");
-      expect(getSLAStatusColor("good")).toBe("success");
     });
 
-    it("should return 'error' for 'Needs attention' or 'Bad'", () => {
-      expect(getSLAStatusColor("Needs attention")).toBe("error");
-      expect(getSLAStatusColor("needs attention")).toBe("error");
-      expect(getSLAStatusColor("Bad")).toBe("error");
-      expect(getSLAStatusColor("bad")).toBe("error");
+    it("should return 'warning' for 'Needs attention'", () => {
+      expect(getSLAStatusColor("Needs attention")).toBe("warning");
+      expect(getSLAStatusColor("needs attention")).toBe("warning");
     });
 
     it("should return 'default' for unknown values", () => {
       expect(getSLAStatusColor("Met")).toBe("default");
+      // Only the exact "all good" / "needs attention" labels are mapped.
+      expect(getSLAStatusColor("Good")).toBe("default");
+      expect(getSLAStatusColor("Bad")).toBe("default");
       expect(getSLAStatusColor("Unknown")).toBe("default");
-      // @ts-ignore
+      // @ts-expect-error - testing runtime behavior for null
       expect(getSLAStatusColor(null)).toBe("default");
     });
   });

@@ -168,7 +168,7 @@ Shutdown is graceful (15 s) on `SIGINT`/`SIGTERM`.
   choosing one.
 - **Record-level authorization** is resolved from platform data, not from the token: for example,
   posting a public case comment requires being the case's assigned engineer, and de-escalating
-  requires being one of the case's team leads. Handlers read the record from the entity-service for
+  requires being one of the case's team leads (and nothing more than a portal role). Handlers read the record from the entity-service for
   these checks. A caller whose token grants a limited role but has no platform user record is
   provisioned one on first use from their own token.
 - `GET /users/me` reports the caller's portal roles from the same guard that enforces the routes, so
@@ -350,8 +350,7 @@ any API change: new, removed or changed endpoints, request/response shapes and e
   the server log line for the failed call.
 - **Slow uploads cut off.** Raise `REST_WRITE_TIMEOUT` and `ENTITY_SERVICE_TIMEOUT` (keep the second
   shorter).
-- **Re-reading dashboards without restarting.** Set `DASHBOARDS_HOT_RELOAD=true` (local only); changed definitions are upserted into the database and served from there.
-- **Dashboards missing or stale.** The API serves the database. Check the startup log for `system dashboard upsert failed` (entity service unreachable or rejecting this backend's credentials) and that `DASHBOARDS_DIR` points where you expect.
+- **Re-reading dashboards without restarting.** Set `DASHBOARDS_HOT_RELOAD=true` (local only).
 - Logs are text on stderr via `log/slog`.
 
 ## Configuration reference
@@ -418,7 +417,7 @@ unset one (except the three marked optional).
 
 | Variable | Warns if unset | Grants |
 |---|---|---|
-| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, scan-user, `/user-info`, ...) |
+| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, `/user-info`, ...) |
 | `AUTH_ESCALATOR_ROLES` | Yes | `view`, `escalate` |
 | `AUTH_ATTACHMENT_DOWNLOADER_ROLES` | Yes | `view`, `download_attachment` |
 | `AUTH_SUPPORT_ENGINEER_ROLES` | Yes | The `cs_engineer` portal role: `view`, `view_operations`, `time_cards_and_updates`, `download_attachment`, `write`, `security_center`, `escalate`, work notes, comment edit/delete, PLG use. (The variable keeps its old name; the role is `cs_engineer`.) Not `approve_time_card`, `admin` or `create_announcement` |
@@ -430,6 +429,7 @@ unset one (except the three marked optional).
 | `AUTH_SECURITY_TEAM_ROLES` | Yes | Read-only `view`, `view_operations`, `security_center`; never any state-changing permission |
 | `AUTH_WORKNOTE_CREATOR_ROLES` | No (optional) | Posting a `work_note` comment on a case only; none of `write`'s other actions |
 | `AUTH_COMMENT_UPDATER_ROLES` | No (optional) | Reaching comment edit/delete, and editing or deleting **any** comment (a plain `cs_engineer` only succeeds on their own); also `security_center` |
+| `AUTH_PRODUCT_CATALOG_MANAGER_ROLES` | No (optional) | Editing the product catalogue (the create, PATCH and retire routes under `/products`, `/product-versions` and `/release-lines`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can. entity-service re-checks the same role names |
 | `AUTH_ONBOARDING_LEAD_ROLES` | No (optional) | Setting a project's onboarding status, owner and dates (`PATCH /projects/{id}`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can |
 | `AUTH_SALES_SOLUTIONS_ROLES` | No (optional) | Only `view_shared_entity` (the shared case, account, project and team-member reads); also reported by `GET /users/me` so the webapp can pick a navigation |
 
@@ -445,7 +445,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `view_operations` | Operations reads: incidents, change requests, problems, incident tasks, outages, alerts. `cs_engineer`, `admin`, `security_team` |
 | `time_cards_and_updates` | Time-card routes and update-level lookups. `cs_engineer`, `admin`, time-card approver |
 | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state`; checked inside the handler. Time-card approver and `admin` |
-| `escalate` | `POST /cases/{id}/escalations`; de-escalating also requires being one of the case's team leads |
+| `escalate` | Escalating via `POST /cases/{id}/escalations` (the route itself only needs `view`; the handler checks this for `ESCALATE`). De-escalating does not use it: it requires being one of the case's team leads, whatever the caller's other roles, and holding `escalate` does not substitute |
 | `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` |
 | `write` | Every other `POST`/`PATCH`/`DELETE` |
 | `admin` | Admin-only routes such as `POST /users`, `POST /users/{id}/roles`, `GET /roles/grantable`, knowledge-base administration |
@@ -453,6 +453,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `create_announcement` | Writes on `/announcement-requests` (together with `write`), and `POST /cases` with `type: announcement` |
 | `update_delete_comment` | `PATCH`/`DELETE /comments/{id}`; which comment may be touched is decided per comment (see `AUTH_COMMENT_UPDATER_ROLES`) |
 | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the five onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`, `onboardingProductionReadinessCompletionDate`); checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
+| `manage_product_catalog` | `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/versions`, `PATCH /product-versions/{id}`, `POST /product-versions/{id}/retire`, `POST /release-lines`, `PATCH /release-lines/{id}`, `POST /release-lines/{id}/retire` (applied at once). `product_catalog_manager` and `admin`. Reading the catalogue (`GET /products/{id}`, `POST /product-versions/search`, `GET /product-versions/{id}`, `GET /release-lines`, `GET /carbon-platform-history`, `GET /carbon-kernel-releases`) is `view` |
 | `use_plg`, `manage_playbooks` | The `/plg/*` routes: `cs_engineer` and `admin` use them; authoring playbook templates is `admin` only |
 
 A caller with none of the required roles gets `403`. Some actions need more than the role: posting a
@@ -540,11 +541,11 @@ starting with `_` and non-`.json` files are ignored by the directory loader.
 
 | Variable | Required | Default | Description | Example |
 |---|---|---|---|---|
-| `DASHBOARDS_DIR` | No | unset (serve only the dashboards already in the database) | Migration source, not the live source. Directory with one `*.json` per dashboard; at startup each is expanded and upserted into the database (entity service `/system-dashboards`, key = the dashboard `id`, slugged to `[A-Za-z0-9._-]` if needed), overwriting the stored copy, and the API serves the database. Files are authoritative while mounted: a removed or renamed file also deletes its stored dashboard, but only once every upsert succeeded and the directory held at least one dashboard (never when unset). Two ids with the same key, or a bad file, are fatal; a failed upsert is retried, logged and startup continues. A set but missing directory is fatal | `./dashboards.example` |
-| `DASHBOARDS_HOT_RELOAD` | No | `false` | Re-read `DASHBOARDS_DIR` on every dashboards request and upsert the definitions that changed into the database before serving. `strconv.ParseBool` values; an unparseable non-empty value warns and is `false`. A failed re-read keeps serving the last good definitions. **Local development only** | `true` |
-| `DASHBOARD_PRESETS_FILE` | No | none | JSON file of `presetKey` to literal filter fragment, shared by every dashboard and referenced as `{"preset": "key"}`. A dashboard's own `filterPresets` shadows it. Only read when `DASHBOARDS_DIR` is set; not stored in the database, so the presets endpoint is empty without it | `./dashboards.example/_presets.json` |
-| `DASHBOARD_SECTIONS_FILE` | No | none | JSON file of reusable widget sections (`sectionKey` to `{displayName, widgets}`) that a dashboard pulls in through `includeSections`. Only read when `DASHBOARDS_DIR` is set; not stored in the database, so the sections endpoint is empty without it | `./dashboards.example/_sections.json` |
-| `DASHBOARDS_CONFIG` | No | none | **Deprecated.** The whole set as one JSON array, migrated into the database like `DASHBOARDS_DIR`. Used only when `DASHBOARDS_DIR` is unset; malformed content is fatal | `[...]` |
+| `DASHBOARDS_DIR` | No | unset (no dashboards unless `DASHBOARDS_CONFIG` is set) | Directory with one `*.json` per dashboard. A set but missing directory is fatal | `./dashboards.example` |
+| `DASHBOARDS_HOT_RELOAD` | No | `false` | Re-read `DASHBOARDS_DIR` on every request instead of serving the startup snapshot. `strconv.ParseBool` values; an unparseable non-empty value warns and is `false`. A failed re-read keeps serving the last good definitions. **Local development only** | `true` |
+| `DASHBOARD_PRESETS_FILE` | No | none | JSON file of `presetKey` to literal filter fragment, shared by every dashboard and referenced as `{"preset": "key"}`. A dashboard's own `filterPresets` shadows it. Only read when `DASHBOARDS_DIR` is set | `./dashboards.example/_presets.json` |
+| `DASHBOARD_SECTIONS_FILE` | No | none | JSON file of reusable widget sections (`sectionKey` to `{displayName, widgets}`) that a dashboard pulls in through `includeSections`. Only read when `DASHBOARDS_DIR` is set | `./dashboards.example/_sections.json` |
+| `DASHBOARDS_CONFIG` | No | none | **Deprecated.** The whole registry as one JSON array. Used only when `DASHBOARDS_DIR` is unset; malformed content is fatal | `[...]` |
 
 A definition may set `"restricted": true`: only callers holding `cs_engineer` or `admin` see it in
 `GET /dashboards`, and `GET /dashboards/{id}` returns `403` to everyone else.
@@ -644,7 +645,7 @@ main service plus the `/plg/*` routes). Main areas:
 | Knowledge base | `/kb-articles/*`, `/knowledge-bases/*`, `/kb-manager-*` |
 | Announcements | `/announcements/*`, `/announcement-requests/*` |
 | Dashboards | `/dashboards`, `/dashboards/{id}`, `/dashboards/filter-presets`, `/dashboards/sections` |
-| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/scan-user`, `/user-info` |
+| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/user-info` |
 
 Many routes forward to entity-service operations that only exist for one data source; when the
 paired entity-service does not support an operation for its data source it returns an error that

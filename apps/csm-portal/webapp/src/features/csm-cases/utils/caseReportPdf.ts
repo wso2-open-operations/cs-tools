@@ -54,8 +54,12 @@ function formatDateTime(value?: string | null): string {
   );
 }
 
-function severityLabel(severity: CsmCaseDetail["severity"]): string {
-  return severity === "unset" ? "Unset" : SEVERITY_LABEL[severity];
+function severityLabel(caseDetail: Pick<CsmCaseDetail, "severity" | "caseType">): string {
+  const { severity } = caseDetail;
+  // A service request's severity is never unset; a missing value there is a dash,
+  // not the "Unset" wording reserved for support cases.
+  if (severity === "unset") return caseDetail.caseType === "service_request" ? "—" : "Unset";
+  return SEVERITY_LABEL[severity];
 }
 
 /**
@@ -110,7 +114,7 @@ export function generateCaseReportPdf(
 
   const rows: PdfDetailsRow[] = [
     { label: "State", value: stateLabel(caseDetail.state), colorRole: "info" },
-    { label: "Severity", value: severityLabel(caseDetail.severity), colorRole: "error" },
+    { label: "Severity", value: severityLabel(caseDetail), colorRole: "error" },
     { label: "Type", value: caseTypeTransferLabel(caseDetail.caseType ?? "case") },
     { label: "Customer", value: caseDetail.customer || "—" },
     { label: "Project", value: caseDetail.projectName || "—" },

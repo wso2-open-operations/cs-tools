@@ -251,6 +251,13 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
   // same reasoning the widget-editor gate uses.
   const exportCouldLoseReferences =
     working?.sourceDashboardId !== undefined && filterPresets === undefined;
+  // The dashboard loader (DASHBOARDS_DIR, the path this JSON is deployed
+  // through) refuses a definition with a blank "displayName" or no "type",
+  // so the draft keeps autosaving without them but cannot be exported.
+  const displayNameMissing = !working?.displayName.trim();
+  const typeMissing = !working?.type;
+  const exportMissingRequired = displayNameMissing || typeMissing;
+  const exportBlocked = exportCouldLoseReferences || exportMissingRequired;
   const [editingWidget, setEditingWidget] = useState<
     { widget: BeDashboardWidget | undefined; defaultSection?: string } | undefined
   >(undefined);
@@ -383,7 +390,7 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
     // Guarded here as well as on the button: a disabled button is a UI
     // affordance, not an invariant, and this must not be reachable from
     // anywhere else while the catalogue is missing.
-    if (exportCouldLoseReferences) return;
+    if (exportBlocked) return;
     const deployable = deployableDashboardFromDraft(working, filterPresets);
     try {
       await navigator.clipboard.writeText(JSON.stringify(deployable, null, 2));
@@ -436,14 +443,16 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
             title={
               exportCouldLoseReferences
                 ? "Unavailable while the shared filter presets cannot be loaded: exporting now would turn this dashboard's shared preset references into fixed copies."
-                : "Copy this dashboard's deployable JSON to the clipboard"
+                : exportMissingRequired
+                  ? "Add a display name and a type first: the dashboard loader refuses a definition without them."
+                  : "Copy this dashboard's deployable JSON to the clipboard"
             }
           >
             <Button
               size="small"
               variant="outlined"
               startIcon={<Copy size={14} />}
-              disabled={exportCouldLoseReferences}
+              disabled={exportBlocked}
               onClick={() => void handleCopyJson()}
             >
               {copyFeedback ? "Copied!" : "Copy as JSON"}
@@ -513,13 +522,15 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
             required
             value={working.displayName}
             onChange={(e) => updateWorking({ displayName: e.target.value })}
+            helperText={displayNameMissing ? "Required to copy as JSON." : undefined}
             size="small"
             sx={{ flex: "1 1 260px" }}
             slotProps={{ htmlInput: { "aria-label": "Dashboard display name" } }}
           />
           <TextField
             select
-            label="Type (optional)"
+            label="Type"
+            required
             value={working.type ?? ""}
             onChange={(e) => updateWorking({ type: (e.target.value || undefined) as DashboardDraft["type"] })}
             size="small"
@@ -531,8 +542,8 @@ export default function CsmDashboardBuilderEditorPage(): JSX.Element {
               },
               select: { notched: (working.type ?? "") !== "" },
             }}
+            helperText={typeMissing ? "Required to copy as JSON." : undefined}
           >
-            <MenuItem value="">None</MenuItem>
             {DASHBOARD_TYPES.map((t) => (
               <MenuItem key={t} value={t}>
                 {t.toUpperCase()}

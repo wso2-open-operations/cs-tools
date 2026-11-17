@@ -350,6 +350,7 @@ export default function SavedViewsMenu({
             size="small"
             margin="dense"
             label="View name"
+            required
             placeholder="e.g. My open records"
             value={newViewName}
             onChange={(e) => {

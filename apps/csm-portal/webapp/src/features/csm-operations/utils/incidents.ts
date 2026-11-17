@@ -97,6 +97,12 @@ export function isIncidentTerminal(state?: string | null): boolean {
   return state === "CLOSED" || state === "CANCELLED";
 }
 
+/** Whether resolving this incident's parent would resolve it too: every state
+ * but Resolved, Closed and Cancelled, New and On Hold included. */
+export function isIncidentOpen(state?: string | null): boolean {
+  return state !== "RESOLVED" && !isIncidentTerminal(state);
+}
+
 /**
  * The states every one of `current` can move to (the same table as the Edit
  * dialog's): what a bulk edit may set on all of them at once, Resolved and

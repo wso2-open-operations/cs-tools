@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
-import { ConfigError, resolveBackendBaseUrl } from "@config/apiConfig";
+import { describe, expect, it, vi } from "vitest";
+import { ConfigError, resolveBackendBaseUrl, resolveSupportUrl } from "@config/apiConfig";
 
 describe("resolveBackendBaseUrl", () => {
   it("returns the URL without trailing slashes", () => {
@@ -33,4 +33,24 @@ describe("resolveBackendBaseUrl", () => {
       expect(() => resolveBackendBaseUrl(value)).toThrow(ConfigError);
     },
   );
+});
+
+describe("resolveSupportUrl", () => {
+  it("accepts an absolute http(s) URL and trims it", () => {
+    expect(resolveSupportUrl("  https://support.example.com/portal ", () => {})).toBe(
+      "https://support.example.com/portal",
+    );
+  });
+
+  it("is undefined when unset", () => {
+    expect(resolveSupportUrl(undefined, () => {})).toBeUndefined();
+    expect(resolveSupportUrl("", () => {})).toBeUndefined();
+  });
+
+  it("drops a malformed value with a warning instead of rendering it", () => {
+    const warn = vi.fn();
+    expect(resolveSupportUrl("javascript:alert(1)", warn)).toBeUndefined();
+    expect(resolveSupportUrl("not a url", warn)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
 });

@@ -20,6 +20,7 @@ import {
   ErrorBannerProvider,
   useErrorBanner,
 } from "@context/error-banner/ErrorBannerContext";
+import { ERROR_BANNER_TIMEOUT_MS } from "@constants/common";
 
 vi.mock("@wso2/oxygen-ui", () => ({
   Alert: ({ children, onClose, severity }: any) => (
@@ -112,7 +113,12 @@ describe("ErrorBannerContext", () => {
     expect(screen.getByTestId("error-banner")).toBeInTheDocument();
 
     act(() => {
-      vi.advanceTimersByTime(2900);
+      vi.advanceTimersByTime(ERROR_BANNER_TIMEOUT_MS - 1);
+    });
+    expect(screen.getByTestId("error-banner")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
     });
 
     expect(screen.queryByTestId("error-banner")).toBeNull();

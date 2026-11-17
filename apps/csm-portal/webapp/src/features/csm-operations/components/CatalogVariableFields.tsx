@@ -27,6 +27,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import Editor from "@components/rich-text-editor/Editor";
 import type { BeCatalogItemVariable } from "@api/backend/types";
 import {
@@ -34,7 +35,7 @@ import {
   isDateTimeField,
   isDescriptionField,
   isMultiLineField,
-  isVariableRequired,
+  isVariableRequiredOnForm,
   usableChoices,
   variableLabel,
 } from "@features/csm-operations/utils/catalogVariables";
@@ -59,10 +60,11 @@ interface CatalogVariableFieldsProps {
  *
  * Respects the additive per-variable metadata from
  * `CHANGES-sr-variable-metadata.md` (`BeCatalogItemVariable`): required-ness
- * comes from `isVariableRequired` (the real `mandatory` flag when the
+ * comes from `isVariableRequiredOnForm` (the real `mandatory` flag when the
  * backend supplies one, falling back to the old hot fix otherwise);
  * `readOnly` disables the control rather than hiding it (the value is still
- * shown so the engineer can see what will be submitted); `maxLength`
+ * shown so the engineer can see what will be submitted) and is never
+ * required; `maxLength`
  * constrains free-text inputs; a declared `validation` regex is checked
  * client-side and its `message` shown as the field's error text.
  * `active`/`hidden` are NOT re-checked here — the caller (`variables` prop)
@@ -80,8 +82,11 @@ export default function CatalogVariableFields({
         {variables.map((v) => {
           const value = values[v.id] ?? "";
           const label = variableLabel(v);
-          const required = isVariableRequired(v);
           const readOnly = v.readOnly === true;
+          // The asterisk and aria-required, never on a read-only (disabled)
+          // control: the user can't fill it in. The submit gate
+          // (`getFirstEmptyRequiredField`) uses the same rule.
+          const required = isVariableRequiredOnForm(v);
           // Checked client-side only when there's something to check and a
           // rule to check it against — matches
           // `getFirstFieldFailingValidation`'s own skip-when-empty rule so
@@ -164,7 +169,8 @@ export default function CatalogVariableFields({
                   color="text.secondary"
                   sx={{ display: "block", mb: 0.5 }}
                 >
-                  {label} {required ? "*" : ""}
+                  {label}
+                  {required && <RequiredMark />}
                 </Typography>
                 <Box role="group" aria-label={label}>
                   <Editor
@@ -175,6 +181,7 @@ export default function CatalogVariableFields({
                     maxHeight="300px"
                     toolbarVariant="full"
                     disabled={readOnly}
+                    ariaRequired={required}
                   />
                 </Box>
               </Grid>

@@ -63,6 +63,7 @@ let mockIsSplAudience = false;
 let mockCanViewWorkItemsStaffView = true;
 let mockCanUpdateProjectClosureState = false;
 let mockCanEditProjectOnboarding = false;
+let mockIsAdmin = false;
 let mockCanUpdateProjectSuspensionOverride = false;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
@@ -77,7 +78,14 @@ vi.mock("@context/current-user/usePortalAccess", () => ({
     canUpdateProjectClosureState: mockCanUpdateProjectClosureState,
     canUpdateProjectSuspensionOverride: mockCanUpdateProjectSuspensionOverride,
     canEditProjectOnboarding: mockCanEditProjectOnboarding,
+    isAdmin: mockIsAdmin,
   }),
+}));
+
+vi.mock("@features/csm-admin/salesforce-resync/SalesforceResyncDialog", () => ({
+  default: ({ scope, id }: { scope: string; id: string }) => (
+    <div data-testid="salesforce-resync-dialog">{`${scope}:${id}`}</div>
+  ),
 }));
 
 const mockPatchClosureStateMutate = vi.fn();
@@ -205,11 +213,32 @@ function renderPage(initialEntry = "/customers/projects/proj-1") {
             }
           />
           <Route path="/cases/new" element={<LocationProbe />} />
+          <Route path="/customers/projects/:id/sla-report/:sysId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+describe("CsmProjectDetailPage: Compare with Salesforce", () => {
+  beforeEach(() => {
+    mockIsAdmin = false;
+    mockUseGetProject.mockReturnValue({ data: PROJECT, isLoading: false, isError: false, error: null });
+  });
+
+  it("hides the button from a non-admin", () => {
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Compare with Salesforce" })).not.toBeInTheDocument();
+  });
+
+  it("shows the button to an admin and opens the dialog for this project", () => {
+    mockIsAdmin = true;
+    renderPage();
+    expect(screen.queryByTestId("salesforce-resync-dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare with Salesforce" }));
+    expect(screen.getByTestId("salesforce-resync-dialog")).toHaveTextContent("project:proj-1");
+  });
+});
 
 describe("CsmProjectDetailPage — tab state", () => {
   beforeEach(() => {
@@ -326,11 +355,27 @@ describe("CsmProjectDetailPage — report buttons", () => {
     });
   });
 
-  it("shows Time and CS reports to anyone who can open the project, and keeps SLA disabled", () => {
+  it("shows the SLA, Time and CS reports to anyone who can open the project", () => {
     renderPage();
+    expect(screen.getByRole("link", { name: "SLA Report" })).toHaveAttribute(
+      "href",
+      `/customers/projects/${PROJECT.id}/sla-report/${PROJECT.id}`,
+    );
     expect(screen.getByRole("link", { name: "Time Report" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "CS Report" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "SLA Report — Coming soon" })).toBeDisabled();
+    expect(screen.queryByText(/Coming soon/)).not.toBeInTheDocument();
+  });
+
+  it("opens the SLA report with the tab it was opened from, so Back returns there", () => {
+    renderPage(`/customers/projects/${PROJECT.id}?tab=workItems&subTab=engagements`);
+    fireEvent.click(screen.getByRole("link", { name: "SLA Report" }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      `/customers/projects/${PROJECT.id}/sla-report/${PROJECT.id}`,
+    );
+    expect(JSON.parse(screen.getByTestId("location-state-probe").textContent ?? "null")).toEqual({
+      from: `/customers/projects/${PROJECT.id}?tab=workItems&subTab=engagements`,
+      parentState: null,
+    });
   });
 });
 

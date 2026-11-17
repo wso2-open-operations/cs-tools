@@ -50,8 +50,21 @@ vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
   usePostCsmCase: () => ({ mutateAsync: postCaseMutateAsyncMock }),
 }));
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="editor"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 // The real multi-select searches the backend as the user types; stub it with
@@ -62,21 +75,29 @@ vi.mock("@features/csm-cases/components/AsyncProjectMultiSelect", () => ({
   default: ({
     values,
     onChange,
+    required,
+    helperText,
   }: {
     values: string[];
     onChange: (next: string[]) => void;
+    required?: boolean;
+    helperText?: string;
   }) => (
-    <select
-      aria-label="Projects"
-      multiple
-      value={values}
-      onChange={(e) =>
-        onChange(Array.from(e.target.selectedOptions).map((o) => o.value))
-      }
-    >
-      <option value="proj-1">Project One</option>
-      <option value="proj-2">Project Two</option>
-    </select>
+    <>
+      <select
+        aria-label="Projects"
+        multiple
+        required={required}
+        value={values}
+        onChange={(e) =>
+          onChange(Array.from(e.target.selectedOptions).map((o) => o.value))
+        }
+      >
+        <option value="proj-1">Project One</option>
+        <option value="proj-2">Project Two</option>
+      </select>
+      {helperText && <span>{helperText}</span>}
+    </>
   ),
 }));
 // CsmAnnouncementCreatePage imports BackendApiError from the real API client
@@ -159,12 +180,15 @@ function selectProjects(...values: string[]): void {
   fireEvent.change(select);
 }
 
-function fillSubjectAndDescription(): void {
+/** A description that is only an inline image: no text, but content all the same. */
+const IMAGE_ONLY_DESCRIPTION = '<p><img src="data:image/png;base64,AAAA" alt=""></p>';
+
+function fillSubjectAndDescription(description = "<p>Maintenance window details.</p>"): void {
   fireEvent.change(screen.getByLabelText(/subject/i), {
     target: { value: "Scheduled maintenance" },
   });
   fireEvent.change(screen.getByLabelText("editor"), {
-    target: { value: "<p>Maintenance window details.</p>" },
+    target: { value: description },
   });
 }
 
@@ -206,6 +230,23 @@ describe("CsmAnnouncementCreatePage", () => {
     fillSubjectAndDescription();
     // No project picked at all — a draft can still be saved.
     expect(saveDraft).toBeEnabled();
+  });
+
+  it("marks Description required (asterisk on its caption, aria-required on the editor)", () => {
+    renderPage();
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("marks the specific Projects picker as required to submit for approval, without blocking a draft", () => {
+    renderPage();
+    expect(screen.getByLabelText("Projects")).toBeRequired();
+    expect(screen.getByText("Required to submit for approval.")).toBeInTheDocument();
+
+    fillSubjectAndDescription();
+    expect(screen.getByRole("button", { name: /save as draft/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /submit for approval/i })).toBeDisabled();
   });
 
   it("keeps Submit for approval disabled until subject, description, and an audience are present", () => {
@@ -294,6 +335,42 @@ describe("CsmAnnouncementCreatePage", () => {
     );
     expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/announcements?tab=pending", undefined));
+  });
+
+  it("saves a draft whose description is only an inline image", async () => {
+    renderPage();
+    fillSubjectAndDescription(IMAGE_ONLY_DESCRIPTION);
+
+    const saveDraft = screen.getByRole("button", { name: /save as draft/i });
+    expect(saveDraft).toBeEnabled();
+    fireEvent.click(saveDraft);
+
+    await waitFor(() =>
+      expect(createDraftMock.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "customer", description: IMAGE_ONLY_DESCRIPTION }),
+      ),
+    );
+  });
+
+  it("runs the dry run and submits for approval with a description that is only an inline image", async () => {
+    mockSuccessfulDryRun();
+    renderPage();
+    fillSubjectAndDescription(IMAGE_ONLY_DESCRIPTION);
+    selectProjects("proj-1");
+
+    const submit = screen.getByRole("button", { name: /submit for approval/i });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(postCaseMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "announcement", description: IMAGE_ONLY_DESCRIPTION }),
+      ),
+    );
+    await waitFor(() =>
+      expect(recordDryRunMock.mutateAsync).toHaveBeenCalledWith({ id: "draft-1", caseId: "case-test-1" }),
+    );
+    await waitFor(() => expect(submitMock.mutateAsync).toHaveBeenCalledWith({ id: "draft-1" }));
   });
 
   it("surfaces an error and does not navigate when Save as draft fails", async () => {
@@ -455,6 +532,15 @@ describe("CsmAnnouncementCreatePage", () => {
       fireEvent.click(await screen.findByRole("option", { name: /4\.2\.0/i }));
     }
 
+    it("marks Description required (asterisk on its caption, aria-required on the editor)", () => {
+      mockEolBackend();
+      renderPage();
+      switchToEolKind();
+      const caption = screen.getByText("Description");
+      expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+      expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
+    });
+
     it("keeps Save as draft disabled until product, version, subject, and description are filled", async () => {
       mockEolBackend();
       renderPage();
@@ -468,6 +554,24 @@ describe("CsmAnnouncementCreatePage", () => {
 
       fillSubjectAndDescription();
       await waitFor(() => expect(saveDraft).toBeEnabled());
+    });
+
+    it("saves an eol draft whose description is only an inline image", async () => {
+      mockEolBackend();
+      renderPage();
+      switchToEolKind();
+      await selectProductAndVersion();
+      fillSubjectAndDescription(IMAGE_ONLY_DESCRIPTION);
+
+      const saveDraft = screen.getByRole("button", { name: /save as draft/i });
+      await waitFor(() => expect(saveDraft).toBeEnabled());
+      fireEvent.click(saveDraft);
+
+      await waitFor(() =>
+        expect(createDraftMock.mutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "eol", description: IMAGE_ONLY_DESCRIPTION }),
+        ),
+      );
     });
 
     it("Submit for approval is disabled until the resolved audience is non-empty", async () => {

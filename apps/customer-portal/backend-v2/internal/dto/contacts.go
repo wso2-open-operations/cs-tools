@@ -55,7 +55,8 @@ type Contact struct {
 	Account             *ContactAccount `json:"account,omitempty"`
 	// CanResendInvitation is set only on database-backed rows
 	// (CSM_MIGRATION_PORTAL_CONTACTS_ENABLED) whose invitation is still
-	// outstanding, so the webapp shows the resend action exactly when
+	// outstanding and who are not integration (system) users, which are never
+	// invited, so the webapp shows the resend action exactly when
 	// POST .../resend-invitation can succeed. It is never set before cutover.
 	CanResendInvitation bool `json:"canResendInvitation,omitempty"`
 	// IsAccountAdmin is read-only: true when the contact holds an account-level

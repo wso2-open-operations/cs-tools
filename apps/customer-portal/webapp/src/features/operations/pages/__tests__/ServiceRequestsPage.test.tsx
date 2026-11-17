@@ -54,6 +54,10 @@ vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
   }),
 }));
 
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [], isLoading: false }),
+}));
+
 vi.mock("@api/useGetProjectDetails", () => ({
   default: () => ({ data: { name: "Demo" }, isLoading: false }),
 }));

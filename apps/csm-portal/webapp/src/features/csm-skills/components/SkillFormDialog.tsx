@@ -34,6 +34,8 @@ import {
   useUpdateSkill,
 } from "@features/csm-skills/api/useSkillCatalogue";
 import { CategoryMultiSelect } from "@features/csm-skills/components/CategorySelect";
+import { fileableCategoryIds } from "@features/csm-skills/utils/categoryTree";
+import { defaultLevelType } from "@features/csm-skills/utils/levels";
 import type { Skill, UpdateSkillRequest } from "@features/csm-skills/types";
 
 interface SkillFormDialogProps {
@@ -62,7 +64,10 @@ export default function SkillFormDialog({ skill, onClose }: SkillFormDialogProps
   const [name, setName] = useState(skill?.name ?? "");
   const [description, setDescription] = useState(skill?.description ?? "");
   const [keywords, setKeywords] = useState(skill?.keywords ?? "");
-  const [levelTypeId, setLevelTypeId] = useState(skill?.levelTypeId ?? "");
+  const [chosenLevelTypeId, setLevelTypeId] = useState(skill?.levelTypeId ?? "");
+  // A new skill starts on the default scale until another is chosen.
+  const levelTypeId = chosenLevelTypeId || (editing ? "" : (defaultLevelType(levelTypes.data)?.id ?? ""));
+  const fileable = fileableCategoryIds(categories.data);
   const [categoryIds, setCategoryIds] = useState<string[]>(initialCategoryIds);
   const [active, setActive] = useState(skill?.active ?? true);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +158,7 @@ export default function SkillFormDialog({ skill, onClose }: SkillFormDialogProps
             {(levelTypes.data ?? []).map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
+                {t.isDefault ? " (default)" : ""}
               </option>
             ))}
           </TextField>
@@ -163,6 +169,8 @@ export default function SkillFormDialog({ skill, onClose }: SkillFormDialogProps
             loading={categories.isLoading}
             values={categoryIds}
             onChange={setCategoryIds}
+            selectableIds={new Set([...fileable, ...initialCategoryIds])}
+            helperText="A skill is filed under an active category with no sub-categories."
           />
           <FormControlLabel
             control={<Switch checked={active} onChange={(e) => setActive(e.target.checked)} />}

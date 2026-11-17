@@ -56,6 +56,7 @@ func TestOutbound_EventTypesMatchTheWorkflows(t *testing.T) {
 		outboundCaseAssigned: "servicenow-case-update",
 		outboundCRCreated:    "servicenow-cr-update",
 		outboundCRUpdated:    "servicenow-cr-update",
+		outboundSeverity:     "csm-severity-update",
 	}
 	for event, want := range cases {
 		t.Run(event, func(t *testing.T) {

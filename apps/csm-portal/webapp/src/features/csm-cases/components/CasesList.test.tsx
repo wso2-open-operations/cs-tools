@@ -788,3 +788,27 @@ describe("CasesList — spare width on a wide screen", () => {
     expect(style.gridTemplateColumns.endsWith("minmax(90px, max-content)")).toBe(true);
   });
 });
+
+describe("CasesList — service request severity", () => {
+  const renderRow = (row: CsmCaseRow): void => {
+    renderWithProviders(
+      <CasesList cases={[row]} isLoading={false} optionalColumns={["severity"]} />,
+      ["/operations/service-requests"],
+    );
+  };
+
+  it("shows a service request's severity badge in the severity column", () => {
+    renderRow({ ...CASE, caseType: "service_request", severity: "S1" });
+    expect(screen.getByText("S1")).toBeInTheDocument();
+  });
+
+  it("never shows the Unset badge for a service request", () => {
+    renderRow({ ...CASE, caseType: "service_request", severity: "unset" });
+    expect(screen.queryByText("Unset")).not.toBeInTheDocument();
+  });
+
+  it("still shows the Unset badge for a support case with no severity", () => {
+    renderRow({ ...CASE, caseType: "case", severity: "unset" });
+    expect(screen.getByText("Unset")).toBeInTheDocument();
+  });
+});

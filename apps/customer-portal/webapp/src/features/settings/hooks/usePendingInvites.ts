@@ -92,7 +92,7 @@ export interface UsePendingInvitesOptions {
    */
   refetchContacts: () => Promise<ProjectContact[] | undefined>;
   /** Called once an invitation is confirmed as a real row. */
-  onInvited: (email: string) => void;
+  onInvited: (email: string, request: CreateProjectContactRequest) => void;
   /** Called when an invitation fails, with the reason. */
   onFailed: (email: string, message: string) => void;
 }
@@ -152,7 +152,7 @@ export function usePendingInvites(options: UsePendingInvitesOptions): UsePending
       if (outcome === "created") {
         await optionsRef.current.refetchContacts();
         remove(email);
-        optionsRef.current.onInvited(email);
+        optionsRef.current.onInvited(email, request);
         return;
       }
       // Accepted but not finished: refresh until the contact appears.
@@ -160,7 +160,7 @@ export function usePendingInvites(options: UsePendingInvitesOptions): UsePending
         await sleep(delay);
         if (await contactExists(email)) {
           remove(email);
-          optionsRef.current.onInvited(email);
+          optionsRef.current.onInvited(email, request);
           return;
         }
       }
@@ -171,7 +171,7 @@ export function usePendingInvites(options: UsePendingInvitesOptions): UsePending
       try {
         if (await contactExists(email)) {
           remove(email);
-          optionsRef.current.onInvited(email);
+          optionsRef.current.onInvited(email, request);
           return;
         }
       } catch {

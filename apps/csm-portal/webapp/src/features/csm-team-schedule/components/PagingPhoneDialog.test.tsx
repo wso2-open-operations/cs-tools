@@ -47,6 +47,9 @@ function Host({ onSave = vi.fn(), mode = "edit" as "edit" | "remove", onRemove =
   );
 }
 
+// By role and name: the label also carries the aria-hidden required asterisk.
+const phoneInput = () => screen.getByRole("textbox", { name: "Mobile number (with country code)" });
+
 function openDialog() {
   const opener = screen.getByRole("button", { name: "Open" });
   opener.focus();
@@ -60,12 +63,21 @@ describe("PagingPhoneDialog", () => {
     const opener = openDialog();
     const dialog = screen.getByRole("dialog", { name: "Add alert number for Jane Doe" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    const input = screen.getByLabelText("Mobile number (with country code)");
+    const input = phoneInput();
     expect(input).toHaveFocus();
     expect(screen.getByText(PAGING_PHONE_HELPER)).toBeInTheDocument();
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
+  });
+
+  it("marks the number required, with the asterisk every required field has", () => {
+    render(<Host />);
+    openDialog();
+    const input = phoneInput();
+    expect(input).toBeRequired();
+    const label = document.querySelector(`label[for="${input.id}"]`);
+    expect(label?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("keeps Tab inside the dialog", () => {
@@ -75,7 +87,7 @@ describe("PagingPhoneDialog", () => {
     const save = screen.getByRole("button", { name: "Save" });
     save.focus();
     fireEvent.keyDown(dialog, { key: "Tab" });
-    expect(screen.getByLabelText("Mobile number (with country code)")).toHaveFocus();
+    expect(phoneInput()).toHaveFocus();
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(save).toHaveFocus();
   });
@@ -84,7 +96,7 @@ describe("PagingPhoneDialog", () => {
     const onSave = vi.fn();
     render(<Host onSave={onSave} />);
     openDialog();
-    const input = screen.getByLabelText("Mobile number (with country code)");
+    const input = phoneInput();
     fireEvent.change(input, { target: { value: "0771234567" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave).not.toHaveBeenCalled();

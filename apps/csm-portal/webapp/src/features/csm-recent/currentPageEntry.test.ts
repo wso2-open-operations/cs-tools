@@ -19,6 +19,15 @@ import {
   currentPageEntry,
   isKnownPage,
 } from "@features/csm-recent/currentPageEntry";
+import { navNodeById } from "@config/csmNavItems";
+import {
+  CHANGE_REQUEST_LIST_PARAM_PREFIX,
+  CHANGE_REQUESTS_VIEW_PARAM,
+  STANDARD_CHANGE_PROPOSALS_PATH,
+  STANDARD_CHANGES_LABELS,
+  STANDARD_CHANGES_PATH,
+  STANDARD_CHANGES_SHOW_PARAM,
+} from "@features/csm-operations/utils/standardChanges";
 
 describe("currentPageEntry — section landing routes", () => {
   it("pins a section under its own name", () => {
@@ -99,6 +108,112 @@ describe("currentPageEntry — query-backed tabs", () => {
     expect(currentPageEntry("/operations", "?state=open").title).toBe(
       "Operations: 1 filter",
     );
+  });
+});
+
+describe("currentPageEntry — a named place inside a page (Standard changes and its proposals)", () => {
+  it.each([
+    ["?view=standard", "Standard changes"],
+    ["?view=standard&show=proposals", "Standard change proposals"],
+  ])("pins %s as the place itself, not a filter of Change requests", (search, title) => {
+    expect(currentPageEntry("/operations/change-requests", search)).toEqual({
+      kind: "page",
+      id: `/operations/change-requests${search}`,
+      title,
+      href: `/operations/change-requests${search}`,
+    });
+  });
+
+  it("gives Standard changes, its proposals and the list each a distinct pin", () => {
+    const ids = [
+      currentPageEntry("/operations/change-requests", "").id,
+      currentPageEntry("/operations/change-requests", "?view=standard").id,
+      currentPageEntry("/operations/change-requests", "?view=standard&show=proposals").id,
+    ];
+    expect(new Set(ids).size).toBe(3);
+    expect(currentPageEntry("/operations/change-requests", "").title).toBe("Change requests");
+  });
+
+  it("names the place first and counts only the other parameters as filters", () => {
+    expect(
+      currentPageEntry("/operations/change-requests", "?view=standard&show=proposals&scope=awaiting"),
+    ).toEqual({
+      kind: "search",
+      id: "/operations/change-requests?view=standard&show=proposals&scope=awaiting",
+      title: "Standard change proposals: 1 filter",
+      href: "/operations/change-requests?view=standard&show=proposals&scope=awaiting",
+    });
+    expect(
+      currentPageEntry("/operations/change-requests", "?view=standard&show=proposals&scope=mine&state=draft").title,
+    ).toBe("Standard change proposals: 2 filters");
+  });
+
+  it("ignores the change request list's cr* filters kept in the URL on Standard changes", () => {
+    expect(currentPageEntry("/operations/change-requests", "?view=standard&crQ=gateway&crStates=new")).toEqual({
+      kind: "page",
+      id: "/operations/change-requests?view=standard",
+      title: "Standard changes",
+      href: "/operations/change-requests?view=standard",
+    });
+    expect(currentPageEntry("/operations/change-requests", "?crQ=gateway&view=standard&show=proposals").title).toBe(
+      "Standard change proposals",
+    );
+    // Its own filters still count, and the pin's href leaves the list's out.
+    expect(
+      currentPageEntry("/operations/change-requests", "?view=standard&show=proposals&scope=awaiting&crQ=gateway"),
+    ).toEqual({
+      kind: "search",
+      id: "/operations/change-requests?view=standard&show=proposals&scope=awaiting",
+      title: "Standard change proposals: 1 filter",
+      href: "/operations/change-requests?view=standard&show=proposals&scope=awaiting",
+    });
+    expect(currentPageEntry("/operations", "?tab=change_requests&view=standard&crQ=x").title).toBe("Standard changes");
+  });
+
+  it("names the old sub-view links after the places they now land on", () => {
+    expect(currentPageEntry("/operations/change-requests", "?view=catalogue").title).toBe("Standard changes");
+    expect(currentPageEntry("/operations/change-requests", "?view=proposals").title).toBe(
+      "Standard change proposals",
+    );
+  });
+
+  it("still reads the change request list's own filters as filters", () => {
+    expect(currentPageEntry("/operations/change-requests", "?crQ=gateway").title).toBe(
+      "Change requests: 1 filter",
+    );
+  });
+
+  it("reads a sub-view it does not know as a filter, as the page shows the list for it", () => {
+    expect(currentPageEntry("/operations/change-requests", "?view=nonsense").title).toBe(
+      "Change requests: 1 filter",
+    );
+  });
+
+  it("resolves the place on the legacy ?tab= form too", () => {
+    expect(currentPageEntry("/operations", "?tab=change_requests&view=standard")).toEqual({
+      kind: "page",
+      id: "/operations?tab=change_requests&view=standard",
+      title: "Standard changes",
+      href: "/operations?tab=change_requests&view=standard",
+    });
+  });
+
+  it("does not treat `view` as a place on a page that declares none", () => {
+    expect(currentPageEntry("/operations/incidents", "?view=standard").title).toBe(
+      "Incidents: 1 filter",
+    );
+  });
+
+  it("uses the same parameters and labels as the Change requests sub-navigation", () => {
+    expect(CHANGE_REQUESTS_VIEW_PARAM).toBe("view");
+    expect(STANDARD_CHANGES_SHOW_PARAM).toBe("show");
+    expect(navNodeById("operations.change-requests")?.views?.ignoreParamPrefix).toBe(CHANGE_REQUEST_LIST_PARAM_PREFIX);
+    expect(currentPageEntry("/operations/change-requests", new URL(STANDARD_CHANGES_PATH, "http://x").search).title).toBe(
+      STANDARD_CHANGES_LABELS.templates,
+    );
+    expect(
+      currentPageEntry("/operations/change-requests", new URL(STANDARD_CHANGE_PROPOSALS_PATH, "http://x").search).title,
+    ).toBe(STANDARD_CHANGES_LABELS.proposals);
   });
 });
 

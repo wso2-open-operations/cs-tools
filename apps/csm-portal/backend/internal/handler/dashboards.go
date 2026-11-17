@@ -17,30 +17,12 @@
 package handler
 
 import (
-	"errors"
-	"log/slog"
 	"net/http"
 	"sort"
 
-	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
-
-const errMsgDashboardsLoadFailed = "The dashboards couldn't be loaded. Try again in a moment."
-
-// writeDashboardsLoadError answers a failed read of the stored dashboards. The
-// read uses this backend's own service credentials, not the caller's, so an
-// upstream 4xx (a rejected credential, a missing route) is not the caller's
-// doing: it is reported as a bad gateway rather than echoed as the caller's
-// own 401/403/404, which the portal would read as a sign-out or a missing page.
-func writeDashboardsLoadError(w http.ResponseWriter, err error) {
-	var apiErr *apierror.Error
-	if errors.As(err, &apiErr) && apiErr.StatusCode < http.StatusInternalServerError {
-		err = &apierror.Error{StatusCode: http.StatusBadGateway}
-	}
-	mapUpstreamErrorGeneric(w, err, errMsgDashboardsLoadFailed)
-}
 
 // dashboardPieSliceView is one wedge of a Shape "pie" widget — see
 // dashboard.PieSlice. Query is this slice's own criteria verbatim, including
@@ -216,12 +198,7 @@ func (h *DashboardHandler) GetDashboards(w http.ResponseWriter, r *http.Request)
 	}
 
 	canSeeRestricted := h.canSeeRestricted(user.Roles)
-	dashboards, err := dashboard.List(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "dashboards: load failed", "err", err)
-		writeDashboardsLoadError(w, err)
-		return
-	}
+	dashboards := dashboard.All()
 	views := make([]dashboardListItemView, 0, len(dashboards))
 	for _, d := range dashboards {
 		if d.Restricted && !canSeeRestricted {
@@ -249,12 +226,7 @@ func (h *DashboardHandler) GetDashboardDetail(w http.ResponseWriter, r *http.Req
 	}
 
 	dashboardID := r.PathValue("dashboardId")
-	d, ok, err := dashboard.Lookup(r.Context(), dashboardID)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "dashboards: load failed", "id", dashboardID, "err", err)
-		writeDashboardsLoadError(w, err)
-		return
-	}
+	d, ok := dashboard.ByID(dashboardID)
 	if !ok {
 		writeError(w, http.StatusNotFound, ErrMsgNotFound)
 		return

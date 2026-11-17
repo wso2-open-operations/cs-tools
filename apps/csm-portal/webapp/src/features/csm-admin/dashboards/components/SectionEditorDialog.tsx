@@ -33,6 +33,7 @@ import {
 import { Pencil, Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type { BeDashboardFilterPreset, BeDashboardWidget } from "@api/backend/types";
+import RequiredMark from "@components/RequiredMark";
 import WidgetEditorDialog from "@features/csm-admin/dashboards/components/WidgetEditorDialog";
 import type { SectionDraft } from "@features/csm-admin/dashboards/utils/sharedConfigDraftsStorage";
 
@@ -104,6 +105,7 @@ export default function SectionEditorDialog({
             <TextField
               size="small"
               label="Section name"
+              required
               value={name}
               onChange={(e) => setName(e.target.value)}
               error={duplicate}
@@ -117,6 +119,7 @@ export default function SectionEditorDialog({
             <TextField
               size="small"
               label="Section heading"
+              required
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               helperText="Shown above the section's widgets, e.g. My Work. A dashboard including this section can override it."
@@ -126,6 +129,7 @@ export default function SectionEditorDialog({
             <Box>
               <Typography variant="subtitle2" gutterBottom>
                 Widgets
+                <RequiredMark />
               </Typography>
               {widgets.length === 0 ? (
                 <Alert severity="info">

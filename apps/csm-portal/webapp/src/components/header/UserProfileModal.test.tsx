@@ -154,3 +154,34 @@ describe("UserProfileModal: phone number", () => {
     expect(screen.getByText(/8 to 15 digits, no spaces or dashes/)).toBeInTheDocument();
   });
 });
+
+describe("UserProfileModal: time zone required mark", () => {
+  beforeEach(() => {
+    mutateMock.mockReset();
+    showErrorMock.mockReset();
+    showSuccessMock.mockReset();
+  });
+
+  const captionMark = (): Element | null =>
+    screen.getByText("Time zone").querySelector(".MuiFormLabel-asterisk");
+
+  it("marks a stored time zone required while it is being edited, since it cannot be cleared", () => {
+    userMe = { email: "jane@example.com", timeZone: "UTC", phoneNumber: PHONE };
+    openDialog();
+    expect(captionMark()).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Edit time zone"));
+
+    expect(captionMark()).not.toBeNull();
+    expect(screen.getByRole("combobox")).toBeRequired();
+  });
+
+  it("does not mark it when no time zone is stored, where leaving it empty changes nothing", () => {
+    userMe = { email: "jane@example.com", phoneNumber: PHONE };
+    openDialog();
+    fireEvent.click(screen.getByLabelText("Edit time zone"));
+
+    expect(captionMark()).toBeNull();
+    expect(screen.getByRole("combobox")).not.toBeRequired();
+  });
+});

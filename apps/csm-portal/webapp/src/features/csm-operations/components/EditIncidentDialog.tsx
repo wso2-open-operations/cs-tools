@@ -115,9 +115,8 @@ interface EditState {
   impact: BeIncidentImpact | "";
   urgency: BeIncidentUrgency | "";
   state: BeIncidentState | "";
-  /** Write-only (see `BeUpdateIncidentPayload`) — `IncidentDetail` never
-   * echoes these back, so they always start blank, unlike every other field
-   * here. Required by ServiceNow to move `state` to `RESOLVED`/`CLOSED`. */
+  /** Always start blank, unlike every other field here, and are sent
+   * whenever filled in. Required to move `state` to `RESOLVED`/`CLOSED`. */
   resolutionCode: BeIncidentResolutionCode | "";
   resolutionNotes: string;
   serviceId: string;
@@ -125,7 +124,8 @@ interface EditState {
   configurationItemId: string;
   assignmentGroupId: string;
   assignedEngineerId: string;
-  parentId: string;
+  /** The parent incident (`parentIncidentId`), not the generic `parentId`. */
+  parentIncidentId: string;
   changeRequestId: string;
   problemId: string;
   causedById: string;
@@ -148,7 +148,7 @@ function toEditState(incident: BeIncidentDetail): EditState {
     configurationItemId: incident.configurationItem?.id ?? "",
     assignmentGroupId: incident.assignmentGroup?.id ?? "",
     assignedEngineerId: incident.assignedTo?.id ?? "",
-    parentId: incident.parent?.id ?? "",
+    parentIncidentId: incident.parentIncident?.id ?? "",
     changeRequestId: incident.changeRequest?.id ?? "",
     problemId: incident.problem?.id ?? "",
     causedById: incident.causedBy?.id ?? "",
@@ -163,9 +163,9 @@ function toEditState(incident: BeIncidentDetail): EditState {
  * {@link BeUpdateIncidentPayload}); the fixed-enum fields (category, impact,
  * etc.) never clear to null, only to a different value.
  *
- * `resolutionCode`/`resolutionNotes` don't fit that diff pattern — they're
- * write-only (no `initial` value exists to diff against), so they're sent
- * whenever filled in, regardless of whether anything else changed.
+ * `resolutionCode`/`resolutionNotes` don't fit that diff pattern — they
+ * start blank (no `initial` value to diff against), so they're sent whenever
+ * filled in, regardless of whether anything else changed.
  */
 function buildPatch(initial: EditState, next: EditState): BeUpdateIncidentPayload {
   const patch: BeUpdateIncidentPayload = {};
@@ -185,7 +185,8 @@ function buildPatch(initial: EditState, next: EditState): BeUpdateIncidentPayloa
   if (next.assignmentGroupId !== initial.assignmentGroupId) patch.assignmentGroupId = next.assignmentGroupId || null;
   if (next.assignedEngineerId !== initial.assignedEngineerId)
     patch.assignedEngineerId = next.assignedEngineerId || null;
-  if (next.parentId.trim() !== initial.parentId) patch.parentId = next.parentId.trim() || null;
+  if (next.parentIncidentId.trim() !== initial.parentIncidentId)
+    patch.parentIncidentId = next.parentIncidentId.trim() || null;
   if (next.changeRequestId.trim() !== initial.changeRequestId)
     patch.changeRequestId = next.changeRequestId.trim() || null;
   if (next.problemId.trim() !== initial.problemId) patch.problemId = next.problemId.trim() || null;
@@ -261,9 +262,11 @@ export default function EditIncidentDialog({
   // incident that already has a subcategory: PATCH has no way to clear a
   // subcategory (omitted/null both mean "unchanged"), so a new category with
   // a blank subcategory would leave the old category's subcategory on the
-  // record.
-  const isSubcategoryMissingForNewCategory =
-    state.category !== initial.category && !!initial.subcategory && !state.subcategory;
+  // record. Not while Category is cleared: Subcategory is disabled then ("Pick
+  // a category first"), and the blank Category is what blocks Save.
+  const isSubcategoryRequiredForNewCategory =
+    !!state.category && state.category !== initial.category && !!initial.subcategory;
+  const isSubcategoryMissingForNewCategory = isSubcategoryRequiredForNewCategory && !state.subcategory;
   const isValid =
     state.subject.trim().length > 0 &&
     !!state.category &&
@@ -295,9 +298,11 @@ export default function EditIncidentDialog({
     value: string,
     onChange: (v: string) => void,
     options: Array<{ value: string; label: string }>,
-    opts?: { disabled?: boolean; helperText?: string },
+    // `required` mirrors isValid below: it draws the label's asterisk and sets
+    // aria-required, nothing more (Save is what actually blocks).
+    opts?: { disabled?: boolean; helperText?: string; required?: boolean },
   ): JSX.Element => (
-    <FormControl fullWidth size="small" disabled={isSaving || opts?.disabled}>
+    <FormControl fullWidth size="small" disabled={isSaving || opts?.disabled} required={opts?.required}>
       <InputLabel id={`${label}-label`} shrink>
         {label}
       </InputLabel>
@@ -333,6 +338,7 @@ export default function EditIncidentDialog({
             value={state.subject}
             onChange={(e) => set("subject", e.target.value)}
             fullWidth
+            required
             disabled={isSaving}
           />
 
@@ -340,7 +346,7 @@ export default function EditIncidentDialog({
           <Typography variant="subtitle2">Classification</Typography>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Box sx={{ flex: "1 1 220px" }}>
-              {renderSelect("Category", state.category, handleCategoryChange, CATEGORY_OPTIONS)}
+              {renderSelect("Category", state.category, handleCategoryChange, CATEGORY_OPTIONS, { required: true })}
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>
               {renderSelect(
@@ -350,6 +356,7 @@ export default function EditIncidentDialog({
                 subcategoryOptions,
                 {
                   disabled: !state.category,
+                  required: isSubcategoryRequiredForNewCategory,
                   helperText: !state.category
                     ? "Pick a category first."
                     : isSubcategoryMissingForNewCategory
@@ -359,16 +366,30 @@ export default function EditIncidentDialog({
               )}
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>
-              {renderSelect("Channel", state.channel, (v) => set("channel", v as BeIncidentContactType | ""), CHANNEL_OPTIONS)}
+              {renderSelect(
+                "Channel",
+                state.channel,
+                (v) => set("channel", v as BeIncidentContactType | ""),
+                CHANNEL_OPTIONS,
+                { required: true },
+              )}
             </Box>
           </Box>
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Box sx={{ flex: "1 1 220px" }}>
-              {renderSelect("Impact", state.impact, (v) => set("impact", v as BeIncidentImpact | ""), IMPACT_OPTIONS)}
+              {renderSelect("Impact", state.impact, (v) => set("impact", v as BeIncidentImpact | ""), IMPACT_OPTIONS, {
+                required: true,
+              })}
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>
-              {renderSelect("Urgency", state.urgency, (v) => set("urgency", v as BeIncidentUrgency | ""), URGENCY_OPTIONS)}
+              {renderSelect(
+                "Urgency",
+                state.urgency,
+                (v) => set("urgency", v as BeIncidentUrgency | ""),
+                URGENCY_OPTIONS,
+                { required: true },
+              )}
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>
               {renderSelect(
@@ -377,6 +398,8 @@ export default function EditIncidentDialog({
                 (v) => set("state", v as BeIncidentState | ""),
                 stateOptions,
                 {
+                  // A terminal state can't be changed, so its disabled select is not marked.
+                  required: !isStateTerminal,
                   disabled: isStateTerminal,
                   helperText: isStateTerminal
                     ? `${incidentStateLabel(initial.state)} is a terminal state — it can no longer be changed.`
@@ -417,10 +440,16 @@ export default function EditIncidentDialog({
 
           {(state.state === "RESOLVED" || state.state === "CLOSED") && (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                ServiceNow requires a resolution to move this incident to {incidentStateLabel(state.state)}.
-              </Typography>
-              <FormControl fullWidth size="small">
+              {/* Said only when this save moves the incident there, like the asterisks below. */}
+              {isTransitioningToResolved && (
+                <Typography variant="caption" color="text.secondary">
+                  A resolution is required to move this incident to {incidentStateLabel(state.state)}.
+                </Typography>
+              )}
+              {/* Required only when this save moves the incident INTO Resolved
+                  or Closed (isTransitioningToResolved, same as isValid); an
+                  incident already Resolved with State left alone needs none. */}
+              <FormControl fullWidth size="small" required={isTransitioningToResolved}>
                 <InputLabel
                   id="edit-incident-resolution-code-label"
                   shrink={state.resolutionCode !== ""}
@@ -450,6 +479,7 @@ export default function EditIncidentDialog({
                 value={state.resolutionNotes}
                 onChange={(e) => set("resolutionNotes", e.target.value)}
                 disabled={isSaving}
+                required={isTransitioningToResolved}
                 multiline
                 minRows={2}
                 fullWidth
@@ -546,14 +576,14 @@ export default function EditIncidentDialog({
                 id="edit-incident-parent"
                 label="Parent incident"
                 placeholder="Search incidents…"
-                value={state.parentId}
-                onChange={(v) => set("parentId", v)}
+                value={state.parentIncidentId}
+                onChange={(v) => set("parentIncidentId", v)}
                 disabled={isSaving}
                 useSearch={useSearchIncidentsExcludingSelf}
                 searchExtra={incident.id ?? undefined}
                 getId={(i) => i.id!}
                 getLabel={incidentLinkLabel}
-                knownLabel={incident.parent?.name}
+                knownLabel={incident.parentIncident?.name}
               />
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>

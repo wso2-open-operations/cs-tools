@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 )
 
-func openCasesFixture() []entitycases.Case {
+func openCasesFixture() []longopenreport.Row {
 	created := time.Date(2026, 8, 1, 4, 5, 0, 0, time.UTC)
-	return []entitycases.Case{
+	return []longopenreport.Row{
 		{ID: "00000000-0000-0000-0000-000000000001", Number: "CS0000001", Type: "case", State: "open", CreatedOn: created, UpdatedOn: created},
 		{ID: "00000000-0000-0000-0000-000000000002", Number: "CS0000002", Type: "service_request", State: "open", CreatedOn: created, UpdatedOn: created},
 		{ID: "00000000-0000-0000-0000-000000000003", Number: "CS0000003", Type: "security_report_analysis", State: "open", CreatedOn: created, UpdatedOn: created},
@@ -38,7 +38,7 @@ func openCasesFixture() []entitycases.Case {
 
 func TestRenderOpenCasesReportLinksPerType(t *testing.T) {
 	body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{
-		Cases: openCasesFixture(), CaseLinkBase: "https://portal.example.com/",
+		Report: longopenreport.Report{Cases: openCasesFixture()}, CaseLinkBase: "https://portal.example.com/",
 	})
 	for _, want := range []string{
 		`href="https://portal.example.com/cases/00000000-0000-0000-0000-000000000001"`,
@@ -56,7 +56,7 @@ func TestRenderOpenCasesReportLinksPerType(t *testing.T) {
 }
 
 func TestRenderOpenCasesReportTypeColumn(t *testing.T) {
-	body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{Cases: openCasesFixture()})
+	body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{Report: longopenreport.Report{Cases: openCasesFixture()}})
 	for _, want := range []string{">Type</th>", ">Case</td>", ">Service request</td>", ">Security report analysis</td>"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body lacks %q", want)

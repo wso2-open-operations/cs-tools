@@ -89,6 +89,7 @@ export const ApiQueryKeys = {
   OUTAGE_DETAILS: "outage-details",
   OUTAGE_METADATA: "outage-metadata",
   OUTAGE_COMMUNICATIONS: "outage-communications",
+  ALERT_MUTE_RULES: "alert-mute-rules",
   GROUPS_SEARCH: "groups-search",
   GROUP_DETAILS: "group-details",
   IT_SERVICES_SEARCH: "it-services-search",
@@ -174,6 +175,13 @@ export const ApiQueryKeys = {
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
   CSM_PRODUCT_REPO_MAPPING: "csm-product-repo-mapping",
   SAVED_FILTER_VIEWS: "saved-filter-views",
+  // Product catalogue (Products section). Each hook's key is
+  // [PRODUCT_CATALOG, <one of the keys below>, ...], so a saved change can refresh
+  // them all by the shared first segment.
+  PRODUCT_CATALOG: "product-catalog",
+  PRODUCT_CATALOG_PRODUCTS: "product-catalog-products",
+  PRODUCT_CATALOG_VERSIONS: "product-catalog-versions",
+  PRODUCT_CATALOG_RELEASE_LINES: "product-catalog-release-lines",
 } as const;
 
 // Constants for API-related mutation keys.

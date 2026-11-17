@@ -34,6 +34,10 @@ type DeployedProductVersion struct {
 	Label       string     `json:"label"`
 	ReleasedOn  *time.Time `json:"releasedOn,omitempty"`
 	EndOfLifeOn *time.Time `json:"endOfLifeOn,omitempty"`
+	// DeploymentProfile separates version records that share a Label (e.g.
+	// "API Control Plane" vs "Traffic Manager" for the same 4.6.0). Label is
+	// left as the plain version so strings built from it stay unchanged.
+	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
 }
 
 // DeployedProductSummary is one item of the portal's response for
@@ -133,10 +137,11 @@ func mapDeployedProductVersion(v *entity.DeployedProductVersionRef) *DeployedPro
 		return nil
 	}
 	return &DeployedProductVersion{
-		ID:          v.ID,
-		Label:       v.Name,
-		ReleasedOn:  v.ReleasedDate,
-		EndOfLifeOn: v.SupportEoLDate,
+		ID:                v.ID,
+		Label:             v.Name,
+		ReleasedOn:        v.ReleasedDate,
+		EndOfLifeOn:       v.SupportEoLDate,
+		DeploymentProfile: v.DeploymentProfile,
 	}
 }
 

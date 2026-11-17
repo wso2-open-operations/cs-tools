@@ -25,6 +25,9 @@ const mockLogger = {
   debug: vi.fn(),
   error: vi.fn(),
 };
+// This suite exercises the real auth client; undo the global mock from vitest.setup.ts.
+vi.unmock("@/hooks/useAuthApiClient");
+
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));

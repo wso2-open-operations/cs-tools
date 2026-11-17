@@ -39,6 +39,7 @@ type entityReportsClient interface {
 	SearchTimeCards(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
+	GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error)
 }
 
 type entityTimeCardRef struct {
@@ -73,8 +74,8 @@ type entitySearchTimeCardsResponse struct {
 
 // postgresReportsClient implements reportsClient by calling entity-service
 // (Postgres). The CS report is built from the project, its cases, and its
-// deployments. SLA percentile clocks are not stored in Postgres, so that
-// report stays retired.
+// deployments. The SLA report is built from entity-service's own SLA report
+// read (GetSLAReport in reports_sla.go).
 type postgresReportsClient struct {
 	entity entityReportsClient
 }

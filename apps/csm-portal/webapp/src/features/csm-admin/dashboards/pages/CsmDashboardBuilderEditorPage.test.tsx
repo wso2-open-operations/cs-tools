@@ -107,6 +107,39 @@ describe("CsmDashboardBuilderEditorPage", () => {
     );
   });
 
+  it("marks Display name and Type required, and keeps Copy as JSON disabled until both are set", async () => {
+    getMock.mockResolvedValue(null);
+    const { container } = renderEditor("/admin/dashboards/new");
+
+    await waitFor(() => expect(screen.getByLabelText("Dashboard display name")).toBeInTheDocument());
+    // By text, not role name: the Tooltip around it names the button with
+    // its own title.
+    const copy = screen.getByText("Copy as JSON").closest("button")!;
+    expect(copy).toHaveAccessibleName(/Add a display name and a type first/);
+    expect(screen.getByLabelText("Dashboard display name")).toBeRequired();
+    const typeLabel = Array.from(container.querySelectorAll("label")).find((l) =>
+      l.textContent?.startsWith("Type"),
+    );
+    expect(typeLabel?.textContent).not.toContain("optional");
+    expect(typeLabel?.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(copy).toBeDisabled();
+    expect(screen.getAllByText("Required to copy as JSON.")).toHaveLength(2);
+
+    fireEvent.change(screen.getByLabelText("Dashboard display name"), {
+      target: { value: "My new dashboard" },
+    });
+    expect(copy).toBeDisabled();
+    expect(screen.getAllByText("Required to copy as JSON.")).toHaveLength(1);
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Type" }));
+    // A required type offers no "None".
+    expect(screen.queryByRole("option", { name: "None" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "CS" }));
+
+    await waitFor(() => expect(copy).toBeEnabled());
+    expect(screen.queryByText("Required to copy as JSON.")).not.toBeInTheDocument();
+  });
+
   it("editing an existing dashboard: seeds from GET /dashboards/{id} and shows no drift banner when unchanged", async () => {
     getMock.mockResolvedValue({
       id: "agents_pilot",

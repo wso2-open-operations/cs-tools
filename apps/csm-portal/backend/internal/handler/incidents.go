@@ -53,7 +53,10 @@ type entityIncidentClient interface {
 type searchIncidentsRequest struct {
 	Filters struct {
 		Priorities []string `json:"priorities"`
-		ParentIDs  []string `json:"parentIds"`
+		// ParentIDs matches the generic work_item.parent_id; ParentIncidentIDs matches
+		// the dedicated incident.parent_incident_id link (finds an incident's children).
+		ParentIDs         []string `json:"parentIds"`
+		ParentIncidentIDs []string `json:"parentIncidentIds"`
 	} `json:"filters"`
 	SortBy struct {
 		Field string `json:"field"`
@@ -307,7 +310,7 @@ func validateUpdateIncidentBody(body []byte) bool {
 }
 
 // validateSearchIncidentsBody checks the filter/sort fields with a known, fixed set of
-// valid values (priority enums, parentIds as UUIDs, sort field/order enums) so obviously
+// valid values (priority enums, parentIds/parentIncidentIds as UUIDs, sort field/order enums) so obviously
 // invalid requests are rejected before reaching the entity service.
 func validateSearchIncidentsBody(body []byte) bool {
 	var req searchIncidentsRequest
@@ -320,6 +323,11 @@ func validateSearchIncidentsBody(body []byte) bool {
 		}
 	}
 	for _, id := range req.Filters.ParentIDs {
+		if !uuidRe.MatchString(id) {
+			return false
+		}
+	}
+	for _, id := range req.Filters.ParentIncidentIDs {
 		if !uuidRe.MatchString(id) {
 			return false
 		}

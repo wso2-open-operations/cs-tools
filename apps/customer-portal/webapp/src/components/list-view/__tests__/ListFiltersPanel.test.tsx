@@ -30,6 +30,7 @@ describe("ListFiltersPanel", () => {
         onFilterChange={() => {}}
       />,
     );
-    expect(screen.getByText("Status")).toBeInTheDocument();
+    // The outlined select renders the label twice (label + notched-outline legend), so assert on the control.
+    expect(screen.getByRole("combobox", { name: "Status" })).toBeInTheDocument();
   });
 });

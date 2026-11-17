@@ -49,8 +49,10 @@ vi.mock("@api/useGetProjectFeatures", () => ({
   default: () => ({ data: undefined }),
 }));
 
+const mockErrorPageContext = { isProjectSuspended: false, isErrorPageDisplayed: false };
+
 vi.mock("@context/error-page/ErrorPageContext", () => ({
-  useErrorPageContext: () => ({ isProjectSuspended: false }),
+  useErrorPageContext: () => mockErrorPageContext,
 }));
 
 // Mock @wso2/oxygen-ui
@@ -172,7 +174,12 @@ vi.mock("@api/useGetProjects", async (importOriginal) => {
 
 // Mock sub-components
 vi.mock("../Brand", () => ({
-  default: () => <div data-testid="brand" />,
+  default: ({ isNavigationDisabled }: { isNavigationDisabled?: boolean }) => (
+    <div
+      data-testid="brand"
+      data-navigation-disabled={isNavigationDisabled ? "true" : "false"}
+    />
+  ),
 }));
 
 vi.mock("../Actions", () => ({
@@ -234,6 +241,7 @@ describe("Header", () => {
     mockUseIsStackedHeaderLayout.mockReturnValue(false);
     mockLocation.pathname = "/";
     mockParams.projectId = "";
+    mockErrorPageContext.isErrorPageDisplayed = false;
     mockUseSearchProjects.mockReturnValue({
       data: {
         pages: [{ projects: mockProjects, totalRecords: mockProjects.length }],
@@ -246,6 +254,33 @@ describe("Header", () => {
   it("should render the brand component", () => {
     render(<Header onToggleSidebar={mockOnToggleSidebar} />);
     expect(screen.getByTestId("brand")).toBeInTheDocument();
+  });
+
+  it("should disable brand navigation for a single-project user", () => {
+    mockUseSearchProjects.mockReturnValue({
+      data: { pages: [{ projects: [mockProjects[0]], totalRecords: 1 }] },
+      isLoading: false,
+      isError: false,
+    });
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+    expect(screen.getByTestId("brand")).toHaveAttribute(
+      "data-navigation-disabled",
+      "true",
+    );
+  });
+
+  it("should enable brand navigation for a single-project user while an error page is displayed", () => {
+    mockUseSearchProjects.mockReturnValue({
+      data: { pages: [{ projects: [mockProjects[0]], totalRecords: 1 }] },
+      isLoading: false,
+      isError: false,
+    });
+    mockErrorPageContext.isErrorPageDisplayed = true;
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+    expect(screen.getByTestId("brand")).toHaveAttribute(
+      "data-navigation-disabled",
+      "false",
+    );
   });
 
   it("should NOT render toggle or switcher on Project Hub", () => {

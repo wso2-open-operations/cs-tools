@@ -347,7 +347,7 @@ describe("WeekTable: a rota admin editing the week", () => {
       { userId: "u-jane", name: "Jane Doe", teamKey: "bravo" },
     ];
     const edit = editControls({ people: bothTeams });
-    renderWeek({ edit });
+    renderWeek({ assignments: WEEK, edit });
     const tuesday = screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Tue 22" });
     const [first, second] = within(tuesday)
       .getAllByRole("option", { name: /Jane Doe/ })

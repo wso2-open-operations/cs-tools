@@ -198,6 +198,27 @@ function stageOptions(catalogue: LifecycleCatalogue) {
   return catalogue.stages.filter((s) => !s.terminal);
 }
 
+/**
+ * Whether a task will be sent. A row with no name is dropped before saving, so
+ * only a named task's reasons are checked.
+ */
+function taskKept(task: PlaybookTaskInput): boolean {
+  return task.name.trim() !== "";
+}
+
+/**
+ * A list task that will be sent with a reason left blank, which the API refuses
+ * ("every option on task … needs a label"). Holds the save back instead.
+ */
+function hasBlankReason(tasks: PlaybookTaskInput[]): boolean {
+  return tasks.some(
+    (t) =>
+      taskKept(t) &&
+      typeNeedsOptions(t.valueType ?? "BOOLEAN") &&
+      (t.options ?? []).some((o) => o.label.trim() === ""),
+  );
+}
+
 function NewPlaybookForm({
   productCode,
   catalogue,
@@ -231,6 +252,7 @@ function NewPlaybookForm({
   const kindMissing = playbookType === "";
   const stageMissing = stage === "";
   const incomplete = nameMissing || kindMissing || stageMissing;
+  const reasonMissing = hasBlankReason(tasks);
 
   // What this playbook achieves, in the stage's own words. There is no target to
   // pick — the destination is a property of the stage — so it is shown, not asked.
@@ -328,12 +350,18 @@ function NewPlaybookForm({
 
       <Stack direction="row" spacing={1} mt={2}>
         <Tooltip
-          title={incomplete ? "Name, kind and stage are all required" : ""}
+          title={
+            incomplete
+              ? "Name, kind and stage are all required"
+              : reasonMissing
+                ? "Every reason on a list task needs a label"
+                : ""
+          }
         >
           <span>
             <Button
               variant="contained"
-              disabled={incomplete || create.isPending}
+              disabled={incomplete || reasonMissing || create.isPending}
               onClick={() =>
                 create.mutate(
                   {
@@ -420,6 +448,7 @@ function PlaybookCard({ playbook }: { playbook: Playbook }) {
   // A name is the one field with no sensible empty value — the card would lose
   // its heading — so an empty box blocks the save rather than sending a blank.
   const nameMissing = name.trim() === "";
+  const reasonMissing = hasBlankReason(tasks);
 
   // A saved edit is the new baseline. Both mutations invalidate the playbook
   // query, so the props arrive updated on the next render and `dirty` returns
@@ -567,7 +596,7 @@ function PlaybookCard({ playbook }: { playbook: Playbook }) {
           <Button
             variant="contained"
             size="small"
-            disabled={!dirty || nameMissing || replaceTasks.isPending || patch.isPending}
+            disabled={!dirty || nameMissing || reasonMissing || replaceTasks.isPending || patch.isPending}
             onClick={saveAll}
           >
             {replaceTasks.isPending || patch.isPending ? "Saving…" : "Save changes"}
@@ -839,11 +868,15 @@ function TaskEditor({
         {tasks.map((task, index) => (
           <Box key={index}>
             <Stack direction="row" spacing={1} alignItems="flex-start">
+              {/* Required for the task to be kept, not for the save: a row
+                  left without a name is dropped, and the helper says so. */}
               <TextField
                 size="small"
+                required
                 label={`Task ${index + 2}`}
                 fullWidth
                 value={task.name}
+                helperText={taskKept(task) ? undefined : "A task with no name is not saved."}
                 onChange={(e) => update(index, { name: e.target.value })}
               />
               <TextField
@@ -875,6 +908,7 @@ function TaskEditor({
             {typeNeedsOptions(task.valueType ?? "BOOLEAN") ? (
               <ReasonEditor
                 options={task.options ?? []}
+                kept={taskKept(task)}
                 onChange={(options) => update(index, { options })}
               />
             ) : null}
@@ -910,9 +944,13 @@ function TaskEditor({
  */
 function ReasonEditor({
   options,
+  kept,
   onChange,
 }: {
   options: ChecklistOption[];
+  /** The task has a name, so it will be sent and a blank reason blocks the save:
+   *  only then is each reason marked required. */
+  kept: boolean;
   onChange: (options: ChecklistOption[]) => void;
 }) {
   const setLabel = (index: number, label: string) =>
@@ -927,33 +965,39 @@ function ReasonEditor({
       </Typography>
 
       <Stack spacing={0.75}>
-        {options.map((option, index) => (
-          <Stack key={index} direction="row" spacing={1} alignItems="center">
-            {/* Lucide icons take no sx, and draw in currentColor — so the
-                colour comes from a wrapper rather than from the icon. */}
-            <Box sx={{ display: "flex", color: "text.disabled" }}>
-              <CheckBoxIcon size={20} />
-            </Box>
-            <TextField
-              size="small"
-              fullWidth
-              label={`Reason ${index + 1}`}
-              value={option.label}
-              onChange={(e) => setLabel(index, e.target.value)}
-            />
-            <Tooltip title={belowMinimum ? `A checklist needs at least ${MIN_CHECKLIST_OPTIONS} reasons` : "Remove"}>
-              <span>
-                <IconButton
-                  size="small"
-                  disabled={belowMinimum}
-                  onClick={() => onChange(options.filter((_, i) => i !== index))}
-                >
-                  <DeleteIcon size={20} />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Stack>
-        ))}
+        {options.map((option, index) => {
+          const blank = kept && option.label.trim() === "";
+          return (
+            <Stack key={index} direction="row" spacing={1} alignItems="center">
+              {/* Lucide icons take no sx, and draw in currentColor — so the
+                  colour comes from a wrapper rather than from the icon. */}
+              <Box sx={{ display: "flex", color: "text.disabled" }}>
+                <CheckBoxIcon size={20} />
+              </Box>
+              <TextField
+                size="small"
+                fullWidth
+                required={kept}
+                label={`Reason ${index + 1}`}
+                value={option.label}
+                error={blank}
+                helperText={blank ? "A reason needs a label" : undefined}
+                onChange={(e) => setLabel(index, e.target.value)}
+              />
+              <Tooltip title={belowMinimum ? `A checklist needs at least ${MIN_CHECKLIST_OPTIONS} reasons` : "Remove"}>
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled={belowMinimum}
+                    onClick={() => onChange(options.filter((_, i) => i !== index))}
+                  >
+                    <DeleteIcon size={20} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+          );
+        })}
       </Stack>
 
       <Button size="small" startIcon={<AddIcon />} sx={{ mt: 0.5 }}

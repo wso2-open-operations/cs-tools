@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -43,7 +44,8 @@ func NewIncidentRepo(pool *pgxpool.Pool, locker *pglock.Locker) *IncidentRepo {
 const incidentColumns = `id, fingerprint, incident_id, incident_number, status, severity, impact, urgency, service,
 	metric_name, category, environment, source, alert_count, first_seen, last_seen, state_checked_at, fallback,
 	csm_confirmed, csm_attempts, csm_permanently_failed, csm_last_attempt_at, fold_version, created_at,
-	assignment_group, source_topic, source_account`
+	assignment_group, source_topic, source_account, unique_identifier, severity_label,
+	muted, muted_at, unmuted_at, mute_rule_id, mute_rule_number`
 
 // FoldPlan is what folding a fingerprint's alerts writes: notes and counters on the current incident, and any new incidents.
 type FoldPlan struct {
@@ -58,7 +60,14 @@ type CurrentFold struct {
 	LastSeen time.Time
 	// Category fills the incident's category only if it is still empty.
 	Category string
-	Notes    []model.Note
+	// SeverityLabel, when set, replaces the incident's severity_label, and Severity, Impact and Urgency its severity,
+	// impact and urgency: a later alert of the same fingerprint was more severe, so alert mute rules match the
+	// incident's worst severity, not its first, and an incident not yet in CSM is created with that priority.
+	SeverityLabel string
+	Severity      int
+	Impact        string
+	Urgency       string
+	Notes         []model.Note
 }
 
 // NewIncident starts a new incident with its notes, the first being its creation note.
@@ -74,6 +83,10 @@ const (
 	selectCurrentQuery = `SELECT ` + incidentColumns + ` FROM incidents_processed WHERE fingerprint = $1 ORDER BY first_seen DESC LIMIT 1`
 	updateCurrentQuery = `UPDATE incidents_processed SET alert_count = alert_count + $2, last_seen = greatest(last_seen, $3),
 	category = CASE WHEN category = '' THEN $4 ELSE category END,
+	severity_label = CASE WHEN $5 <> '' THEN $5 ELSE severity_label END,
+	severity = CASE WHEN $5 <> '' THEN $6 ELSE severity END,
+	impact = CASE WHEN $5 <> '' THEN $7 ELSE impact END,
+	urgency = CASE WHEN $5 <> '' THEN $8 ELSE urgency END,
 	fold_version = fold_version + 1, delivery_due_at = least(coalesce(delivery_due_at, now()), now())
 	WHERE id = $1`
 	insertNotesQuery = `INSERT INTO incident_notes (incident, alert_id, kind, note, chat_pending)
@@ -82,8 +95,8 @@ const (
 	insertIncidentQuery = `WITH inc AS (
 	INSERT INTO incidents_processed (fingerprint, incident_number, status, severity, impact, urgency, service, metric_name,
 		category, environment, source, alert_count, first_seen, last_seen, delivery_due_at,
-		assignment_group, source_topic, source_account)
-	VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $18, $19, $20)
+		assignment_group, source_topic, source_account, unique_identifier, severity_label)
+	VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $18, $19, $20, $21, $22)
 	RETURNING id)
 	INSERT INTO incident_notes (incident, alert_id, kind, note, chat_pending)
 	SELECT inc.id, n.* FROM inc, unnest($14::text[], $15::text[], $16::text[], $17::bool[]) AS n
@@ -120,7 +133,7 @@ func (r *IncidentRepo) Fold(ctx context.Context, fp string, alertIDs []string, d
 	plan = decide(current, recorded)
 	writes := &pgx.Batch{}
 	if c := plan.Current; c != nil {
-		writes.Queue(updateCurrentQuery, c.ID, c.Added, c.LastSeen, c.Category)
+		writes.Queue(updateCurrentQuery, c.ID, c.Added, c.LastSeen, c.Category, c.SeverityLabel, c.Severity, c.Impact, c.Urgency)
 		if len(c.Notes) > 0 {
 			writes.Queue(insertNotesQuery, append([]any{c.ID}, noteArrays(c.Notes)...)...)
 		}
@@ -130,7 +143,7 @@ func (r *IncidentRepo) Fold(ctx context.Context, fp string, alertIDs []string, d
 		args := []any{inc.Fingerprint, inc.IncidentNumber, inc.Severity, inc.Impact, inc.Urgency, inc.Service,
 			inc.MetricName, inc.Category, inc.Environment, inc.Source, inc.AlertCount, inc.FirstSeen, inc.LastSeen}
 		args = append(args, noteArrays(n.Notes)...)
-		args = append(args, inc.AssignmentGroup, inc.SourceTopic, inc.SourceAccount)
+		args = append(args, inc.AssignmentGroup, inc.SourceTopic, inc.SourceAccount, inc.UniqueIdentifier, inc.SeverityLabel)
 		writes.Queue(insertIncidentQuery, args...)
 	}
 	writes.Queue(`COMMIT`)
@@ -302,6 +315,199 @@ func (r *IncidentRepo) FinishDelivery(ctx context.Context, id, foldVersion int64
 	return r.exec(ctx, "finish delivery", id, `UPDATE incidents_processed
 		SET delivery_due_at = CASE WHEN fold_version = $2 THEN $3::timestamptz ELSE least(coalesce(delivery_due_at, now()), now()) END
 		WHERE id = $1`, id, foldVersion, next)
+}
+
+// Mute marks the incident muted by alert mute rule ruleID/ruleNumber, keeping the time it was first muted.
+func (r *IncidentRepo) Mute(ctx context.Context, id int64, ruleID, ruleNumber string) error {
+	return r.exec(ctx, "mute", id, `UPDATE incidents_processed
+		SET muted = true, muted_at = coalesce(muted_at, now()), mute_rule_id = $2, mute_rule_number = $3 WHERE id = $1`,
+		id, ruleID, ruleNumber)
+}
+
+// Unmute releases a muted incident for normal delivery. It takes the fingerprint's fold lock, so no Fold runs between
+// its checks and its write, and it does nothing in two cases:
+//   - a fold changed the incident since inc.FoldVersion (an OK that just arrived must be seen before the incident is
+//     delivered): it returns false, false, and that fold left the incident due, so the next pass decides again;
+//   - a newer incident of the same fingerprint exists. A fold that starts a new incident does not touch the old one's
+//     fold_version, so the version check alone would let both generations reach CSM: it returns false, true, and the
+//     caller closes this one quietly instead.
+func (r *IncidentRepo) Unmute(ctx context.Context, inc model.Incident) (unmuted, superseded bool, err error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: begin: %w", inc.ID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "fold:"+inc.Fingerprint); err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: lock: %w", inc.ID, err)
+	}
+	err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM incidents_processed WHERE fingerprint = $1 AND first_seen > $2)`,
+		inc.Fingerprint, inc.FirstSeen).Scan(&superseded)
+	if err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: check newer incident: %w", inc.ID, err)
+	}
+	if superseded {
+		return false, true, nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE incidents_processed SET muted = false, unmuted_at = now()
+		WHERE id = $1 AND fold_version = $2`, inc.ID, inc.FoldVersion)
+	if err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: %w", inc.ID, err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: commit: %w", inc.ID, err)
+	}
+	return tag.RowsAffected() == 1, false, nil
+}
+
+// MuteOutcome reports, for a muted incident no rule matches any more, whether its last alert was a resolving one
+// and whether a newer incident of the same fingerprint has replaced it.
+func (r *IncidentRepo) MuteOutcome(ctx context.Context, inc model.Incident) (resolved, superseded bool, err error) {
+	var lastKind string
+	err = r.pool.QueryRow(ctx, `SELECT
+		coalesce((SELECT kind FROM incident_notes WHERE incident = $1 ORDER BY id DESC LIMIT 1), ''),
+		EXISTS (SELECT 1 FROM incidents_processed WHERE fingerprint = $2 AND first_seen > $3)`,
+		inc.ID, inc.Fingerprint, inc.FirstSeen).Scan(&lastKind, &superseded)
+	if err != nil {
+		return false, false, fmt.Errorf("read mute outcome for incident %d: %w", inc.ID, err)
+	}
+	return lastKind == model.NoteOK, superseded, nil
+}
+
+// CloseMuted closes a muted incident without delivering anything: it is marked closed and unmuted, every pending note
+// is settled, and nothing more is due. Closing it again (an OK folded in after the quiet close) keeps the first
+// unmuted_at, the time the mute ended. It does nothing, and returns false, if a fold changed it since foldVersion.
+func (r *IncidentRepo) CloseMuted(ctx context.Context, id, foldVersion int64) (bool, error) {
+	var closed int
+	err := r.pool.QueryRow(ctx, `WITH inc AS (
+		UPDATE incidents_processed SET muted = false, unmuted_at = coalesce(unmuted_at, now()), status = 'closed', delivery_due_at = NULL
+		WHERE id = $1 AND fold_version = $2 RETURNING id),
+	notes AS (
+		UPDATE incident_notes SET csm_pending = false, chat_pending = false
+		WHERE incident IN (SELECT id FROM inc) AND (csm_pending OR chat_pending))
+	SELECT count(*) FROM inc`, id, foldVersion).Scan(&closed)
+	if err != nil {
+		return false, fmt.Errorf("close muted incident %d: %w", id, err)
+	}
+	return closed == 1, nil
+}
+
+// MutedByRule returns one page of the incidents alert mute rule ruleID muted, newest first, and how many there are in all.
+// An incident keeps mute_rule_id after it is released, so the page includes muted incidents that later became CSM
+// incidents or were closed quietly. Rows the retention job purged are gone.
+func (r *IncidentRepo) MutedByRule(ctx context.Context, ruleID string, limit, offset int) ([]model.Incident, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM incidents_processed WHERE mute_rule_id = $1`, ruleID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count incidents muted by rule %s: %w", ruleID, err)
+	}
+	rows, err := r.pool.Query(ctx, `SELECT `+incidentColumns+` FROM incidents_processed
+		WHERE mute_rule_id = $1 ORDER BY first_seen DESC, id DESC LIMIT $2 OFFSET $3`, ruleID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list incidents muted by rule %s: %w", ruleID, err)
+	}
+	incs, err := pgx.CollectRows(rows, pgx.RowToStructByName[model.Incident])
+	if err != nil {
+		return nil, 0, fmt.Errorf("list incidents muted by rule %s: %w", ruleID, err)
+	}
+	return incs, total, nil
+}
+
+// MutedByRuleSummary counts the incidents ruleID muted by outcome (see model.Incident.MuteOutcome).
+func (r *IncidentRepo) MutedByRuleSummary(ctx context.Context, ruleID string) (map[string]int, error) {
+	// Counted in SQL, so a busy rule's incidents never leave the database: the CASE is
+	// model.Incident.MuteOutcome, branch for branch (TestIncidentRepo_MutedByRuleSummaryMatchesMuteOutcome).
+	rows, err := r.pool.Query(ctx, `SELECT CASE
+			WHEN muted THEN $2
+			WHEN csm_confirmed THEN $3
+			WHEN unmuted_at IS NOT NULL AND csm_attempts = 0 AND NOT fallback AND lower(trim(status)) = 'closed' THEN $4
+			ELSE $5 END AS outcome, count(*)
+		FROM incidents_processed WHERE mute_rule_id = $1 GROUP BY 1`,
+		ruleID, model.MuteOutcomeMuted, model.MuteOutcomeIncident, model.MuteOutcomeClosedQuietly, model.MuteOutcomeDelivering)
+	if err != nil {
+		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var outcome string
+		var n int
+		if err := rows.Scan(&outcome, &n); err != nil {
+			return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
+		}
+		counts[outcome] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
+	}
+	return counts, nil
+}
+
+// MutedCounts returns how many incidents each of ruleIDs muted (rules that muted nothing are absent), in one query, so a
+// list of rules does not ask once per rule.
+func (r *IncidentRepo) MutedCounts(ctx context.Context, ruleIDs []string) (map[string]int, error) {
+	counts := map[string]int{}
+	if len(ruleIDs) == 0 {
+		return counts, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT mute_rule_id, count(*) FROM incidents_processed
+		WHERE mute_rule_id = ANY($1) GROUP BY mute_rule_id`, ruleIDs)
+	if err != nil {
+		return nil, fmt.Errorf("count incidents muted by %d rules: %w", len(ruleIDs), err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("count incidents muted by %d rules: %w", len(ruleIDs), err)
+		}
+		counts[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("count incidents muted by %d rules: %w", len(ruleIDs), err)
+	}
+	return counts, nil
+}
+
+// fieldValueColumns maps the alert fields a mute rule condition can name to incidents_processed columns.
+var fieldValueColumns = map[string]string{
+	"service": "service", "environment": "environment", "source": "source", "metric_name": "metric_name",
+	"category": "category", "severity": "severity_label", "unique_identifier": "unique_identifier",
+}
+
+// fieldValuesWindow bounds a field-values search to recently seen incidents.
+const fieldValuesWindow = "30 days"
+
+// minUniqueIdentifierQuery is how many characters a unique_identifier search needs before it runs.
+const minUniqueIdentifierQuery = 3
+
+// likeEscaper escapes LIKE wildcards so a search matches them literally.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// FieldValues returns up to limit distinct non-empty values of alert field field that contain query (case-insensitive),
+// most recently seen first. They come from the incidents still kept, so they are the values real alerts carry, which is
+// what an alert mute rule must match. ok is false for a field it doesn't know.
+func (r *IncidentRepo) FieldValues(ctx context.Context, field, query string, limit int) (values []string, ok bool, err error) {
+	col, ok := fieldValueColumns[field]
+	if !ok {
+		return nil, false, nil
+	}
+	// unique_identifier is close to one value per alert, so it is only searched, never listed whole.
+	if field == "unique_identifier" && len([]rune(query)) < minUniqueIdentifierQuery {
+		return []string{}, true, nil
+	}
+	// Bounded to recently seen incidents so a longer retention never makes a keystroke group the whole table. The
+	// portal debounces typing (300 ms) and only asks while the field's list is open.
+	rows, err := r.pool.Query(ctx, `SELECT `+col+` FROM incidents_processed
+		WHERE last_seen > now() - $3::interval AND `+col+` <> '' AND `+col+` ILIKE '%' || $1 || '%'
+		GROUP BY `+col+` ORDER BY max(last_seen) DESC, `+col+` LIMIT $2`, likeEscaper.Replace(query), limit, fieldValuesWindow)
+	if err != nil {
+		return nil, true, fmt.Errorf("list %s values: %w", field, err)
+	}
+	values, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, true, fmt.Errorf("list %s values: %w", field, err)
+	}
+	return values, true, nil
 }
 
 // Purge deletes up to limit incidents, and their notes, last seen before cutoff with no delivery still owed.

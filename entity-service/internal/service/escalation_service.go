@@ -282,7 +282,7 @@ func (s *escalationService) publishCaseEscalated(ctx context.Context, cv domain.
 		CaseID:        e.Case.ID,
 		CaseNumber:    cv.Number,
 		CaseTitle:     cv.Subject,
-		Severity:      strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Severity:      strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
 		Product:       caseProductName(cv),
 		EscalationID:  e.ID,
 		PreviousLevel: escalationLevelNumber(e.PreviousLevel),

@@ -28,12 +28,15 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
   default: ({
     value,
     onChange,
+    ariaRequired,
   }: {
     value: string;
     onChange: (v: string) => void;
+    ariaRequired?: boolean;
   }) => (
     <textarea
       aria-label="work-log-editor"
+      aria-required={ariaRequired || undefined}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -637,5 +640,57 @@ describe("LogTimeCardDialog — billable switch", () => {
     const toggle = screen.getByLabelText("Billable");
     expect(toggle).toBeChecked();
     expect(toggle).not.toBeDisabled();
+  });
+});
+
+describe("LogTimeCardDialog — required marks", () => {
+  /** The asterisk RequiredMark draws inside a caption the dialog renders itself. */
+  const captionHasMark = (text: string): boolean =>
+    screen.getByText(text, { selector: "h6, span" }).querySelector(".MuiFormLabel-asterisk") !== null;
+
+  it("marks the time breakdown, work log comment and approver as required on create", () => {
+    render(
+      <LogTimeCardDialog
+        caseId="case-1"
+        caseNumber="CS0000001"
+        caseSeverity="S3"
+        projectId="proj-1"
+        projectName="Acme"
+        isSubmitting={false}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(captionHasMark("Time breakdown (minutes)")).toBe(true);
+    expect(captionHasMark("Work log comment")).toBe(true);
+    expect(screen.getByLabelText("work-log-editor")).toHaveAttribute("aria-required", "true");
+    expect(captionHasMark("Approver (team lead)")).toBe(true);
+    // The search box is named by that caption (the asterisk is aria-hidden), not
+    // just its placeholder.
+    const approverSearch = screen.getByRole("textbox", { name: "Approver (team lead)" });
+    expect(approverSearch).toBe(screen.getByPlaceholderText("Search engineers by name or email…"));
+    expect(approverSearch).toHaveAttribute("aria-required", "true");
+    // One asterisk each: the work log caption no longer carries a typed "*".
+    expect(screen.queryByText(/Work log comment \*/)).not.toBeInTheDocument();
+  });
+
+  it("drops the approver asterisk in edit mode, where the approver is read-only and never sent", () => {
+    render(
+      <LogTimeCardDialog
+        caseId={EDITING_CARD.caseId}
+        caseNumber={EDITING_CARD.caseNumber}
+        projectId={EDITING_CARD.projectId}
+        projectName={EDITING_CARD.projectName}
+        editingCard={EDITING_CARD}
+        isSubmitting={false}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(captionHasMark("Approver (team lead)")).toBe(false);
+    expect(captionHasMark("Time breakdown (minutes)")).toBe(true);
+    expect(captionHasMark("Work log comment")).toBe(true);
   });
 });

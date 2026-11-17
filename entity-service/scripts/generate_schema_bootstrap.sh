@@ -27,15 +27,15 @@
 #   1. Every 4-digit NNNN_*.sql file (the convention), ascending.
 #   2. Every 6-digit 1NNNNN_*.sql file numbered 100000+ (the RLS track) -
 #      written to the RLS file, not the schema file.
-#   3. The legacy 6-digit 0NNNNN_*.up.sql stragglers (000020-000105) that
+#   3. The legacy 6-digit 0NNNNN_*.up.sql stragglers (000086-000105) that
 #      predate this whole scheme and still depend on tables the 4-digit
 #      files create. *.down.sql files are rollbacks and never run here.
-# A plain `migrations/*.sql` glob sorts every 6-digit file in the 000020-
+# A plain `migrations/*.sql` glob sorts every 6-digit file in the 000086-
 # 000105 range *before* 0001 (leading zeros) and would fail outright applied
 # against a from-scratch database - this script used to do exactly that,
 # silently, before this fix (it only ever LOOKED sorted because the 100000+
 # RLS files happen to sort after everything 4-digit by coincidence of
-# starting with "1"; the 000020-000105 legacy files got no such luck).
+# starting with "1"; the 000086-000105 legacy files got no such luck).
 #
 # Default output paths include a UTC timestamp (e.g.
 # dist/schema_bootstrap_20260924_153000.sql,
@@ -89,6 +89,14 @@
 # exactly what `make migrate` already does file-by-file today. Do not wrap
 # the run in BEGIN/COMMIT yourself for the same reason - this applies to any
 # future migration added the same way, not just today's.
+#
+# Each output file starts with `\set ON_ERROR_STOP on`, so psql stops at the
+# first failing statement. Without it psql logs the error and carries on, and
+# the tracking INSERT straight after the failed file records it as applied:
+# 0251 and 0262, for one, fail by design under their lock_timeout when a table
+# they lock is busy, and would then be recorded with no foreign key added. A
+# client that does not understand psql's backslash commands must be set to
+# stop on the first error instead, with that line removed.
 #
 # csm_migration_applied_migration is created (if missing, in BOTH files) and
 # seeded one filename at a time as each file's statements complete, so: (a)
@@ -245,7 +253,7 @@ for f in $files; do
 		# of the two running together indistinguishably.
 		if ((!legacy_marker_written)); then
 			{
-				echo "-- ===== legacy 6-digit stragglers below (000020-000105; predate the"
+				echo "-- ===== legacy 6-digit stragglers below (000086-000105; predate the"
 				echo "-- NNNN_*.sql convention; see entity-service/CLAUDE.md's \"Database"
 				echo "-- migrations\" section) ====="
 				echo
@@ -265,6 +273,7 @@ done
 
 if ((schema_count > 0)); then
 	{
+		echo '\set ON_ERROR_STOP on'
 		echo "-- Generated ${generated_at} by scripts/generate_schema_bootstrap.sh from migrations/*.sql at commit ${commit}."
 		echo "-- SCHEMA file: everything except the dedicated RLS track (migrations/1NNNNN_*.sql)."
 		echo "-- Run this FIRST - the RLS file (see its own sibling output) depends on tables this one creates."
@@ -272,6 +281,10 @@ if ((schema_count > 0)); then
 		echo "--"
 		echo "-- Run with plain autocommit, e.g.:"
 		echo "--   psql \"\$DATABASE_URL\" -v ON_ERROR_STOP=1 -f $(basename "$out_schema")"
+		echo "-- The run must stop at the first error (the first line makes psql do so):"
+		echo "-- otherwise the INSERT after a failed migration records it as applied."
+		echo "-- In a client that does not understand psql's backslash commands, remove"
+		echo "-- the first line and set the client to stop on the first error."
 		echo "-- Do NOT wrap this in BEGIN/COMMIT or run it with psql -1/--single-transaction -"
 		echo "-- see the ALTER TYPE ... ADD VALUE note in scripts/generate_schema_bootstrap.sh."
 		echo "-- Do not commit or re-run this file via migrations/*.sql - it is a generated"
@@ -288,6 +301,7 @@ fi
 
 if ((rls_count > 0)); then
 	{
+		echo '\set ON_ERROR_STOP on'
 		echo "-- Generated ${generated_at} by scripts/generate_schema_bootstrap.sh from migrations/*.sql at commit ${commit}."
 		echo "-- RLS file: migrations/1NNNNN_*.sql only (CREATE POLICY / ALTER POLICY / ROW LEVEL"
 		echo "-- SECURITY and the functions that support them). Run this SECOND, after the schema"
@@ -297,6 +311,10 @@ if ((rls_count > 0)); then
 		echo "--"
 		echo "-- Run with plain autocommit, e.g.:"
 		echo "--   psql \"\$DATABASE_URL\" -v ON_ERROR_STOP=1 -f $(basename "$out_rls")"
+		echo "-- The run must stop at the first error (the first line makes psql do so):"
+		echo "-- otherwise the INSERT after a failed migration records it as applied."
+		echo "-- In a client that does not understand psql's backslash commands, remove"
+		echo "-- the first line and set the client to stop on the first error."
 		echo "-- Do NOT wrap this in BEGIN/COMMIT or run it with psql -1/--single-transaction -"
 		echo "-- see the ALTER TYPE ... ADD VALUE note in scripts/generate_schema_bootstrap.sh."
 		echo "-- Do not commit or re-run this file via migrations/*.sql - it is a generated"

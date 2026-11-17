@@ -17,11 +17,14 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/emaildomains"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/handler"
 )
 
@@ -31,7 +34,8 @@ import (
 func status(t *testing.T, method, path string) int {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	newMux(handler.NewDashboardHandler(nil)).
+	classifier := emaildomains.NewClassifier(emaildomains.NewLists(), net.DefaultResolver, time.Second, nil, "", 0)
+	newMux(handler.NewDashboardHandler(nil), handler.NewEmailDomainHandler(classifier)).
 		ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(`{"prompt":"p"}`)))
 	return rec.Code
 }
@@ -42,6 +46,9 @@ func TestRoutes(t *testing.T) {
 	}
 	if got := status(t, http.MethodPost, "/ai/dashboards/generate"); got != http.StatusServiceUnavailable {
 		t.Errorf("generate = %d, want 503 from the handler (registered, no key)", got)
+	}
+	if got := status(t, http.MethodPost, "/ai/email-domains/classify"); got != http.StatusBadRequest {
+		t.Errorf("classify = %d, want 400 from the handler (registered, wrong body)", got)
 	}
 	if got := status(t, http.MethodPost, "/ai/dashboards/unknown"); got != http.StatusNotFound {
 		t.Errorf("an unregistered path = %d, want 404", got)

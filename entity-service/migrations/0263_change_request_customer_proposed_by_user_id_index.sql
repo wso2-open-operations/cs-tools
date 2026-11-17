@@ -1,0 +1,32 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- The index on change_request.customer_proposed_by_user_id (migration 0249). The other "user"
+-- references of change_request are indexed too; it keeps a user delete (ON DELETE SET NULL) from
+-- scanning the table.
+--
+-- IF NOT EXISTS: safe to run again, and an index already there is left as it is, an INVALID one
+-- included. A build that is cancelled or fails partway leaves an INVALID index of this name, which
+-- the next run skips. Before running this file again, check with
+--   SELECT indexrelid::regclass FROM pg_index
+--    WHERE indexrelid = to_regclass('idx_change_request_customer_proposed_by_user_id')
+--      AND NOT indisvalid;
+-- and drop any index it returns with
+--   DROP INDEX CONCURRENTLY idx_change_request_customer_proposed_by_user_id;
+--
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block, so this is the only statement in
+-- its own file, run without BEGIN/COMMIT.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_change_request_customer_proposed_by_user_id ON change_request (customer_proposed_by_user_id);

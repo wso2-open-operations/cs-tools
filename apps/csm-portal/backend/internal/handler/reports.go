@@ -31,6 +31,7 @@ import (
 type reportsClient interface {
 	GetProjectReportDetails(ctx context.Context, projectID, from, to string) (viewer.CSReportDetails, error)
 	GetTimeLogBreakdown(ctx context.Context, projectID string, period TimeLogPeriod) (viewer.TimeLogBreakdownDetails, error)
+	GetSLAReport(ctx context.Context, projectID, from, to string) (viewer.SLAReportDetails, error)
 }
 
 // ReportsHandler handles HTTP requests for the project reports, delegating
@@ -133,6 +134,45 @@ func (h *ReportsHandler) GenerateTimelogsBreakdownReport(w http.ResponseWriter, 
 		}
 		slog.ErrorContext(r.Context(), "GetTimeLogBreakdown failed", "userID", user.UserID, "projectId", projectID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to generate timelogs breakdown report.")
+		return
+	}
+
+	writeJSONValue(w, http.StatusOK, report)
+}
+
+// GenerateSLAReport handles GET /generate-sla-report: the SLA clocks of the
+// cases a project opened between from and to (both YYYY-MM-DD, inclusive).
+func (h *ReportsHandler) GenerateSLAReport(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireReportAccess(w, r, h.accessGuard)
+	if !ok {
+		return
+	}
+
+	q := r.URL.Query()
+	projectID, from, to := q.Get("projectId"), q.Get("from"), q.Get("to")
+	if projectID == "" || from == "" || to == "" {
+		writeError(w, http.StatusBadRequest, "projectId, from, and to are required.")
+		return
+	}
+	fromDay, errFrom := time.Parse(dateLayout, from)
+	toDay, errTo := time.Parse(dateLayout, to)
+	if errFrom != nil || errTo != nil {
+		writeError(w, http.StatusBadRequest, "from and to must be valid dates in YYYY-MM-DD format.")
+		return
+	}
+	if fromDay.After(toDay) {
+		writeError(w, http.StatusBadRequest, "from must not be after to.")
+		return
+	}
+
+	report, err := h.reports.GetSLAReport(r.Context(), projectID, from, to)
+	if err != nil {
+		if errors.Is(err, viewer.ErrProjectNotFound) {
+			writeError(w, http.StatusNotFound, ErrMsgNotFound)
+			return
+		}
+		slog.ErrorContext(r.Context(), "GetSLAReport failed", "userID", user.UserID, "projectId", projectID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to generate the SLA report.")
 		return
 	}
 

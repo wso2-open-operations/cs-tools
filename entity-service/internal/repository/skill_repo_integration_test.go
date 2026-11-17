@@ -100,16 +100,18 @@ func skRemoveFixtures(pool *pgxpool.Pool) {
 		sql  string
 		args []any
 	}{
-		{`DELETE FROM user_skill_history WHERE user_id = ANY($1::uuid[]) OR skill_id = ANY($2::uuid[]) OR skill_id IN (SELECT id FROM skill WHERE name LIKE 'sktest %')`, []any{skUsers, skSkills}},
+		// History is append-only (migration 0286): its rows go only with their
+		// user, by the cascade, so the users are deleted before the skills.
 		{`DELETE FROM user_skill WHERE user_id = ANY($1::uuid[]) OR skill_id = ANY($2::uuid[]) OR skill_id IN (SELECT id FROM skill WHERE name LIKE 'sktest %')`, []any{skUsers, skSkills}},
+		{`DELETE FROM team_member WHERE user_id = ANY($1::uuid[])`, []any{skUsers}},
+		{`DELETE FROM user_role WHERE user_id = ANY($1::uuid[])`, []any{skUsers}},
+		{`DELETE FROM "user" WHERE id = ANY($1::uuid[])`, []any{skUsers}},
+		{`DELETE FROM skill_request WHERE resolved_skill_id = ANY($1::uuid[]) OR resolved_skill_id IN (SELECT id FROM skill WHERE name LIKE 'sktest %')`, []any{skSkills}},
 		{`DELETE FROM skill WHERE id = ANY($1::uuid[]) OR name LIKE 'sktest %'`, []any{skSkills}},
 		{`DELETE FROM skill_level WHERE level_type_id IN ` + scales, nil},
 		{`DELETE FROM skill_level_type WHERE id IN ` + scales, nil},
-		{`DELETE FROM skill_category WHERE id IN ` + cats, nil},
-		{`DELETE FROM team_member WHERE user_id = ANY($1::uuid[])`, []any{skUsers}},
-		{`DELETE FROM user_role WHERE user_id = ANY($1::uuid[])`, []any{skUsers}},
+		{`DELETE FROM skill_category WHERE id IN ` + cats + ` OR name LIKE 'sktest %'`, nil},
 		{`DELETE FROM team WHERE id IN ` + teams, nil},
-		{`DELETE FROM "user" WHERE id = ANY($1::uuid[])`, []any{skUsers}},
 	} {
 		if _, err := pool.Exec(ctx, q.sql, q.args...); err != nil {
 			panic("skill fixture cleanup: " + err.Error())
@@ -242,8 +244,12 @@ func TestSkillIntegration_AddChangeRemoveWriteRowsAndHistory(t *testing.T) {
 	if err != nil || res.Outcome != domain.SkillOutcomeDone {
 		t.Fatalf("RemoveUserSkill = %+v, %v", res, err)
 	}
-	if n := skCount(t, pool, `SELECT count(*) FROM user_skill WHERE user_id = $1 AND skill_id = $2`, skJane, skGo); n != 0 {
-		t.Fatalf("user_skill rows after remove = %d, want 0", n)
+	// Soft delete (migration 0284): the row stays, inactive.
+	if n := skCount(t, pool, `SELECT count(*) FROM user_skill WHERE user_id = $1 AND skill_id = $2 AND active`, skJane, skGo); n != 0 {
+		t.Fatalf("active user_skill rows after remove = %d, want 0", n)
+	}
+	if n := skCount(t, pool, `SELECT count(*) FROM user_skill WHERE user_id = $1 AND skill_id = $2 AND NOT active AND updated_by = $3`, skJane, skGo, skActor); n != 1 {
+		t.Fatalf("inactive user_skill rows after remove = %d, want 1", n)
 	}
 
 	h := skHistory(t, pool, skJane, skGo)
@@ -270,9 +276,30 @@ func TestSkillIntegration_AddChangeRemoveWriteRowsAndHistory(t *testing.T) {
 	if err != nil || total != 3 || len(page) != 3 || page[0].LevelTo != nil || page[0].SkillName != "sktest Go" {
 		t.Fatalf("ListUserSkillHistory = %+v, %d, %v (newest first: the removal)", page, total, err)
 	}
+	if page[0].Action != domain.SkillHistoryRemoved || page[1].Action != domain.SkillHistoryLevelChanged || page[2].Action != domain.SkillHistoryAdded {
+		t.Fatalf("history actions = %s, %s, %s", page[0].Action, page[1].Action, page[2].Action)
+	}
+	// History cannot be edited.
+	if _, err := pool.Exec(ctx, `UPDATE user_skill_history SET level_to_id = NULL WHERE user_id = $1`, skJane); err == nil {
+		t.Fatal("a history row was updated")
+	}
+	// Adding it back revives the same row and is recorded as a re-add.
+	res, err = repo.AddUserSkill(ctx, skJane, skGo, skLvlA50, skActor)
+	if err != nil || res.Outcome != domain.SkillOutcomeDone || res.Action != domain.SkillHistoryReadded {
+		t.Fatalf("re-add = %+v, %v", res, err)
+	}
+	if n := skCount(t, pool, `SELECT count(*) FROM user_skill WHERE user_id = $1 AND skill_id = $2`, skJane, skGo); n != 1 {
+		t.Fatalf("user_skill rows after re-add = %d, want 1 (revived)", n)
+	}
+	if _, err := repo.RemoveUserSkill(ctx, skJane, skGo, skActor); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(skHistory(t, pool, skJane, skGo)); n != 5 {
+		t.Fatalf("history rows = %d, want 5", n)
+	}
 	// Removing what is no longer held finds nothing, writes nothing.
 	res, _ = repo.RemoveUserSkill(ctx, skJane, skGo, skActor)
-	if res.Outcome != domain.SkillOutcomeNotHeld || len(skHistory(t, pool, skJane, skGo)) != 3 {
+	if res.Outcome != domain.SkillOutcomeNotHeld || len(skHistory(t, pool, skJane, skGo)) != 5 {
 		t.Fatalf("remove again = %+v", res)
 	}
 }
@@ -707,7 +734,7 @@ func TestSkillIntegration_CatalogueSearchAndReads(t *testing.T) {
 	if !found {
 		t.Fatal("fixture scale missing from ListLevelTypes")
 	}
-	cats, err := repo.ListCategories(ctx)
+	cats, err := repo.ListCategories(ctx, true)
 	if err != nil || len(cats) < 3 {
 		t.Fatalf("ListCategories = %d, %v", len(cats), err)
 	}
@@ -798,7 +825,7 @@ func (openAccess) ResolveScope(context.Context) (service.AccessScope, error) {
 // real database.
 func TestSkillIntegration_ServiceEndToEnd(t *testing.T) {
 	repo, pool := newSkillIntegration(t)
-	svc := service.NewSkillService(repo, openAccess{}, []string{"cs_admin"})
+	svc := service.NewSkillService(repo, openAccess{}, []string{"cs_admin"}, nil)
 	jane := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: skJaneEmail, UserID: "idp-subject"})
 
 	// A level of the other scale is refused before anything is written.
@@ -837,13 +864,14 @@ func TestSkillIntegration_ServiceEndToEnd(t *testing.T) {
 		t.Fatalf("history rows by the caller = %d, want 3", n)
 	}
 
-	// The manager read: an ordinary engineer is refused, a team lead is not.
+	// The manager read is a capability: admins only while no role is
+	// configured for it, so a team lead without a role is refused too.
 	if _, err := svc.SearchUserSkills(jane, domain.SearchUserSkillsRequest{}); err == nil {
 		t.Fatal("an engineer read everybody's skills")
 	}
 	lead := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: skLeadEmail})
-	if _, err := svc.SearchUserSkills(lead, domain.SearchUserSkillsRequest{}); err != nil {
-		t.Fatalf("a team lead was refused: %v", err)
+	if _, err := svc.SearchUserSkills(lead, domain.SearchUserSkillsRequest{}); err == nil {
+		t.Fatal("a team lead without the directory role read everybody's skills")
 	}
 	// A lead does not edit the catalogue; an admin does.
 	if _, err := svc.CreateSkill(lead, domain.CreateSkillRequest{Name: "sktest Nope", LevelTypeID: skScaleA}); err == nil {

@@ -21,7 +21,11 @@ import { ACTIVE_CASES_CHART_DATA } from "@/features/dashboard/constants/dashboar
 import { OperationsChartMode } from "@/features/dashboard/types/charts";
 
 // Mock @wso2/oxygen-ui
-vi.mock("@wso2/oxygen-ui", () => ({
+vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
+  // Keep the real palette (dashboard constants read colors.pink etc. at import time).
+  const actual = await importOriginal<typeof import("@wso2/oxygen-ui")>();
+  return {
+    ...actual,
   Box: ({ children, sx, onClick }: any) => (
     <div style={sx} onClick={onClick}>
       {children}
@@ -41,6 +45,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
     <div data-testid="skeleton" data-variant={variant}></div>
   ),
   colors: {
+    ...actual.colors,
     blue: { 500: "#3B82F6" },
     brown: { 500: "#795548" },
     common: { white: "#FFFFFF" },
@@ -51,7 +56,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
     red: { 500: "#EF4444" },
     yellow: { 600: "#EAB308" },
   },
-}));
+  };
+});
 
 // Mock @wso2/oxygen-ui-charts-react
 vi.mock("@wso2/oxygen-ui-charts-react", () => ({

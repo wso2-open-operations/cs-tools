@@ -28,7 +28,7 @@ import (
 // database is needed here).
 func TestPLGRegistrationVolumeTrendRoute(t *testing.T) {
 	mux := http.NewServeMux()
-	registerPLGRoutes(mux, nil)
+	registerPLGRoutes(mux, nil, nil)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/plg/registrations/volume-trend",
@@ -48,7 +48,7 @@ func TestPLGRegistrationVolumeTrendRoute(t *testing.T) {
 // refused by the service before any query.
 func TestPLGOrganizationAggregateRoute(t *testing.T) {
 	mux := http.NewServeMux()
-	registerPLGRoutes(mux, nil)
+	registerPLGRoutes(mux, nil, nil)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/plg/organizations/aggregate",
@@ -62,7 +62,7 @@ func TestPLGOrganizationAggregateRoute(t *testing.T) {
 // than "country" is refused by the service before any query.
 func TestPLGRegistrationAggregateRoute(t *testing.T) {
 	mux := http.NewServeMux()
-	registerPLGRoutes(mux, nil)
+	registerPLGRoutes(mux, nil, nil)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/plg/registrations/aggregate",

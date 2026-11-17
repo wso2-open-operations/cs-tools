@@ -153,6 +153,7 @@ describe("support API query hooks - batch 1", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockAuthFetch).toHaveBeenCalledWith("https://api.test/cases/case-1", {
       method: "GET",
+      headers: { "X-CSM-Correlation-ID": expect.any(String) },
     });
   });
 

@@ -159,46 +159,40 @@ returns an error. `--run-now=stale_cases_report --recipients=... [--cc=...]` wor
 `reportRunNow` like every report: it mails the override list only, even for a task with no `to` of its
 own.
 
-`internal/entitycases.Client` remains a separate entity-service client, used by `open_cases_report`,
-even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials; see that
-package's own doc comment for why case search isn't just another method on `ledger.Client`.
-
 ## Open cases report
 
 `internal/opencases.SendReport`, registered as `"open_cases_report"`, is a narrower, more urgent
 sibling of "Stale cases report" above: it flags a case nobody has even started working on yet,
-rather than any case that's merely been open a long time. Queries entity-service's
-`POST /cases/search` (via `internal/entitycases.Client.SearchCasesInStateCreatedBeforeYesterday`)
-for every item whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
-moved to `work_in_progress` or anything else no longer belongs here), whose `type` is one of `case`,
-`service_request` or `security_report_analysis` (`entitycases.OpenCaseTypes`; without the filter the
-search also returns announcements and engagements, tens of thousands of rows) and whose `createdOn`
-falls before the start of yesterday, then emails a report table of them (oldest first) via
-`notify.RenderOpenCasesReport`. The table has a Type column (Case, Service request, Security report
-analysis), and each row's number links to the item's CSM portal page, built from
-`CSM_PORTAL_WEB_BASE_URL` and the item's UUID: `/cases/<id>`, `/operations/service-requests/<id>` or
-`/security-center/security-reports/<id>`. The base is empty, the row has no id or the type has no
-known route: plain text. A result over the pagination cap is an error, never a partial list. With no
-matching rows no mail is sent: the handler logs a count-only line and succeeds (also for a
-`--run-now` with `--recipients`, which then sends nothing either), like "Stale cases report".
+rather than any case that's merely been open a long time. It mails entity-service's
+open-before-yesterday report: `internal/longopenreport.Client.OpenBeforeYesterday` calls
+`GET /reports/long-open-cases?variant=open-before-yesterday` (same client, base URL and OAuth client
+credentials as the stale cases report) and `notify.RenderOpenCasesReport` renders its `cases` (oldest
+first). Which items count (a case, service request or security report analysis, as each row's `type`
+says; engagements and announcements are left out; state exactly `open`, created before the start of yesterday), the
+calendar-day boundary (computed by entity-service in Asia/Colombo, not by this task) and the row cap
+(5000) all live in entity-service; this task only fetches, renders and sends. Columns: Case, Type
+(Case, Service request, Security report analysis), Account, Assigned To, State, Severity, Days Open
+(whole days since creation, computed here at send time), Updated. Each row's number links to the item's
+CSM portal page, built from `CSM_PORTAL_WEB_BASE_URL` and the item's UUID (`/cases/<id>`,
+`/operations/service-requests/<id>` or `/security-center/security-reports/<id>`); plain text when the
+base is unset or the row has no id or a type with no known route. With no matching rows no mail is
+sent. Subject: `[Immediate-Action-Required][Report] Opened before yesterday cases`.
 
-"Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
-time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
-rolling duration: a case created at 23:59 yesterday (UTC) is
-excluded, one created at 00:01 the day before is included, regardless of what time of day the task
-itself runs. The "Housekeeping" section's `TZ=UTC` caveat is about something different — when the
-*cron schedule itself* fires (`internal/schedule.PeriodKey`'s own local-time interpretation) — and
-doesn't apply here: this cutoff is UTC-anchored no matter what `TZ` the process runs with.
+If the report has no cases the task sends nothing (a count-only line is logged) and succeeds, as
+the original report does. If entity-service cut the list at its cap (`casesTruncated`), the mail
+is still sent and says "This list is cut: showing only the oldest N of TOTAL".
 
-Default schedule `0 8 * * *` (daily at 08:00, after "Stale cases report"'s 07:00 slot — this time
-itself *is* subject to the same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule);
-override via
-`SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
+This depends on the entity-service `variant` parameter: deploy entity-service first. Against an
+entity-service without it the parameter is ignored and the default age-based report would come
+back, so deploy order matters.
+
+Default schedule `30 3 * * *` (daily at 03:30 UTC, which is 09:00 Asia/Colombo, when the original
+report sends; same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule); override
+via `SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
 `SUB_CRON_RECIPIENTS` entry, unrelated to `ALERT_RECIPIENTS`, no report sent (and no entity-service
-query run) if empty. Shares `internal/entitycases.Client` and the row-rendering helpers in
-`internal/notify` with "Stale cases report", but has its own template
-(`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
-emails" below.
+query run) if empty. Has its own template (`internal/notify/templates/open_cases_report.html`) per
+this component's own "Per-task report emails" below. `--run-now=open_cases_report
+--recipients=... [--cc=...]` works as for the other report tasks.
 
 ## Rota reminders
 
@@ -504,6 +498,81 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 
 First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
 days. Set a hold on tickets that customers asked to keep open **before** enabling.
+
+## Incident auto-close
+
+`internal/incidentautoclose.Run`, registered as **`incident_autoclose`** (default schedule `0 * * * *`, hourly;
+TZ=UTC caveat as above), closes incidents that have been Resolved for `INCIDENT_AUTOCLOSE_DAYS` (default 14, the
+threshold measured in the previous system: 399 of 400 of its auto-closes came 14 days after resolution), with no
+comment and no work note. It follows the decisions made for "Case auto-closure" above rather than new ones:
+
+- **Off unless `INCIDENT_AUTOCLOSE_ENABLED=true`.** It closes incidents, so it is never on by accident. Run it once
+  per environment with `INCIDENT_AUTOCLOSE_DRY_RUN=true`, review the count (including the incidents with no
+  `resolved_on`, measured from their last update), then enable it. Deploy entity-service with migration 0273 first.
+- **The close is entity-service's own incident update**, as the system user `AUTOCLOSURE_SYSTEM_USER_EMAIL`
+  (optional; empty acts as "System user" with no user row, so `closed_by` stays empty), the same user case
+  auto-closure closes as. In dual-write the close is therefore mirrored to the backing data source like any other
+  incident update. The previous system's own auto-close job still closes its copy until it is retired; while both
+  run, a mirrored close of an incident that job already closed may be refused there, which is recorded in
+  `sn_writeback_failures` and never undoes the close in Postgres (not verified against the backing data source).
+  Switching that job off before enabling this under dual-write is a decision for the team, as it is for case
+  auto-closure. Once it is retired, this task is what closes both copies.
+- **Config is checked at startup**, as `autoclosure.RunConfig.Validate` is: a day count outside 1-3650 (what
+  entity-service accepts) refuses to start rather than failing and alerting every hour. So does a daily limit
+  that is negative, above 100000 or not a whole number, and a non-boolean `INCIDENT_AUTOCLOSE_SCHEDULED`.
+- **Daily limit.** `INCIDENT_AUTOCLOSE_DAILY_LIMIT` is sent as `dailyLimit` on every request. entity-service
+  subtracts the incidents closed since 00:00 UTC today from it and recomputes that from its database on every
+  call, so no state is carried between pages or runs. **Manual closes count toward the limit**, so a busy day of
+  hand-closing leaves the job less (or nothing). When the response says `dailyLimitReached` the run stops: it is
+  logged at Info, is not an error and does not alert, and the run succeeds; the rest waits for the next run or the
+  next UTC day. `0` or unset is no cap.
+- **Staged rollout**, as for case auto-closure: `INCIDENT_AUTOCLOSE_SCHEDULED=false` keeps the task registered
+  (so `--run-now` and `TRYOUT_TASK` find it) but off the engine tick, the same mechanism as
+  `AUTOCLOSURE_SCHEDULED=false`. Then, from a Choreo Manual Task component, reading the logs between steps:
+  1. `--run-now=incident_autoclose --dry-run` : review how many are due (a dry run asks one page only).
+  2. `--run-now=incident_autoclose --limit=20` : a small real batch.
+  3. Raise `--limit`, as far as `INCIDENT_AUTOCLOSE_DAILY_LIMIT` allows.
+
+  Then set `INCIDENT_AUTOCLOSE_SCHEDULED=true` (or remove it) so the hourly run takes over. The task's run-now
+  flags are `--dry-run` and `--limit` only (`--states` is refused: there are no states). They narrow and never
+  loosen: `--dry-run` cannot turn off a configured `INCIDENT_AUTOCLOSE_DRY_RUN=true`, and `--limit=N` lowers the
+  daily limit for that run and is refused when it exceeds a configured `INCIDENT_AUTOCLOSE_DAILY_LIMIT` (when that
+  is `0` or unset, it sets a limit for the run, at most 100000). A run-now writes no ledger row; it is safe beside
+  the scheduled run because entity-service re-checks each incident under its row lock and recomputes the daily
+  budget on every call.
+
+This component's client id must be in entity-service's `M2M_CLIENT_IDS`, and entity-service must run on Postgres:
+under `DATA_SOURCE=servicenow` the endpoint answers 503 and every run fails and alerts, so leave the task off there.
+
+This task is a **trigger only**. entity-service's `POST /incidents/autoclose` picks what is due (oldest resolved
+first), closes each incident through its incident service (which re-checks it under the row lock and closes its
+open tasks as a manual close would), and reports `closed`, `failed`, `more` (the page was full) and
+`dailyLimitReached`. See
+entity-service's CLAUDE.md, "Incident auto-close".
+
+- **Paging.** Each call asks for 200 new incidents (`PageSize`); the handler asks again while `more` is true, at
+  most 20 pages (`MaxPages`, 4,000 incidents) a run. Reaching the cap with `more` still true logs a WARN and the
+  run succeeds; the next hourly run continues. entity-service lists the oldest due first with no offset, and an
+  incident that fails stays Resolved and due, so it comes back at the head of every later page. The request limit
+  therefore grows with the failures already seen (200 + failures, at most entity-service's 1,000), so failing
+  incidents do not hide the ones behind them. If a full page still holds only incidents that already failed (more
+  than 800 failing), the run stops and its error says that later due incidents were not reached.
+- **Timeout.** A page must finish inside entity-service's `REQUEST_TIMEOUT` (60s by default); the client waits
+  the same 60s. A page cut short comes back as an error with no `closed`/`failed` lists, so the run fails and
+  alerts, but no work is lost: each incident commits on its own, and the rest are still due next run.
+- **Failures fail the run.** A failed call, or any `failed` entry, returns an error naming the incidents (at most
+  10, then a count; each message cut to 200 characters), so the engine alerts and retries on the next tick.
+  Retrying is safe: closed incidents are no longer due. One incident failing does not stop the others on its page
+  or later pages; it is named once per run even when later pages report it again.
+- **A dry run asks once.** Nothing is closed, so a second call would return the same page; the run logs each
+  incident it would close and, when `more` is true, that more are due. A response that says it was not a dry run
+  when one was asked for fails the run.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `INCIDENT_AUTOCLOSE_ENABLED` | `false` | Register the task |
+| `INCIDENT_AUTOCLOSE_DAYS` | `14` | Days an incident stays Resolved (from `resolved_on`) before it is closed; a value outside 1-3650 or not a whole number refuses to start |
+| `INCIDENT_AUTOCLOSE_DRY_RUN` | `false` | List what is due, close nothing. A malformed value refuses to start rather than falling back to a real run. **A `TRYOUT_TASK=incident_autoclose` is always forced to a dry run**, as for `case_autoclosure` |
 
 ## ACP closure
 
@@ -825,10 +894,10 @@ task", and the message lists the registered names.
 | Argument | Meaning |
 |---|---|
 | `--run-now=<task>` | Run that registered task once now |
-| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure` and `acp_closure`) |
+| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure`, `incident_autoclose` and `acp_closure`) |
 | `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
 | `--full-sweep` | Evaluate every project live, no screening, for this run. `acp_closure` only |
-| `--states=a,b` | Work only these states, each among the configured ones. Same tasks as `--dry-run` |
+| `--states=a,b` | Work only these states, each among the configured ones. `case_autoclosure` only |
 | `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
 | `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's whole audience for this one run (To and Cc both; see "Recipient override" below). Every report task takes it. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
 | `--project-key=KEY` `--to=a@x,b@y` `--cc=c@x` | **Only `time_card_report`** (see "Monthly time card report" below). `--project-key` runs one project, configured or not; `--to` replaces the project's derived contacts with your list (one mail, all in To); `--cc` adds copies. Same address rules as `--recipients`, at most 50 addresses per list, one bare key. `--to` and `--recipients` cannot be combined; every other task refuses `--to` and `--project-key` |
@@ -854,7 +923,7 @@ csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 -
 
 **Recipient override (`--recipients`, `--cc`).** Valid for every report task: the two CS Worklogs reports,
 `migration_case_report`, `open_cases_report`, `stale_cases_report`, `unresolved_products_digest`, the three
-`product_regression_report_*` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
+`product_regression_report_*`, `eol_product_usage_report` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
 refuses to run if one of them is registered without the hook, `tasksMissingReportRunNow`). One mechanism: each task's
 `RunNowNarrow` is `reportRunNow(normal, raw, build)` (the CS Worklogs ones `worklogsRunNow`, which also takes the window
 flags), and `build` is the task's own handler constructor, so the scheduled `Handler` is untouched. With
@@ -889,7 +958,7 @@ that is **not idempotent** sends or does its work again. Safe to run now are the
 reading the handlers' code and doc comments (a judgement, not a test):
 
 - **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
-  daily limit); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
+  daily limit); `incident_autoclose` (entity-service's row-locked re-check and per-call daily budget); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
   them; it is a real run, sending real notices and suspending, with the configured `ACP_*` settings);
   `acp_reopen_check` (entity-service records each reopen); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
   `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
@@ -898,6 +967,7 @@ reading the handlers' code and doc comments (a judgement, not a test):
 - **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
   `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
   `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports,
+  `eol_product_usage_report` (a run-now sends whatever the date),
   `time_card_report` (customer-facing: a repeat mails every contact of the project again).
   `unresolved_products_digest` also mails every run it finds anything.
 - **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
@@ -966,6 +1036,67 @@ yesterday, so a report that reaches PCT late, or a night this task did not run, 
 next run. Both rollups are idempotent (a rerun over unchanged rows writes nothing), so the overlap
 costs nothing. One failing day or month does not stop the others; the handler returns every failure
 together and the engine retries the whole run. Days and months are UTC, so run with `TZ=UTC`.
+
+## PLG signups from Moesif
+
+**`plg_moesif_sync`** (default `*/15 * * * *`) lands WSO2 Cloud signups in the PLG portal. Moesif is the
+source of truth: a registration event (`metadata.initiating_product`, once per user) and each later
+subscription event (`metadata.product`) become one registration, by company id, user id and product,
+posted to entity-service's `POST /plg/registrations/ingest`. entity-service maps the product name to a
+portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
+
+- **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
+  `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only
+  refreshes what is stored, and a failed or superseded period is covered by the next run as long as the
+  outage is shorter than the window. The handler reads the wall clock, not the period start. Startup
+  refuses a window shorter than the schedule's longest gap between runs plus `DRIVER_INTERVAL`
+  (`schedule.LongestGap`), since events in between would never be read, and a schedule limited to
+  certain days of the month, months or years, whose gaps an eight-day sample cannot bound.
+- **Failures.** An event with no company id or product, or one entity-service rejects, is recorded in
+  `plg_ingest_failure` under its Moesif event id, by ids only; entity-service keeps one open row per
+  event id (a partial unique index, migration 0288), so later runs do not repeat it. Neither fails the
+  run, but a failure that cannot be recorded does, after every other failure was attempted. Moesif or entity-service unreachable,
+  or a window larger than `PLG_MOESIF_SYNC_MAX_PAGES` pages, fails it (retried and alerted as usual).
+- **Personal data.** Only time, action, user id, company id and the product fields are requested from
+  Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
+- **`internal/moesif`** is the shared Management API client (event search with `search_after` paging).
+  Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
+  sub-crons run one after another.
+
+## PLG registration validation
+
+**`plg_registration_validation`** (default `20 * * * *`) fills each product's registration playbook from
+its Moesif activity. **Off unless `PLG_REGISTRATION_VALIDATION_ENABLED=true`**, and a dry run (derive and
+log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. Only `AGENT_PLATFORM` (Moesif
+platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the others when they do.
+
+- **Each run**: `POST /plg/registrations/validation-queue` lists the product's REGISTRATION pairings signed
+  up within `WINDOW_HOURS` (12) plus `GRACE_HOURS` (24); Moesif is read for 50 companies per query
+  (company id, time and action only); `internal/plgactivity` counts the user's actions in the first
+  `WINDOW_HOURS` after signup; one `PUT /plg/pairings/{id}/registration-validation` per pairing writes the
+  summary and values. entity-service attaches the playbook, never overwrites an engineer's value, and
+  closes and abandons the pairing when the outcome is EXCLUDED. This client's id must be in
+  entity-service's `M2M_CLIENT_IDS`.
+- **Rules**: Agent Manager has no onboarding wizard, so the onboarding tasks are left to the engineer.
+  An action is any Agent Manager action, deletions included; `registered-gateway` and
+  `rotated-gateway-token` are not (the platform emits them minutes after signup), nor are account events
+  such as `Select Subscription Plan`. `ELIGIBLE_ACTIONS` (10) or more is ELIGIBLE and HIGH;
+  `MODERATE_ACTIONS` (5) or more is MODERATE, fewer LOW, none NONE, all MONITOR. A CORPORATE email is
+  ELIGIBLE; INTERNAL or DISPOSABLE is EXCLUDED.
+- **Email classification**, when the pairing has none or UNKNOWN: the owner's email is read from the
+  Cloud Directory API (`CLOUD_API_*`), kept in memory only, and reduced to its domain and a role-mailbox
+  flag (`admin@`, `test+1@`). Only the domain goes to the CSM AI service's
+  `POST /ai/email-domains/classify`; a PERSONAL domain with a role mailbox becomes DISPOSABLE. A Directory
+  or AI failure leaves it unset for the next run. Off, with a warning at start, unless
+  `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain.
+- **Queue order**: pairings never validated come first, then the least recently validated, so a
+  queue over `QueueLimit` (1000) cannot starve the same pairings every run.
+- **Stale exclusions**: entity-service abandons only when the classification the run will hold still
+  excludes (an engineer may have changed it since the queue was read). Otherwise it writes nothing and
+  answers `stale`; the job counts it and the next run decides again. A zero `WINDOW_HOURS` fails the run.
+- **Failures**: Moesif or the queue failing fails the run. A failed write is logged and the others go
+  on; the run then fails naming at most 10 pairing ids. A product without an active registration
+  playbook is skipped with a warning.
 
 ## Unresolved products digest
 
@@ -1085,11 +1216,17 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
+| `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
+| `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
+| `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `AGENT_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
+| `CSM_AI_SERVICE_BASE_URL` / `CSM_AI_SERVICE_SCOPES` | No | The CSM AI service, called with the shared `OAUTH2_*` credentials, for the registration validation's email classification |
+| `CLOUD_API_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` / `_USER_EMAIL_PATH` | With `CLOUD_API_BASE_URL` (path default `/users/{userId}/email`) | The Cloud Directory API (the CSM portal's Directory client) for the owner's email. The secret is a Choreo secret: never commit it |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
@@ -1133,6 +1270,41 @@ unit mail groups, and a failed period is retried on every tick, so failure alert
 `ALERT_RECIPIENTS` only.
 `PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
 (`<prefix>/<case number>`); unset keeps the plain text the PDF had.
+
+## Monthly EOL product usage report
+
+`internal/eolusagescan.SendReport`, registered as **`eol_product_usage_report`**, is the port of the previous system's *EOL
+Product Version Usage Monthly Report*: the customers still running a product version past its EOL date in an active
+Primary Production deployment, mailed to the people who should act on it. entity-service builds the list (`GET
+/reports/eol-product-usage?asOf=YYYY-MM-DD`, client in `internal/eolusagereport`; the joins and the EOL rule live
+there) and this task mails it through its own template (`internal/notify/templates/eol_product_usage_report.html`,
+`notify.RenderEolProductUsageReport`): the introduction the previous mail carried, then one table per region, each
+account's cells (account, CS ABT, account manager, technical owner) spanning its rows; there is no Region column, as each region has its own heading and table and each project's cell
+spanning its versions.
+
+- **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
+  sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
+  run's period key (`Options.Anchor`, `periodStart` in `cmd/server/main.go`), not the clock: the engine retries a
+  failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
+  A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
+  report can then be sent by hand with `--run-now=eol_product_usage_report`. A `--run-now` sends whatever
+  the date (`Options.AnyDay`). A `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use
+  `--run-now` with `--recipients` to test on another day.
+- **Report date.** The report is fetched as of the run's Monday in Asia/Colombo, so a retry later in the week lists
+  the same versions.
+- **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
+  audience agreed with CS (account managers, technical owners and leadership see the same list). It is internal
+  only.
+- **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
+  account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
+  To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
+  `To`/`Cc` nil for the same reason as theirs: failures go to `ALERT_RECIPIENTS` alone, never to every account
+  manager on each retry; `eolUsageTaskWithRecipients` carries its audience to the startup `EMAIL_BASE_URL` check.
+- **No EOL usage.** Unlike the regression reports, an empty report **is sent**: a short "no customers are using EOL
+  product versions" note to the configured to/cc only, so the leadership group knows the report ran.
+- `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset
+  keeps plain text, and a non-https value refuses to start.
 
 ## Monthly time card report
 
@@ -1218,8 +1390,8 @@ alerts reach `ALERT_RECIPIENTS` only, never the team mail groups. Each sub-cron'
 (`internal/notify/templates/{stale,open}_cases_report.html`, following `alert.html`'s pattern) and
 its own recipients (its own `SUB_CRON_RECIPIENTS` entry, passed in as plain `to`/`cc` slices) — the
 report is sent from inside the `Handler` closure itself, entirely outside `engine.Engine`'s own
-success/failure path. What they *do* share is the case-search client (`internal/entitycases.Client`)
-and the row-rendering helpers in `internal/notify` (`renderCaseRows`/`humanizeState`/etc.) — real,
+success/failure path. What they *do* share is the long-open report client (`internal/longopenreport.Client`)
+and the row-rendering helpers in `internal/notify` (`humanizeState`/`severityLabel`/etc.) — real,
 already-duplicated logic worth sharing, as distinct from the report's own template/copy, which
 stays owned per task on purpose. A future report-sending sub-cron follows the same split: reuse
 whatever's genuinely identical (a case-search method, a rendering helper), but keep its own

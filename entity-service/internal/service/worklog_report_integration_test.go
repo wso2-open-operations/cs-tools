@@ -297,6 +297,12 @@ func seedWorklogDailyFixture(ctx context.Context, t *testing.T, pool *pgxpool.Po
 	exec(`DELETE FROM team_member WHERE team_id IN (SELECT id FROM team WHERE key = ANY($1))`, fixtureTeams)
 	exec(`DELETE FROM work_item WHERE created_by = 'seed'`)
 	exec(`DELETE FROM team WHERE key = ANY($1)`, fixtureTeams)
+	// A user another suite's seed gave leave or shifts to cannot be deleted
+	// while those rows exist (team_schedule_absence.user_id and
+	// team_schedule_assignment.user_id are ON DELETE RESTRICT), so the
+	// dependants go first, then the users.
+	exec(`DELETE FROM team_schedule_assignment WHERE user_id IN (SELECT id FROM "user" WHERE email LIKE '%@example.com')`)
+	exec(`DELETE FROM team_schedule_absence WHERE user_id IN (SELECT id FROM "user" WHERE email LIKE '%@example.com')`)
 	exec(`DELETE FROM "user" WHERE email LIKE '%@example.com'`)
 
 	// Management: its own team, type cre-leadership, contributing its

@@ -80,9 +80,19 @@ func TestChangeRequestApprovedLockIntegration_ApprovedStatesAreReadOnly(t *testi
 			f.execSQL(`UPDATE work_item SET updated_by = 'before-the-patch' WHERE id = $1`, id)
 			actor := crFlowEmail(crFlowCreatorID)
 
-			// One field.
+			// One field. The tail says what is still possible: the deviation from the
+			// implementation plan only once implementation has started and until the
+			// change is final.
 			_, err := f.repo.PatchChangeRequest(f.sys, id, domain.PatchChangeRequestRequest{Description: str("changed")}, actor)
 			approvedLockRefusal(t, err, "description")
+			tail := "; only work notes can be added"
+			if state == "IMPLEMENT" || state == "REVIEW" || state == "CUSTOMER_REVIEW" {
+				tail = "; only work notes and the deviation from the implementation plan can be added"
+			}
+			var ve *apierror.ValidationError
+			if errors.As(err, &ve) && !strings.HasSuffix(ve.Msg, "(current state: "+strings.ToLower(state)+"), so its fields are read-only"+tail) {
+				t.Errorf("message = %q, want it to end with the state and %q", ve.Msg, tail)
+			}
 
 			// The implementation plan, and several at once: every changed field is named.
 			plan := str("<p>Another plan</p>")

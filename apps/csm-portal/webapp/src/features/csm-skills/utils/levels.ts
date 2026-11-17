@@ -63,3 +63,9 @@ export function distinctLevelValues(
     .sort(([a], [b]) => a - b)
     .map(([value, names]) => ({ value, names: [...names] }));
 }
+
+/** The scale marked as the default (new skills and requests use it), or the only scale. */
+export function defaultLevelType(levelTypes: readonly SkillLevelType[] | undefined): SkillLevelType | undefined {
+  if (!levelTypes?.length) return undefined;
+  return levelTypes.find((t) => t.isDefault) ?? (levelTypes.length === 1 ? levelTypes[0] : undefined);
+}

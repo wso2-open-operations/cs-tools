@@ -65,6 +65,10 @@ import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { visibleCaseTypes } from "@features/csm-cases/utils/caseType";
 import {
+  SERVICE_REQUEST_SEVERITY_OPTIONS,
+  SEVERITY_OPTIONS,
+} from "@features/csm-cases/utils/caseFilterOptions";
+import {
   DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
@@ -141,6 +145,7 @@ const FILTER_PARAM_KEYS = [
   "workStates",
   "projects",
   "engagementTypes",
+  "salesRegions",
   "products",
   "csTeams",
   "sreTeams",
@@ -211,6 +216,8 @@ interface CsmIssuesViewProps {
   hideSreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in; only the Engagements page passes it). */
+  showSalesRegionFilter?: boolean;
   /**
    * Force the Severity filter/column on or off, overriding the default
    * "only when `lockedFilters.caseTypes` is locked to `case`" rule below.
@@ -275,6 +282,7 @@ export default function CsmIssuesView({
   hideCreTeamFilter,
   hideSreTeamFilter,
   showEngagementTypeFilter,
+  showSalesRegionFilter,
   showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
   hideSeverityColumn,
@@ -301,10 +309,15 @@ export default function CsmIssuesView({
     defaultTypesArmed && !urlHasTypes && !hideTypeFilter && !!defaultCaseTypes?.length;
   const seedTypesKey = seedTypes ? (defaultCaseTypes ?? []).join(",") : "";
   const filters = useMemo<CasesFilters>(() => {
-    const fromUrl = readCasesFiltersFromUrl(searchParams);
+    const parsed = readCasesFiltersFromUrl(searchParams);
+    // Sales Region only has a control on views that opt in. A value arriving
+    // through a shared URL or a saved view on any other list would filter
+    // results the user cannot see or clear, and the other data source rejects
+    // the filter outright, so it is dropped here for query and display alike.
+    const fromUrl = showSalesRegionFilter ? parsed : { ...parsed, salesRegions: [] };
     if (!seedTypesKey) return fromUrl;
     return { ...fromUrl, caseTypes: seedTypesKey.split(",") as CasesFilters["caseTypes"] };
-  }, [searchParams, seedTypesKey]);
+  }, [searchParams, seedTypesKey, showSalesRegionFilter]);
   useEffect(() => {
     if (!seedTypesKey) return;
     const next = new URLSearchParams(searchParams);
@@ -443,31 +456,31 @@ export default function CsmIssuesView({
   // The URL write happens in an effect so it is not a navigate during
   // render, and only for this clamp — a general pagination effect races
   // filter updates that also call `setSearchParams`.
-  const clampedPageRef = useRef<number | null>(null);
+  // The clamp is recorded in state (a fresh object per clamp, set during
+  // render); the ref remembers which clamp the effect has already written so
+  // later effect re-runs do not replay it.
+  const [clampedPage, setClampedPage] = useState<{ page: number } | null>(null);
+  const writtenClampRef = useRef<{ page: number } | null>(null);
   useEffect(() => {
-    const clamped = clampedPageRef.current;
-    if (clamped == null) return;
-    clampedPageRef.current = null;
-    writePaginationToUrl(clamped, rowsPerPage);
-  }, [page, rowsPerPage, writePaginationToUrl]);
+    if (clampedPage == null || writtenClampRef.current === clampedPage) return;
+    writtenClampRef.current = clampedPage;
+    writePaginationToUrl(clampedPage.page, rowsPerPage);
+  }, [clampedPage, rowsPerPage, writePaginationToUrl]);
 
   const { canWrite, canViewSecurityReportCases } = usePortalAccess();
 
-  // Severity (S1-S4) is a support-case concept, so the severity filter is by
-  // default only shown on the support-cases list — i.e. when the surrounding
-  // view locks the record type to `case`. Every other list (service
-  // requests, engagements, security reports) hides it, unless the caller
+  // Severity (S1-S4) is a support-case and service-request concept, so the
+  // severity filter is by default only shown on those lists — i.e. when the
+  // surrounding view locks the record type to `case` or `service_request`.
+  // Every other list (engagements, security reports) hides it, unless the caller
   // overrides with `showSeverityFilter` (see its own doc comment — the
   // project Work items tab does this since its type filter is unlocked and
   // visible rather than fixed via `lockedFilters`).
   const showSeverityFilter =
     showSeverityFilterOverride ??
     (lockedFilters?.caseTypes?.length === 1 &&
-      lockedFilters.caseTypes[0] === "case");
-  // Service Requests don't carry a severity, so the column is redundant there.
-  const isServiceRequestOnly =
-    lockedFilters?.caseTypes?.length === 1 &&
-    lockedFilters.caseTypes[0] === "service_request";
+      (lockedFilters.caseTypes[0] === "case" ||
+        lockedFilters.caseTypes[0] === "service_request"));
 
   const debouncedSearch = useDebouncedValue(filters.search, 300);
   // User filters (debounced search) with the locked overrides applied last so
@@ -569,10 +582,9 @@ export default function CsmIssuesView({
 
   // "Customise columns" — off unless a caller opts in (see `enableColumnCustomization`'s
   // doc). `showSeverityColumn` mirrors the exact gate `CasesList` itself is given below
-  // (`isServiceRequestOnly || hideSeverityColumn`) so the picker can never offer a
-  // Severity column that would just render "—" for every row (service requests have no
-  // severity concept at all).
-  const showSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // (`hideSeverityColumn`) so the picker can never offer a Severity column that would
+  // just render "—" for every row.
+  const showSeverityColumn = !hideSeverityColumn;
   // Every current caller of this view locks the case type via `lockedFilters` (Case, SR,
   // SRA, Engagements each fix `caseTypes` to one value) — the Type column would then show
   // the same chip on every row, so it's still offered (a legacy row that predates type
@@ -650,10 +662,9 @@ export default function CsmIssuesView({
     [api, queryFilters, exportSearch, sortField, sortOrder, currentUserId, currentUserEmail],
   );
 
-  // Same gate `CasesList` is given (`hideSeverityColumn={isServiceRequestOnly
-  // || hideSeverityColumn}`) so the export's column set can never drift from
-  // what's actually rendered.
-  const showExportSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // Same gate `CasesList` is given (`hideSeverityColumn`) so the export's column
+  // set can never drift from what's actually rendered.
+  const showExportSeverityColumn = !hideSeverityColumn;
   const caseToCsvRow = useCallback(
     (c: CsmCaseRow): string[] => {
       const caseId =
@@ -741,7 +752,7 @@ export default function CsmIssuesView({
   // setState in effects); React re-renders before committing, so it's not a
   // user-visible extra paint.
   if (data !== undefined && !data.hasMore && page > lastPage) {
-    clampedPageRef.current = lastPage;
+    setClampedPage({ page: lastPage });
     setPage(lastPage);
   }
   const paginationCount = data === undefined || data.hasMore ? -1 : total;
@@ -829,6 +840,17 @@ export default function CsmIssuesView({
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
         showSeverityFilter={showSeverityFilter}
+        // Service requests have no S0, so it is not offered as a new pick.
+        // A shared URL or saved view can still carry `severities=S0`, so keep
+        // it listed while selected, otherwise the user could not deselect it.
+        severityOptions={
+          lockedFilters?.caseTypes?.length === 1 &&
+          lockedFilters.caseTypes[0] === "service_request"
+            ? filters.severities.includes("S0")
+              ? SEVERITY_OPTIONS
+              : SERVICE_REQUEST_SEVERITY_OPTIONS
+            : SEVERITY_OPTIONS
+        }
         hideTypeFilter={hideTypeFilter}
         typeFilterLabel={typeFilterLabel}
         hideProjectFilter={hideProjectFilter}
@@ -836,6 +858,7 @@ export default function CsmIssuesView({
         hideCreTeamFilter={hideCreTeamFilter}
         hideSreTeamFilter={hideSreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
+        showSalesRegionFilter={showSalesRegionFilter}
       />
 
       {canWrite && selectedRows.size > 0 && (
@@ -867,7 +890,7 @@ export default function CsmIssuesView({
         isFetching={isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
-        hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
+        hideSeverityColumn={hideSeverityColumn}
         selectable={canWrite}
         selectedIds={selectedRowIds}
         onToggleRow={toggleRow}

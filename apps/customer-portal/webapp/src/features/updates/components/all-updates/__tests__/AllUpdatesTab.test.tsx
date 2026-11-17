@@ -73,14 +73,18 @@ describe("AllUpdatesTab", () => {
     expect(screen.getByLabelText(/Ending Update Level/)).toBeDefined();
   });
 
-  it("renders Search and View Report buttons", () => {
+  it("renders Search, Clear Filters and Download Report buttons", () => {
     render(
       <MemoryRouter>
         <AllUpdatesTab />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("button", { name: /Search/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /View Report/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Search" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Clear Filters" })).toBeDefined();
+    // The report is downloaded as a PDF and is only available once a search has run.
+    const downloadReport = screen.getByRole("button", { name: "Download Report" });
+    expect(downloadReport).toBeDefined();
+    expect((downloadReport as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows placeholder text when no search has been run", () => {

@@ -163,6 +163,17 @@ func identityArgs(scope SearchScope) (isInternal, viewerEmail string) {
 	return strconv.FormatBool(scope.Unrestricted), scope.ViewerEmail
 }
 
+// isInternalStaffArg is the value of app.is_internal_staff: "true" only for an
+// internal caller that did not arrive through the customer portal's backend --
+// the same rule as SearchScope.canSeeServiceRequestSeverity. app.is_internal
+// stays true for such portal-routed staff (they keep the data access an
+// internal user has); this narrower setting is for the few database checks
+// that must treat them as a customer, such as the service request severity
+// trigger (migration 100027).
+func isInternalStaffArg(scope SearchScope) string {
+	return strconv.FormatBool(scope.canSeeServiceRequestSeverity())
+}
+
 // queueIdentity queues the identity-setting statements onto batch, ahead of
 // whatever real statement the caller queues next -- never inlined into that
 // statement's own WHERE clause (see setCallerIdentity's own doc comment for
@@ -186,7 +197,9 @@ func identityArgs(scope SearchScope) (isInternal, viewerEmail string) {
 // is ever consulted.
 func queueIdentity(batch *pgx.Batch, scope SearchScope) {
 	isInternal, viewerEmail := identityArgs(scope)
-	batch.Queue("SELECT set_config('app.is_internal', $1, true)", isInternal)
+	// app.is_internal_staff rides in the same statement (no extra round trip):
+	// see isInternalStaffArg.
+	batch.Queue("SELECT set_config('app.is_internal', $1, true), set_config('app.is_internal_staff', $2, true)", isInternal, isInternalStaffArg(scope))
 	// app.audit_actor rides in the same statement (no extra round trip): see
 	// SearchScope.AuditActor.
 	batch.Queue("SELECT set_config('app.viewer_email', $1, true), set_config('app.audit_actor', $2, true)", viewerEmail, scope.auditActor())

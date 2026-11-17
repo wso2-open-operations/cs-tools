@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -45,21 +46,31 @@ func TestOutageAffectedCIsLive(t *testing.T) {
 	svc := NewOutageService(repository.NewOutageRepository(repository.NewScoped(pool)))
 
 	// Two offerings with a monitor (A, C) and two without (main, B).
-	var main, b, a, c string
+	// array_agg is NULL (or has fewer than two elements) when the database
+	// does not hold that many offerings, so these scan into pointers and the
+	// test skips rather than fails on a database without that ambient data.
+	var mainP, bP, aP, cP *string
 	if err := pool.QueryRow(ctx, `
 SELECT (array_agg(so.id::text ORDER BY so.id))[1], (array_agg(so.id::text ORDER BY so.id))[2]
   FROM service_offering so
- WHERE NOT EXISTS (SELECT 1 FROM cloud_monitor m WHERE m.service_offering_id = so.id)`).Scan(&main, &b); err != nil {
+ WHERE NOT EXISTS (SELECT 1 FROM cloud_monitor m WHERE m.service_offering_id = so.id)`).Scan(&mainP, &bP); err != nil {
 		t.Fatalf("pick unmonitored offerings: %v", err)
+	}
+	if mainP == nil || bP == nil {
+		t.Skip("needs two service offerings without a cloud monitor; this database does not have them")
 	}
 	if err := pool.QueryRow(ctx, `
 SELECT (array_agg(x ORDER BY x))[1], (array_agg(x ORDER BY x))[2]
   FROM (SELECT DISTINCT m.service_offering_id::text x FROM cloud_monitor m
          WHERE m.cloud_offering IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM outage_affected_ci ac JOIN outage o ON o.id = ac.outage_id
-                            WHERE ac.ci_id = m.service_offering_id AND o.end_on IS NULL)) s`).Scan(&a, &c); err != nil {
+                            WHERE ac.ci_id = m.service_offering_id AND o.end_on IS NULL)) s`).Scan(&aP, &cP); err != nil {
 		t.Fatalf("pick monitored offerings: %v", err)
 	}
+	if aP == nil || cP == nil {
+		t.Skip("needs two monitored service offerings with no open outage; this database does not have them")
+	}
+	main, b, a, c := *mainP, *bP, *aP, *cP
 	yes := true
 	create := func(req domain.CreateOutageRequest) domain.Outage {
 		t.Helper()
@@ -152,6 +163,9 @@ SELECT (array_agg(x ORDER BY x))[1], (array_agg(x ORDER BY x))[2]
 	// shows on the read, and re-saving the list with it kept must not fail.
 	var svcID string
 	if err := pool.QueryRow(ctx, "SELECT id::text FROM service LIMIT 1").Scan(&svcID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			t.Skip("the rest of this test needs a row in the service table; this database has none")
+		}
 		t.Fatalf("pick a service: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO outage_affected_ci (id, outage_id, ci_id, created_on, updated_on, created_by, updated_by)

@@ -116,6 +116,9 @@ import {
   windowChangedMessage,
   projectFrozenMessage,
   approvedReadOnlyMessage,
+  deviationFinalMessage,
+  deviationNotYetMessage,
+  DEVIATION_NOT_INCORPORATED_MESSAGE,
   APPROVED_STATES,
   requirementCannotBeRemovedMessage,
   requirementGatePassedMessage,
@@ -1302,7 +1305,7 @@ test.describe("change request approval flow — editing the customer checkboxes"
     expect(api.flags().customerReviewRequired).toBe(false);
   });
 
-  test("after the CAB approval every field is read-only, the implementation plan included, and a work note is all the form adds", async ({ page }) => {
+  test("after the CAB approval every field is read-only, the implementation plan included, and a work note is added on its own", async ({ page }) => {
     const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
     const detail = new ChangeRequestDetailPage(page);
     await openDetail(detail);
@@ -1314,7 +1317,7 @@ test.describe("change request approval flow — editing the customer checkboxes"
     await expect(detail.editApprovedNotice()).toBeVisible();
     await expect(detail.editDialog().getByRole("textbox", { name: /^subject/i })).toBeDisabled();
     await expect(
-      detail.editDialog().getByRole("group", { name: /implementation plan/i }).locator("[contenteditable], textarea").first(),
+      detail.editDialog().getByRole("group", { name: /^implementation plan/i }).locator("[contenteditable], textarea").first(),
     ).not.toBeEditable();
     await expect(detail.editDeploymentsField()).toBeDisabled();
     await expect(detail.editCustomerApprovalCheckbox()).toBeDisabled();
@@ -1516,6 +1519,159 @@ const ACME_CONTACTS = FAKE_PROJECT_CONTACTS[ACME.id]!.map((u) => u.name);
 const BETA_CONTACTS = FAKE_PROJECT_CONTACTS[BETA.id]!.map((u) => u.name);
 const productsOf = (deploymentId: string): string[] =>
   FAKE_DEPLOYMENT_PRODUCTS.filter((p) => p.deploymentId === deploymentId).map((p) => p.name);
+
+test.describe("change request lifecycle — the deviation from the implementation plan (mocked backend)", () => {
+  const PLAN = "<p>Upgrade every node together.</p>";
+  const DEVIATION = "<p>Upgraded the nodes one at a time instead.</p>";
+
+  test("once approved the plan is read-only, but the deviation is recorded beside a work note and shown under the plan", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("implement");
+    await page.reload();
+    await expect(detail.currentStep()).toContainText("Implement");
+    await expect(detail.planTab()).toHaveAccessibleName("Plan");
+
+    await detail.openEditDialog();
+    await expect(
+      detail.editDialog().getByText("You can still record a deviation from the implementation plan and add work notes.", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      detail.editDialog().getByRole("group", { name: /^implementation plan/i }).locator(".editor-input"),
+    ).not.toBeEditable();
+    await expect(detail.editDeviationEditor()).toBeEditable();
+    await detail.editDeviationEditor().click();
+    await page.keyboard.type("Upgraded the nodes one at a time instead.");
+    await detail.editWorkNoteField().fill("Recorded the deviation.");
+    await expect(detail.saveButton()).toBeEnabled();
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "PATCH" && r.url().endsWith(`/change-requests/${FAKE_CR_ID}`)),
+      detail.saveEdit(),
+    ]);
+    expect(request.postDataJSON()).toEqual({
+      implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+      workNote: "Recorded the deviation.",
+    });
+    await expect(detail.editDialog()).toHaveCount(0);
+    expect(api.plan().implementationDeviation).toContain("Upgraded the nodes one at a time instead.");
+
+    // The Plan tab is flagged, and the deviation sits right under the implementation plan.
+    await expect(detail.planTab()).toHaveAccessibleName("Plan, has a deviation from the implementation plan");
+    await detail.planTab().click();
+    await expect(detail.deviationSection()).toContainText("Upgraded the nodes one at a time instead.");
+    // The section is the very next block after the Implementation plan section.
+    await expect(
+      page.getByText("Implementation plan", { exact: true }).locator("xpath=..").locator("xpath=following-sibling::*[1]"),
+    ).toHaveAttribute("aria-labelledby", "cr-plan-implementation-deviation-title");
+  });
+
+  test("final once the change request is closed: read-only in the form, and the API refuses a change in the backend's words", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN, implementationDeviation: DEVIATION });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("closed");
+    await page.reload();
+
+    await detail.openEditDialog();
+    await expect(detail.editDeviationEditor()).not.toBeEditable();
+    await expect(
+      detail.editDialog().getByText("The change request is closed, so its deviation from the implementation plan is final."),
+    ).toBeVisible();
+    await expect(detail.addWorkNoteButton()).toBeVisible();
+
+    expect(await patchFromPage(page, { implementationDeviation: "<p>Something else</p>", workNote: "riding along" })).toEqual({
+      status: 400,
+      message: deviationFinalMessage("closed"),
+    });
+    expect(api.plan().implementationDeviation).toBe(DEVIATION);
+    expect(api.journal().filter((e) => e.text === "riding along")).toHaveLength(0);
+    // The stored value resent is accepted.
+    expect((await patchFromPage(page, { implementationDeviation: DEVIATION })).status).toBe(200);
+  });
+
+  test("before implementation it cannot be recorded: Scheduled offers no field, and the move to Implement cannot carry it", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("scheduled");
+    await page.reload();
+
+    await detail.openEditDialog();
+    await expect(detail.editDialog().getByText("Only work notes can be added.", { exact: false })).toBeVisible();
+    await expect(detail.editDeviationGroup()).toHaveCount(0);
+    await expect(detail.addWorkNoteButton()).toBeVisible();
+
+    // Judged on the stored state (Scheduled): refused, and nothing moves.
+    expect(await patchFromPage(page, { state: "implement", implementationDeviation: DEVIATION })).toEqual({
+      status: 400,
+      message: deviationNotYetMessage("scheduled"),
+    });
+    expect(api.state()).toBe("scheduled");
+    expect(api.plan().implementationDeviation).toBeNull();
+    // Once in Implement it is recorded.
+    expect((await patchFromPage(page, { state: "implement" })).status).toBe(200);
+    expect((await patchFromPage(page, { implementationDeviation: DEVIATION })).status).toBe(200);
+    expect(api.plan().implementationDeviation).toBe(DEVIATION);
+  });
+
+  test("Clone carries the deviation into the create form, read-only, and sends it; the new change clears it before Request Approval", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN, implementationDeviation: DEVIATION });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("review");
+    await page.reload();
+
+    await detail.cloneButton().click();
+    await expect(page.getByRole("heading", { name: "New change request" })).toBeVisible();
+    const deviation = page.getByRole("group", { name: /^Deviation from the implementation plan/ });
+    await expect(deviation).toContainText("Upgraded the nodes one at a time instead.");
+    await expect(deviation.locator(".editor-input")).not.toBeEditable();
+    await expect(
+      page.getByText(/Carried over from the cloned change request\. Fold it into the implementation plan, then clear it before requesting approval\./),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Clear deviation" })).toBeVisible();
+    // Left as it is, it is sent.
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/change-requests")),
+      page.getByRole("button", { name: /create change request/i }).click(),
+    ]);
+    expect(request.postDataJSON()).toMatchObject({
+      implementationPlan: expect.stringContaining("Upgrade every node together."),
+      implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+    });
+    await expect(page).toHaveURL(new RegExp(`/operations/change-requests/${FAKE_CR_ID}$`));
+    // The fake holds one change request, so the new change has the id of the one cloned (in Review), whose
+    // detail the page still holds in its query cache; reading it again shows the new change in New.
+    await page.reload();
+    await expect(detail.stage("New")).toHaveText("New, current");
+
+    // The new change, in New, cannot request approval until the deviation is folded into the plan and cleared.
+    const blocked = page.getByLabel(
+      "Request Approval: Fold the carried-over deviation into the implementation plan and clear it before requesting approval",
+    );
+    await expect(blocked).toBeVisible();
+    expect(await patchFromPage(page, { state: "assess" })).toEqual({ status: 400, message: DEVIATION_NOT_INCORPORATED_MESSAGE });
+    expect(api.state()).toBe("new");
+
+    // The Edit form shows it read-only under the plan, and clears it with the save.
+    await detail.openEditDialog();
+    await expect(detail.editDeviationEditor()).not.toBeEditable();
+    await detail.editDialog().getByRole("button", { name: "Clear deviation" }).click();
+    const [clearing] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "PATCH" && r.url().endsWith(`/change-requests/${FAKE_CR_ID}`)),
+      detail.saveEdit(),
+    ]);
+    expect(clearing.postDataJSON()).toEqual({ implementationDeviation: "" });
+    await expect(detail.editDialog()).toHaveCount(0);
+    expect(api.plan().implementationDeviation).toBeNull();
+    await expect(blocked).toHaveCount(0);
+  });
+});
 
 test.describe("change request lifecycle — project and deployments (mocked backend)", () => {
   test("Normal change: create with project + deployments, see them on the detail page, edit the scope, approve, and have it locked once implementing", async ({
@@ -5026,7 +5182,8 @@ test.describe("migrated (legacy) change requests in the CSM portal (real stack)"
 // ---------------------------------------------------------------------------
 // A customer's PROPOSED TIME, on the REAL stack (the CSM webapp, the CSM backend, entity-service as csm_app with row-level
 // security, the database). The previous system's own mechanism: the customer's proposal is written to customer_updated_on (a planned
-// START) and nothing else, the change STAYS in Customer Approval with the planned window untouched, and WSO2 answers it from the
+// START), with the record of who proposed it in the same write (entity-service migration 0249), and nothing else, the change
+// STAYS in Customer Approval with the planned window untouched, and WSO2 answers it from the
 // change request: Accept proposed time (Scheduled in one step, no CAB, no new customer request) or Propose a different time
 // (the customer is asked again; keeping the window declines). The customer proposes the way the customer portal does (a PATCH
 // to entity-service with their own token, utils/customerPortalDecision.ts); every database assertion is on the rows the
@@ -5218,7 +5375,8 @@ test.describe("a customer's proposed time (real stack)", () => {
       const id = legacyId("CHG0039112");
       await psql(`update change_request set customer_updated_on = '2031-03-08 10:00:00+00', customer_updated_date_confirmation = NULL where id = '${id}'`);
       const read = (await staff("jane").get(id)).body as unknown as { customerProposal?: Record<string, unknown> };
-      // The last writer is the sync, not a registered contact: nobody is named, and Accept is not on offer, with the reason.
+      // No proposal recorded who proposed it (the shape of a time stored before entity-service migration 0249), so the legacy rule
+      // reads the last writer, which is the sync, not a registered contact: nobody is named, and Accept is not on offer, with the reason.
       expect(read.customerProposal).toMatchObject({ answer: "pending", startOn: "2031-03-08T10:00:00Z", proposerRecorded: false, canAccept: false });
       expect(read.customerProposal?.acceptBlockedReason).toBe(ACCEPT_PROPOSER_NOT_RECORDED);
       expect(read.customerProposal?.proposedByEmail).toBeUndefined();

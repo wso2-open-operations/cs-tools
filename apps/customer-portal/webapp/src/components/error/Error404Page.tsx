@@ -14,22 +14,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import { type JSX, type ReactNode } from "react";
 import ErrorPage from "./ErrorPage";
 import illustration from "@assets/error/error-404.svg";
 
 interface Error404PageProps {
   message?: string;
   error?: unknown;
+  actions?: ReactNode;
 }
 
-export default function Error404Page({ message, error }: Error404PageProps): JSX.Element {
+export default function Error404Page({
+  message,
+  error,
+  actions,
+}: Error404PageProps): JSX.Element {
   return (
     <ErrorPage
       illustration={illustration}
       illustrationAlt="404 not found illustration"
       description={message ?? "The page you're looking for doesn't exist or has been moved."}
       error={error}
+      actions={actions}
     />
   );
 }

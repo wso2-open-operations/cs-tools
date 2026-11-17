@@ -27,7 +27,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
@@ -285,6 +285,76 @@ func TestNarrowAutoclosure(t *testing.T) {
 	}
 }
 
+func TestNarrowIncidentAutoclose(t *testing.T) {
+	base := incidentautoclose.Config{Days: 14, DailyLimit: 100}
+	tests := []struct {
+		name    string
+		cfg     incidentautoclose.Config
+		args    registry.RunNowOptions
+		want    incidentautoclose.Config
+		wantErr string
+	}{
+		{name: "no narrowing keeps env", cfg: base, want: base},
+		{name: "dry run forced", cfg: base, args: registry.RunNowOptions{DryRun: true},
+			want: incidentautoclose.Config{Days: 14, DailyLimit: 100, DryRun: true}},
+		{name: "env dry run is never loosened", cfg: incidentautoclose.Config{Days: 14, DryRun: true}, want: incidentautoclose.Config{Days: 14, DryRun: true}},
+		{name: "limit tightens", cfg: base, args: registry.RunNowOptions{Limit: 20},
+			want: incidentautoclose.Config{Days: 14, DailyLimit: 20}},
+		{name: "limit equal to env", cfg: base, args: registry.RunNowOptions{Limit: 100}, want: base},
+		{name: "limit above env", cfg: base, args: registry.RunNowOptions{Limit: 101}, wantErr: "exceeds INCIDENT_AUTOCLOSE_DAILY_LIMIT=100"},
+		{name: "env no cap allows a limit", cfg: incidentautoclose.Config{Days: 14}, args: registry.RunNowOptions{Limit: 5000},
+			want: incidentautoclose.Config{Days: 14, DailyLimit: 5000}},
+		{name: "env no cap, limit above the endpoint maximum", cfg: incidentautoclose.Config{Days: 14}, args: registry.RunNowOptions{Limit: 100001},
+			wantErr: "largest daily limit"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := narrowIncidentAutoclose(tc.cfg, tc.args)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestIncidentAutocloseHook wires the hook the way main does: --dry-run and
+// --limit are accepted, --states is refused for this task, and a loosening
+// limit is refused through resolveRunNow.
+func TestIncidentAutocloseHook(t *testing.T) {
+	cfg := incidentautoclose.Config{Days: 14, DailyLimit: 50}
+	var got incidentautoclose.Config
+	task := registry.Task{Name: "incident_autoclose",
+		Handler:     func(context.Context) error { return nil },
+		RunNowFlags: []string{"--dry-run", "--limit"},
+		RunNowNarrow: func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
+			c, err := narrowIncidentAutoclose(cfg, o)
+			got = c
+			return func(context.Context) error { return nil }, []any{"dryRun", c.DryRun}, err
+		}}
+	args := runNowArgs{Task: "incident_autoclose",
+		Options: registry.RunNowOptions{DryRun: true, Limit: 10}, Given: []string{"--dry-run", "--limit"}}
+	if _, _, err := resolveRunNow([]registry.Task{task}, args); err != nil {
+		t.Fatalf("flags must be accepted for incident_autoclose: %v", err)
+	}
+	if !got.DryRun || got.DailyLimit != 10 {
+		t.Fatalf("narrowed config = %+v", got)
+	}
+	args.Options.Limit = 51
+	if _, _, err := resolveRunNow([]registry.Task{task}, args); err == nil || !strings.Contains(err.Error(), "can only tighten") {
+		t.Fatalf("a limit above the configured cap must be refused, err = %v", err)
+	}
+	_, _, err := resolveRunNow([]registry.Task{task}, runNowArgs{Task: "incident_autoclose", Given: []string{"--states"}})
+	if err == nil || !strings.Contains(err.Error(), "--states is not supported by task incident_autoclose") {
+		t.Fatalf("--states must be refused for incident_autoclose, err = %v", err)
+	}
+}
+
 func TestParseStrictBool(t *testing.T) {
 	for raw, want := range map[string]bool{"": true, "true": true, "false": false, " False ": false, "1": true, "0": false} {
 		got, err := parseStrictBool("K", raw, true)
@@ -438,6 +508,7 @@ func TestReportTasksTakeRecipientFlags(t *testing.T) {
 		"open_cases_report", "stale_cases_report", "unresolved_products_digest",
 		"query_hours_usage_notifications", "query_hours_weekly_report",
 		"product_regression_report_apim", "product_regression_report_iam", "product_regression_report_integration",
+		"eol_product_usage_report",
 	}
 	got := reportTaskNames()
 	slices.Sort(got)
@@ -558,8 +629,10 @@ type fakeOpen struct{}
 
 // fakeOpen returns one case so the report is not empty (an empty report is
 // not sent at all).
-func (fakeOpen) SearchCasesInStateCreatedBeforeYesterday(context.Context, string) ([]entitycases.Case, error) {
-	return []entitycases.Case{{Number: "CS0000001", Type: "case"}}, nil
+func (fakeOpen) OpenBeforeYesterday(context.Context) (longopenreport.Report, error) {
+	return longopenreport.Report{
+		Cases: []longopenreport.Row{{Number: "CS0000001", State: "open"}}, CasesTotal: 1,
+	}, nil
 }
 
 type fakeMigration struct{}

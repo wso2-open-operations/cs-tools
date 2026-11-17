@@ -460,9 +460,26 @@ func TestChangeRequestSeedIntegration_SeedIsSelfHealing(t *testing.T) {
 		if got := scalar(`SELECT (group_id IS NULL)::text FROM team_member WHERE id = '00000000-0000-0000-0000-000000000902'`); got != "true" {
 			t.Errorf("%s: jane.doe is still in the assigned group (group_id IS NULL = %s)", pass, got)
 		}
+		if got := scalar(`SELECT COALESCE(customer_updated_on::text, '-') || '/' || COALESCE(customer_proposed_by_user_id::text, '-') || '/' ||
+		                         COALESCE(customer_proposed_for::text, '-') || '/' || COALESCE(customer_proposed_on::text, '-')
+		                  FROM change_request WHERE id = $1`, seedCR007); got != "-/-/-/-" {
+			t.Errorf("%s: CHG-FIXED-007's proposed time and the record of who proposed it = %q, want none", pass, got)
+		}
+		if got := scalar(`SELECT state::text || '/' || COALESCE(implementation_deviation, '-') FROM change_request WHERE id = $1`, seedCR002); got != "NEW/-" {
+			t.Errorf("%s: CHG-FIXED-002 = %q, want back in NEW with no deviation from the implementation plan", pass, got)
+		}
 	}
 	mustExec(seedSQL)
 	check("first run")
+	// ...and a spec left CHG-FIXED-007 in Customer Approval with a customer's proposal waiting: the
+	// date and the record of who proposed it (migration 0249). The 0249 trigger voids the record only
+	// on ENTERING Customer Approval, so here only the seed's own reset clears it.
+	mustExec(`UPDATE change_request SET customer_updated_on = now() + interval '30 days', customer_proposed_by_user_id = $2::uuid,
+	                 customer_proposed_for = now() + interval '30 days', customer_proposed_on = now() WHERE id = $1`, seedCR007, seedDaveID)
+	// ...and a walk-through took CHG-FIXED-002 on to Review and recorded a deviation from the
+	// implementation plan (migration 0245). Put back to New with it, the change's Request Approval
+	// would be refused (change_request_deviation_not_incorporated), so the seed clears it too.
+	mustExec(`UPDATE change_request SET state = 'REVIEW', implementation_deviation = '<p>The second step ran twice.</p>' WHERE id = $1`, seedCR002)
 	mustExec(seedSQL)
 	check("second run")
 }

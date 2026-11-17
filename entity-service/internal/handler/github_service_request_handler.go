@@ -19,6 +19,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
@@ -88,5 +89,35 @@ func (h *GithubServiceRequestHandler) Create(w http.ResponseWriter, r *http.Requ
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SetSeverity sets the severity of the service request an issue produced, from the issue's Priority field.
+func (h *GithubServiceRequestHandler) SetSeverity(w http.ResponseWriter, r *http.Request) {
+	// Internal clients only, as Create: severity is internal and the caller is a workflow, never a user.
+	id := auth.IdentityFromContext(r.Context())
+	if !id.Validated || id.ClientID == "" || !h.internalClientIDs[id.ClientID] {
+		apierror.WriteJSON(w, http.StatusUnauthorized,
+			"an authorized internal client credential is required")
+		return
+	}
+
+	issueNumber, err := strconv.Atoi(r.PathValue("issueNumber"))
+	if err != nil || issueNumber <= 0 {
+		apierror.WriteJSON(w, http.StatusBadRequest, "issueNumber must be a positive integer")
+		return
+	}
+	var req domain.SetIssueSeverityRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+
+	resp, err := h.svc.SetServiceRequestSeverityFromIssue(r.Context(), r.PathValue("owner"), r.PathValue("repository"), issueNumber, req.Severity)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -69,6 +69,10 @@ vi.mock("@api/useGetProjects", () => ({
   getTotalRecords: () => 1,
 }));
 
+vi.mock("@features/settings/api/useGetUserDetails", () => ({
+  default: () => ({ data: undefined, isLoading: false }),
+}));
+
 vi.mock("@hooks/useDebouncedValue", () => ({
   useDebouncedValue: (value: string) => value,
 }));

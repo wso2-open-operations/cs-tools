@@ -32,7 +32,7 @@ import { Link as RouterLink, useLocation } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import EscalationLevelChip from "@components/EscalationLevelChip";
 import RelativeTime from "@components/RelativeTime";
-import SeverityChip from "@components/SeverityChip";
+import CaseSeverityChip from "@features/csm-cases/components/CaseSeverityChip";
 import StateChip from "@components/StateChip";
 import WorkStateChip from "@components/WorkStateChip";
 import CasePreviewDrawer from "@features/csm-cases/components/CasePreviewDrawer";
@@ -45,7 +45,6 @@ import {
   CASE_TYPE_COLOR,
   CASE_TYPE_LABEL,
   caseTypeDetailBasePath,
-  caseTypeHasSeverity,
 } from "@features/csm-cases/utils/caseType";
 import { ISSUE_TYPE_LABEL } from "@features/csm-cases/utils/caseIssueType";
 import { effectiveWorkState } from "@features/csm-cases/utils/caseWorkState";
@@ -155,11 +154,7 @@ function renderOptionalCell(id: CaseOptionalColumnId, c: CsmCaseRow): JSX.Elemen
     case "severity":
       return (
         <Box sx={{ justifySelf: "start" }}>
-          {caseTypeHasSeverity(c.caseType) ? (
-            <SeverityChip severity={c.severity} clickable />
-          ) : (
-            "—"
-          )}
+          <CaseSeverityChip caseType={c.caseType} severity={c.severity} clickable />
         </Box>
       );
     case "issueType":

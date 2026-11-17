@@ -118,8 +118,21 @@ vi.mock("@features/csm-announcements/components/CreateCustomerAnnouncementForm",
 // The rich-text editor isn't this dialog's concern (see EditorWithSourceToggle's
 // own tests) — stubbed to a plain textarea so edits are simple to simulate.
 vi.mock("@components/rich-text-editor/EditorWithSourceToggle", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="Description" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="Description"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 
@@ -329,6 +342,25 @@ describe("AnnouncementRequestDialog — draft", () => {
     await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalledWith({ id: "req-1" }));
   });
 
+  it("submits a draft whose description is only an inline image", async () => {
+    mockGet({ state: "draft", description: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' });
+    const handleRunDryRun = vi.fn().mockResolvedValue({ caseId: "case-123", displayId: "WSO2-1" });
+    mockedDryRun.mockReturnValue({ runningDryRun: false, dryRunResult: null, canRunDryRun: true, handleRunDryRun });
+    const submitMutateAsync = vi.fn().mockResolvedValue({});
+    mockedSubmit.mockReturnValue({
+      ...(noopMutation() as object),
+      mutateAsync: submitMutateAsync,
+    } as unknown as ReturnType<typeof useSubmitAnnouncementRequest>);
+
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+    const submitBtn = screen.getByRole("button", { name: /submit for approval/i });
+    expect(submitBtn).toBeEnabled();
+    fireEvent.click(submitBtn);
+
+    expect(handleRunDryRun).toHaveBeenCalled();
+    await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalledWith({ id: "req-1" }));
+  });
+
   it("does not record or submit anything when the dry run itself fails", async () => {
     mockGet({ state: "draft" });
     const handleRunDryRun = vi.fn().mockResolvedValue(null);
@@ -388,6 +420,163 @@ describe("AnnouncementRequestDialog — draft", () => {
 
     expect(screen.getByRole("button", { name: /submit for approval/i })).toBeDisabled();
     expect(screen.getByText(/save your changes first/i)).toBeInTheDocument();
+  });
+});
+
+describe("AnnouncementRequestDialog — required fields", () => {
+  it("marks Subject and Description required on a draft, the description as needed to submit", () => {
+    mockGet({ state: "draft" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("textbox", { name: /^subject$/i })).toBeRequired();
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    const editor = screen.getByLabelText("Description");
+    expect(editor).toHaveAttribute("aria-required", "true");
+    // The caption names the editor's group, as on the create forms.
+    expect(within(screen.getByRole("group", { name: "Description" })).getByLabelText("Description")).toBe(editor);
+    expect(screen.getByText("Required to submit for approval.")).toBeInTheDocument();
+  });
+
+  it("still lets a draft save with an empty description (only Submit needs one)", () => {
+    mockGet({ state: "draft", description: "" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: /^subject$/i }), {
+      target: { value: "New subject" },
+    });
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /submit for approval/i })).toBeDisabled();
+  });
+
+  it("on an approved request, says the description is needed to publish and blocks Publish while the saved one is empty", () => {
+    mockGet({ state: "approved", description: "<p><br></p>", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByText("Required to publish.")).toBeInTheDocument();
+    const publishBtn = screen.getByRole("button", { name: /^publish$/i });
+    expect(publishBtn).toBeDisabled();
+    fireEvent.click(publishBtn);
+    expect(screen.queryByText("Confirm before sending")).not.toBeInTheDocument();
+  });
+
+  it("counts an inline image as a saved description, so an image-only one does not block Publish", () => {
+    mockGet({
+      state: "approved",
+      description: '<p><img src="data:image/png;base64,AAAA" alt=""></p>',
+      resolvedProjectIds: ["p-1"],
+      resolvedProjectCount: 1,
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /^publish$/i })).toBeEnabled();
+  });
+
+  it("does not block Retry failed projects on an empty saved description (content is locked for the retry)", () => {
+    mockGet({
+      state: "approved",
+      description: "<p><br></p>",
+      resolvedProjectIds: ["p-1", "p-2"],
+      resolvedProjectCount: 2,
+    });
+    mockedPublish.mockReturnValue({
+      publishing: false,
+      progress: null,
+      succeededProjectIds: ["p-1"],
+      failedProjectIds: ["p-2"],
+      failedTagProjectIds: [],
+      published: null,
+      readyToPublish: true,
+      hydratingDeliveries: false,
+      hydrationFailed: false,
+      retryHydration: vi.fn(),
+      publishGivingUpOnFailed: vi.fn(),
+      handlePublish: vi.fn(),
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /retry failed projects/i })).toBeEnabled();
+  });
+
+  it("does not mark Subject and Description while they are locked for a retry, since they can't be edited", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
+    mockedPublish.mockReturnValue({
+      publishing: false,
+      progress: null,
+      succeededProjectIds: ["p-1"],
+      failedProjectIds: ["p-2"],
+      failedTagProjectIds: [],
+      published: null,
+      readyToPublish: true,
+      hydratingDeliveries: false,
+      hydrationFailed: false,
+      retryHydration: vi.fn(),
+      publishGivingUpOnFailed: vi.fn(),
+      handlePublish: vi.fn(),
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    const subject = screen.getByRole("textbox", { name: /^subject$/i });
+    expect(subject).toBeDisabled();
+    expect(subject).not.toBeRequired();
+    const caption = screen.getByRole("group", { name: "Description" }).previousElementSibling;
+    expect(caption).toHaveTextContent("Description");
+    expect(caption!.querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Description" })).getByLabelText("Description")).not.toHaveAttribute(
+      "aria-required",
+    );
+    expect(screen.queryByText("Required to publish.")).not.toBeInTheDocument();
+    // What it says instead.
+    expect(screen.getByText(/locked while retrying failed projects/i)).toBeInTheDocument();
+  });
+
+  it("does not show the edit fields' markers on a read-only (pending approval) request", () => {
+    mockGet({ state: "pending_approval" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("textbox", { name: /^subject$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Required to submit for approval.")).not.toBeInTheDocument();
+  });
+
+  it("marks the Publish at picker required when scheduling", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule for later…" }));
+
+    const label = screen.getAllByText(/^Publish at/).find((el) => el.tagName === "LABEL");
+    expect(label).toBeDefined();
+    expect(label!.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+  });
+
+  it("marks the update editor required under its own caption and keeps Post update disabled for a cleared editor", () => {
+    mockGet({
+      state: "published",
+      resolvedProjectIds: ["p-1"],
+      resolvedProjectCount: 1,
+      publishedBy: "jane@example.com",
+      publishedAt: "2026-07-03T10:00:00Z",
+      publishedCaseIds: ["case-1"],
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    const editor = screen.getByLabelText("Description");
+    expect(editor).toHaveAttribute("aria-required", "true");
+    // A visible caption with the asterisk, naming the editor's group.
+    expect(screen.getByText("Update").querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(within(screen.getByRole("group", { name: "Update" })).getByLabelText("Description")).toBe(editor);
+    const postBtn = screen.getByRole("button", { name: /^post update$/i });
+    expect(postBtn).toBeDisabled();
+
+    // What a cleared rich editor sends; the backend only refuses blank text.
+    fireEvent.change(editor, { target: { value: "<p><br></p>" } });
+    expect(postBtn).toBeDisabled();
+
+    fireEvent.change(editor, { target: { value: "<p>A correction.</p>" } });
+    expect(postBtn).toBeEnabled();
+
+    // An inline image alone is something to post.
+    fireEvent.change(editor, { target: { value: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' } });
+    expect(postBtn).toBeEnabled();
   });
 });
 

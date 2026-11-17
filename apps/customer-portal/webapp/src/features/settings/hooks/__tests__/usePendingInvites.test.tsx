@@ -71,8 +71,19 @@ describe("usePendingInvites", () => {
 
     await act(async () => resolveSend("created"));
     expect(options.refetchContacts).toHaveBeenCalled();
-    expect(options.onInvited).toHaveBeenCalledWith("a@acme.com");
+    expect(options.onInvited).toHaveBeenCalledWith("a@acme.com", expect.objectContaining({ contactEmail: "a@acme.com" }));
     expect(result.current.pending).toEqual([]);
+  });
+
+  it("passes the request to onInvited so callers can tell system users apart", async () => {
+    const { result, options } = setup({ send: vi.fn().mockResolvedValue("created") });
+    const systemUser = { ...request("sys@acme.com"), isCsIntegrationUser: true, isPortalUser: false };
+
+    await act(async () => {
+      result.current.invite(systemUser);
+    });
+
+    expect(options.onInvited).toHaveBeenCalledWith("sys@acme.com", systemUser);
   });
 
   it("keeps a failed invitation with its reason and retries it", async () => {
@@ -120,7 +131,7 @@ describe("usePendingInvites", () => {
     await act(async () => vi.advanceTimersByTimeAsync(PENDING_INVITE_POLL_DELAYS_MS[1]));
 
     expect(refetchContacts).toHaveBeenCalledTimes(2);
-    expect(options.onInvited).toHaveBeenCalledWith("c@acme.com");
+    expect(options.onInvited).toHaveBeenCalledWith("c@acme.com", expect.objectContaining({ contactEmail: "c@acme.com" }));
     expect(result.current.pending).toEqual([]);
   });
 
@@ -176,7 +187,7 @@ describe("usePendingInvites", () => {
 
     await act(async () => resolveSend("created"));
     expect(second.result.current.pending).toEqual([]);
-    expect(first.options.onInvited).toHaveBeenCalledWith("g@acme.com");
+    expect(first.options.onInvited).toHaveBeenCalledWith("g@acme.com", expect.objectContaining({ contactEmail: "g@acme.com" }));
   });
 
   it("finishes an invitation while the page is away, and shows nothing stale on return", async () => {
@@ -225,7 +236,7 @@ describe("usePendingInvites", () => {
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(result.current.pending).toEqual([]);
-    expect(options.onInvited).toHaveBeenCalledWith("r@acme.com");
+    expect(options.onInvited).toHaveBeenCalledWith("r@acme.com", expect.objectContaining({ contactEmail: "r@acme.com" }));
     expect(options.onFailed).not.toHaveBeenCalled();
   });
 
@@ -240,7 +251,7 @@ describe("usePendingInvites", () => {
     });
 
     expect(result.current.pending).toEqual([]);
-    expect(options.onInvited).toHaveBeenCalledWith("j@acme.com");
+    expect(options.onInvited).toHaveBeenCalledWith("j@acme.com", expect.objectContaining({ contactEmail: "j@acme.com" }));
     expect(options.onFailed).not.toHaveBeenCalled();
   });
 

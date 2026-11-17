@@ -53,6 +53,9 @@ func newEngagementAllocationIntegrationRepo(t *testing.T) (ScheduleRepository, *
 	clean := func() {
 		mustExec(t, pool, `DELETE FROM customer_engagement WHERE id IN ($1, $2)`, seaEngA, seaEngB)
 		mustExec(t, pool, `DELETE FROM account WHERE id = $1`, seaAccount)
+		// Leave and shifts reference the user ON DELETE RESTRICT: they go first.
+		mustExec(t, pool, `DELETE FROM team_schedule_absence WHERE user_id IN ($1, $2)`, seaUserA, seaUserB)
+		mustExec(t, pool, `DELETE FROM team_schedule_assignment WHERE user_id IN ($1, $2)`, seaUserA, seaUserB)
 		mustExec(t, pool, `DELETE FROM "user" WHERE id IN ($1, $2)`, seaUserA, seaUserB)
 	}
 	clean()

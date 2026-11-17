@@ -29,6 +29,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useAnnouncementDryRun, DRY_RUN_TAG_LABEL } from "@features/csm-announcements/api/useAnnouncementDryRun";
@@ -43,11 +44,7 @@ import { useSearchProducts } from "@features/csm-projects/api/useSearchProducts"
 import { useSearchProductVersions } from "@features/csm-projects/api/useSearchProductVersions";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatDateOnlyForDisplay } from "@utils/dateTime";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
+import { hasVisibleContent } from "@utils/sanitizeHtml";
 
 const PENDING_TARGET = "/announcements?tab=pending";
 
@@ -113,7 +110,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
   );
 
   const canSaveDraft =
-    !!productId && !!productVersionId && subject.trim().length > 0 && !isEmptyHtml(description) && !busy;
+    !!productId && !!productVersionId && subject.trim().length > 0 && hasVisibleContent(description) && !busy;
 
   const canSubmitForApproval =
     canRunDryRun &&
@@ -295,6 +292,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
             sx={{ display: "block", mb: 0.5 }}
           >
             Description
+            <RequiredMark />
           </Typography>
           {/* Editor doesn't accept an `id`, so associate the label by wrapping
               the editor in a labelled group for assistive tech. */}
@@ -308,6 +306,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
               maxHeight={420}
               toolbarVariant="full"
               disabled={busy}
+              ariaRequired
             />
           </Box>
         </Grid>

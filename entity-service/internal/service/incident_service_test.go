@@ -94,8 +94,11 @@ type stubIncidentRepo struct {
 	createIncidentComment   func(ctx context.Context, incidentID string, commentType domain.CommentType, content, createdBy string) (domain.CaseComment, error)
 	getIncidentByID         func(ctx context.Context, id string) (domain.IncidentView, error)
 	updateIncidentLifecycle func(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) error
-	applySpecialistHandoff  func(ctx context.Context, id, actorEmail string, plan func(repository.SpecialistHandoffSnapshot) (repository.SpecialistHandoffPlan, error)) (repository.SpecialistHandoffWritten, error)
-	searchActivities        func(ctx context.Context, req domain.SearchIncidentActivitiesRequest) ([]domain.CaseActivity, int, error)
+	// resolvedChildren is what UpdateIncidentLifecycle reports its cascade resolved, after a
+	// successful updateIncidentLifecycle.
+	resolvedChildren       []repository.ResolvedChildIncident
+	applySpecialistHandoff func(ctx context.Context, id, actorEmail string, plan func(repository.SpecialistHandoffSnapshot) (repository.SpecialistHandoffPlan, error)) (repository.SpecialistHandoffWritten, error)
+	searchActivities       func(ctx context.Context, req domain.SearchIncidentActivitiesRequest) ([]domain.CaseActivity, int, error)
 	// recordedChanges collects every RecordIncidentFieldChanges call; recordChangesErr fails them.
 	// Unlike the other hooks it is not a panic when unset: the activity write rides on every update.
 	recordedChanges  []recordedIncidentChanges
@@ -204,9 +207,12 @@ func (s *stubIncidentRepo) CreateIncident(ctx context.Context, req domain.Create
 	}
 	panic("CreateIncident called unexpectedly")
 }
-func (s *stubIncidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) error {
+func (s *stubIncidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) ([]repository.ResolvedChildIncident, error) {
 	if s.updateIncidentLifecycle != nil {
-		return s.updateIncidentLifecycle(ctx, id, u, actorEmail)
+		if err := s.updateIncidentLifecycle(ctx, id, u, actorEmail); err != nil {
+			return nil, err
+		}
+		return s.resolvedChildren, nil
 	}
 	panic("UpdateIncidentLifecycle called unexpectedly")
 }
@@ -960,7 +966,7 @@ func TestIncidentService_UpdateIncident_RecordFieldsWrittenAndMirrored(t *testin
 }
 
 // TestIncidentService_UpdateIncident_EnvironmentClear: an explicit null for
-// environment clears it, the one field that can be cleared.
+// environment clears it.
 func TestIncidentService_UpdateIncident_EnvironmentClear(t *testing.T) {
 	var got repository.IncidentLifecycleUpdate
 	repo := &stubIncidentRepo{
@@ -980,6 +986,45 @@ func TestIncidentService_UpdateIncident_EnvironmentClear(t *testing.T) {
 	}
 	if got.Environment == nil || *got.Environment != nil {
 		t.Errorf("environment = %v, want an explicit clear", got.Environment)
+	}
+}
+
+// TestIncidentService_UpdateIncident_ParentIncidentClear: an explicit null for
+// parentIncidentId reaches the repository as a clear, and a set value as itself.
+func TestIncidentService_UpdateIncident_ParentIncidentClear(t *testing.T) {
+	var got repository.IncidentLifecycleUpdate
+	repo := &stubIncidentRepo{
+		updateIncidentLifecycle: func(_ context.Context, _ string, u repository.IncidentLifecycleUpdate, _ string) error {
+			got = u
+			return nil
+		},
+		getIncidentByID: func(_ context.Context, id string) (domain.IncidentView, error) {
+			return newTestIncidentView(id), nil
+		},
+	}
+	svc := NewIncidentServiceWithPublisher(repo, stubUpdateIncidentUserRepo{email: "jane.doe@example.com"}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	if _, err := svc.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: testDeploymentUUID, ParentIncidentID: new(*string)}); err != nil {
+		t.Fatalf("UpdateIncident(parentIncidentId: null): %v", err)
+	}
+	if got.ParentIncidentID == nil || *got.ParentIncidentID != nil {
+		t.Errorf("parentIncidentId = %v, want an explicit clear", got.ParentIncidentID)
+	}
+
+	parent := testIncidentUUID
+	set := &parent
+	if _, err := svc.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: testDeploymentUUID, ParentIncidentID: &set}); err != nil {
+		t.Fatalf("UpdateIncident(parentIncidentId: %s): %v", parent, err)
+	}
+	if got.ParentIncidentID == nil || *got.ParentIncidentID == nil || **got.ParentIncidentID != parent {
+		t.Errorf("parentIncidentId = %v, want %s", got.ParentIncidentID, parent)
+	}
+
+	bad := "not-a-uuid"
+	badPtr := &bad
+	if _, err := svc.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: testDeploymentUUID, ParentIncidentID: &badPtr}); err == nil {
+		t.Error("a parentIncidentId that is not a UUID must be refused")
 	}
 }
 

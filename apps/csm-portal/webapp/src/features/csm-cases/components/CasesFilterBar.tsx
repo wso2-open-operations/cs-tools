@@ -72,6 +72,7 @@ import {
 import { isCompleteAnyOfBranch, type AnyOfBranch } from "@features/csm-cases/utils/anyOfFilters";
 import {
   ENGAGEMENT_TYPE_OPTIONS,
+  SALES_REGION_OPTIONS,
   ONBOARDING_STATUS_OPTIONS,
   SEVERITY_OPTIONS,
   STATE_OPTIONS,
@@ -118,6 +119,9 @@ export interface CasesFilters {
   projects: string[];
   /** Engagement sub-type filter; only meaningful when `caseTypes` is locked to `engagement`. */
   engagementTypes: BeEngagementType[];
+  /** Account sales-region filter (`salesRegion` op:in); empty = all regions.
+   * Only surfaced by views that pass `showSalesRegionFilter`. */
+  salesRegions: string[];
   /** Product family names (e.g. "API Manager"); matches all versions of each. */
   productNames: string[];
   /** CS team group ids (`creTeam` op:in) the case's project is scoped to. */
@@ -222,6 +226,12 @@ interface CasesFilterBarProps {
    * record types (service requests, engagements, etc.) hide it.
    */
   showSeverityFilter?: boolean;
+  /**
+   * Options for the severity control, in both Simple and Advanced modes.
+   * Defaults to every severity (S0-S4); a service-request-locked list passes
+   * S1-S4 since service requests have no S0.
+   */
+  severityOptions?: { value: Severity; label: string }[];
   /** Hide the case-type control when the surrounding view locks the type. */
   hideTypeFilter?: boolean;
   /**
@@ -237,6 +247,8 @@ interface CasesFilterBarProps {
   hideProjectFilter?: boolean;
   /** Show the engagement-type multi-select (only relevant when type is locked to engagement). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in, like the engagement-type one). */
+  showSalesRegionFilter?: boolean;
   /**
    * Hide the "Onboarding status" Simple-mode control. `onboardingStatuses` is
    * a per-project attribute, not a per-case one — on a view already scoped to
@@ -333,6 +345,21 @@ interface ActiveFilterChip {
 // mode now. Simple mode has no row list at all, so a chip stays the only
 // way to see/clear an Advanced-only value that arrived via URL/dashboard
 // click-through while looking at the Simple grid -- that part is unchanged.
+// Sales Region has a Simple-mode select only, and is deliberately absent from
+// the Advanced builder. With the Advanced panel open the regular chips are
+// suppressed, so these keep a selected region visible and individually
+// removable there.
+function buildSalesRegionChips(filters: CasesFilters): ActiveFilterChip[] {
+  return filters.salesRegions.map((region) => ({
+    key: `salesRegion-${region}`,
+    label: `Sales Region: ${region}`,
+    onRemove: (f) => ({
+      ...f,
+      salesRegions: f.salesRegions.filter((r) => r !== region),
+    }),
+  }));
+}
+
 function buildActiveFilterChips(
   filters: CasesFilters,
 ): ActiveFilterChip[] {
@@ -505,6 +532,7 @@ export default function CasesFilterBar({
   availableAssigneeUsers,
   availableProjects,
   showSeverityFilter = true,
+  severityOptions = SEVERITY_OPTIONS,
   hideTypeFilter = false,
   hideOnboardingStatusFilter = false,
   hideCreTeamFilter = false,
@@ -512,6 +540,7 @@ export default function CasesFilterBar({
   typeFilterLabel = "Case type",
   hideProjectFilter = false,
   showEngagementTypeFilter = false,
+  showSalesRegionFilter = false,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -638,13 +667,12 @@ export default function CasesFilterBar({
   // value that arrives without a remount (e.g. an applied saved view)
   // doesn't sit chip-less behind a Simple grid that no longer matches
   // reality.
-  const activeFilterChips = useMemo(
-    () =>
-      effectiveMode === "simple" || !isFiltersOpen
-        ? buildActiveFilterChips(filters)
-        : [],
-    [filters, effectiveMode, isFiltersOpen],
-  );
+  const activeFilterChips = useMemo(() => {
+    if (effectiveMode === "simple" || !isFiltersOpen) {
+      return buildActiveFilterChips(filters);
+    }
+    return showSalesRegionFilter ? buildSalesRegionChips(filters) : [];
+  }, [filters, effectiveMode, isFiltersOpen, showSalesRegionFilter]);
 
   // A saved view is a name pointing at a serialized filter query string.
   // Applying one feeds the parsed filters back through onChange (which the
@@ -666,7 +694,6 @@ export default function CasesFilterBar({
   // (`caseFilterOptions.ts` is the one source of truth for each), so a value
   // picked in either mode renders identically in the other. Plain constants,
   // not `useMemo`'d, since they're static imports, not derived from props.
-  const severityOptions = SEVERITY_OPTIONS;
   const stateOptions = STATE_OPTIONS;
   const caseTypeOptions = useMemo(
     () => ALL_CASE_TYPES.map((t) => ({ value: t, label: CASE_TYPE_LABEL[t] })),
@@ -905,6 +932,17 @@ export default function CasesFilterBar({
                 />
               </Grid>
             )}
+            {showSalesRegionFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-sales-region"
+                  label="Sales Region"
+                  values={filters.salesRegions}
+                  options={SALES_REGION_OPTIONS}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, salesRegions: next })}
+                />
+              </Grid>
+            )}
             {!hideTypeFilter && (
               <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
                 <MultiSelectField
@@ -975,6 +1013,7 @@ export default function CasesFilterBar({
                 onAddRow={() => onChange(addBlankUnifiedRow(filters))}
                 creTeamOptions={teamOptions}
                 sreTeamOptions={sreTeamOptions}
+                severityOptions={severityOptions}
                 assigneeNameSeed={assigneeNameSeed}
                 projectNameSeed={projectNameSeed}
               />

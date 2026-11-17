@@ -90,7 +90,8 @@ window.config = {
   // .change-requests, .incidents, .problems}, engagements, security-center
   // {.reports, .vulnerabilities}, updates, time-cards, announcements,
   // customers{.accounts, .projects, .customer-health}, customer-health,
-  // usage-metrics, user-scan, admin{.user-management{.users, .roles,
+  // usage-metrics, products{.catalogue, .release-lines},
+  // admin{.user-management{.users, .roles,
   // .groups, .teams, .permissions}, .dashboards}. Unknown ids are ignored
   // with a console warning.
   //

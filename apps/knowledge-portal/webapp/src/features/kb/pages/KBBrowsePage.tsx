@@ -14,32 +14,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Box,
-  Container,
-  Divider,
-  Grid,
-  List,
-  ListItemButton,
-  ListItemText,
-  Typography,
-} from "@wso2/oxygen-ui";
+import { Box, Button, Container, Grid, Stack, Typography } from "@wso2/oxygen-ui";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { isValidId } from "@api/backend/types";
 import { isClientError, isNotFoundError } from "@api/backend/client";
-import { useArticleSearch, useKnowledgeBases } from "@api/useKb";
+import { useArticleSearch, useKnowledgeBaseCounts, useKnowledgeBases } from "@api/useKb";
 import EmptyState from "@components/EmptyState";
-import LoadingState from "@components/LoadingState";
 import QueryErrorState from "@components/QueryErrorState";
+import SupportCallout from "@components/SupportCallout";
 import ArticleCard from "@features/kb/components/ArticleCard";
 import ArticleList, { ArticleListItem } from "@features/kb/components/ArticleList";
+import ArticleListSkeleton from "@features/kb/components/ArticleListSkeleton";
+import KnowledgeBaseFilter from "@features/kb/components/KnowledgeBaseFilter";
 import LoadMoreButton from "@features/kb/components/LoadMoreButton";
 import SearchBox from "@features/kb/components/SearchBox";
 import { useDocumentTitle } from "@hooks/useDocumentTitle";
 import { browseUrl } from "@utils/browseUrl";
 import { normalizeSearchQuery } from "@utils/searchQuery";
 import { toSnippet } from "@utils/snippet";
+
+const NO_MATCH_TIPS = [
+  "Check the spelling of product names and error codes.",
+  "Try fewer or more general keywords.",
+  "Search all knowledge bases instead of one product.",
+] as const;
 
 export default function KBBrowsePage(): JSX.Element {
   const [params, setParams] = useSearchParams();
@@ -52,7 +52,9 @@ export default function KBBrowsePage(): JSX.Element {
   const search = useArticleSearch({ knowledgeBaseId, searchQuery });
 
   const knowledgeBases = kbData?.knowledgeBases ?? [];
+  const { counts } = useKnowledgeBaseCounts(knowledgeBases.map((kb) => kb.id));
   const selectedKb = knowledgeBases.find((kb) => kb.id === knowledgeBaseId);
+  const kbTitle = (id: string): string | undefined => knowledgeBases.find((kb) => kb.id === id)?.title;
 
   const heading = searchQuery
     ? `Search results for "${searchQuery}"`
@@ -70,6 +72,7 @@ export default function KBBrowsePage(): JSX.Element {
   const { articles, total } = search;
   const showInitialError = search.isError && articles.length === 0;
   const unknownKnowledgeBase = !!knowledgeBaseId && isNotFoundError(search.error);
+  const showSkeleton = search.isLoading || (search.isSkippingEmpty && articles.length === 0);
 
   // With a knowledge base filter the backend's total is exact. Without one the
   // backend filters each upstream page afterwards, so total only bounds the
@@ -86,62 +89,66 @@ export default function KBBrowsePage(): JSX.Element {
     }
   }
 
-  return (
-    <Container maxWidth="lg" sx={{ py: 5 }}>
-      <Typography variant="h4" component="h1" sx={{ fontWeight: 700, mb: 3 }}>
-        {heading}
-      </Typography>
+  const scopeLine = searchQuery
+    ? selectedKb
+      ? `In ${selectedKb.title}`
+      : "In all knowledge bases"
+    : selectedKb
+      ? "Every published article in this knowledge base, newest first."
+      : "Every published article across all knowledge bases, newest first.";
 
-      <Box sx={{ mb: 4 }}>
-        {/* Remount when the URL query changes so the input follows back/forward. */}
-        <SearchBox
-          key={searchQuery}
-          label="Search articles"
-          placeholder="Search articles..."
-          initialValue={searchQuery}
-          onSearch={onSearch}
-        />
+  return (
+    <Container maxWidth="lg" sx={{ py: { xs: 4, md: 5 } }}>
+      <Box sx={{ mb: { xs: 3, md: 4 } }}>
+        <Typography
+          variant="h4"
+          component="h1"
+          sx={{ fontWeight: 700, mb: 0.5, overflowWrap: "anywhere", fontSize: { xs: "1.75rem", md: "2.125rem" } }}
+        >
+          {heading}
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          {scopeLine}
+        </Typography>
       </Box>
 
-      <Grid container spacing={4}>
+      <Grid container spacing={{ xs: 3, md: 5 }}>
         <Grid size={{ xs: 12, md: 3 }}>
-          <Box component="nav" aria-label="Knowledge bases">
-            <Typography variant="subtitle2" component="h2" sx={{ fontWeight: 600, mb: 1 }}>
-              Knowledge bases
-            </Typography>
-            <Divider sx={{ mb: 1 }} />
-            <List dense disablePadding>
-              <ListItemButton
-                component={Link}
-                to={browseUrl({ q: searchQuery })}
-                selected={!knowledgeBaseId}
-                aria-current={!knowledgeBaseId ? "page" : undefined}
-                sx={{ borderRadius: 1 }}
-              >
-                <ListItemText primary="All" />
-              </ListItemButton>
-              {knowledgeBases.map((kb) => (
-                <ListItemButton
-                  key={kb.id}
-                  component={Link}
-                  to={browseUrl({ knowledgeBaseId: kb.id, q: searchQuery })}
-                  selected={kb.id === knowledgeBaseId}
-                  aria-current={kb.id === knowledgeBaseId ? "page" : undefined}
-                  sx={{ borderRadius: 1 }}
-                >
-                  <ListItemText primary={kb.title} />
-                </ListItemButton>
-              ))}
-            </List>
+          <Box sx={{ position: { md: "sticky" }, top: { md: 88 } }}>
+            <KnowledgeBaseFilter
+              knowledgeBases={knowledgeBases}
+              selectedId={knowledgeBaseId}
+              searchQuery={searchQuery}
+              counts={counts}
+            />
           </Box>
         </Grid>
 
         <Grid size={{ xs: 12, md: 9 }}>
-          {search.isLoading && <LoadingState label="Loading articles" />}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mb: 3 }}>
+            {/* Remount when the URL query changes so the input follows back/forward. */}
+            <SearchBox
+              key={`${knowledgeBaseId}:${searchQuery}`}
+              label="Search articles"
+              placeholder={selectedKb ? `Search in ${selectedKb.title}` : "Search all articles"}
+              initialValue={searchQuery}
+              onSearch={onSearch}
+            />
+            {searchQuery && (
+              <Button
+                component={Link}
+                to={browseUrl({ knowledgeBaseId: knowledgeBaseId || undefined })}
+                color="inherit"
+                size="small"
+                startIcon={<X size={16} aria-hidden />}
+                sx={{ flexShrink: 0, whiteSpace: "nowrap" }}
+              >
+                Clear search
+              </Button>
+            )}
+          </Stack>
 
-          {search.isSkippingEmpty && articles.length === 0 && !search.isLoading && (
-            <LoadingState label="Loading articles" />
-          )}
+          {showSkeleton && <ArticleListSkeleton label="Loading articles" />}
 
           {showInitialError && (
             <QueryErrorState
@@ -155,7 +162,7 @@ export default function KBBrowsePage(): JSX.Element {
             />
           )}
 
-          {!search.isLoading && !showInitialError && !(search.isSkippingEmpty && articles.length === 0) && (
+          {!showSkeleton && !showInitialError && (
             <>
               {countLine && (
                 <Typography
@@ -163,7 +170,7 @@ export default function KBBrowsePage(): JSX.Element {
                   color="text.secondary"
                   role="status"
                   aria-live="polite"
-                  sx={{ mb: 2 }}
+                  sx={{ mb: 1.5 }}
                 >
                   {countLine}
                 </Typography>
@@ -179,6 +186,14 @@ export default function KBBrowsePage(): JSX.Element {
                   <EmptyState
                     title="No articles matched"
                     message="Try a different search or knowledge base."
+                    tips={searchQuery ? NO_MATCH_TIPS : undefined}
+                    action={
+                      searchQuery || knowledgeBaseId ? (
+                        <Button component={Link} to={browseUrl()} variant="outlined" size="small">
+                          Browse all articles
+                        </Button>
+                      ) : undefined
+                    }
                   />
                 )
               ) : (
@@ -189,7 +204,10 @@ export default function KBBrowsePage(): JSX.Element {
                         id={article.id}
                         title={article.title}
                         snippet={toSnippet(article.body)}
+                        updatedOn={article.updatedOn}
                         publishedOn={article.publishedOn}
+                        knowledgeBaseTitle={knowledgeBaseId ? undefined : kbTitle(article.knowledgeBaseId)}
+                        query={searchQuery}
                       />
                     </ArticleListItem>
                   ))}
@@ -215,6 +233,10 @@ export default function KBBrowsePage(): JSX.Element {
               )}
             </>
           )}
+
+          <Box sx={{ mt: 6 }}>
+            <SupportCallout />
+          </Box>
         </Grid>
       </Grid>
     </Container>

@@ -20,6 +20,7 @@ import {
   changeRequestStateLabel,
   isChangeRequestOffRampState,
   isEmergencyChangeRequestType,
+  isStandardChangeRequestType,
 } from "@features/csm-operations/utils/changeRequests";
 
 /**
@@ -202,7 +203,10 @@ export interface BuildChangeRequestLifecycleInput {
    * Emergency change has no Assess step (it goes from New straight to Authorize, for
    * the CAB alone), so that stage reads `not-taken` on its line, in every state but
    * Assess itself (an Emergency change sitting in Assess, however it got there,
-   * is shown where it is).
+   * is shown where it is). A Standard change is pre-authorised by its template and
+   * has no approval stages at all (New goes straight to Scheduled, or to Customer
+   * Approval when that is required), so Assess and Authorize both read `not-taken`
+   * on its line, again unless the change is in that very state.
    */
   type?: string | null;
   /**
@@ -219,6 +223,18 @@ export interface BuildChangeRequestLifecycleInput {
    * that left no trace.
    */
   hasCustomerContacts?: boolean;
+}
+
+/**
+ * The approval stages a change of this type never takes: an Emergency change
+ * goes from New straight to Authorize (Assess skipped), a Standard change from
+ * New straight to Scheduled or Customer Approval (Assess and Authorize skipped).
+ * A Normal change, or one whose type is unknown, takes both.
+ */
+function stagesNotTakenByType(type: string | null | undefined): readonly BeChangeRequestState[] {
+  if (isEmergencyChangeRequestType(type)) return ["assess"];
+  if (isStandardChangeRequestType(type)) return ["assess", "authorize"];
+  return [];
 }
 
 /**
@@ -240,6 +256,11 @@ export interface BuildChangeRequestLifecycleInput {
  *    change goes from New straight to Authorize, with a single CAB approval. That
  *    holds in every state, rolled back or canceled included, unless the change is
  *    in Assess itself.
+ *  - Assess AND Authorize stay on the line of a Standard change and read
+ *    `not-taken` the same way: the template is the authorisation, so Request
+ *    Approval moves it from New straight to Scheduled (or Customer Approval when
+ *    that is required), with no approval stage at all. Again in every state but
+ *    the skipped stage itself.
  *
  * Statuses by the change's state (a stage left off the line has no row):
  *
@@ -290,6 +311,7 @@ export function buildChangeRequestLifecycle({
   hasCustomerContacts,
 }: BuildChangeRequestLifecycleInput): ChangeRequestLifecycleNode[] {
   const emergency = isEmergencyChangeRequestType(type);
+  const notTakenByType = stagesNotTakenByType(type);
 
   const onLine = (s: BeChangeRequestState): boolean => {
     if (s !== "customer_approval" && s !== "customer_review") return true;
@@ -309,8 +331,9 @@ export function buildChangeRequestLifecycle({
   const customerApprovalAt = HAPPY_PATH.indexOf("customer_approval");
 
   const statusOf = (s: BeChangeRequestState): ChangeRequestLifecycleStatus => {
-    // An Emergency change never takes Assess (its one approval is the CAB's, in Authorize).
-    if (emergency && s === "assess" && state !== s) return "not-taken";
+    // An Emergency change never takes Assess (its one approval is the CAB's, in Authorize), and a Standard change takes
+    // neither Assess nor Authorize (its template is pre-authorised). A change that is somehow in one is shown where it is.
+    if (notTakenByType.includes(s) && state !== s) return "not-taken";
     const exception = isChangeRequestOffRampState(s);
     if (state === "rollback" || state === "canceled") {
       if (s === state) return "current";

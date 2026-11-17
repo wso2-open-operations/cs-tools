@@ -22,6 +22,9 @@ import { ASGARDEO_UNAUTHENTICATED_CODE } from "@constants/apiConstants";
 const getIdTokenMock = vi.fn();
 const signInMock = vi.fn();
 
+// This suite exercises the real auth client; undo the global mock from vitest.setup.ts.
+vi.unmock("@/hooks/useAuthApiClient");
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     getIdToken: getIdTokenMock,

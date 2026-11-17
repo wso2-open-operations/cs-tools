@@ -50,13 +50,44 @@ permission (see `apps/csm-portal/backend`'s own `CLAUDE.md`, "PATCH /projects/{i
 requires PermAdmin") — hiding the pencil icon for a `cs_engineer` just avoids offering an action that
 would 403 for them.
 
-**Skills** (`features/csm-skills`, `/skills`) has two more deliberate exceptions, both by explicit product
-decision and both on top of a real backend gate: the **Skill Manager** tab (`CsmSkillsPage.tsx`) is shown only
-when `useIsSkillManager` succeeds. That hook has no flag to read, so it calls `POST /skills/users/search` once
-with `{pagination:{limit:1}}`, caches the answer for the session and treats a `403` as "not a manager" (any other
-failure also hides the tab). And the All Skills tab's create/edit/(de)activate actions render only for
-`usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
-manager table are always sent to the backend, never done in the browser.
+**Skills** (`features/csm-skills`, `/skills`) hides two tabs by explicit product decision, on top of a real backend
+gate: **Skill Directory** and **Administration** (Requests / Skills / Categories sub-tabs) render only for the
+matching capability from `GET /skills/me/capabilities` (`useSkillCapabilities`: `canViewDirectory`,
+`canReviewRequests`, `canManageCatalogue`; entity-service resolves each from the admin roles plus its own configured
+role list, so who does which task is configuration, not code). There is no 403 probe and no `isAdmin` check any more;
+an old `?tab=manager` link lands on the directory. **All Skills** (`SkillCatalogueBrowser`) is a category tree
+(`SkillTree`, built by `utils/skillTree.ts`; the whole active catalogue is read page by page with the search sent to the
+backend) beside the selected skill (`SkillDetailPanel`, kept in the URL as `?skill=`): what it covers, its levels, "On
+your profile" or "Add to my skills", and, **only with `canViewDirectory`**, the people who hold it (the directory search
+with that one skill as its criterion; a person opens `PersonSkillsDrawer`). Without it the panel says the people list
+needs directory access and nothing is asked for. Administration › Skills (`AllSkillsTab`) is the catalogue managers'
+list: create, edit, (de)activate, inactive skills, holder counts. The backend sends inactive skills/categories and
+holder counts only to a catalogue manager, so the tree never has them to hide. A skill the
+catalogue lacks is requested (`RequestSkillDialog`, with a live duplicate check) and reviewed in
+`ReviewSkillRequestDialog`; approving adds it to the requester's profile at the requested level. Filtering and paging
+for the catalogue, the directory and the request queue are always sent to the backend, never done in the browser.
+
+**Products** (`features/csm-products`, `/products`) is another deliberate exception, on top of a real backend
+gate: every edit control (Add product, Add product version and each product's Add version action, the Edit pencil,
+New release line, and the Retire action inside each edit dialog) renders only for `usePortalAccess().canManageProductCatalog` (`product_catalog_manager` or `admin`). The
+backend's `PermManageProductCatalog` refuses the catalogue write routes of the products API (`POST /products`,
+`POST /products/{id}/versions`, `PATCH`/`retire` on `/product-versions/{id}`, `/release-lines`) to anyone else, so for a
+reader each control would only ever 403. A save applies at once (there is no draft step): a PATCH carries only the
+changed keys (`utils/catalogChange.ts`), and the backend applies a version's listing-wide fields to every live
+deployment-profile row of the version (the rows sharing its `publicId`, or for an unpublished version the live rows
+with the same product and version), in one transaction, which the edit dialog spells out before saving. The edit
+dialog sends one PATCH with only the support fields it shows (`buildVersionSupportPayload`), and one retire call
+for the whole version; Add version creates every profile in one call. The API sends dates as RFC 3339 timestamps
+and the support status upper case; `utils/catalogWire.ts` turns them into the `YYYY-MM-DD` / lower-case shapes
+the feature works with, in the read hooks only. The Catalogue never lists cloud (SaaS)
+products or end-of-life products (every version retired or discontinued), nor retired or discontinued versions or
+retired release lines, so there is no Restore (`isListedProduct`, `listedVersions`, `utils/catalogProducts.ts`). Adding a version pre-fills
+its publishing settings from the product's latest live version (`listingFormFrom`), shown in a collapsed "Advanced
+configuration" section (on a release-date tie the "All In One" row, then the lowest `publicId`, so a profile that
+is its own listing is not copied), and creates one row per deployment profile in a single
+`POST /products/{id}/versions` (`useAddCatalogVersion`); if the product's versions fail to load, the dialog warns
+instead of prefilling. A refusal's message is shown inside the
+dialog; a success closes it and goes to `useSuccessBanner`.
 
 **`AddUserDialog.tsx` only collects an email — there are no first/last name fields.** The backend
 (`apps/csm-portal/backend`'s own `CLAUDE.md`, "Creating a user") looks that email up in SCIM and fills
@@ -223,20 +254,20 @@ existing `canWrite`-gated controls — no parallel read-only clone was needed.
 A handful of features from that old app have no equivalent on the shared side and were relocated
 (not rewritten) into their own properly-named `csm-*` feature folders, restyled to this app's table/
 page conventions, but still calling the exact same backend routes they always did (`/customer-health/*`,
-`/usage-metrics/*`, `/user-scan`, the Time-log report endpoint — all still gated backend-side by
+`/usage-metrics/*`, the Time-log report endpoint — all still gated backend-side by
 `PermViewCustomerHealth`/`PermViewerAccess`/`PermUsageMetricsViewer`, see `apps/csm-portal/backend`'s
-own `CLAUDE.md`): `csm-customer-health`, `csm-usage-metrics`, `csm-user-scan`, `csm-reports`. Four gating flags on
+own `CLAUDE.md`): `csm-customer-health`, `csm-usage-metrics`, `csm-reports`. Four gating flags on
 `usePortalAccess()` (`portalAccess.ts`) control who sees what in this merged app, and are NOT
 interchangeable:
 
 - **`isSplAudience`** — true for anyone holding the `viewer` role, regardless of what else they hold.
-  Gates User Scan, the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx`
-  and the Time report button added to `CsmProjectDetailPage.tsx` — all of it invisible to a caller
-  who has never held `viewer`.
+  Gates the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx` — invisible
+  to a caller who has never held `viewer`. The SLA, Time and CS report buttons on `CsmProjectDetailPage.tsx` are not
+  gated by it: anyone who can open the project sees them (their routes are `PermView` on the backend).
 - **`canViewCustomerHealth`** — the Customer Health dashboard: `viewer` as well as `cs_engineer`/`admin`
   (mirrors the backend's `PermViewCustomerHealth`). Wider than `isSplAudience` on purpose, so a
   `cs_engineer` or `admin` who does not also hold `viewer` still sees it. Customer Health and Usage Metrics
-  sit together at the end of the sidebar, just above User Scan and Help — except for a `viewer` who is not
+  sit together at the end of the sidebar, just above Settings and Help — except for a `viewer` who is not
   also a `cs_engineer`/`admin` (`showCustomerHealthUnderCustomers`): for them Customers opens as a dropdown
   (Accounts, Projects, Customer Health) and the top-level Customer Health entry is dropped. That dropdown entry
   is a nav *shortcut* (`CsmNavNode.shortcutTo`): it owns no routes and is never a Customers page tab, so the
@@ -330,6 +361,38 @@ Every paginated data table backed by a real MUI `<Table>` (`ProductVulnerabiliti
 **`ColumnCustomizerButton`'s picker reorders columns by dragging a grip handle** (native HTML5 drag-and-drop — `draggable` + `onDragStart`/`onDragOver`/`onDrop`, no library), not the up/down chevron pair it used to have. The handle's focus + arrow-up/down keys still call `useColumnPreferences`'s `moveColumn` (one slot at a time) as the keyboard-accessible fallback, since native drag-and-drop has no keyboard path of its own — losing that would've been a real accessibility regression, not just a visual one. The drop itself calls a *different* hook method, `reorderColumn(id, targetIndex)`, not a repeated `moveColumn`: `moveColumn` is a `useCallback` closing over that render's `state`, so calling it more than once inside the same synchronous drop handler (which a multi-slot drag needs) would have every call act on the same stale `state.order` and net only a single-slot move no matter the actual drop target. `reorderColumn` computes the whole new order in one atomic update instead. Any future "reorder by dragging, multiple slots in one gesture" UI on a `useColumnPreferences`-backed list should reuse `reorderColumn`, not try to loop `moveColumn`.
 
 **`CasesFilterBar.tsx`'s "Quick filters"/"Advanced" toggle stashes-and-restores instead of disabling.** The Quick filters grid can't represent every filter shape the Advanced builder can (an OR group, `tags`, certain operators) — clicking Quick filters used to just be `disabled` whenever the active filter had anything like that, with no way to even look at the Quick filters grid without first clearing it by hand. It's unconditionally clickable now: clicking it while not Simple-representable resets the active filter to `DEFAULT_CASES_FILTERS` (preserving `search`, which is shared by both modes and edited independently of this toggle) — Quick filters must never silently keep an Advanced-only criterion applied behind a grid that can't display it — but stashes the previous value in local state first, so an accidental click doesn't lose real filter criteria: clicking straight back to Advanced restores it. That stash is dropped the moment a real edit happens in Quick filters (routed through `handleSimpleFieldChange`, not `onChange` directly) — restoring stale Advanced criteria over a filter the user just deliberately changed would be its own kind of surprising data loss. Any other "switching view A to view B loses some of A's state" toggle in this app should follow the same shape: clear-with-a-stash-and-restore, not a disabled control with no path forward.
+
+## Required fields: mark what the code requires, the same way everywhere
+
+A field the code refuses to save without (a disabled Save, a validation message, a backend 400) carries the
+standard asterisk, so the user can see it before they try. One convention, no hand-typed `*`:
+
+- **MUI inputs**: the `required` prop (`TextField`, `FormControl`, `Autocomplete`'s `renderInput`, a DatePicker's
+  `slotProps.textField.required`, the repo's `AsyncEntitySelect` / `AsyncEntityMultiSelect` / `AsyncUserIdSingleSelect`).
+  It draws MUI's aria-hidden asterisk (`MuiFormLabel-asterisk`) and sets `aria-required`.
+- **A caption the page draws itself** (a rich-text editor's label, a section title over a group): `<RequiredMark />`
+  (`@components/RequiredMark`), the same aria-hidden asterisk, plus `ariaRequired` on the `Editor` /
+  `EditorWithSourceToggle` or `required` on `ExpandableRichTextField`. A caption over a single control also names it:
+  wrap an editor (it takes no `id`) in `role="group" aria-labelledby` the caption's id, or point a plain input's
+  `aria-labelledby` at it. A placeholder is not a name.
+- **Conditional** requirements are marked only while they apply (`required={isTransitioningToResolved}`), and any
+  caption that explains them is shown under the same condition.
+- **Never on a field the user can't fill** in the current state: one that is disabled, read-only or locked (a terminal
+  incident's State, an announcement locked for a retry, a read-only catalog variable) or has nothing to pick (no
+  knowledge base to add an article to). Mark it once it can be filled; where the user needs to know why it stays blank,
+  say so in plain text instead (the bulk edit's Customer Project on a mixed selection). A field disabled only while its
+  own form is saving keeps its mark.
+- **Needed for a later step, not for saving** (a change request's Assignment group before Request Approval, an
+  announcement's description before Submit / Publish): the asterisk plus helper text naming the step ("Required to request
+  approval."); saving stays possible. The step itself is what is disabled or refused.
+- **Inside a `<form>`**, the native `required` attribute is live: the browser blocks the submit with its own bubble
+  before the page's `onSubmit` runs. So there, either use `required` with `noValidate` on the form (CaseAlertLadderSettings,
+  CaseAlertSettings' room dialog, CaseAlertChatSpaces, PagingPhoneDialog, RotaReminderSettings), or `aria-required` alone
+  (CaseAlertSettings' RouteForm, CellPicker's new-tag form). The MUI fields marked so far sit in no `<form>`, so their
+  `required` triggers no browser validation. Either way the page's own checks and the backend stay the authority.
+- Tests: `getByRole(..., { name })` ignores the aria-hidden asterisk, so names are unchanged; assert `toBeRequired()` (or
+  `aria-required="true"` on an editor) and, for a caption, `.MuiFormLabel-asterisk`, and their absence in the states
+  where the field is not marked. e2e page objects match labels with `/^X\s*\*?$/`.
 
 ## Runtime feature flags: `CSM_MIGRATION_*`
 
@@ -445,17 +508,70 @@ Who the customer is (the **Customer Project**, from which the read-only Customer
 The edit form (`EditChangeRequestDialog`, inline on the detail page) offers every field the create form sets: Subject,
 Type (New only: it decides the approval flow, `CHANGE_REQUEST_TYPE_FROZEN_REASON` after; choosing Emergency unticks both
 customer boxes in the same request, which the backend requires), Impact, Priority (read through
-`changeRequestPriorityValue`: a value, or the previous system's `{ id, label }` ref), Description, Justification and Risk and
-impact analysis (sent as `impactDescription`), beside the fields it already had. Only what changed is sent.
+`changeRequestPriorityValue`; `planning`, which only a change request migrated from the previous system carries, is not one
+of the form's values, so the select starts empty and nothing is sent for it), Description, Justification and Risk and
+impact analysis (sent as `impactDescription`), beside the fields it already had. Only what changed is sent. The detail's
+`priority`, `changeRequestType` and `likelihood` are plain strings, shown under "SRE details" (and the priority in the
+PDF) through `changeRequestChoiceLabel`: a lower-case value (the PostgreSQL data source's) in sentence case, a label of
+the previous system as sent.
 
 Once the change request has been approved (`changeRequestApprovedReadOnlyReason`: Customer Approval, Scheduled, Implement,
 Review, Customer Review, Closed, Rollback -- CAB approval received, or a Standard change scheduled; not Canceled) every
-field is disabled under one notice and the form's only input is the internal **Work note**, sent as `workNote` with the
-button "Add work note". This mirrors entity-service's approved-content lock (400 `change_request_approved_read_only`),
+field is disabled under one notice and the form's inputs are the internal **Work note**, sent as `workNote` with the
+button "Add work note", and, in Implement, Review and Customer Review, the deviation from the implementation plan (next
+section). This mirrors entity-service's approved-content lock (400 `change_request_approved_read_only`),
 which is the authority; the deployments' window (`changeRequestScopeLockedReason`) closes at the same point, and the review
 box can no longer be added after the approval. A work note can ride with any save before the approval too;
 `usePatchChangeRequest` refreshes the comments query when one was sent. The CSM microapp disables its Edit button in the
 same states. e2e: the fake API refuses the same edits in the backend's words (`approvedReadOnlyMessage`, `APPROVED_STATES`).
+
+### The deviation from the implementation plan (recorded from Implement on, final once closed)
+
+What the implementation or the review actually did differently from the approved implementation plan
+(`implementationDeviation`, rich text; entity-service CLAUDE.md, "The deviation from the implementation plan", has the
+backend rules). It is the one field the approved lock leaves open, and only while implementation is under way (the
+deviation is only relevant during implementation):
+
+- **When** (`implementationDeviationLockedReason(state, stored)`, mirroring the backend's `checkDeviationEditable`, which judges
+  the stored state): editable in Implement, Review and Customer Review (`implementationDeviationRecordable`); before that it
+  cannot be recorded (400 `change_request_deviation_not_yet`, reason `IMPLEMENTATION_DEVIATION_NOT_YET_REASON`), except that in
+  New one a clone carried over can be cleared (`IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON`); final once the change is closed,
+  canceled or rolled back (400 `change_request_deviation_final`).
+- **Edit form** (`EditChangeRequestDialog`, `implementationDeviationOffered`): in Implement, Review and Customer Review it sits at
+  the top beside the work note, under the notice `CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON` (`changeRequestApprovedNotice`;
+  Customer Approval, Scheduled, Closed and Rollback get `CHANGE_REQUEST_APPROVED_READ_ONLY_REASON`, "Only work notes can be
+  added"), and the button reads "Save" once it is edited ("Add work note" otherwise). Cleared with `""` like the plan fields
+  (`useRichTextPlanField`). In every other state it is shown read-only with the reason when one is stored, and not shown when
+  none is. In New a stored one (`implementationDeviationClearable`; "stored" as the backend judges it, `hasImplementationDeviation`:
+  `isBlankHtml`, no text once the markup is removed, so `<p><br></p>`, `&nbsp;` and an image alone are none -- entity-service's
+  `IsBlankRichText` mirrors `isBlankHtml`, stores such a value as NULL and reads a stored one the same way) is shown read-only under the implementation
+  plan by `CarriedOverDeviationField`, with "Clear deviation": the choice is sent as `implementationDeviation: ""` with the
+  save, so the engineer folds it into the plan and clears it in one save or in two ("Keep deviation" undoes it; the text stays on
+  screen to copy from).
+- **Request Approval** (`ChangeRequestActionBar`, `TARGET_BLOCKED_REASON.assess`): disabled with the focusable, labelled reason
+  `REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON` while a change in New has a deviation stored
+  (`requestApprovalNeedsDeviationClearedReason`, every type), after the team, project and contact reasons; the backend refuses it
+  with 400 `change_request_deviation_not_incorporated`.
+- **Plan tab** (`CsmChangeRequestDetailPage`): `ImplementationDeviationSection`, right under the Implementation plan section, a
+  named region with a warning-coloured edge and icon (prominent without being an alert). The Plan tab is not the default one, so
+  its label carries a small warning dot and the tab's accessible name becomes "Plan, has a deviation from the implementation plan"
+  (an explicit `aria-label`: Chrome's computed name of the flex label put a space before the comma). The Plan card renders for
+  a deviation alone. It shows what is stored, in every state.
+- **Clone** copies it (`buildCloneChangeRequestNavState`, `CLONE_SOURCE_GAP_MESSAGE`); the create form shows it only when it
+  opened with one (a clone or a draft of one), under the implementation plan, read-only with the same explanation and "Clear
+  deviation" (`CarriedOverDeviationField`); left as it is, it is sent (non-blank only), and the new change then has to clear it
+  before Request Approval. The draft keeps it (`ChangeRequestDraft.implementationDeviation`, optional; a cleared one is kept as
+  blank, and the clone's text is still offered with "Keep deviation").
+- **PDF export** writes it after the implementation plan. Not in the bulk edit. Not in the CSM microapp (its detail shows no plan
+  at all).
+- Internal: the backend never returns it to a customer, and the customer portal has no field for it.
+- Tests: `EditChangeRequestDialog.test.tsx` ("deviation from the implementation plan"), `CsmChangeRequestDetailPage.test.tsx`
+  (same), `CreateChangeRequestPage.test.tsx` (Clone prefill), `ChangeRequestActionBar.test.tsx` ("Request Approval needs the
+  deviation a clone carried over cleared"), `changeRequests.test.ts` (one row per state, row ids as the backend's
+  `TestDeviationEditRefusal_PerState`), `ImplementationDeviationSection.test.tsx`; e2e `change-request-lifecycle.spec.ts` ("the
+  deviation from the implementation plan (mocked backend)"), whose fake API holds the plan and the deviation (`seedPlan`,
+  `plan()`) and refuses in the backend's words (`deviationNotYetMessage`, `DEVIATION_CARRIED_OVER_MESSAGE`,
+  `deviationFinalMessage`, `DEVIATION_NOT_INCORPORATED_MESSAGE`, `DEVIATION_RECORDABLE_STATES`).
 
 ### Customers never decide in the CSM portal
 
@@ -482,7 +598,7 @@ The previous system's own mechanism, which the schema already carries: a custome
 
 - **Read model.** `BeChangeRequestDetail.customerProposal` (`BeChangeRequestCustomerProposal`: `startOn`, `endOn` while pending, `answer` = `pending` / `agreed` / `disagreed` / `unanswered`, `proposerRecorded`, `proposedByName` / `proposedByEmail` / `proposedOn`, `canAccept` / `acceptBlockedReason`) plus the raw `customerUpdatedOn` / `confirmCustomerUpdatedDate`. The page never infers a proposal from the raw columns: `pendingCustomerProposal(cr)` is the backend's verdict (`answer === "pending"`, an allowlist: a change in Authorize with a live CAB stage, one waiting on any other approval or an unknown approval group, a closed or scheduled one, a date equal to the plan, one with a standing answer never match) and only in `customer_approval`. Tests: `__tests__/changeRequests.test.ts` ("a time the customer proposed").
 - **Banner** (`ChangeRequestProposedTimeBanner`, a `warning` `Alert`, `role="region"` named "The customer proposed a new time", under the stepper): "Planned now" beside "Proposed by the customer" (start to end, "Same length as the planned window (2 hours)"), who proposed it and when, and two answers. **Accept proposed time** (green, the one primary action) opens `ChangeRequestAcceptProposedTimeDialog` and sends `{confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn, expectedPlannedStartOn, expectedPlannedEndOn}` -- the proposal and the planned window the dialog showed, never a `state` (the no-Bypass rule is untouched: a manual `scheduled` stays refused, and Accept applies the customer's OWN proposal). **Propose a different time** (outlined) is the Re-schedule dialog in counter mode; the action bar's own outlined `authorize` button reads the same while a time is stored (`changeRequestTransitionLabel(target, from, pending)`), so Accept lives only in the banner. Accept is disabled with a focusable reason (`acceptProposedTimeBlockedReason`) when nobody is recorded as the proposer (first, see below), on hold, once the proposed time has passed, with no planned window to keep the length of, and when the backend says `canAccept: false` (among its reasons a date left far ahead, whose window would end after the year 2100, a window no other path may write; `customer_updated_on` is a column the previous system writes too); the backend stays the authority and its refusal shows in the dialog.
-- **Nobody recorded as the proposer.** The previous system lets WSO2 users write `customer_updated_on` too, and a date left over from an old cycle looks the same, so the proposer is named only when the backend says it can (`proposerRecorded`, or a name / email came with it; `customerProposalProposer`). With nobody recorded the stored time is **not a proposal and nothing waits for WSO2's answer**, and no staff action stands in for the customer's own answer: the backend refuses an Accept with a 409 `change_request_proposer_not_recorded` and sends `canAccept: false` with that reason as `acceptBlockedReason`, so the page offers no way to accept it (the earlier "I have checked that the customer proposed this time" confirmation is gone, in the dialog and everywhere else). `customerProposalWording(customerProposalProposer(proposal))` (`utils/changeRequests.ts`) is the one place the banner, window, dialog and header wording comes from. Recorded: banner "The customer proposed a new time", window "Proposed by the customer", counter dialog "The customer proposed <window>.", header "Waiting for WSO2 to respond to the customer's proposed time" (`CUSTOMER_PROPOSAL_WAITING_REASON`). Nobody recorded: an **info** banner "A time is stored on this change request" that says "A time is stored (<window>) but nobody is recorded as having proposed it." (`storedTimeSentence`) and what that may be and what is still true (`STORED_TIME_ADVICE`: the customer is still being asked to approve the planned time), the window labelled "Stored time", **Accept disabled with the server's reason** (`PROPOSER_NOT_RECORDED_ACCEPT_REASON` is the page's own copy of those words for a backend that sends none) and **Propose a different time enabled**; the header stays at "Awaiting Customer Approval" (`changeRequestBlockingReason` only says "Waiting for WSO2..." for a recorded proposer). `openAccept` refuses to open for such a time too. **Who is recorded** is entity-service's call and nothing else: the change's LAST WRITER, read before the act's own write, and only when that writer is a registered contact of the project (no comment, audit or other log is read, and nothing is stored to name the proposer: the schema is not extended). So after ANY later edit of the change by staff (an unrelated one too, such as a plan edited or an engineer assigned) a genuine customer proposal reads "nobody is recorded": Accept is then unavailable, and "Propose a different time" (which the customer then approves) is the way on, at the cost of one extra customer approval. That is the accepted cost of not guessing, and the page says no more than the backend says. A date a WSO2 user wrote in the previous system is migrated history, not a daily event, because the previous system is not used in parallel after the cutover. Tests: `ChangeRequestProposedTimeBanner.test.tsx`, `ChangeRequestAcceptProposedTimeDialog.test.tsx`, the page test ("nobody is recorded as having proposed the stored time").
+- **Nobody recorded as the proposer.** The previous system lets WSO2 users write `customer_updated_on` too, and a date left over from an old cycle looks the same, so the proposer is named only when the backend says it can (`proposerRecorded`, or a name / email came with it; `customerProposalProposer`). With nobody recorded the stored time is **not a proposal and nothing waits for WSO2's answer**, and no staff action stands in for the customer's own answer: the backend refuses an Accept with a 409 `change_request_proposer_not_recorded` and sends `canAccept: false` with that reason as `acceptBlockedReason`, so the page offers no way to accept it (the earlier "I have checked that the customer proposed this time" confirmation is gone, in the dialog and everywhere else). `customerProposalWording(customerProposalProposer(proposal))` (`utils/changeRequests.ts`) is the one place the banner, window, dialog and header wording comes from. Recorded: banner "The customer proposed a new time", window "Proposed by the customer", counter dialog "The customer proposed <window>.", header "Waiting for WSO2 to respond to the customer's proposed time" (`CUSTOMER_PROPOSAL_WAITING_REASON`). Nobody recorded: an **info** banner "A time is stored on this change request" that says "A time is stored (<window>) but nobody is recorded as having proposed it." (`storedTimeSentence`) and what that may be and what is still true (`STORED_TIME_ADVICE`: the customer is still being asked to approve the planned time), the window labelled "Stored time", **Accept disabled with the server's reason** (`PROPOSER_NOT_RECORDED_ACCEPT_REASON` is the page's own copy of those words for a backend that sends none) and **Propose a different time enabled**; the header stays at "Awaiting Customer Approval" (`changeRequestBlockingReason` only says "Waiting for WSO2..." for a recorded proposer). `openAccept` refuses to open for such a time too. **Who is recorded** is entity-service's call and nothing else: the customer's proposal records its proposer on the change request (entity-service migration 0249), and the backend names them while that record is about the stored time and the contact is still a registered contact of the project (no comment, audit or other log is read). A later write to the change by staff (a work note, an additional comment, the hold, a whole-form resend; in Customer Approval the backend refuses any field that would change) does not touch the record, so a customer's proposal stays recorded and Accept stays available. A time stored with no record (before 0249, or by another writer on a change that has had no proposal since it entered Customer Approval) is still judged by the change's last writer (and since entity-service migration 0250 a later write by anyone else first records that writer as its proposer when they are a registered contact of the project with a user record, so a customer's time stays recorded; one edited by someone else before 0250 was applied, or whose contact has no user record, reads "nobody is recorded"); entering Customer Approval voids the record, and so does a plain Re-schedule (a new round that does not move the state), so a time left over from an earlier round reads "nobody is recorded" too (the fakes clear their proposer on a plain Re-schedule the same way). The page says no more than the backend says. A date a WSO2 user wrote in the previous system is migrated history, not a daily event, because the previous system is not used in parallel after the cutover. Tests: `ChangeRequestProposedTimeBanner.test.tsx`, `ChangeRequestAcceptProposedTimeDialog.test.tsx`, the page test ("nobody is recorded as having proposed the stored time").
 - **Re-schedule dialog** (`ChangeRequestRescheduleDialog`, `proposal` prop = counter mode when a customer is recorded as the proposer; **a plain Re-schedule that names the stored time when nobody is**). Re-schedule: "Set the new planned time. The customer is asked to approve it. No further internal approval is needed: the change itself has not changed.", at least one end must change, sends only the changed ends with `{state: "authorize"}` and no proposal version. Counter ("Propose a different time"): prefilled with the PLANNED window, "No CAB approval is needed", the submit is "Propose this time" for a different window and "Decline proposed time" when the window is left as it is (a decline: only the answer is written and the customer keeps their live request); the very window the customer proposed is refused up front (that is Accept). It sends `expectedCustomerUpdatedOn` and the planned window it was shown. With nobody recorded as the proposer the dialog is still titled "Propose a different time" and says "A time is stored (<window>) but nobody is recorded as having proposed it. There is no proposal to decline.", but it is a plain Re-schedule: there is no "Decline proposed time" (a request with no window is refused by the backend with a 400, never answered with a silent Disagree against a date nobody proposed), at least one end must change, the stored time itself may be the new window (nobody proposed it, so there is no "that is Accept's" note), and no answer is written on the stored time. It still sends the stored time and the planned window it was shown, so one that moved is refused in words. Both dialogs and the Accept dialog work from a **snapshot** of the change and proposal as they were when opened (`CsmChangeRequestDetailPage`): a proposal or window that moved behind them is refused by the backend in words, and the dialog keeps what the engineer was shown.
 - **A refusal that means the change moved on.** The page reads the refusal's `errorCode` (`BackendApiError.payload.errorCode`, never its words). A 409 that names one of `ChangeRequestErrorCode` (`utils/changeRequests.ts`: schedule changed, not proposable, proposal not now, no planned window, on hold, proposer not recorded) means what the dialog showed is no longer what is stored and the same request would be refused again, so `closeAnswerDialogsAsStale` closes whichever dialog is open, shows the backend's words plus "The page now shows the current state." in a warning `Alert` on the page (`role="alert"`, dismissible; it takes focus once the dialog is gone, because the button that opened the dialog is often not there any more) and reads the change again (`refetch({ cancelRefetch: false })`: the patch hook already invalidates the detail and the approvals when it settles, and this joins that read). Anything else keeps the dialog open with the words: a 400 (even one carrying such a code), a server error, a 409 with another code or none. Where the backend names no code (the refusals "the proposed time changed" and "no longer waiting" have none today), the snapshot decides: after a refused attempt, if the page now holds another state, planned window or proposal than the dialog was opened on (`answerSnapshotMoved`), the dialog says so and holds submit back (`stale` prop on both dialogs) so there is no retry loop, and Close is the way on. Closing a dialog without answering, by Close or Escape, leaves focus where MUI puts it: back on the button that opened it. **The Re-schedule / counter reason is recorded after the change has been updated**, never before (the Roll back / Cancel dialog keeps its own reason-first order): a refused attempt leaves no note, so a retry, or a dialog closed and opened again, cannot post it twice (there is no "already recorded" lock any more); if the note then cannot be saved the dialog closes, the error banner says the change was updated but the reason was not recorded, and the reason can be added as a comment. Tests: `CsmChangeRequestDetailPage.test.tsx` ("a refusal that means the change moved on", "a refusal the dialog keeps", "focus"), the dialogs' own tests, `changeRequests.test.ts` ("the refusals that mean the change moved on", `answerSnapshotMoved`); e2e: "a window re-scheduled behind an open Accept confirmation" and "... behind an open counter" (`api.moveWindow`).
 - **Header / stepper.** While a customer's proposal waits the header reads "Waiting for WSO2 to respond to the customer's proposed time" (`CUSTOMER_PROPOSAL_WAITING_REASON`) instead of "Awaiting Customer Approval" (which is what a stored time nobody proposed keeps); the stepper is unchanged (Customer Approval current; after Accept the change is Scheduled). Its `customerApproved` evidence stays `hasCustomerApproved` only: an Agree written in the previous system does not prove the customer's step was passed. "SRE details" adds "WSO2 answer to the customer's time" (Agree / Disagree).
@@ -531,10 +647,12 @@ Both lists have a checkbox column (for `canWrite` only), a selection bar (`BulkS
     the list sent back replaces the whole one); one whose list cannot be read is skipped, and a list that would not
     change is not sent. On the Postgres data sources the detail reads `work_item_watcher` (entity-service
     `incidentWatchers`; it used to return an empty list there, which made "add" a replace).
-  - Parent incident never offers a selected incident (`useSearchIncidentsExcludingIds`), and the plan refuses one as
-    its own parent. Caused by change is a change request picker (its column references `change_request`).
-  - Not offered: priority (it follows from impact and urgency) and `parentIncidentId` (a second parent column with no
-    label in the portal).
+  - Parent incident sets `parentIncidentId` (the incident's parent incident, the link the child incidents list and
+    the resolve cascade follow), like the single Edit dialog, never the generic `parentId`. It never offers a selected
+    incident (`useSearchIncidentsExcludingIds`), and the plan refuses one as its own parent (entity-service also
+    refuses a loop through the parent chain, in words). Caused by change is a change request picker (its column
+    references `change_request`).
+  - Not offered: priority (it follows from impact and urgency) and the generic `parentId`.
 - **Edit, change requests** (`BulkEditChangeRequestsDialog`): every field `PATCH /change-requests/{id}` takes from the
   edit form, plus on hold and the two journals, in sections (Change request, On hold, Service, Assignment, Schedule,
   Customer, Planning, Notes): short description, state, type, category, impact, priority, originating service request,
@@ -587,8 +705,11 @@ Both lists have a checkbox column (for `canWrite` only), a selection bar (`BulkS
 - **After a run** the dialog is closed with `flushSync` before anything is refreshed (its per-record detail queries would
   otherwise all refetch), then each record is refreshed exactly as a single edit refreshes it:
   `refreshChangeRequestRecord` (detail, approvals, comments when a work note or comment was sent) and
-  `refreshIncidentRecord` (detail, tasks, activity and comments after every update, and again after the In
-  Progress / Resolved flows), both exported from the single-record PATCH hooks so the two paths cannot drift. Only the run's own ids leave the selection (`remove`).
+  `refreshIncidentRecords` (detail, tasks, activity and comments after every update, and again after the In
+  Progress / Resolved flows), both exported from the single-record PATCH hooks so the two paths cannot drift. An
+  incident run passes all its updates in one call: a move to Resolved also resolves child incidents whose ids the page
+  does not know, so it refreshes every incident's detail, activity and comments (and the child lists after the flows),
+  and doing that once per incident would refetch every cached incident page N times. Only the run's own ids leave the selection (`remove`).
 - **Focus and announcements**: the result banner takes focus when it appears (the button that started the run has gone
   with the bar, and focus makes a screen reader read the outcome); Clear selection puts focus on the page's select-all
   box; `BulkSelectionBar` keeps one hidden `role="status"` region mounted even at 0, so the first count is announced.
@@ -638,6 +759,129 @@ The previous system has no Emergency CAB and acts on an Emergency change **witho
 - **ECAB is history only.** `approvalStageLabel` still reads "ECAB Approval" / "Emergency CAB" (and the stage-to-state map still decides "ECAB Approval" in Authorize), so an Emergency change raised before this keeps displaying its stage and the approvers it asked can still decide it (a decision needs the caller's own REQUESTED row). Nothing in the webapp creates, offers or describes ECAB any more.
 - e2e: the fake API's Emergency Request Approval creates one `CAB Approval` stage (`FAKE_CAB_GROUP`), ignores the stored boxes (`effectiveGates`) and refuses a create / PATCH that turns a box on in the backend's words (`emergencyNoCustomerConsentMessage`); an OLDER Emergency change with a live ECAB stage is `api.startOlderEmergencyAtAuthorize()` (and `startAtState` still settles one for the customer-gate rows), with `FAKE_ECAB` / `FAKE_ECAB_GROUP` kept only for that. Retired: "Emergency with Customer Approval (ECAB -> Customer Approval -> Scheduled)" (vitest and Playwright), which is now "an Emergency change never reaches a customer state". A group may have no members: that is an operations matter (there is no admin UI and no schema change), so a new Emergency change where nobody maintains the CAB Approval group's membership is refused with the backend's readable "no members" message, which names the group.
 
+## Standard changes: templates, proposals, and a change raised from one
+
+A standard change is raised only from a CAB-approved template (entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
+thin proxy that keeps entity-service's 400 / 403 / 404 / 409 words and `errorCode`). Hooks: `api/useStandardChanges.ts` (every
+write invalidates `STANDARD_CHANGES_KEY`, refused or not); pure rules mirroring `standard_change_template.go` (key shape,
+declarations, values, `{{key}}` placeholders, completeness, the preview's rendering): `utils/standardChanges.ts`.
+
+- **Inside Operations > Change requests, as one sub-view.** Standard changes are templated change requests, so the
+  Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
+  before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
+  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, "Propose a standard change",
+  `kind: "new"`); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
+  search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
+  absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
+  fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
+  me" and "Awaiting my decision" are filters the user picks from the "Show" select (options: All proposals, Proposed
+  by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
+  does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
+  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
+  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your CAB decision · N
+    draft(s) of yours", each part a link to the proposals filtered to it (`scope=awaiting`; `scope=mine&state=draft`),
+    built from the current query so the list's `cr*` filters ride along.
+    Counts come from `useCountStandardChangeProposals` (`POST /standard-change-proposals/search` with
+    `{awaitingMyDecision:true}` / `{proposedByMe:true, states:["draft"]}`, limit 1, `total` read, no retry). Nothing is
+    shown until both counts are in, a part with 0 is left out, nothing at all when both are 0, and a failed count is
+    left out silently (no banner).
+  - **The list's filters do not apply to Standard changes, but they are kept.** Entering it keeps the `cr*`
+    parameters in the URL, unread (`standardChangesSearch` copies everything but Standard changes' own parameters),
+    and going back to the list drops only `view`/`show`/`scope`/`state` (`changeRequestListSearch`), so clicking
+    "Change requests" restores the list exactly as it was left. A pin / Recent entry of Standard changes ignores
+    them: the Change requests nav node's `views.ignoreParamPrefix: "cr"` (equal to
+    `CHANGE_REQUEST_LIST_PARAM_PREFIX`, a test checks; every `CR_FILTER_PARAM_KEYS` entry starts with it) makes
+    `currentPageEntry` leave them out of the title and the href, so it reads "Standard changes", not "Standard
+    changes: 2 filters". Because such a pin's href is shorter than the URL, `PinThisPageButton` finds the page's
+    entry by the URL or, failing that, by the href `currentPageEntry` gives it; matching the URL alone showed "Pin"
+    on a page that was pinned, and the next click unpinned it. Switching the strip pushes a history entry; a filter
+    change replaces it.
+  - **Old URLs.** `?view=catalogue` / `?view=proposals` (the two sub-views this replaced) are read
+    (`changeRequestsView`, `standardChangesShow`) and rewritten in place to `?view=standard[&show=proposals]`
+    (`canonicalStandardChangesSearch`, replace, no history entry; the list's `cr*` filters are kept). The older separate tab
+    (`/operations?tab=standard_changes|standard-changes[&view=proposals]`, `/operations/standard-changes[?view=proposals]`)
+    is redirected the same way (`OperationsLegacyRedirects`, `legacyStandardChangesHref`).
+  - **Heading.** On Standard changes the page heading is "Standard changes" with "Pre-authorised change requests,
+    raised from templates the CAB has approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
+    and the proposals alike, never the Operations-wide "Service requests, change requests, incidents, problems, and
+    runbooks" line, which every other Operations tab (the change request list included) keeps.
+  - **Template and proposal pages.** The Change requests nav node owns `/operations/standard-changes` and
+    `/operations/standard-change-proposals`, so it is the one highlighted there; the pages carry "Change requests ›
+    Standard changes › <STD number>" and "Change requests › Standard changes › Proposals › <SCP number>"
+    (`StandardChangeBreadcrumbs`, `show` prop), and Back falls back to Standard changes / all its proposals. Each records a
+    Recent entry (`standardChangeRecentEntry`, kind `standard_change`, "STD0000003 · <name>", grouped as "Standard
+    changes" in Recent), so "Pin this page" there names the record, not "Operations".
+  - **Pins of the tab.** The Change requests nav node declares the places as `views` with a nested `within`
+    (`CsmNavNode.views`, `navViewForSearch`): `view=standard` pins as "Standard changes",
+    `view=standard&show=proposals` as "Standard change proposals" (its `scope`/`state` count as filters, `cr*` never
+    does), and the old
+    `catalogue` / `proposals` values are named the same way.
+- **A standard change is one customer's** (entity-service `CLAUDE.md` has the rules; a customer is an account, and a change
+  request's customer is its project's account). Every template and proposal carries `customer` {id, name} (null only on an
+  older template whose customer could not be told, or a new draft that has not named one); `customerAccountPath` links it.
+  What the webapp does with it:
+  - **Catalogue**: a Customer column (a dash when none) and a Customer filter (`AsyncEntitySelect` over
+    `useSearchStandardChangeCustomersForSelect`, `POST /accounts/search`) sent as the search's `accountId`. The proposals
+    list shows each proposal's customer too; the attention line is unchanged.
+  - **Template page**: "For <customer>: used only for this customer's projects." under the name and a Customer cell
+    beside Owner. A template with `customer: null` shows "No customer recorded" (`STANDARD_CHANGE_ONE_CUSTOMER_RULE`)
+    and Raise a change request is disabled (the backend answers it with 409 `standard_change_template_unavailable`).
+  - **Proposal**: the header says "Customer: <link>" (or "not named yet"). In the editor a **new** proposal that did not
+    start from a change request names it (`standardChangeProposalCustomerEditable`; required, never cleared once
+    named, sent as `accountId` in the PATCH only there); one started from a change request and a modify / retire
+    proposal show it read-only with `standardChangeProposalCustomerFixedReason`. A copy carries `copiedFrom` {id,
+    number} and keeps the copied proposal's customer: read-only with "The customer of the proposal it was copied
+    from (SCP...)"; only a copy of a proposal that had no customer names one, once (the backend accepts naming it
+    while it has none and refuses changing it after). Naming another customer drops the
+    evidence already cited, with an info notice (it was the other customer's; the backend would refuse the PATCH).
+    The evidence picker is disabled until there is a customer and searches only that customer's closed change
+    requests (`useSearchClosedChangeRequestsForSelect(query, enabled, accountId)`: the change request search has no
+    account filter, so it pages the customer's project ids first, `useCustomerProjectIds`, `POST /projects/search`
+    `{accountId}`, and searches with `projectIds`; no projects = no evidence, nothing searched). Submit is held back
+    with "still needs ... a customer" (`standardChangeProposalGaps`, in the backend's order: after name and rationale).
+  - **Create form, Standard**: the customer is the Customer Project's account (`useProjectCustomer`, `GET
+    /projects/{id}`). The template picker is disabled with the reason until a project with a customer is chosen, and
+    then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
+    accountId)`, `searchExtra`; it searches nothing without a customer). The Customer Project is required for
+    Standard. A template chosen before any project (`?standardChangeTemplateId=`, a clone, a draft) narrows the
+    project picker to its customer (`AsyncProjectSelect accountId`, a server-side `accountId` on `/projects/search`,
+    through `ChangeRequestScopeFields projectAccountId`) with a helper, and Create waits with "Select a Customer
+    Project of <customer> to continue."; once a project is chosen the picker is no longer narrowed. Choosing a project
+    of another customer (or one with none) clears the template and its change specifics during render, with an info
+    notice saying whose each is. A template with no customer is refused up front. A 400
+    `standard_change_template_other_customer` (`isStandardChangeTemplateOtherCustomer`) is shown at the template in the
+    backend's words (not the banner) and holds Create back until the template or the project changes.
+  - **Detail / Edit**: the template banner adds "Customer: <name>. The template is used only for this customer's
+    projects."; when the detail's `standardChange.customerMismatch` is true (the project sync moved the project to
+    another account after the change was raised) the banner turns `warning` and says the project is no longer one of
+    the customer's, approval cannot be requested, and to cancel and raise a new one
+    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code; in New the Edit dialog narrows the Customer Project picker to the template's customer
+    (`projectAccountId`) and says so in its template notice. The backend refuses a move to another customer's project
+    in every state with the same code; its words show in `saveError`.
+  - Tests: `utils/__tests__/standardChanges.test.ts` ("a standard change is one customer's"), `useStandardChanges.test.tsx`,
+    `StandardChangesTab.test.tsx`, `StandardChangeTemplateDetailPage.test.tsx` ("its customer"),
+    `StandardChangeProposalPage.test.tsx` ("its customer: ..."), `CreateChangeRequestPage.test.tsx` ("a template is one
+    customer's: the Customer Project's"), `EditChangeRequestDialog.test.tsx`, `CsmChangeRequestDetailPage.test.tsx`,
+    `AsyncProjectSelect.test.tsx` ("narrowed to one customer").
+- **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): current version with placeholders
+  highlighted, parameters, version history (an older version via the versions endpoint), usage, the review flag (link to the
+  change request, Clear review), Suspend / Resume (who may is the server's call: the 403 words are shown), Propose a revision /
+  retirement (disabled while one is open: `openProposal`), Raise a change request (`?standardChangeTemplateId=`).
+- **Proposal** `/operations/standard-change-proposals/:id` (`StandardChangeProposalPage`): the proposer's editor while `canEdit`
+  (parameters editor, "Insert {{…}}" per text field, live preview with sample values, closed change requests as evidence, Save =
+  one PATCH of the whole draft, Submit saves first); read-only otherwise, with the CAB approvers and Approve / Reject on the
+  viewer's own `canDecide` row (a rejection needs a comment). "Copy into a new proposal" only for a rejected / withdrawn
+  **new** proposal: the API's `copyFromProposalId` starts new templates only.
+- **Create form**: type Standard shows a template picker (active only, of the project's customer), "Change specifics" (one input per parameter type) and a
+  read-only preview of what the template specifies; the payload is `type`, `standardChangeTemplateId`,
+  `standardChangeTemplateVersionId` (the version shown), `standardChangeParameters`, `projectId` (required: a project of the
+  template's customer) and only the fields the template does not specify. A 409 `standard_change_template_unavailable` is shown at the template with "Reload template", not in the banner. A
+  clone of a templated change carries the template and its values, never the frozen fields (`buildCloneChangeRequestNavState`).
+- **Detail / Edit / action bar**: `standardChange` shows a banner (template link, version, values); the Edit dialog disables
+  every field the template specifies (400 `change_request_standard_template_field`) and keeps the type Standard; a Standard
+  change with `customerApprovalRequired === false` labels Request Approval "Schedule" (`requestApprovalSchedulesDirectly`; still
+  `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`).
+
 ## Change request Approval tab: opening an Assignment group
 
 In `ChangeRequestApprovals`, each row's **Assignment group** is a link-button (`Link component="button"`, `aria-haspopup="dialog"`, accessible name `View members of <group>`) that opens `ApprovalGroupDialog` (`features/csm-operations/components`): the group's name as the title, **Manager / Group email / Description** when it has them, and a **"Group Members (N)"** list (name, email, a "Lead" chip for `role: "lead"`), with loading, error (`QueryErrorState` + Try again), not-found and empty states. It closes with Esc, a click outside or the Close button, and focus returns to the link.
@@ -654,7 +898,7 @@ In `ChangeRequestApprovals`, each row's **Assignment group** is a link-button (`
 
 - **Statuses**: `done` / `current` / `pending` / `not-taken` / `unrecorded` / `rejected` (the customer rejected the change at that stage: an error-coloured ring with a cross, read as "rejected by the customer"). Rollback and Canceled are *exception* stages: while the change is on the path they are `not-taken` (faint, dashed outline, still labelled and iconed -- never `done`); they turn `current` (error colour, Undo2 / Ban icon, red connector into them) only when the change really is in that state.
 - **Rollback** (`rollback` is only reachable from Review / Customer Review): everything through Review is `done`; Customer Review reads from its approval stage rows: a REJECTED one is `rejected` (the customer's rejection is what rolls the change back), any other row means it was entered (`done`), and with no row it is `not-taken` only when the project has registered customer contacts (`hasCustomerContacts`: the backend would have asked them on entering Customer Review), else `unrecorded` (a rollback from Customer Review in a project with nobody to ask leaves no row either). **Canceled** (reachable from anywhere, no history kept): a stage is `done` only when the evidence proves it was passed -- a stage row proves every state before its own; an APPROVED stage proves its own *except Review's* (approving Review does not move the change on); `hasCustomerApproved` (`customerApproved`) proves Customer Approval -- every other path stage is `unrecorded`, never `pending`, never skipped. The exception is a REJECTED Customer Approval stage: the backend answers it by canceling the change right there, so the stages before are `done`, Customer Approval is `rejected` and everything after is `not-taken`. The page passes the approvals it already fetches for the header note, `hasCustomerApproved` and whether `customerContacts` is non-empty.
-- Customer Approval / Customer Review are left off the line when their checkbox is explicitly `false` and the change is not in that state; an unknown flag keeps them. An **Emergency** change is the exception (see "An Emergency change has one CAB approval and no customer steps"): its boxes are ignored and Assess reads `not-taken`; the e2e `expectStages` letters for it are e.g. `c n p p p p p p n p n` in New and `d n c p p p p p n p n` in Authorize (customer columns dropped by the flags). A state that is none of the eleven keeps the faint line and the "Current state" chip.
+- Customer Approval / Customer Review are left off the line when their checkbox is explicitly `false` and the change is not in that state; an unknown flag keeps them. An **Emergency** change is the exception (see "An Emergency change has one CAB approval and no customer steps"): its boxes are ignored and Assess reads `not-taken`. A **Standard** change reads Assess *and* Authorize `not-taken` (its template is pre-authorised: New goes straight to Scheduled, or to Customer Approval when that is required; `stagesNotTakenByType`), in every state but the skipped stage itself; its customer stages follow its boxes like a Normal change's; the e2e `expectStages` letters for it are e.g. `c n p p p p p p n p n` in New and `d n c p p p p p n p n` in Authorize (customer columns dropped by the flags). A state that is none of the eleven keeps the faint line and the "Current state" chip.
 - Every stage says its status in words as well as colour (visually-hidden ", done" / ", current" / ", not taken" ... after the label) and carries the customer portal's caption as a tooltip and `aria-description` (the tooltip adds "(not taken)" / "(history not recorded)" / "(rejected by the customer)" for the stages whose faint or crossed marker needs it). Light-theme contrast is a design constraint, measured from screenshots: the current / rejected label uses the tone's *dark* shade on the light theme and its *light* shade on the dark theme (`toneText`; the main shade is 3.3:1 on the light page backdrop and about 4:1 for the error red on the dark one), muted labels are only dimmed to 0.85, and an upcoming stage's ring is `text.secondary` at 0.7 (a ring in the divider colour was 1.2:1) so it stays above 3:1 and clearer than a not-taken one (0.45, dashed). Captions are **not** shown inline: at the page's real content width (about 1110px at a 1440px viewport, 11 stages) adjacent two-line captions touch and the row doubles in height.
 - Under 68px per stage the row scrolls **inside its own container** (centred on the current stage), never the page. Test helpers that read a stage's label must drop the hidden status suffix (`stepLabel` in `CsmChangeRequestDetailPage.test.tsx`; the e2e specs match `^<label>, `).
 - e2e: `change-request-lifecycle.spec.ts` asserts the stepper through the page object's `stage(label)` and the spec's `expectStages(detail, columns, flags)`, which takes the eleven columns as one letter each (`d` done, `c` current, `p` upcoming, `n` not taken, `u` history not recorded, `r` rejected by the customer) and compares them with the words the stepper reads (", done", ", current", ", upcoming", ", not taken", ", history not recorded", ", rejected by the customer"), dropping Customer Approval / Customer Review when their checkbox is off. "the stepper and the action bar in every state" (fake API) walks a Normal change through every state with the customer checkboxes on and off, asserting all eleven stages *and* the action bar (primary button, Re-schedule, "Change state" entries in order) at each; the Rollback and Canceled screens (rolled back from Review with and without customer contacts, from the customer's rejection; canceled with no approvals, in Review after Peer / CAB, in Review after the Review stage was approved, at Customer Approval, after the customer's approval (their APPROVED stage and `hasCustomerApproved`), and by the customer's rejection) and the checkbox-off line are separate tests; the seeded-fixture describes assert CHG-FIXED-007 / -008 and the stage statuses after each customer answer.
@@ -672,6 +916,38 @@ The fix is not to change the container but to clean the body before it is render
 - Markdown bodies (Novera, GitHub-raised descriptions) never go through it.
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
+
+**Whitespace round trip (draft restore, HTML-source toggle):** the export keeps tabs and runs of spaces raw (no per-run `pre-wrap`), and HTML parsing would collapse them on the way back in. `InitialValuePlugin` therefore runs `preserveEditorWhitespace` on the `value` DOM before `$generateNodesFromDOM`: a text node with a tab, two spaces, or a space at a line edge (no newline in it) is wrapped in a `pre-wrap` span that exists only in that DOM, so export -> load -> export is lossless and the exported HTML is unchanged. `preserveTrailingLineBreaks` does the same for a `<br>` that ends a block (`<p>Hi<br></p>`, Enter at the end of a line), which Lexical's importer drops as a block's last `<br>`: it is followed by an empty text node in that DOM only, so a restored draft keeps its line breaks (`<p><br></p>` and blocks without a trailing `<br>` are untouched). Whitespace-only gaps next to or between block elements (minified or ServiceNow HTML such as `<li>\t<ul>`) are never wrapped, so they add no blank lines. A leading or trailing single space at a line edge may now be kept when an older comment is re-saved (accepted). Text with a newline still collapses, so laid-out HTML source is cleaned as before; pasted foreign HTML never goes through it.
+
+**Nested lists:** Lexical exports a nested list as a wrapper `<li class="editor-list-item-nested"><ul>…</ul></li>` whose marker only the editor's CSS hid, so other renderers drew an empty bullet. `markNestedListItemsInHtml` (the `OnChangeHTMLPlugin` export) adds `style="list-style-type: none"` to it; `CsmCaseCommentBubble` also hides `li.editor-list-item-nested` for comments saved before, and `htmlToPdfPlainText` prints no bullet for the wrapper.
+
+## Reply box: Enter is a line break, not a paragraph (`enterInsertsLineBreak`)
+
+`CsmCaseCommentInput` passes `enterInsertsLineBreak` to the shared `Editor` (off by default; every other editor keeps Lexical's Enter, and the prop is ignored with `enterToSubmit`). Plain Enter then inserts a `<br>` in the current paragraph, like a newline in a GitHub comment: Enter twice is `<br><br>`, one blank line. Ctrl/Cmd+Enter still sends and Shift+Enter still inserts a `<br>`.
+
+**Why `<br>` and not paragraphs:** a paragraph gap is renderer-specific (6px in the editor and CSM bubble via `p + p`, ~0.25em in the customer portal card, ~1em in other HTML renderers), so the same reply looked different everywhere; a `<br>` is a line in all of them, with no CSS change.
+
+- `EnterLineBreakPlugin` (`Editor.tsx`, HIGH priority, independent of `onSubmit`) handles KEY_ENTER and INSERT_PARAGRAPH_COMMAND (a soft keyboard's Enter) only when the whole selection is in plain paragraphs (`$selectionInPlainParagraphs`). Lists (new item / exit on empty), headings, quotes, code and table cells keep Lexical's default (cells so its table-edge paragraph handling still works). The keydown path skips IME composition; on Safari/iOS Enter arrives as `beforeinput` and only the INSERT_PARAGRAPH_COMMAND handler runs.
+- Toolbar (`enterInsertsLineBreak` on `Toolbar`): a list or heading conversion first splits the *selected* `<br>`-separated lines into paragraphs (`$splitSelectedLinesIntoParagraphs`), otherwise Lexical makes one item holding the `<br>`s. For a bullet/numbered list the selected blank lines are dropped, not made empty items (a line holding only an image is kept; if every selected line is blank, one empty item remains; an existing empty paragraph counts as a blank line too), in the same update so undo is one step. Lines outside the selection stay together. A quote or code block keeps its lines in one block.
+- Plain-text paste (direct, and "Remove Formatting") uses `tokenizePlainTextPaste(text, { lineBreaks: true })` when the selection is in a plain paragraph (in a list item, heading or table cell the old paragraph tokens apply, so a pasted `a\nb\nc` in a bullet is three items): each newline is a break, a blank line stays one, 3+ newlines collapse to one blank line.
+- Indent / Outdent and alignment in the reply box apply to the selected lines only, like list/heading conversion: the same `$splitSelectedLinesIntoParagraphs` runs first (blank lines kept), in the same update, so undo is one step. The normal editor indents/aligns the whole block as before.
+- **A blank line typed before a converted line is kept as an empty paragraph.** `a<br><br>b` with `b` made a heading gives `<p>a</p><p><br></p><h2>b</h2>`, not `<p>a<br></p><h2>b</h2>`: the editor shows a trailing `<br>` as a blank line but a browser does not, so the sent reply would lose it. Each trailing `<br>` of the paragraph before becomes one empty paragraph (`$trailingBreaksToParagraphs`).
+- **Images are inline-block in the reply box** (`Editor` records the editor in `ImageNode`'s `WeakSet` (`markInlineImageEditor`) when `enterInsertsLineBreak` is on; `ImageNode` reads it for the editor DOM, the export style and `ImagesPlugin`; there is no theme key), so a `<br>` after an image ends its line like after text: one Enter after an image starts the next line directly, two is one blank line. (`display:block` plus a `<br>` showed and exported an extra blank line.) An image inserted after text on its line gets a `<br>` before it so it still starts its own line. Other editors keep `display:block` images. Lexical hands every one of those the editor (`createDOM(config, editor)`, `exportDOM(editor)`, `decorate(editor, config)`) but its `_config` is private, so the set is the single source of truth. It is marked once at creation and never unmarked: `enterInsertsLineBreak` must not change after mount (remount with a `key`).
+- Inserting an image into an empty editor (any editor, `ImagesPlugin`) reuses the existing empty paragraph, so there is no trailing `<p><br></p>`.
+- Toolbar block conversions (heading, quote, normal, code block) first move a caret that sits on the root (a truly empty editor) into a paragraph (`$caretOnRootIntoBlock`), and re-read the selection after `$setBlocksType` before patching the font size (the stale one threw over 2+ blocks and dropped the whole update). In the normal editor `EnterEmptyRootPlugin` does the same for Enter (skipped when that Enter is a submit, so nothing changes before `onSubmit`), so Enter then typing on an empty editor writes on the 2nd line.
+- **Tab** (both editors, `ListTabPlugin`) never traps keyboard focus: in a list item Tab nests and Shift+Tab un-nests it (the Indent/Outdent commands), but Tab on the first item of a list (it cannot nest) and Shift+Tab on a top-level item pass through, so repeated Tab nests once and then moves focus. **Escape is an escape hatch**: the next Tab or Shift+Tab after it is never handled; any other key or a click re-arms it. Outside a list, and with Ctrl/Alt/Cmd, Tab keeps the browser default; a code block keeps its own handling. (The toolbar has no keyboard-hint text for this, so it is documented here only.)
+- A reply of only Enters is empty (`<p><br><br></p>` has no text), and `CsmCaseCommentInput` drops trailing `<br>`s from the HTML it sends (`trimTrailingLineBreaks`).
+
+### Paste as Markdown (`markdownPaste`, opt-in, also the reply box only)
+
+`CsmCaseCommentInput` also passes `markdownPaste` to `Editor`. When the clipboard's `text/plain` passes `looksLikeMarkdown` (`looksLikeMarkdown.ts`) **and the clipboard has no HTML or only flat HTML** (`isFlatClipboardHtml`: no `li/ol/ul/table/h1-h6/a[href]/strong/b/em/i/blockquote/img`, no Word list markup `MsoList*` / `mso-` styles; what VS Code and code views send), the paste is held and `PasteFormatDialog` shows its `"markdown"` variant ("Remove Formatting" / "Paste as Markdown"). Rendered HTML (Word, Gmail, a web page, a chat's rendered answer) keeps the normal Keep/Remove Formatting prompt, because its `text/plain` is rendered text that can look like Markdown ("1. a\n2. b" from a real list). Never prompted when the selection is in a code block; every other paste is as before. "Remove Formatting" is the existing plain-text path (symbols stay literal, with the line-break rules above); Escape or the backdrop cancels.
+
+- **The detector is conservative on purpose** (a false positive interrupts a paste, a miss pastes plain text): a fenced block, an ATX heading, 2+ *consecutive* list lines (blank lines allowed between items, prose breaks the run), 2+ consecutive `>` lines or one `>` line beside a list line (a lone `> app@1.0.0 build` / `>30 days` does not count), a GFM table, `**bold**` (not glued to a word or a slash, so `2**3**4`, `**/node_modules/**` and `src/**/test/**` are out) / `__bold text__`, a link to http(s), `mailto:`, `./`, `../`, `/` or `#anchor`, or `~~strike~~`. A lone `*italic*`, a backtick span, `#123`, one "1. step", Windows paths, `__init__`, `foo[0](x/y)`, e-mail, URLs, stack traces and logs do not count. A `# comment` line in pasted shell/Python does count as a heading (accepted). It judges only the first 20,000 characters, cuts lines at 1,000 and bounds every quantifier (an unbounded one took 17 s on 200k `[`): keep new rules linear.
+- **Conversion** (`markdownPaste.ts`): `markdownToHtml` (breaks, no raw HTML, linkify) -> `sanitizeRichTextHtml` -> DOM fixes -> `$generateNodesFromDOM` inserted with PASTE_TAG (one undo step). Fixes: the table wrapper is unwrapped, `<hr>` is dropped (no node for it), `<li><p>` and `<blockquote><p>` are unwrapped to inline content, a fenced block's trailing newline is removed, and **every image becomes a link** (alt or address as text; the app never hot-links or embeds a pasted image), except one already inside a link (a README badge), which becomes its alt text so there is one link, not a nested one. Task-list syntax stays literal `[ ]`. Keep Formatting of HTML applies the same image rule (`imagesToLinks`, every editor); when the clipboard also carries the picture file (stored by `ClipboardImagePlugin`) its `<img>`s are dropped, not linked. Images of this app stay images (`isAppImageSrc`): a `blob:` preview of THIS page's origin (another origin is a foreign image), a stored `/<uuid>`, or a raster `data:image/(png|jpeg|gif|webp);base64,` image of an older draft whose exact `src` is in the clipboard's `application/x-lexical-editor` JSON (`appClipboardImageSrcs`; the type's mere presence proves nothing, any page can set it; svg and other types are never kept). They count against the inline image limits (`data:` ones sized from their base64, also when already in the draft); over the limit: alt text and `onImageRefused`. With no `onImageUpload` a `data:` image is its alt text and reports `disabled`. A clipboard with only `application/x-lexical-editor` (no html/text; a real copy always has both) is dropped, never left to Lexical's native paste, which inserts the payload's nodes unsanitised. Our PASTE_COMMAND handler runs before Lexical's own `x-lexical-editor` paste, so in-app copies also get the Keep/Remove prompt.
+- **Paragraph merge:** with `enterInsertsLineBreak` and a plain-paragraph selection, adjacent top-level `<p>`s are merged into one `<p>` joined by `<br><br>`, so a pasted blank line is the same markup as a typed one; lists, headings, code, quotes and tables stay separate blocks. Keep Formatting of HTML does the same (`mergeAdjacentParagraphs`), but only for non-empty `<p>`s with no `style`, `class` or `align` and only when just whitespace or comments lie between them (`<p>A</p>middle<p>B</p>` keeps its order) (aligned, indented and Word `Mso*` paragraphs stay blocks); the normal editor keeps separate paragraphs.
+- **Inserting blocks into an existing block** (`$insertPastedNodes`, `insertPastedNodes.ts`, used by Keep Formatting and Paste as Markdown): Lexical's `insertNodes` merges a pasted list/quote into a heading or list item and puts the text after the caret into the innermost last block, so content with block nodes is placed itself. A leading paragraph/heading continues the line when text precedes the caret (`hello` + `# One` is `helloOne`); the other blocks go between the two halves of the caret's block (a heading, quote or list item is split, a list split into two lists), never inside it; text after the caret joins a trailing pasted paragraph, otherwise stays in its own block after the pasted content; an empty half is dropped (no `<p></p>`, no stray `<p><br></p>`); of the head paragraph's trailing `<br>`s one is the caret line and goes, any more are typed blank lines and become empty paragraphs (`$trailingBreaksToParagraphs`), so `x` Enter Enter + a pasted list is `<p>x</p><p><br></p><ul>`. In a table cell a pasted table becomes one paragraph per row, cells joined by ` | `, each cell's `<br>`/blocks as spaces (`flattenTablesToParagraphs`), never a nested table. A single list pasted into a list item (`$insertListItemsInPlace`; the caret may be inside a link, which is split and kept on both halves) becomes siblings of that item at ITS depth (after the item's own sub-list; `two` stays after), with the text after the caret as an item after them. Inline-only content, the root caret and code blocks keep Lexical's own insertion.
+- **The held paste lands where the caret was:** the selection is cloned when the paste is held and restored inside the update that applies the dialog's choice (all three choices), because the dialog takes focus and the editor re-resolved its caret to the end of the line in Chrome; if those nodes are gone the end of the document is used.
+- **Paste rules for rendered HTML (every editor, `Editor.tsx` `PasteNormalizationPlugin`).** *A picture beside table/text HTML is a rendering of it:* Excel and LibreOffice Calc put an `image/png` of the copied range next to the table HTML, which used to give the image AND the table. When `text/html` has a `<table>` or real text and **no `<img>` of its own**, `ClipboardImagePlugin` skips the picture (nothing uploaded, no refusal reported) and the HTML goes through the Keep/Remove prompt (`clipboardImageRendersHtml`). A picture alone, and a picture beside HTML that has an `<img>` (a copied web picture, a chat message with a screenshot), are stored as before. The rule's known cost: a clipboard of text HTML WITHOUT an `<img>` plus a screenshot (a few chat apps) loses the screenshot; paste the picture on its own. *HTML with no body content* (only a `<meta>`, comments, blank blocks: `hasMeaningfulHtmlContent`) opens no prompt and pastes `text/plain` through the plain path (line-break mode and Markdown detection apply). *Into a code block* every paste (HTML, plain, meta-only, Markdown-looking) inserts the text (`text/plain`, else the HTML's text) as code lines (`insertRawText`: blank lines and indentation kept), with no prompt, never as `<p>` inside the `<pre>`. *Word lists:* `convertWordListsToHtmlLists` (Keep Formatting only; Remove keeps plain text) turns `MsoListParagraph*` / `mso-list:lN levelN` paragraphs into real `<ul>`/`<ol>`, nested by `levelN`, with the glyph (`mso-list:Ignore` span or `<!--[if !supportLists]-->`) removed; the glyph decides the kind (a number/letter/roman numeral plus `.` or `)`, or a dotted outline such as `1.1.` / `2.3.1` / `A.1.`, is ordered; `·` `o` `§` `•` `-` unordered; an ambiguous or lost glyph follows its list/parent, so it stays ordered under an ordered parent; a first number above 1 sets `start`), and a different list id or kind at the same level starts a new list. The `MsoListParagraph` class alone is not a list item (Word applies it to plain text): it counts only with a glyph (an `Ignore` span, the `supportLists` comment, or a literal leading marker, which is stripped: a bullet symbol or 1-3 digit numbering such as `1.` / `1.1.)` with any spacing; a letter, a valid roman numeral, `A.1.` or `o` only with a tab or 2+ spaces after it, so `Yes. We agree`, `Dr. Smith`, `Hello) there` stay text; residual: `A.  Smith` with two spaces). A selection of empty Excel cells pastes an empty table (accepted). *Remove Formatting with no `text/plain`* uses `htmlToPastePlainText` (a newline between blocks and for `<br>`, one item/row per line, cells tab-separated by their place in the row, so empty edge cells keep their tab), not `textContent`. *Google Docs' bare `<br>`* between two blocks is dropped with the empty paragraphs (`collapseEmptyParagraphElements`). The root caret is moved into a paragraph before a plain-text paste in both editors.
 
 ## Generate chat: what can I ask about
 
@@ -882,7 +1158,8 @@ Four of the five shapes do the same thing — issue that `resourceType`'s own `P
 Separately, `CsmProjectsPage.tsx`'s `onboardingStatus` used to be seeded from the URL **only in a `useState` initializer**, which only ever runs once on mount — so a URL change that doesn't remount the page (the route stays `/customers/projects`, only the query string differs: browser back/forward across two different dashboard-tile click-throughs, or any other same-route navigation) left the filter control and the search request showing the first click's status instead of the URL's current one. Fixed by dropping the separate state entirely: `onboardingStatus` is now derived straight from `searchParams.get("onboardingStatus")` on every render (`useMemo`, keyed on that string so the array reference stays stable across unrelated re-renders), and `handleOnboardingStatusChange` writes directly to the URL instead of to local state — one source of truth, nothing to go stale. Pagination still needs resetting whenever the param changes, including from an external navigation `handleOnboardingStatusChange` didn't cause (and so didn't already reset itself for) — a small `useEffect` keyed on the param handles that one piece, with the same `eslint-disable-next-line react-hooks/set-state-in-effect` escape hatch (and the same justification: syncing state to an external source) `QuickNav.tsx`'s own initial-`q`/`goto`-param sync already uses.
 
 **PLG widgets (`plg_organization`, `plg_registration`).** Count, list, pie and bar, and a registration
-line. Both searches take the same `filters` (`OrganizationSearchFilters`), so `plgSearchFilters` cleans
+line. A list row shows the company id and a masked email (`CompanyName`, `MaskedEmail`), as the PLG
+pages do; the organisation page reveals them. Both searches take the same `filters` (`OrganizationSearchFilters`), so `plgSearchFilters` cleans
 them in one place: the single-valued keys (`playbookTask` among them), `unowned`, `countryUnknown` and `playbookUnanswered` are unwrapped after the preview
 page's URL round trip (which decodes every value as an array), View more's `searchQuery` is sent as
 `query`, and a plain `registeredFrom` / `registeredTo` date is sent as `T00:00:00Z` / `T23:59:59.999999Z` of that

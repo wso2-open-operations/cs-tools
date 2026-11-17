@@ -26,6 +26,9 @@ export type IdLabelRef = {
   abbreviation?: string | null;
   releasedOn?: string | null;
   endOfLifeOn?: string | null;
+  // Set on a deployed product's version ref: version records that share a
+  // label differ only by this (e.g. "API Control Plane" vs "Traffic Manager").
+  deploymentProfile?: string | null;
 };
 
 // Model type for metadata items (status, severity, type, etc.).

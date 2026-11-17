@@ -785,7 +785,24 @@ func TestSLAEngineIntegration_ActiveClockPoliciesRunsAgainstRealPostgres(t *test
 	scoped := repository.NewScoped(pool)
 	repo := repository.NewSLAEngineRepository(scoped, "")
 
-	policy, err := repo.FindPolicyByName(ctx, "P0 - Resolution (Open Source)", "RESOLUTION")
+	// No migration seeds a RESOLUTION policy of a fixed name this test could
+	// rely on, so it brings its own and removes it afterwards.
+	const policyName = "SLA engine integration test - Resolution"
+	deletePolicy := func() {
+		_, _ = scoped.Exec(ctx, `DELETE FROM sla WHERE work_item_id = $1::uuid`, slaEngineIntegrationWorkItemID)
+		_, _ = scoped.Exec(ctx, `DELETE FROM sla_policy WHERE name = $1`, policyName)
+	}
+	deletePolicy()
+	t.Cleanup(deletePolicy)
+	if _, err := scoped.Exec(ctx, `
+		INSERT INTO sla_policy (id, created_on, updated_on, created_by, updated_by, name, is_active, target, duration, source)
+		VALUES (gen_random_uuid(), NOW(), NOW(), 'sla-engine-test', 'sla-engine-test', $1, TRUE,
+		        'RESOLUTION'::sla_policy_target_enum, INTERVAL '48 hours', 'CSM'::sla_source_enum)`,
+		policyName); err != nil {
+		t.Fatalf("seed sla_policy: %v", err)
+	}
+
+	policy, err := repo.FindPolicyByName(ctx, policyName, "RESOLUTION")
 	if err != nil {
 		t.Fatalf("FindPolicyByName(resolution): %v", err)
 	}

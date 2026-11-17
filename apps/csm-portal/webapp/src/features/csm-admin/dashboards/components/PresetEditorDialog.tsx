@@ -26,6 +26,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import WidgetFilterConditionEditor from "@features/csm-admin/dashboards/components/WidgetFilterConditionEditor";
 import {
   filterConditionsFromQuery,
@@ -94,6 +95,7 @@ export default function PresetEditorDialog({
           <TextField
             size="small"
             label="Preset name"
+            required
             value={name}
             onChange={(e) => setName(e.target.value)}
             error={duplicate}
@@ -107,6 +109,7 @@ export default function PresetEditorDialog({
           <Box>
             <Typography variant="subtitle2" gutterBottom>
               Condition
+              <RequiredMark />
             </Typography>
             <WidgetFilterConditionEditor
               resourceType="case"

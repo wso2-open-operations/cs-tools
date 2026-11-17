@@ -45,7 +45,7 @@ const { mockAuthFetch } = vi.hoisted(() => ({
   mockAuthFetch: vi.fn(),
 }));
 
-vi.mock("@utils/useAuthApiClient", () => ({
+vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => mockAuthFetch,
 }));
 

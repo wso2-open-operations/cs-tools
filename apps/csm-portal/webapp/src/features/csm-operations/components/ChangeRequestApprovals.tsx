@@ -124,7 +124,7 @@ interface ApproverTableRow {
 function groupTargetFor(
   approval: BeChangeRequestApproval,
   groupName: string,
-  customerContacts: BeCustomerContact[] | undefined,
+  customerContacts: BeCustomerContact[] | null | undefined,
 ): ApprovalGroupTarget | null {
   const group = approval.assignmentGroup;
   if (group?.id) return { kind: "group", id: group.id, name: group.name || groupName };
@@ -142,7 +142,7 @@ function groupTargetFor(
 
 function flattenApprovals(
   approvals: BeChangeRequestApproval[],
-  customerContacts: BeCustomerContact[] | undefined,
+  customerContacts: BeCustomerContact[] | null | undefined,
 ): ApproverTableRow[] {
   const rows: ApproverTableRow[] = [];
   approvals.forEach((approval, approvalIndex) => {
@@ -254,7 +254,7 @@ export default function ChangeRequestApprovals({
   /** The change request's read-only Customer Group (its project's registered
    * contacts, `BeChangeRequestDetail.customerContacts`): what the Assignment
    * group of a Customer Approval / Customer Review row lists. */
-  customerContacts?: BeCustomerContact[];
+  customerContacts?: BeCustomerContact[] | null;
 }): JSX.Element | null {
   const { data, isLoading, isError, error } = useGetChangeRequestApprovals(id);
   const { user } = useCurrentUser();

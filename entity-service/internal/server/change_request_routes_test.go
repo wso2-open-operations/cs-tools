@@ -45,3 +45,26 @@ func TestChangeRequestLinkOptionsIsInternalOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestChangeRequestCreateIsInternalOnly pins the access guard on
+// POST /change-requests. A create carries fields only staff may set (the
+// deviation from the implementation plan among them), and the repository relies
+// on no customer identity reaching it (its create paths refuse a customer's
+// deviation only as a second line). The guard itself (internalOnly) is covered
+// by TestInternalOnly; this checks it is actually applied to the route.
+func TestChangeRequestCreateIsInternalOnly(t *testing.T) {
+	src, err := os.ReadFile("routes.go")
+	if err != nil {
+		t.Fatalf("read routes.go: %v", err)
+	}
+	re := regexp.MustCompile(`HandleFunc\("POST /change-requests",\s*([^\n]+)`)
+	matches := re.FindAllStringSubmatch(string(src), -1)
+	if len(matches) == 0 {
+		t.Fatal("POST /change-requests is not registered in routes.go")
+	}
+	for _, m := range matches {
+		if !strings.HasPrefix(strings.TrimSpace(m[1]), "internalOnly(") {
+			t.Errorf("POST /change-requests must be wrapped in internalOnly, got %q", strings.TrimSpace(m[1]))
+		}
+	}
+}

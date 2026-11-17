@@ -3194,6 +3194,24 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "product and publicTicket are only allowed when addPublicComment is also provided"}
 	}
 
+	// A service request's severity is internal and exists in Postgres only: the
+	// backing data source has no field for it, so on this data source the
+	// request is refused (like markFixIssued above) rather than sent on as a
+	// case severity or accepted and dropped. Only a severity sent on its own
+	// needs the check; with a type it is the companion of a transfer, which
+	// validateCaseTypeTransfer judges.
+	if req.Severity != nil && req.Type == nil {
+		// A failed lookup fails the request: the PATCH below would send the
+		// severity on as a case severity for a record whose type is unknown.
+		cv, err := s.GetCaseByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if cv.Type != nil && *cv.Type == "service_request" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity of a service request is only supported for the Postgres data source"}
+		}
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snUpdateCasePayload{}
@@ -4455,6 +4473,21 @@ func (s *snCaseService) SubmitCaseFeedback(ctx context.Context, id string, req d
 // against the same validXxx maps the top-level (AND-only) filters use,
 // mirroring that validation exactly (unrecognized values would otherwise be
 // silently dropped by domainStatesToSNIDs/etc's omitempty behavior).
+// rejectSalesRegionFilter refuses the salesRegion filter, top level or inside
+// an anyOf branch: the account sales region is only queryable on the
+// relational data source, and dropping the predicate here would answer with a
+// wider result set than the caller asked for.
+func rejectSalesRegionFilter(parsed domain.ParsedCaseFilters) error {
+	bad := len(parsed.SalesRegions) > 0
+	for _, g := range parsed.OrGroups {
+		bad = bad || len(g.SalesRegions) > 0
+	}
+	if bad {
+		return &apierror.ValidationError{Msg: `field "salesRegion" is not supported by this data source`}
+	}
+	return nil
+}
+
 func validateOrGroupEnums(i int, group domain.CaseFilterGroup) error {
 	for _, t := range group.Types {
 		if _, ok := snCaseTypeMap[t]; !ok {
@@ -4696,6 +4729,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, err
 	}
 	if err := validateUUIDs("accountId", req.Parsed.ExcludeAccountIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := rejectSalesRegionFilter(req.Parsed); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
 
@@ -5040,6 +5076,9 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 		return domain.AggregateResponse{}, err
 	}
 	if err := validateUUIDs("accountId", parsed.ExcludeAccountIDs); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := rejectSalesRegionFilter(parsed); err != nil {
 		return domain.AggregateResponse{}, err
 	}
 	for _, t := range parsed.Types {

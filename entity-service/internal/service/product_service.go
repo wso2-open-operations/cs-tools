@@ -43,9 +43,13 @@ func NewProductService(repo repository.ProductRepository) ProductService {
 	return &productService{repo: repo}
 }
 
+// maxProductsLimit bounds a page of POST /products/search, so the product
+// catalogue (about 80 products) reads in one page.
+const maxProductsLimit = 500
+
 // SearchProducts implements ProductService.
 func (s *productService) SearchProducts(ctx context.Context, req domain.SearchProductsRequest) (domain.SearchProductsResponse, error) {
-	if err := normalizePagination(&req.Pagination); err != nil {
+	if err := normalizePaginationMax(&req.Pagination, maxProductsLimit); err != nil {
 		return domain.SearchProductsResponse{}, err
 	}
 	if err := validateSearchQuery(req.SearchQuery); err != nil {

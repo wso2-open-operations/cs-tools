@@ -52,15 +52,17 @@ export const CASE_TYPE_COLOR: Record<BeCaseType, ChipColor> = {
 };
 
 /**
- * Whether severity (S1-S4) is a meaningful concept for this case type. Only
- * plain support cases (`case`) actually have one set with any intent — every
- * other type still carries a `severity` in the search response (the field
- * isn't type-gated upstream), but it's not something anyone sets or acts on
+ * Whether severity is a meaningful concept for this case type. Plain support
+ * cases (`case`) and service requests carry one that someone sets and acts
+ * on; every other type still carries a `severity` in the search response
+ * (the field isn't type-gated upstream), but it's not something anyone sets
  * for those, so the UI hides it there rather than show a value nobody put
- * any thought into. A missing `caseType` (legacy rows) is treated as `case`.
+ * any thought into. A service request's severity is internal (S1-S4, never
+ * S0, and always present). A missing `caseType` (legacy rows) is treated as
+ * `case`.
  */
 export function caseTypeHasSeverity(caseType: BeCaseType | undefined): boolean {
-  return caseType === undefined || caseType === "case";
+  return caseType === undefined || caseType === "case" || caseType === "service_request";
 }
 
 /**

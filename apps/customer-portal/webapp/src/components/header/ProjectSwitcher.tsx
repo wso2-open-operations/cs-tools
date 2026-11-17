@@ -36,6 +36,7 @@ import {
   useMemo,
   useState,
   type JSX,
+  type KeyboardEvent,
   type MouseEvent,
   type UIEvent,
 } from "react";
@@ -248,17 +249,42 @@ export default function ProjectSwitcher({
   }
 
   if (!isMenuOpen && !isLoading && unfilteredTotal <= 1) {
-    const project = selectedProject ?? projects[0];
+    // Only fall back to the user's sole project when the URL carries no project
+    // id. A URL id missing from the list is a project the user can't access:
+    // showing their own project's name would falsely imply it is the one loaded.
+    const isForeignProject = Boolean(projectId) && !selectedProject;
+    const project = selectedProject ?? (projectId ? undefined : projects[0]);
+    const recoveryProject = isForeignProject ? projects[0] : undefined;
+    const label = project ? project.name : "Select Project";
+    const goToRecoveryProject = () => {
+      if (recoveryProject) onProjectChange(recoveryProject.id);
+    };
 
     return (
       <HeaderSwitchersSlot stackedHeaderRow={stackedHeaderRow}>
         <Box
+          {...(recoveryProject && {
+            role: "button",
+            tabIndex: 0,
+            "aria-label": `Go to ${recoveryProject.name}`,
+            onClick: goToRecoveryProject,
+            onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                goToRecoveryProject();
+              }
+            },
+          })}
           sx={{
             ...TRIGGER_ROW_SX,
             border: "1px solid",
             borderColor: "divider",
             borderRadius: 1,
             backgroundColor: "background.paper",
+            ...(recoveryProject && {
+              cursor: "pointer",
+              "&:hover": { borderColor: "action.active" },
+            }),
             ...triggerSx,
           }}
         >
@@ -266,7 +292,11 @@ export default function ProjectSwitcher({
             <FolderOpen size={16} />
           </Box>
           <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-            <Tooltip title={project ? project.name : "Select Project"}>
+            <Tooltip
+              title={
+                recoveryProject ? `Go to ${recoveryProject.name}` : label
+              }
+            >
               <Typography
                 variant="body2"
                 component="span"
@@ -277,7 +307,7 @@ export default function ProjectSwitcher({
                   whiteSpace: "nowrap",
                 }}
               >
-                {project ? project.name : "Select Project"}
+                {label}
               </Typography>
             </Tooltip>
           </Box>

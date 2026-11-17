@@ -30,6 +30,7 @@ import type {
   ProductItem,
   ProductVersionItem,
 } from "@features/project-details/types/products";
+import { formatVersionWithProfile } from "@features/project-details/utils/deploymentProfile";
 import {
   ADD_PRODUCT_MODAL_INITIAL_FORM,
   parseValidNumber,
@@ -456,7 +457,12 @@ export function useProductForm(
       productLabel:
         selectedProduct?.label ?? selectedProduct?.name ?? form.productId,
       versionId: form.versionId,
-      versionLabel: selectedVersion?.version ?? form.versionId,
+      versionLabel: selectedVersion
+        ? formatVersionWithProfile(
+            selectedVersion.version,
+            selectedVersion.deploymentProfile,
+          )
+        : form.versionId,
     };
   }, [isValid, products, versions, form, postProduct, deploymentId, projectId]);
 

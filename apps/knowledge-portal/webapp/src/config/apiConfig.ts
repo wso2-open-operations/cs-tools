@@ -21,11 +21,14 @@ declare global {
     config?: {
       /** Base URL of the knowledge portal backend. Required. */
       KNOWLEDGE_PORTAL_BACKEND_BASE_URL?: string;
+      /** Where "Contact support" sends a visitor. Optional; the callouts are hidden without it. */
+      KNOWLEDGE_PORTAL_SUPPORT_URL?: string;
     };
   }
 }
 
 export const BACKEND_BASE_URL_KEY = "KNOWLEDGE_PORTAL_BACKEND_BASE_URL";
+export const SUPPORT_URL_KEY = "KNOWLEDGE_PORTAL_SUPPORT_URL";
 
 /** Thrown when the runtime configuration is missing or malformed. */
 export class ConfigError extends Error {
@@ -68,4 +71,27 @@ export function resolveBackendBaseUrl(raw: unknown): string {
 /** The configured backend base URL; throws {@link ConfigError} if unusable. */
 export function getBackendBaseUrl(): string {
   return resolveBackendBaseUrl(window.config?.[BACKEND_BASE_URL_KEY]);
+}
+
+/**
+ * Validates the optional support URL: an absolute http(s) URL, or undefined
+ * when it is unset. A malformed value is dropped (with a console warning)
+ * rather than rendered, so a typo in config.js cannot produce a broken link.
+ */
+export function resolveSupportUrl(raw: unknown, warn: (message: string) => void = console.warn): string | undefined {
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  const value = raw.trim();
+  try {
+    const url = new URL(value);
+    if (url.protocol === "http:" || url.protocol === "https:") return value;
+  } catch {
+    // fall through
+  }
+  warn(`Ignoring ${SUPPORT_URL_KEY}: it must be an absolute http(s) URL.`);
+  return undefined;
+}
+
+/** The configured support URL, or undefined when none is set or it is unusable. */
+export function getSupportUrl(): string | undefined {
+  return resolveSupportUrl(window.config?.[SUPPORT_URL_KEY]);
 }

@@ -105,11 +105,15 @@ export default function AudienceScopeControls({
       </RadioGroup>
 
       {scope === "specific" && (
+        // A draft can be saved with no projects; submitting for approval needs
+        // at least one (the backend refuses to submit an empty audience).
         <AsyncProjectMultiSelect
           id="announcement-create-projects"
           label="Projects"
           values={projectIds}
           onChange={onProjectIdsChange}
+          required
+          helperText="Required to submit for approval."
         />
       )}
 

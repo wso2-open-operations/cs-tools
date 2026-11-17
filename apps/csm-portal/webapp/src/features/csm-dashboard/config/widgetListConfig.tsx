@@ -75,6 +75,7 @@ import {
 import { resolveAccountTier, type Account } from "@features/csm-accounts/types/csmAccounts";
 import AccountPreviewDrawer from "@features/csm-accounts/components/AccountPreviewDrawer";
 import { StatusChip } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail } from "@features/plg/components/CompanyIdentity";
 import type { OrganizationSummary, RegistrationItem } from "@features/plg/api/types";
 import type { Project } from "@features/csm-projects/types/csmProjects";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
@@ -239,7 +240,7 @@ const PREVIEW_COLUMN = { label: "Preview", width: "auto" };
  * (`service_request`/`security_report_analysis`/`announcement`/`engagement`
  * — see `WIDGET_LIST_RENDERERS` below), so they all get the same columns,
  * gated the same way `CsmIssuesView`/`CaseFamilyWidgetPreview` gate theirs:
- * Severity only where it's a real concept (`case`), and it's shown by
+ * Severity only where it's a real concept (`case`, `service_request`), and it's shown by
  * default since that matched this renderer's own long-standing hardcoded
  * set before "Customise columns" existed here at all — only Product/Type/
  * (Severity)/Assignee were ever on by default, so that default is
@@ -260,7 +261,7 @@ function CaseWidgetList({
 
   const currentUserId = useCurrentUser().user?.id;
   const currentUserEmail = useIdTokenClaims()?.email;
-  const showSeverityColumn = resourceType === "case";
+  const showSeverityColumn = resourceType === "case" || resourceType === "service_request";
   // Memoized so `columnPrefs`'s own `allColumns`/etc. stay referentially
   // stable across renders that don't actually change anything — without
   // this, a fresh array literal on every render made `useColumnPreferences`
@@ -775,13 +776,10 @@ function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps
             state: dashboardReturnState,
           }),
         cells: [
-          <Box key="name" sx={{ minWidth: 0 }}>
-            <Typography variant="body2" noWrap title={org.organizationName}>
-              {org.organizationName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {org.registeredEmail}
-            </Typography>
+          // Masked as on the PLG pages; the organisation page reveals them.
+          <Box key="name" sx={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <CompanyName organizationId={org.id} companyId={org.moesifCompanyId} />
+            <MaskedEmail organizationId={org.id} />
           </Box>,
           <Box key="products" sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
             {(org.platformStages ?? []).map((ps) => (
@@ -836,13 +834,10 @@ function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps
             { state: dashboardReturnState },
           ),
         cells: [
-          <Box key="name" sx={{ minWidth: 0 }}>
-            <Typography variant="body2" noWrap title={r.organizationName}>
-              {r.organizationName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {r.registeredEmail}
-            </Typography>
+          // Masked as on the PLG pages; the organisation page reveals them.
+          <Box key="name" sx={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <CompanyName organizationId={r.organizationId} companyId={r.moesifCompanyId} />
+            <MaskedEmail organizationId={r.organizationId} />
           </Box>,
           <Typography key="product" variant="body2" noWrap title={r.product.name}>
             {r.product.name}

@@ -41,6 +41,8 @@ type mockEntityReportsClient struct {
 
 	searchTimeCardsPages     [][]byte
 	searchTimeCardsCallCount int
+
+	getProjectSLAReportFn func(ctx context.Context, id, from, to string) ([]byte, error)
 }
 
 func (m *mockEntityReportsClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
@@ -262,4 +264,11 @@ func TestGetTimeLogBreakdown_UnknownProjectUUIDIsNotFound(t *testing.T) {
 	if !errors.Is(err, viewer.ErrProjectNotFound) {
 		t.Fatalf("err = %v, want viewer.ErrProjectNotFound", err)
 	}
+}
+
+func (m *mockEntityReportsClient) GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error) {
+	if m.getProjectSLAReportFn == nil {
+		return nil, errors.New("GetProjectSLAReport not stubbed")
+	}
+	return m.getProjectSLAReportFn(ctx, id, from, to)
 }

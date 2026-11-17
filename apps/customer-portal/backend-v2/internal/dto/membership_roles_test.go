@@ -240,6 +240,28 @@ func TestMapEntityProjectContact_CanResendInvitation(t *testing.T) {
 	}
 }
 
+func TestMapEntityProjectContact_CanResendInvitation_IntegrationUser(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		integration bool
+		want        bool
+	}{
+		{"invited integration user", true, false},
+		{"invited non-integration user", false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MapEntityProjectContact(entity.ProjectContact{
+				Email:               "a@acme.com",
+				RegistrationState:   "INVITED",
+				IsCsIntegrationUser: tt.integration,
+			})
+			if got.CanResendInvitation != tt.want {
+				t.Errorf("CanResendInvitation = %v, want %v", got.CanResendInvitation, tt.want)
+			}
+		})
+	}
+}
+
 // The pre-cutover list never offers a resend: the route answers 404 there.
 func TestMapContact_NeverOffersResend(t *testing.T) {
 	state := "INVITED"

@@ -43,12 +43,15 @@ describe("securityPage utils", () => {
     expect(parseSecurityReportViewMode("unknown")).toBe(SecurityReportViewMode.ALL);
   });
 
-  it("parses case sort field with fallback to createdOn", () => {
+  it("parses case sort field with fallback to updatedOn", () => {
     expect(parseSecurityReportCaseSortField(SecurityReportCaseSortField.state)).toBe(
       SecurityReportCaseSortField.state,
     );
+    expect(
+      parseSecurityReportCaseSortField(SecurityReportCaseSortField.createdOn),
+    ).toBe(SecurityReportCaseSortField.createdOn);
     expect(parseSecurityReportCaseSortField("bad")).toBe(
-      SecurityReportCaseSortField.createdOn,
+      SecurityReportCaseSortField.updatedOn,
     );
   });
 });

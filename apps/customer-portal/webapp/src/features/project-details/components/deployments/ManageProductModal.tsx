@@ -41,6 +41,10 @@ import { usePatchDeploymentProduct } from "@features/project-details/api/usePatc
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
 import type { ProductUpdate } from "@features/project-details/types/products";
 import UpdateHistoryTab from "@features/project-details/components/deployments/UpdateHistoryTab";
+import {
+  formatVersionWithProfile,
+  getUpdateStreamKey,
+} from "@features/project-details/utils/deploymentProfile";
 import type {
   ManageProductModalProps,
   UpdateHistorySaveAction,
@@ -89,6 +93,15 @@ function deployedProductVersionLabel(
     return version;
   }
   return version?.label?.trim() ?? "";
+}
+
+function deployedProductVersionProfile(
+  version: DeploymentProductItem["version"],
+): string | null {
+  if (typeof version === "object" && version !== null) {
+    return version.deploymentProfile ?? null;
+  }
+  return null;
 }
 
 /**
@@ -252,6 +265,18 @@ export default function ManageProductModal({
 
   if (!product) return null;
 
+  const productKey = recommendedLevelsProductKey(product.product);
+  const versionLabel = deployedProductVersionLabel(product.version);
+  const versionProfile = deployedProductVersionProfile(product.version);
+  const productHeading = [
+    product.product?.label?.trim(),
+    versionLabel
+      ? formatVersionWithProfile(versionLabel, versionProfile)
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <Dialog
       open={open}
@@ -274,6 +299,14 @@ export default function ManageProductModal({
         >
           Update product details and manage update history
         </Typography>
+        {productHeading && (
+          <Typography
+            variant="body2"
+            sx={{ mt: 0.5, fontWeight: 600, fontSize: "0.875rem" }}
+          >
+            {productHeading}
+          </Typography>
+        )}
         <IconButton
           aria-label="close"
           onClick={handleClose}
@@ -346,8 +379,9 @@ export default function ManageProductModal({
         {tabValue === 1 && (
           <UpdateHistoryTab
             updates={product.updates ?? []}
-            productName={recommendedLevelsProductKey(product.product)}
-            productVersion={deployedProductVersionLabel(product.version)}
+            productName={getUpdateStreamKey(productKey, versionProfile)}
+            fallbackProductName={productKey}
+            productVersion={versionLabel}
             isLoading={false}
             onSaveUpdates={handleSaveUpdates}
             onFormStateChange={setAddUpdateState}

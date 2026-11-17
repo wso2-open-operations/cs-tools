@@ -24,6 +24,9 @@ const mockLogger = {
   debug: vi.fn(),
   error: vi.fn(),
 };
+// This suite exercises the real auth client; undo the global mock from vitest.setup.ts.
+vi.unmock("@/hooks/useAuthApiClient");
+
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));
@@ -119,7 +122,25 @@ describe("usePostCreateDeployment", () => {
     });
 
     await expect(result.current.mutateAsync(requestBody)).rejects.toThrow(
-      "Error creating deployment: 500 Internal Server Error - Error message",
+      "Internal Server Error",
+    );
+  });
+
+  it("should surface the message from a JSON error body", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      text: () => Promise.resolve(JSON.stringify({ message: "Invalid name" })),
+    } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { result } = renderHook(() => usePostCreateDeployment(projectId), {
+      wrapper,
+    });
+
+    await expect(result.current.mutateAsync(requestBody)).rejects.toThrow(
+      "Invalid name",
     );
   });
 

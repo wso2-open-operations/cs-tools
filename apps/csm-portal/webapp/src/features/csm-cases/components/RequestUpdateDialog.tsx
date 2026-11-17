@@ -149,6 +149,7 @@ export default function RequestUpdateDialog({
             <TextField
               label="Custom message"
               placeholder="Write the message to post on this case…"
+              required
               multiline
               minRows={4}
               fullWidth

@@ -168,6 +168,13 @@ func (s *incidentReportService) HandleChange(ctx context.Context, tx repository.
 			return err
 		}
 		slog.InfoContext(ctx, "incidentreport: wrote incident report", "incidentId", c.IncidentID)
+		if resolvedWithParent(c.Snapshot) {
+			// The parent's own resolve raises the workaround problem and the
+			// alert tasks; its children would only repeat them.
+			slog.InfoContext(ctx, "postresolution: resolved with its parent incident, skipping follow-ups",
+				"incidentId", c.IncidentID)
+			return nil
+		}
 		if err := postResolutionTasks(ctx, tx, src, !s.workaroundProblemInRequest); err != nil {
 			return err
 		}
@@ -185,6 +192,18 @@ func stateChangedTo(changes map[string]map[string]any) (string, bool) {
 	}
 	to, ok := st["to"].(string)
 	return to, ok
+}
+
+// resolvedWithParent reports whether the recorded change is a resolve that
+// came from the parent incident's (incident.resolved_with_parent, migration
+// 0256). It reads the outbox snapshot -- the row as this change left it --
+// rather than the incident as it is now, so a child resolved on its own,
+// re-opened and then resolved with its parent before this row is drained
+// still gets the follow-ups for its own resolve. A snapshot without the
+// column (recorded before 0256) is a resolve of its own.
+func resolvedWithParent(snapshot map[string]any) bool {
+	v, _ := snapshot["resolved_with_parent"].(bool)
+	return v
 }
 
 // groupChangedTo reports the new assignment group when the change is one

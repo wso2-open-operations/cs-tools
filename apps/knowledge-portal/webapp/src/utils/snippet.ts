@@ -18,14 +18,14 @@ const BLOCK_SELECTOR =
   "p,div,li,br,h1,h2,h3,h4,h5,h6,tr,td,th,pre,blockquote,ul,ol,table,section,article,hr";
 
 /**
- * Plain-text excerpt of an HTML article body for a result card.
+ * Plain text of an HTML article body.
  *
  * Parsed with DOMParser (an inert document: no scripts run, no images load)
  * and read back as textContent, so entities are decoded and the text of
  * <style>, <script> and similar non-content elements is dropped rather than
  * leaking into the snippet the way regex tag-stripping lets it.
  */
-export function toSnippet(html: string, max = 180): string {
+export function toPlainText(html: string): string {
   if (!html) return "";
   const doc = new DOMParser().parseFromString(html, "text/html");
   doc.querySelectorAll("script,style,noscript,template,head").forEach((el) => el.remove());
@@ -33,7 +33,11 @@ export function toSnippet(html: string, max = 180): string {
   doc.body.querySelectorAll(BLOCK_SELECTOR).forEach((el) => {
     el.after(doc.createTextNode(" "));
   });
-  const plain = (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
+  return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+export function toSnippet(html: string, max = 180): string {
+  const plain = toPlainText(html);
   if (plain.length <= max) return plain;
   // Cut on a code point boundary so an emoji is not split in half.
   const chars = Array.from(plain);

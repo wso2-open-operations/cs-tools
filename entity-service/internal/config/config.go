@@ -41,6 +41,24 @@ const (
 	DefaultUpstreamClientTimeout = 60 * time.Second
 )
 
+// DefaultServiceRequestSeverity is the severity a new service request gets when
+// the request names none and SERVICE_REQUEST_DEFAULT_SEVERITY is not set.
+const DefaultServiceRequestSeverity = "S4"
+
+// NormalizeServiceRequestSeverity returns raw as one of "S1".."S4" (trimmed and
+// upper-cased), DefaultServiceRequestSeverity when raw is empty, and an error
+// for anything else. S0 is rejected: a service request never carries it.
+func NormalizeServiceRequestSeverity(raw string) (string, error) {
+	v := strings.ToUpper(strings.TrimSpace(raw))
+	switch v {
+	case "":
+		return DefaultServiceRequestSeverity, nil
+	case "S1", "S2", "S3", "S4":
+		return v, nil
+	}
+	return "", fmt.Errorf("%q must be one of S1, S2, S3, S4 (or unset for S4)", raw)
+}
+
 // DataSource identifies which backend the service reads from.
 type DataSource string
 
@@ -419,6 +437,12 @@ type Config struct {
 	// created unassigned and logged as an error. Validated as a UUID; checked
 	// at startup (best effort, logged only) to exist and have a support group.
 	IncidentDefaultServiceID string
+	// ServiceRequestDefaultSeverity is SERVICE_REQUEST_DEFAULT_SEVERITY: the
+	// internal severity (S1, S2, S3 or S4, case-insensitive) a service request
+	// gets when it is created without an explicit one. Empty means S4 (see
+	// DefaultServiceRequestSeverity). Validated at startup: any other value
+	// refuses to start. Read it through ServiceRequestSeverityOrDefault.
+	ServiceRequestDefaultSeverity string
 	// IncidentExtraAssignmentGroupIDs is INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS:
 	// group ids ("group".id, UUIDs) an incident may be created in even though
 	// they are the support group of no service. They join the set POST
@@ -559,6 +583,12 @@ type Config struct {
 	// excluded tags would list cases the team has set aside.
 	LongOpenCasesReportProjectTypes []string
 	LongOpenCasesReportExcludedTags []string
+	// OpenBeforeYesterdayReportProjectTypes are the project type names that
+	// put a case in the open-before-yesterday variant of that report whatever
+	// its product; OpenBeforeYesterdayReportProductProjectTypes put it there
+	// only when the case has a product set. Blank falls back to the defaults.
+	OpenBeforeYesterdayReportProjectTypes        []string
+	OpenBeforeYesterdayReportProductProjectTypes []string
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -716,6 +746,22 @@ type Config struct {
 	// setting. Matched exactly, as the portal does. Empty means nobody is (the
 	// portal's own rule for an unset role).
 	AuthAdminRoles []string
+	// AuthProductCatalogManagerRoles is AUTH_PRODUCT_CATALOG_MANAGER_ROLES,
+	// comma-separated: the same variable, with the same value, as
+	// csm-portal-backend's -- the token roles that may edit the product
+	// catalogue. AUTH_ADMIN_ROLES may edit it too.
+	// Matched exactly. Empty means only admins can.
+	AuthProductCatalogManagerRoles []string
+	// AuthSkillDirectoryRoles, AuthSkillRequestReviewerRoles and
+	// AuthSkillCatalogueManagerRoles are AUTH_SKILL_DIRECTORY_ROLES,
+	// AUTH_SKILL_REQUEST_REVIEWER_ROLES and AUTH_SKILL_CATALOGUE_MANAGER_ROLES,
+	// comma-separated: the token roles that hold each skills capability (the
+	// directory of everybody's skills; reviewing skill requests; managing the
+	// skill catalogue) on top of AUTH_ADMIN_ROLES. Matched exactly. Empty means
+	// admins only, which is the default until roles are assigned per task.
+	AuthSkillDirectoryRoles        []string
+	AuthSkillRequestReviewerRoles  []string
+	AuthSkillCatalogueManagerRoles []string
 	// CaseAlertsSecretKey is CASE_ALERTS_SECRET_KEY: 32 bytes, base64, the
 	// AES-256-GCM key that seals the Case Alerts chat-room webhook URLs
 	// (migration 0233). One per environment, so a database copied from
@@ -992,6 +1038,7 @@ func Load() *Config {
 		SpecialistHandoffConfig:                       os.Getenv("SPECIALIST_HANDOFF_CONFIG"),
 		SpecialistHandoffGithubTokens:                 os.Getenv("SPECIALIST_HANDOFF_GITHUB_TOKENS"),
 		IncidentDefaultServiceID:                      strings.TrimSpace(os.Getenv("INCIDENT_DEFAULT_SERVICE_ID")),
+		ServiceRequestDefaultSeverity:                 strings.TrimSpace(os.Getenv("SERVICE_REQUEST_DEFAULT_SEVERITY")),
 		IncidentExtraAssignmentGroupIDs:               splitComma(os.Getenv("INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS")),
 		GithubLabelTypeIncident:                       os.Getenv("GITHUB_LABEL_TYPE_INCIDENT"),
 		GithubLabelTypeServiceRequest:                 os.Getenv("GITHUB_LABEL_TYPE_SERVICE_REQUEST"),
@@ -1018,11 +1065,17 @@ func Load() *Config {
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
 		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
 		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
+		OpenBeforeYesterdayReportProjectTypes:         splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProjectTypes),
+		OpenBeforeYesterdayReportProductProjectTypes:  splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProductProjectTypes),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
 		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
 		AuthAdminRoles:                                splitComma(os.Getenv("AUTH_ADMIN_ROLES")),
+		AuthProductCatalogManagerRoles:                splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
+		AuthSkillDirectoryRoles:                       splitComma(os.Getenv("AUTH_SKILL_DIRECTORY_ROLES")),
+		AuthSkillRequestReviewerRoles:                 splitComma(os.Getenv("AUTH_SKILL_REQUEST_REVIEWER_ROLES")),
+		AuthSkillCatalogueManagerRoles:                splitComma(os.Getenv("AUTH_SKILL_CATALOGUE_MANAGER_ROLES")),
 		CaseAlertsSecretKey:                           strings.TrimSpace(os.Getenv("CASE_ALERTS_SECRET_KEY")),
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
@@ -1216,6 +1269,15 @@ var (
 	// "migrartion" is a historic misspelling that exists as stored on
 	// real cases; it must stay exactly as is to match them.
 	defaultLongOpenCasesReportExcludedTags = []string{"migrartion", "migration-assistance"}
+)
+
+// defaultOpenBeforeYesterdayReportProjectTypes and
+// defaultOpenBeforeYesterdayReportProductProjectTypes are the
+// open-before-yesterday report's project type sets when the environment does
+// not override them. The second set needs the case's product to be set.
+var (
+	defaultOpenBeforeYesterdayReportProjectTypes        = []string{"Subscription", "Managed Cloud Subscription"}
+	defaultOpenBeforeYesterdayReportProductProjectTypes = []string{"Cloud Support"}
 )
 
 func splitComma(s string) []string {
@@ -1474,6 +1536,9 @@ func (c *Config) Validate() error {
 	}
 	if v := c.CaseEscalationNotices; v != "" && v != "true" && v != "false" {
 		return fmt.Errorf("CASE_ESCALATION_NOTICES_ENABLED %q must be true, false or unset", v)
+	}
+	if _, err := NormalizeServiceRequestSeverity(c.ServiceRequestDefaultSeverity); err != nil {
+		return fmt.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY: %w", err)
 	}
 	if v := c.IncidentDefaultServiceID; v != "" && !validate.IsUUID(v) {
 		return fmt.Errorf("INCIDENT_DEFAULT_SERVICE_ID %q is not a valid UUID", v)

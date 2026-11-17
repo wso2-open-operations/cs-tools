@@ -137,6 +137,7 @@ function SpaceCells({
               type="url"
               placeholder={`${WEBHOOK_PREFIX}v1/spaces/…`}
               value={url}
+              required
               autoComplete="off"
               aria-invalid={urlError ? true : undefined}
               aria-describedby={urlError ? `${inputId}-err` : undefined}

@@ -59,7 +59,7 @@ func TestKnowledgeBaseListNullActive(t *testing.T) {
 	}
 
 	repo := repository.NewKnowledgeBaseRepository(pool)
-	kbs, err := repo.ListKnowledgeBases(ctx)
+	kbs, err := repo.ListKnowledgeBases(ctx, false)
 	if err != nil {
 		t.Fatalf("ListKnowledgeBases with a NULL active row: %v", err)
 	}

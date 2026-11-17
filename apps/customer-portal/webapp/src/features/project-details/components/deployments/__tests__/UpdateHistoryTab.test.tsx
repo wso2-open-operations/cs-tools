@@ -24,7 +24,20 @@ vi.mock("@features/updates/api/useGetProductUpdateLevels", () => ({
 }));
 
 vi.mock("@hooks/useLogger", () => ({
-  useLogger: () => ({ debug: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() }),
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
+vi.mock("@features/updates/api/usePostUpdateLevelsSearch", () => ({
+  usePostUpdateLevelsSearch: () => ({
+    data: null,
+    isLoading: false,
+    isFetching: false,
+  }),
 }));
 
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({

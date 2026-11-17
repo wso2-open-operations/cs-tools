@@ -20,6 +20,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useGetProjectStat } from "@features/project-details/api/useGetProjectStat";
 import type { ReactNode } from "react";
 
+const mockAuthFetch = vi.fn();
+
+vi.mock("@/hooks/useAuthApiClient", () => ({
+  useAuthApiClient: () => mockAuthFetch,
+}));
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     getIdToken: vi.fn().mockResolvedValue("mock-token"),
@@ -53,6 +59,16 @@ const createWrapper = () => {
 describe("useGetProjectStat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/projects/1890347890/stats")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ projectStats: {}, recentActivity: {} }),
+        };
+      }
+      return { ok: false, status: 404, statusText: "Not Found" };
+    });
     (
       window as unknown as {
         config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
@@ -88,7 +104,7 @@ describe("useGetProjectStat", () => {
 
     expect(result.current.error).toBeDefined();
     expect(result.current.error?.message).toContain(
-      "Project stats not found for ID: invalid-id",
+      "Error fetching project stats: Not Found",
     );
   });
 });

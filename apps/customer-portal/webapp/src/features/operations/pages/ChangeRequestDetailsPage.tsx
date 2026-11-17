@@ -394,6 +394,8 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           color: "text.secondary",
           "& p": { mb: 0.5 },
           "& p:last-child": { mb: 0 },
+          // Lexical wrapper <li> that only holds a sub-list: no marker (else an empty bullet).
+          "& li.editor-list-item-nested": { listStyleType: "none" },
         }}
         // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized backend HTML content
         dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html, DESCRIPTION_PURIFY_CONFIG) }}
@@ -444,15 +446,15 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           color="warning"
           disabled={isApprovalsLoading || isApprovalsRetrying}
           onClick={() => {
-            try {
-              generateChangeRequestDetailsPdf(changeRequest, [], approval);
-            } catch (error) {
-              const message =
-                error instanceof Error
-                  ? error.message
-                  : "Failed to generate PDF";
-              showError(message);
-            }
+            generateChangeRequestDetailsPdf(changeRequest, [], approval).catch(
+              (error: unknown) => {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to generate PDF";
+                showError(message);
+              },
+            );
           }}
         >
           Download Change Request PDF

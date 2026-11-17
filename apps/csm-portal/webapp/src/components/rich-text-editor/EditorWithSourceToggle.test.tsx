@@ -142,6 +142,24 @@ describe("EditorWithSourceToggle (keepStyledHtmlAsSource) — ordinary content i
   });
 });
 
+describe("EditorWithSourceToggle — ariaRequired", () => {
+  it("marks the rich editor and the source box aria-required when set", () => {
+    render(<EditorWithSourceToggle value={SIMPLE_HTML} onChange={vi.fn()} ariaRequired />);
+    expect(richEditor()).toHaveAttribute("aria-required", "true");
+
+    fireEvent.click(screen.getByRole("switch"));
+    expect(sourceBox()).toHaveAttribute("aria-required", "true");
+  });
+
+  it("marks neither when not set", () => {
+    render(<EditorWithSourceToggle value={SIMPLE_HTML} onChange={vi.fn()} />);
+    expect(richEditor()).not.toHaveAttribute("aria-required");
+
+    fireEvent.click(screen.getByRole("switch"));
+    expect(sourceBox()).not.toHaveAttribute("aria-required");
+  });
+});
+
 describe("EditorWithSourceToggle (keepStyledHtmlAsSource) — preview", () => {
   it("shows a preview of the styled HTML under the source box, without changing it", async () => {
     const onChange = vi.fn();
@@ -199,5 +217,26 @@ describe("EditorWithSourceToggle without keepStyledHtmlAsSource — behaviour is
     const { rerender } = render(<EditorWithSourceToggle value="" onChange={vi.fn()} />);
     rerender(<EditorWithSourceToggle value={BULLETIN_HTML} onChange={vi.fn()} />);
     expect(sourceBox()).toBeNull();
+  });
+});
+
+describe("EditorWithSourceToggle — whitespace survives the source -> rich switch", () => {
+  const TYPED = "<p>A\tB<br>    indented<br>\ttabbed</p><p>two  spaces</p>";
+
+  it("keeps tabs, runs of spaces and leading indentation when switching back to the rich editor", async () => {
+    const onChange = vi.fn();
+    render(<EditorWithSourceToggle value={TYPED} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("switch")); // to source
+    fireEvent.click(screen.getByRole("switch")); // and back: the editor re-reads the value
+    await waitFor(() => expect(richEditor()).not.toBeNull());
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toBe(TYPED);
+  });
+
+  it("still collapses the newlines and indentation of laid-out HTML source", async () => {
+    const onChange = vi.fn();
+    render(<EditorWithSourceToggle value={"<ul>\n  <li>\n    one\n  </li>\n  <li>two</li>\n</ul>\n<p>\n    hello\n    world\n</p>"} onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toBe(`<ul class="editor-list-ul"><li value="1">one</li><li value="2">two</li></ul><p>hello world</p>`);
   });
 });

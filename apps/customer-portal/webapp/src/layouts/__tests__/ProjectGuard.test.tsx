@@ -19,11 +19,16 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import ProjectGuard from "@layouts/ProjectGuard";
 import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
+import { ApiError } from "@utils/ApiError";
 
 const mockUseGetProjectDetails = vi.fn();
 
 vi.mock("@api/useGetProjectDetails", () => ({
   default: () => mockUseGetProjectDetails(),
+}));
+
+vi.mock("@components/error/ErrorRecoveryAction", () => ({
+  default: () => <button type="button">Recovery action</button>,
 }));
 
 vi.mock("react-router", async (importOriginal) => {
@@ -144,5 +149,51 @@ describe("ProjectGuard", () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
+  });
+
+  describe("error copy", () => {
+    const renderGuard = () =>
+      render(
+        <MemoryRouter initialEntries={["/projects/proj/dashboard"]}>
+          <ErrorPageProvider>
+            <Routes>
+              <Route path="/projects/:projectId/*" element={<ProjectGuard />} />
+            </Routes>
+          </ErrorPageProvider>
+        </MemoryRouter>,
+      );
+
+    it.each([
+      [403, "Forbidden"],
+      [404, "Not Found"],
+    ])("shows access copy and a recovery action for %i", (status, text) => {
+      mockUseGetProjectDetails.mockReturnValue({
+        data: undefined,
+        error: new ApiError(status, text, "backend reason that must not leak"),
+        isLoading: false,
+      });
+      renderGuard();
+
+      expect(
+        screen.getByText("You don't have access to this project, or it doesn't exist."),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/try again later/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/backend reason/)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Recovery action" })).toBeInTheDocument();
+    });
+
+    it("keeps the try-again-later copy and no recovery action for 5xx", () => {
+      mockUseGetProjectDetails.mockReturnValue({
+        data: undefined,
+        error: new ApiError(500, "Server Error"),
+        isLoading: false,
+      });
+      renderGuard();
+
+      expect(
+        screen.getByText("Unable to load project details. Please try again later."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
   });
 });

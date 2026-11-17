@@ -39,6 +39,12 @@ const mockProjectDetail = {
   hasSR: false,
 };
 
+const mockAuthFetch = vi.fn();
+
+vi.mock("@/hooks/useAuthApiClient", () => ({
+  useAuthApiClient: () => mockAuthFetch,
+}));
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     getIdToken: vi.fn().mockResolvedValue("mock-token"),
@@ -72,6 +78,18 @@ const createWrapper = () => {
 describe("useGetProjectDetails", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith(`/projects/${mockProjectDetail.id}`)) {
+        return { ok: true, status: 200, json: async () => mockProjectDetail };
+      }
+      return {
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        headers: new Headers(),
+        json: async () => ({ message: "Project with ID invalid-id not found" }),
+      };
+    });
     (
       window as unknown as {
         config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };

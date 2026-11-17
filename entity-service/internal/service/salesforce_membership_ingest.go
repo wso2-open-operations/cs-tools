@@ -121,6 +121,14 @@ func (s *salesforceEventService) ingestMembership(ctx context.Context, membershi
 	if err != nil {
 		return err
 	}
+	return s.ingestMembershipRecord(ctx, membershipSfID, eventType, pc, known)
+}
+
+// ingestMembershipRecord is ingestMembership's body for a Project_Contact__c
+// already in hand: the admin resync reads memberships itself and writes them
+// here, with the Contact as known.
+func (s *salesforceEventService) ingestMembershipRecord(ctx context.Context, membershipSfID, eventType string, pc salesentity.ProjectContact, known *salesentity.Contact) error {
+	var err error
 	if pc.Contact == nil || strings.TrimSpace(derefString(pc.Contact.ID)) == "" {
 		return &apierror.ServiceUnavailableError{Msg: "sales/sales-entity-service project contact " + membershipSfID + " has no linked contact"}
 	}
@@ -130,7 +138,11 @@ func (s *salesforceEventService) ingestMembership(ctx context.Context, membershi
 	contactSfID := strings.TrimSpace(derefString(pc.Contact.ID))
 	// A partner contact's membership refreshes the project account's partner
 	// links on every exit, duplicate or not (salesforce_partner_ingest.go).
-	defer s.refreshPartnersForMembership(ctx, membershipSfID, pc)
+	// The resync refreshes partners as a component of its own, with its own
+	// Salesforce call budget, so it does not start one behind a membership.
+	if !isResyncApply(ctx) {
+		defer s.refreshPartnersForMembership(ctx, membershipSfID, pc)
+	}
 	if known != nil && !strings.EqualFold(strings.TrimSpace(derefString(known.ID)), contactSfID) {
 		// Not this membership's contact as spelled here (a 15/18-character
 		// Id pair, or Salesforce moved it between the two reads): read the
@@ -154,7 +166,32 @@ func (s *salesforceEventService) ingestMembership(ctx context.Context, membershi
 	if contactOn, ok := parseSalesforceLastModified(contactModified); ok && (!hasModified || contactOn.After(eventModifiedOn)) {
 		eventModifiedOn, hasModified = contactOn, true
 	}
-	if !hasModified {
+	if isResyncApply(ctx) {
+		// Equal version: overwrite. Strictly newer than the snapshot (a
+		// DELETED or DEACTIVATED step included): the membership changed since
+		// it was read, so it is left alone. No parseable version: keep the
+		// stored one.
+		steps, err := s.membership.Steps.GetByMembership(ctx, membershipSfID)
+		if err != nil {
+			return err
+		}
+		for _, st := range steps {
+			if st.Step != domain.OnboardingStepDatabase || st.Status != domain.OnboardingStepSucceeded {
+				continue
+			}
+			if !hasModified {
+				eventModifiedOn = st.EventModifiedOn
+			} else if st.EventModifiedOn.After(eventModifiedOn) {
+				slog.InfoContext(ctx, "salesforce resync: membership changed since it was read, leaving it alone",
+					"membershipSfId", membershipSfID, "snapshotModifiedOn", eventModifiedOn, "recordedOn", st.EventModifiedOn, "recordedEventType", st.EventType)
+				noteResyncStale(ctx, membershipSfID)
+				return nil
+			}
+		}
+		if !hasModified && eventModifiedOn.IsZero() {
+			eventModifiedOn = time.Now().UTC()
+		}
+	} else if !hasModified {
 		slog.WarnContext(ctx, "salesforce: project contact has no parseable lastModifiedDate, skipping duplicate guard",
 			"membershipSfId", membershipSfID, "lastModifiedDate", derefString(pc.LastModifiedDate))
 		eventModifiedOn = time.Now().UTC()
@@ -187,6 +224,7 @@ func (s *salesforceEventService) ingestMembership(ctx context.Context, membershi
 	if err != nil {
 		return err
 	}
+	in.KeepStaleProjectGroups = isResyncApply(ctx)
 	if len(ignored) > 0 {
 		// One line per membership. The six labels with no CSM group are
 		// dropped by decision (D2); anything else is a vocabulary gap.
@@ -222,6 +260,11 @@ func (s *salesforceEventService) ingestMembership(ctx context.Context, membershi
 	slog.InfoContext(ctx, "salesforce: project contact ingested",
 		"membershipSfId", membershipSfID, "state", in.State, "projectId", res.ProjectID, "projectContactId", res.ProjectContactID,
 		"createdUser", res.CreatedUser, "createdAccountContact", res.CreatedAccountContact, "createdProjectContact", res.CreatedProjectContact)
+	if isResyncApply(ctx) {
+		// An admin resync repairs rows; it must never email a customer. The
+		// invitation and welcome events are the ordinary event path's.
+		return nil
+	}
 
 	// ECHO SUPPRESSION. Publish only when this event MOVED the membership
 	// into an invited state — the row was created here, or its stored state

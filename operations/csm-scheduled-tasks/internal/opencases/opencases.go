@@ -29,20 +29,16 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 )
 
-// openState is entity-service's exact CaseState value this report queries —
-// see entity-service's own domain.CaseStateOpen. Unlike
-// stalecases.SendReport's "not closed" filter, this is an exact match: a
-// case that has since moved to work_in_progress (or any other non-open,
-// non-closed state) no longer belongs in this specific report.
-const openState = "open"
+// Subject is the report mail's subject line.
+const Subject = "[Immediate-Action-Required][Report] Opened before yesterday cases"
 
-// CaseSearcher is the subset of *entitycases.Client this package depends on.
-type CaseSearcher interface {
-	SearchCasesInStateCreatedBeforeYesterday(ctx context.Context, state string) ([]entitycases.Case, error)
+// ReportFetcher is the subset of *longopenreport.Client this package depends on.
+type ReportFetcher interface {
+	OpenBeforeYesterday(ctx context.Context) (longopenreport.Report, error)
 }
 
 // EmailSender is the subset of *notify.Client this package depends on.
@@ -50,12 +46,13 @@ type EmailSender interface {
 	SendEmail(ctx context.Context, to, cc []string, subject, htmlBody string) error
 }
 
-// SendReport returns a registry.Task.Handler that finds every case created
-// before yesterday and still in "open" state, and emails to/cc a report of
-// them. Recipients are exactly this task's own SUB_CRON_RECIPIENTS entry
-// (see cmd/server/main.go) — same reasoning as stalecases.SendReport's own
-// doc comment: unrelated to the standing ALERT_RECIPIENTS failure-alert
-// audience.
+// SendReport returns a registry.Task.Handler that fetches entity-service's
+// open-before-yesterday report (cases still in "open" state created before the
+// start of yesterday, the day boundary computed there in the team's time zone)
+// and emails it to to/cc. Recipients are exactly this task's own
+// SUB_CRON_RECIPIENTS entry (see cmd/server/main.go) — same reasoning as
+// stalecases.SendReport's own doc comment: unrelated to the standing
+// ALERT_RECIPIENTS failure-alert audience.
 //
 // emailsEnabled is cmd/server/main.go's ALERTS_ENABLED — see
 // stalecases.SendReport's own doc comment for why this silences report
@@ -65,35 +62,32 @@ type EmailSender interface {
 // set, each row's number links to that item's page in the portal (see
 // notify.OpenCasesReportData.CaseLinkBase), else it is plain text.
 //
-// When no case matches, the handler sends nothing and succeeds: the report
-// omits itself on a day with nothing to act on, like stalecases.SendReport.
-//
 // If emailsEnabled is false or to is empty, the returned handler skips the
-// case search entirely and returns nil (success) — same reasoning as
-// stalecases.SendReport.
-func SendReport(cases CaseSearcher, email EmailSender, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
+// fetch entirely and returns nil (success). When the report has no cases it
+// sends nothing and succeeds: the report omits itself on a day with nothing to
+// act on. When entity-service cut the list at its cap the mail still goes out
+// and says so.
+func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
 		}
 
-		found, err := cases.SearchCasesInStateCreatedBeforeYesterday(ctx, openState)
+		report, err := reports.OpenBeforeYesterday(ctx)
 		if err != nil {
-			return fmt.Errorf("opencases: search open cases: %w", err)
+			return fmt.Errorf("opencases: fetch open cases report: %w", err)
 		}
 
-		if len(found) == 0 {
+		if len(report.Cases) == 0 {
 			slog.Info("no open cases created before yesterday; the open cases report is not sent")
 			return nil
 		}
-		slog.Info("sending the open cases report", "cases", len(found), "to", len(to), "cc", len(cc))
+		slog.Info("sending the open cases report",
+			"cases", len(report.Cases), "casesTotal", report.CasesTotal,
+			"truncated", report.CasesTruncated, "to", len(to), "cc", len(cc))
 
-		subject := "[Action-Required][Report] Cases created before yesterday still in Open state"
-		body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{
-			Cases:        found,
-			CaseLinkBase: caseLinkBase,
-		})
-		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
+		body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{Report: report, CaseLinkBase: caseLinkBase})
+		if err := email.SendEmail(ctx, to, cc, Subject, body); err != nil {
 			return fmt.Errorf("opencases: send report email: %w", err)
 		}
 		return nil

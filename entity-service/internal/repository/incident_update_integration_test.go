@@ -112,7 +112,7 @@ func TestIncidentUpdateIntegration_RecordFields(t *testing.T) {
 	// Impact up, urgency unchanged (LOW): ServiceNow's lookup gives MODERATE.
 	// A new category whose list lacks the current subcategory clears it.
 	var cleared *string
-	if err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
+	if _, err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
 		Subject:           iuStr("after"),
 		Impact:            iuStr("HIGH"),
 		Category:          iuStr("SECURITY"),
@@ -147,7 +147,7 @@ func TestIncidentUpdateIntegration_RecordFields(t *testing.T) {
 	// list clears it.
 	env := "production"
 	envPtr := &env
-	if err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
+	if _, err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
 		SubcategoryValue: iuStr("Phishing"),
 		Priority:         iuStr("CRITICAL"),
 		Environment:      &envPtr,
@@ -170,7 +170,7 @@ func TestIncidentUpdateIntegration_RecordFields(t *testing.T) {
 		"subcategory of another category": {IncidentLifecycleUpdate{SubcategoryValue: iuStr("dns")}, "does not belong to category SECURITY"},
 		"unknown assignment group":        {IncidentLifecycleUpdate{AssignmentGroupID: iuStr(iuMissingID)}, "assignmentGroupId does not identify an existing group"},
 	} {
-		err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, tc.u, "tester@example.com")
+		_, err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, tc.u, "tester@example.com")
 		var ve *apierror.ValidationError
 		if !errors.As(err, &ve) || !strings.Contains(ve.Msg, tc.want) {
 			t.Errorf("%s: got %v, want a ValidationError containing %q", name, err, tc.want)
@@ -196,7 +196,7 @@ func TestIncidentUpdateIntegration_DetailReadsWatchList(t *testing.T) {
 		t.Fatalf("watch list before any write = %#v, want an empty list (never null)", v.WatchList)
 	}
 
-	if err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
+	if _, err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
 		WatchList: &[]string{iuWatcherID},
 	}, "tester@example.com"); err != nil {
 		t.Fatalf("add watcher: %v", err)
@@ -212,7 +212,7 @@ func TestIncidentUpdateIntegration_DetailReadsWatchList(t *testing.T) {
 		t.Errorf("watcher name = %q, want the user name when the user has no name", v.WatchList[0].Name)
 	}
 
-	if err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
+	if _, err := repo.UpdateIncidentLifecycle(ctx, iuIncidentID, IncidentLifecycleUpdate{
 		WatchList: &[]string{},
 	}, "tester@example.com"); err != nil {
 		t.Fatalf("clear watch list: %v", err)

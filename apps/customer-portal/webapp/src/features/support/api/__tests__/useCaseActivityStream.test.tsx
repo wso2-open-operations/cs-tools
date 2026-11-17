@@ -193,35 +193,35 @@ describe("useCaseActivityStream", () => {
       vi.restoreAllMocks();
     });
 
-    it("first open refreshes comments only, not case details", async () => {
+    it("first open makes no comments refresh and no case details invalidation", async () => {
       const { spy } = setup("case-1");
       await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
 
       MockEventSource.instances[0].emit("open");
 
-      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+      expect(mockAuthFetch).not.toHaveBeenCalled();
       expect(spy).not.toHaveBeenCalled();
     });
 
-    it("a reconnect open also refetches case details, but not lists, stats or filters", async () => {
+    it("a routine reconnect refetches case details only, with no comments refresh", async () => {
       vi.spyOn(Math, "random").mockReturnValue(0.5);
       const { spy } = setup("case-1");
       await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
       MockEventSource.instances[0].emit("open");
       MockEventSource.instances[0].emit("error");
-      mockRefreshCaseComments.mockClear();
 
       await vi.advanceTimersByTimeAsync(61_000);
       expect(MockEventSource.instances).toHaveLength(2);
       MockEventSource.instances[1].emit("open");
 
-      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
       expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
       expect(invalidates(spy, [ApiQueryKeys.PROJECT_CASES, "project-1"])).toBe(false);
       expect(invalidates(spy, [ApiQueryKeys.CASES_STATS])).toBe(false);
     });
 
-    it("catches up at most once per 60 seconds per case", async () => {
+    it("rate-limits the routine reconnect details invalidation to once per 60 seconds", async () => {
       vi.spyOn(Math, "random").mockReturnValue(0.01);
       const { spy } = setup("case-1");
       await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
@@ -231,15 +231,13 @@ describe("useCaseActivityStream", () => {
       await vi.advanceTimersByTimeAsync(5_000);
       expect(MockEventSource.instances).toHaveLength(2);
       MockEventSource.instances[1].emit("open");
-
-      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
       expect(spy).not.toHaveBeenCalled();
 
       MockEventSource.instances[1].emit("error");
       await vi.advanceTimersByTimeAsync(61_000);
       MockEventSource.instances[2].emit("open");
-      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(2);
       expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
     });
 
     it("keeps backing off when the connection opens and is cut straight away", async () => {
@@ -292,7 +290,7 @@ describe("useCaseActivityStream", () => {
       expect(MockEventSource.instances).toHaveLength(3);
     });
 
-    it("treats the first open after idle as a reconnect", async () => {
+    it("resume after idle catches up once: comments refresh plus case details", async () => {
       const { rerender, spy } = setup("case-1");
       await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
       MockEventSource.instances[0].emit("open");
@@ -305,7 +303,47 @@ describe("useCaseActivityStream", () => {
       await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
       MockEventSource.instances[1].emit("open");
 
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+      expect(mockRefreshCaseComments.mock.calls[0][2]).toBe("case-1");
       expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+
+      // The flag is consumed: a following routine reconnect does not refresh comments.
+      MockEventSource.instances[1].emit("error");
+      await vi.advanceTimersByTimeAsync(61_000);
+      MockEventSource.instances[2].emit("open");
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+    });
+
+    it("idle resume catch-up is not swallowed by the rate limit", async () => {
+      const { rerender, spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+
+      // Resume well within 60 s of the first open.
+      idleRef.current = true;
+      rerender();
+      idleRef.current = false;
+      rerender();
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+      expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+    });
+
+    it("starting idle before the stream ever opened does not trigger a resume catch-up", async () => {
+      const { rerender, spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+      idleRef.current = true;
+      rerender();
+      idleRef.current = false;
+      rerender();
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
     });
   });
 

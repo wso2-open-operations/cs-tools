@@ -26,6 +26,8 @@ interface BaseProps {
   loading?: boolean;
   disabled?: boolean;
   helperText?: string;
+  /** When set, only these categories can be picked; the rest stay visible, greyed, for context. */
+  selectableIds?: ReadonlySet<string>;
 }
 
 function useFlat(categories: readonly SkillCategory[] | undefined): FlatCategory[] {
@@ -71,6 +73,7 @@ export function CategorySelect({
       getOptionLabel={labelOf}
       isOptionEqualToValue={sameCategory}
       renderOption={renderTreeOption}
+      getOptionDisabled={base.selectableIds ? (o) => !base.selectableIds?.has(o.category.id) : undefined}
       onChange={(_e, next) => onChange(next ? next.category.id : "")}
       renderInput={(params) => (
         <TextField {...params} label={base.label} helperText={base.helperText} />
@@ -101,6 +104,7 @@ export function CategoryMultiSelect({
       getOptionLabel={labelOf}
       isOptionEqualToValue={sameCategory}
       renderOption={renderTreeOption}
+      getOptionDisabled={base.selectableIds ? (o) => !base.selectableIds?.has(o.category.id) : undefined}
       onChange={(_e, next) => onChange(next.map((o) => o.category.id))}
       renderInput={(params) => (
         <TextField {...params} label={base.label} helperText={base.helperText} />

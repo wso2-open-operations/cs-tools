@@ -21,6 +21,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BackendApiError,
+  countArticles,
   getArticle,
   getRelatedArticles,
   listKnowledgeBases,
@@ -34,6 +35,7 @@ vi.mock("@api/backend/client", async () => {
   const actual = await vi.importActual<typeof import("@api/backend/client")>("@api/backend/client");
   return {
     ...actual,
+    countArticles: vi.fn(),
     getArticle: vi.fn(),
     getRelatedArticles: vi.fn(),
     listKnowledgeBases: vi.fn(),
@@ -64,6 +66,7 @@ beforeEach(() => {
   vi.mocked(searchArticles).mockReset();
   vi.mocked(listKnowledgeBases).mockResolvedValue({ knowledgeBases: [] });
   vi.mocked(getRelatedArticles).mockResolvedValue({ articles: [] });
+  vi.mocked(countArticles).mockResolvedValue(3);
 });
 
 describe("KBArticlePage errors", () => {

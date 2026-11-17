@@ -1,0 +1,21 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- Add a public visibility flag to knowledge_base. Defaults to false so
+-- every existing and newly created knowledge base is private until an
+-- operator explicitly marks it public. The Knowledge Hub portal filters
+-- on this column; the CSM Portal ignores it.
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS is_public boolean NOT NULL DEFAULT false;

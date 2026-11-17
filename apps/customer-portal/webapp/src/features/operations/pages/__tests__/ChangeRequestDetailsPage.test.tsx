@@ -747,12 +747,18 @@ describe("ChangeRequestDetailsPage", () => {
     /** The printed value of each row of the PDF the export made last. */
     const printedRows = (): Record<string, string> =>
       Object.fromEntries(mocks.pdfRows.mock.lastCall?.[0] as string[][]);
+    /** Clicks the export and waits for the PDF, written once the footer logo is looked up. */
+    const exportPdf = async (): Promise<void> => {
+      fireEvent.click(exportButton());
+      await waitFor(() => expect(mocks.pdfRows).toHaveBeenCalled());
+    };
 
-    it("keeps Download Change Request PDF off while the approvals load, and turns it on once they are read", () => {
+    it("keeps Download Change Request PDF off while the approvals load, and turns it on once they are read", async () => {
       mocks.approvalsRead.value = "loading";
       const view = renderPage();
       expect(exportButton()).toBeDisabled();
       fireEvent.click(exportButton());
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       expect(mocks.pdfRows).not.toHaveBeenCalled();
 
       mocks.approvalsRead.value = "read";
@@ -769,7 +775,7 @@ describe("ChangeRequestDetailsPage", () => {
       expect(exportButton()).toBeEnabled();
     });
 
-    it("prints Approved By / Approved On from the approvals once they are read", () => {
+    it("prints Approved By / Approved On from the approvals once they are read", async () => {
       mocks.approvals.value = [
         {
           stage: "CAB Approval",
@@ -780,14 +786,14 @@ describe("ChangeRequestDetailsPage", () => {
         },
       ];
       renderPage();
-      fireEvent.click(exportButton());
+      await exportPdf();
       expect(printedRows()["Approved By"]).toBe("Cab Member");
       expect(printedRows()["Approved On"]).toMatch(/2026/);
     });
 
-    it("leaves the two rows out after a read that found no approval", () => {
+    it("leaves the two rows out after a read that found no approval", async () => {
       renderPage();
-      fireEvent.click(exportButton());
+      await exportPdf();
       expect(printedRows()).not.toHaveProperty("Approved By");
       expect(printedRows()).not.toHaveProperty("Approved On");
     });
@@ -868,22 +874,22 @@ describe("ChangeRequestDetailsPage", () => {
         expect(mocks.fetchApprovals).toHaveBeenCalledTimes(3);
       });
 
-      it("still exports, printing Approved By / Approved On as 'Not available' rather than leaving them out", () => {
+      it("still exports, printing Approved By / Approved On as 'Not available' rather than leaving them out", async () => {
         renderPage();
         expect(exportButton()).toBeEnabled();
-        fireEvent.click(exportButton());
+        await exportPdf();
         expect(printedRows()["Approved By"]).toBe("Not available");
         expect(printedRows()["Approved On"]).toBe("Not available");
         expect(mocks.showError).not.toHaveBeenCalled();
       });
 
-      it("prints the record's own values, which do not depend on the approvals", () => {
+      it("prints the record's own values, which do not depend on the approvals", async () => {
         mocks.changeRequest.value = makeChangeRequest({
           approvedBy: { id: "u", label: "Recorded Approver" },
           approvedOn: "2026-05-01T09:00:00Z",
         });
         renderPage();
-        fireEvent.click(exportButton());
+        await exportPdf();
         expect(printedRows()["Approved By"]).toBe("Recorded Approver");
         expect(screen.getByTestId("cr-approved-by")).toHaveTextContent("Recorded Approver");
       });
@@ -988,5 +994,19 @@ describe("ChangeRequestDetailsPage", () => {
       expect(button("Propose New Time")).not.toBeInTheDocument();
       expect(button("Approve")).not.toBeInTheDocument();
     });
+  });
+
+  it("hides the marker of the nested-list wrapper li in the description but keeps normal bullets", () => {
+    mocks.changeRequest.value = makeChangeRequest({
+      description:
+        '<ul><li value="1">Parent</li><li value="2" class="editor-list-item-nested"><ul><li value="1">Child</li></ul></li></ul>',
+    });
+    const { container } = renderPage();
+    const wrapper = container.querySelector("li.editor-list-item-nested");
+    const normal = container.querySelector("li:not(.editor-list-item-nested)");
+    expect(wrapper).not.toBeNull();
+    expect(normal).not.toBeNull();
+    expect(getComputedStyle(wrapper as Element).listStyleType).toBe("none");
+    expect(getComputedStyle(normal as Element).listStyleType).not.toBe("none");
   });
 });

@@ -17,6 +17,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { Header } from "@wso2/oxygen-ui";
 import HeaderSwitchersSlot from "@components/header/HeaderSwitchersSlot";
 
 vi.mock("@api/useAttachmentPreview", () => ({
@@ -24,8 +25,24 @@ vi.mock("@api/useAttachmentPreview", () => ({
 }));
 
 describe("HeaderSwitchersSlot", () => {
-  it("renders", () => {
-    render(<HeaderSwitchersSlot><span>slot</span></HeaderSwitchersSlot>);
+  it("renders inside the Header switchers region", () => {
+    // Header.Switchers is a compound component and must sit inside Header.
+    render(
+      <Header>
+        <HeaderSwitchersSlot>
+          <span>slot</span>
+        </HeaderSwitchersSlot>
+      </Header>,
+    );
+    expect(screen.getByText("slot")).toBeInTheDocument();
+  });
+
+  it("renders as a plain row without a Header when stackedHeaderRow is set", () => {
+    render(
+      <HeaderSwitchersSlot stackedHeaderRow>
+        <span>slot</span>
+      </HeaderSwitchersSlot>,
+    );
     expect(screen.getByText("slot")).toBeInTheDocument();
   });
 });

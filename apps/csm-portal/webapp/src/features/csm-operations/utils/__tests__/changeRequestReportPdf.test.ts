@@ -100,3 +100,26 @@ describe("generateChangeRequestReportPdf — the Customer approved row", () => {
     expect(customerApprovedRow({})).toBeUndefined();
   });
 });
+
+describe("generateChangeRequestReportPdf — the Priority row", () => {
+  const priorityRow = (priority: BeChangeRequestDetail["priority"]): string | undefined => {
+    writeDetailsTable.mockClear();
+    generateChangeRequestReportPdf({ ...CR, priority }, []);
+    const rows = writeDetailsTable.mock.calls[0]?.[1] as Array<{ label: string; value: string }> | undefined;
+    return rows?.find((r) => r.label === "Priority")?.value;
+  };
+
+  it("reads the value the PostgreSQL data source sends, planning included", () => {
+    expect(priorityRow("moderate")).toBe("Moderate");
+    expect(priorityRow("planning")).toBe("Planning");
+  });
+
+  it("shows a label of the previous system as sent", () => {
+    expect(priorityRow("5 - Planning")).toBe("5 - Planning");
+  });
+
+  it("leaves the row out when there is no priority", () => {
+    expect(priorityRow(null)).toBeUndefined();
+    expect(priorityRow(undefined)).toBeUndefined();
+  });
+});

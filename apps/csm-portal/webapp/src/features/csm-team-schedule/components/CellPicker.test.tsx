@@ -339,6 +339,14 @@ describe("CellPicker: adding a tag", () => {
     expect(await screen.findByRole("button", { name: "+ New tag" })).toBeInTheDocument();
   });
 
+  it("marks the name required", () => {
+    renderWithCreate(vi.fn(() => Promise.resolve()));
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    const field = screen.getByRole("textbox", { name: "Tag name" });
+    expect(field).toBeRequired();
+    expect(field.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("asks the tag type and the timesheet as labelled dropdowns, an allocation kept on the timesheet by default", () => {
     renderWithCreate(vi.fn(() => Promise.resolve()));
     fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));

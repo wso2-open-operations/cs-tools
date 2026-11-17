@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import Footer from "@components/footer/Footer";
 import {
   COMPANY_NAME,
@@ -23,40 +23,27 @@ import {
   TERMS_OF_SERVICE_URL,
 } from "@features/project-hub/constants/appLayoutConstants";
 
-// Mock @wso2/oxygen-ui
-vi.mock("@wso2/oxygen-ui", () => ({
-  Footer: ({
-    companyName,
-    termsUrl,
-    privacyUrl,
-  }: {
-    companyName: string;
-    termsUrl: string;
-    privacyUrl: string;
-  }) => (
-    <div data-testid="footer-ui">
-      <span>{companyName}</span>
-      <a href={termsUrl}>Terms of Service</a>
-      <a href={privacyUrl}>Privacy Policy</a>
-    </div>
-  ),
-}));
+// Footer is a compound component (Footer.Copyright / Footer.Link), so render the
+// real Oxygen UI implementation instead of a flat mock.
 
 describe("Footer", () => {
   it("should render the company name", () => {
     render(<Footer />);
     expect(screen.getByText(new RegExp(COMPANY_NAME, "i"))).toBeDefined();
+    expect(
+      screen.getByText(new RegExp(`${new Date().getFullYear()}`)),
+    ).toBeDefined();
   });
 
   it("should render the terms of service link with correct URL", () => {
     render(<Footer />);
-    const termsLink = screen.getByRole("link", { name: /terms/i });
+    const termsLink = screen.getByRole("link", { name: "Terms & Conditions" });
     expect(termsLink).toHaveAttribute("href", TERMS_OF_SERVICE_URL);
   });
 
   it("should render the privacy policy link with correct URL", () => {
     render(<Footer />);
-    const privacyLink = screen.getByRole("link", { name: /privacy/i });
+    const privacyLink = screen.getByRole("link", { name: "Privacy Policy" });
     expect(privacyLink).toHaveAttribute("href", PRIVACY_POLICY_URL);
   });
 });

@@ -48,16 +48,21 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/holidayreminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/moesif"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgvalidation"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -65,6 +70,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/rotareminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
@@ -144,21 +151,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Same entity-service deployment and credentials as ledgerClient above,
-	// but a separate client — see internal/entitycases' own doc comment for
-	// why case search isn't just another method on ledger.Client.
-	entityCasesClient, err := entitycases.NewClient(entitycases.Config{
-		BaseURL:      entityServiceBaseURL,
-		TokenURL:     oauthTokenURL,
-		ClientID:     oauthClientID,
-		ClientSecret: oauthClientSecret,
-		Scopes:       entityServiceScopes,
-	})
-	if err != nil {
-		slog.Error("failed to construct entity-service case-search client", "err", err)
-		os.Exit(1)
-	}
-
 	// The migration scan's own client: the same deployment and credentials,
 	// a distinct endpoint (GET /reports/migration-cases) with its own
 	// timeout.
@@ -174,8 +166,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The stale cases report's own client: the same deployment and
-	// credentials, a distinct endpoint (GET /reports/long-open-cases).
+	// The stale cases report's own client (also used by the open cases
+	// report's variant): the same deployment and credentials, a distinct
+	// endpoint (GET /reports/long-open-cases).
 	longOpenReportClient, err := longopenreport.NewClient(longopenreport.Config{
 		BaseURL:      entityServiceBaseURL,
 		TokenURL:     oauthTokenURL,
@@ -229,6 +222,34 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service product-regression-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The weekly SLA breach report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/sla-breaches).
+	slaBreachReportClient, err := slabreachreport.NewClient(slabreachreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service sla-breach-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The EOL product usage report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/eol-product-usage).
+	eolUsageReportClient, err := eolusagereport.NewClient(eolusagereport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service EOL-product-usage-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -318,8 +339,96 @@ func main() {
 		}
 	}
 
+	// PLG signups from Moesif: the Moesif reader and the PLG ingest client.
+	// Off by default; MOESIF_API_KEY is required once it is on.
+	plgMoesifSyncEnabled := envBool("PLG_MOESIF_SYNC_ENABLED", false)
+	plgValidationEnabled := envBool("PLG_REGISTRATION_VALIDATION_ENABLED", false)
+	var (
+		moesifClient        *moesif.Client
+		plgSignupsClient    *plgsignups.Client
+		plgValidationClient *plgvalidation.Client
+	)
+	if plgMoesifSyncEnabled || plgValidationEnabled {
+		moesifClient, err = moesif.NewClient(moesif.Config{
+			BaseURL: envString("MOESIF_BASE_URL", moesif.DefaultBaseURL),
+			APIKey:  mustEnv("MOESIF_API_KEY"),
+			Timeout: envDuration("MOESIF_TIMEOUT", 30*time.Second),
+		})
+		if err != nil {
+			slog.Error("failed to construct Moesif client", "err", err)
+			os.Exit(1)
+		}
+		plgSignupsClient, err = plgsignups.NewClient(plgsignups.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG ingest client", "err", err)
+			os.Exit(1)
+		}
+		plgValidationClient, err = plgvalidation.NewClient(plgvalidation.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG validation client", "err", err)
+			os.Exit(1)
+		}
+	}
+	// Email domain classification: the owner's email from the Cloud Directory
+	// API, the domain to the CSM AI service. Off unless both are configured.
+	var (
+		plgDirectory  *plgvalidation.DirectoryClient
+		plgClassifier *plgvalidation.AIClient
+	)
+	if plgValidationEnabled && os.Getenv("CSM_AI_SERVICE_BASE_URL") != "" && os.Getenv("CLOUD_API_BASE_URL") != "" {
+		plgClassifier, err = plgvalidation.NewAIClient(plgvalidation.Config{
+			BaseURL:      os.Getenv("CSM_AI_SERVICE_BASE_URL"),
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       splitComma(os.Getenv("CSM_AI_SERVICE_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("failed to construct CSM AI service client", "err", err)
+			os.Exit(1)
+		}
+		plgDirectory, err = plgvalidation.NewDirectoryClient(plgvalidation.DirectoryConfig{
+			Config: plgvalidation.Config{
+				BaseURL:      os.Getenv("CLOUD_API_BASE_URL"),
+				TokenURL:     mustEnv("CLOUD_API_TOKEN_URL"),
+				ClientID:     mustEnv("CLOUD_API_CLIENT_ID"),
+				ClientSecret: mustEnv("CLOUD_API_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CLOUD_API_SCOPES")),
+			},
+			UserEmailPath: envString("CLOUD_API_USER_EMAIL_PATH", "/users/{userId}/email"),
+		})
+		if err != nil {
+			slog.Error("failed to construct Cloud Directory client", "err", err)
+			os.Exit(1)
+		}
+	} else if plgValidationEnabled {
+		slog.Warn("plg registration validation: email classification is off; set CSM_AI_SERVICE_BASE_URL and CLOUD_API_BASE_URL")
+	}
+	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM"))
+	if plgValidationEnabled {
+		for i, p := range plgValidationProducts {
+			plgValidationProducts[i] = strings.ToUpper(p)
+			if _, ok := plgvalidation.Platforms[plgValidationProducts[i]]; !ok {
+				slog.Error("PLG_REGISTRATION_VALIDATION_PRODUCTS names a product with no Moesif platform", "product", p)
+				os.Exit(1)
+			}
+		}
+	}
+
 	// Same entity-service deployment and credentials again — a fourth,
-	// separate client for the same reason entityCasesClient is its own:
+	// separate client, as every entity-service endpoint here gets its own:
 	// this one's Bearer token must satisfy entity-service's own
 	// AUTH_INTERNAL_CLIENT_IDS (AutoPublish is internal-caller-only), a
 	// concern specific to this one task, not shared with case search or
@@ -455,6 +564,41 @@ func main() {
 		}
 	}
 
+	// Incident auto-close: closes an incident 14 days after it was resolved --
+	// see internal/incidentautoclose's package doc and CLAUDE.md, "Incident
+	// auto-close". OFF unless INCIDENT_AUTOCLOSE_ENABLED=true, as for
+	// case_autoclosure: it closes incidents, so it is never on by accident, and
+	// the first run should be a dry run (INCIDENT_AUTOCLOSE_DRY_RUN=true) whose
+	// count is reviewed. This component's client id must be in entity-service's
+	// M2M_CLIENT_IDS, and entity-service must run on Postgres
+	// (DATA_SOURCE=servicenow answers 503).
+	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", false)
+	var incidentAutocloseClient *incidentautoclose.Client
+	var incidentAutocloseCfg incidentautoclose.Config
+	// INCIDENT_AUTOCLOSE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK
+	// find it) but not fired by the engine tick, as for case_autoclosure.
+	incidentAutocloseUnscheduled := false
+	if incidentAutocloseEnabled {
+		// A malformed value refuses to start rather than falling back: a mistyped
+		// dry run must not become a real one.
+		incidentAutocloseCfg, err = incidentautoclose.ConfigFromEnv(os.Getenv)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		incidentAutocloseClient, err = incidentautoclose.NewClient(incidentautoclose.ClientConfig{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service incident auto-close client", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// Global kill switch for every failure alert email — see
 	// engine.Engine.AlertsEnabled's own doc comment. Defaults to true (the
 	// current always-alert behavior); set to false to go quiet without
@@ -515,6 +659,10 @@ func main() {
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
 	const usageRollupMonthlyTaskName = "usage_rollup_monthly"
 	usageRollupMonthlyTo, usageRollupMonthlyCc := recipientsFor(recipientOverrides, usageRollupMonthlyTaskName)
+	const plgMoesifSyncTaskName = "plg_moesif_sync"
+	plgMoesifSyncTo, plgMoesifSyncCc := recipientsFor(recipientOverrides, plgMoesifSyncTaskName)
+	const plgValidationTaskName = "plg_registration_validation"
+	plgValidationTo, plgValidationCc := recipientsFor(recipientOverrides, plgValidationTaskName)
 	const unresolvedProductsTaskName = "unresolved_products_digest"
 	unresolvedProductsTo, unresolvedProductsCc := recipientsFor(recipientOverrides, unresolvedProductsTaskName)
 	unresolvedProductsEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, unresolvedProductsTaskName))
@@ -680,6 +828,109 @@ func main() {
 		})
 	}
 
+	// The monthly EOL product usage report: the customers still running a
+	// product version past its EOL date in an active Primary Production
+	// deployment, mailed on the first Monday of the month at 10:00 IST
+	// (04:30 UTC; the schedule fires every Monday and the handler sends only
+	// on the 1st to the 7th). To is its SUB_CRON_RECIPIENTS "to" (the CS
+	// leadership group) plus every listed account's manager and technical
+	// owner; with no "to" the task skips and succeeds. A month with no EOL
+	// usage still sends a short note to the configured to/cc.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the regression
+	// reports: failures go to ALERT_RECIPIENTS alone, never to the account
+	// managers on every retry. eolUsageTaskWithRecipients carries its
+	// audience to the EMAIL_BASE_URL check below for the same reason.
+	//
+	// EOL_USAGE_REPORT_PORTAL_BASE_URL optionally links account and project
+	// names to their CSM portal pages (<base>/customers/accounts/<id>); a
+	// non-https value refuses to start, as every URL here does.
+	eolUsagePortalBase := strings.TrimRight(os.Getenv("EOL_USAGE_REPORT_PORTAL_BASE_URL"), "/")
+	if eolUsagePortalBase != "" {
+		if err := httpsec.RequireSecureURL(eolUsagePortalBase); err != nil {
+			slog.Error("invalid EOL_USAGE_REPORT_PORTAL_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	eolUsageTo, eolUsageCc := recipientsFor(recipientOverrides, eolusagescan.TaskName)
+	var eolUsageTaskWithRecipients []string
+	if len(eolUsageTo) > 0 {
+		eolUsageTaskWithRecipients = append(eolUsageTaskWithRecipients, eolusagescan.TaskName)
+	}
+	eolUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, eolusagescan.TaskName))
+	eolUsageSchedule := scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule)
+	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled}
+	// A scheduled run (and its retries) takes its date from its period; a
+	// run-now below keeps the clock.
+	eolUsageScheduled := eolUsageOptions
+	eolUsageScheduled.Anchor = periodStart(eolUsageSchedule)
+	eolUsageTask := registry.Task{
+		Name:     eolusagescan.TaskName,
+		Schedule: eolUsageSchedule,
+		Handler:  eolusagescan.SendReport(eolUsageReportClient, eolUsageEmail, eolUsageTo, eolUsageCc, eolUsageScheduled),
+		// --recipients/--cc of a manual run-now only; see reportRunNow. A
+		// run-now sends whatever the date: it is asked for on purpose.
+		RunNowFlags: reportRunNowFlags,
+		RunNowNarrow: reportRunNow(eolUsageEmail, emailClient,
+			func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				opts := eolUsageOptions
+				opts.AnyDay = true
+				return eolusagescan.SendReport(eolUsageReportClient, email, orRecipients(eolUsageTo, rec), eolUsageCc, opts)
+			}),
+	}
+
+	// The weekly SLA breach reports: last week's breached clocks on the
+	// covered SLA definitions. There are TWO source reports, separate
+	// definitions with different stage and onboarding-status filters, so
+	// each variant is its own task and its own email.
+	//
+	// Default schedule 10:00 Monday India Standard Time, from the source
+	// scheduled report (Run Weekly, Mon, Time 10:00:00). Its Time zone
+	// field reads "-- None --", meaning the ServiceNow instance's own
+	// default; that default is IST, confirmed with the report's owner
+	// rather than assumed. These cron strings are UTC, so 10:00 IST is
+	// 30 4 * * 1. Audience, schedule and the debug divert all resolve by
+	// task name like every other report.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, for the same reason
+	// the regression reports leave them nil: the engine mails task.To on
+	// every failed attempt and retries a failed period every tick, and
+	// the audience here is leadership mail groups. Failures go to
+	// ALERT_RECIPIENTS alone; the tasks are carried to the EMAIL_BASE_URL
+	// check by name instead.
+	slaBreachDefinitions := slabreachscan.Definitions()
+	slaBreachCaseLinkBase := strings.TrimRight(os.Getenv("SLA_BREACH_REPORT_LINK_BASE_URL"), "/")
+	if slaBreachCaseLinkBase != "" {
+		if err := httpsec.RequireSecureURL(slaBreachCaseLinkBase); err != nil {
+			slog.Error("invalid SLA_BREACH_REPORT_LINK_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant(), slabreachscan.OnboardingVariant()} {
+		v = slabreachscan.ApplyStageOverride(v)
+		name := slabreachscan.TaskName(v)
+		to, cc := recipientsFor(recipientOverrides, name)
+		if len(to) > 0 {
+			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
+		}
+		v, to, cc := v, to, cc
+		regressionTasks = append(regressionTasks, registry.Task{
+			Name:     name,
+			Schedule: scheduleFor(scheduleOverrides, name, "30 4 * * 1"),
+			Handler: slabreachscan.SendReport(slaBreachReportClient,
+				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
+				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return slabreachscan.SendReport(slaBreachReportClient, email,
+						v, slaBreachDefinitions, orRecipients(to, rec), cc,
+						slaBreachCaseLinkBase, alertsEnabled)
+				}),
+		})
+	}
+
 	// The monthly time card report: each project in TIME_CARD_REPORT_PROJECT_KEYS
 	// gets last calendar month's approved effort per case, mailed to the
 	// project's contacts (one mail each, so customers never see one another's
@@ -702,6 +953,9 @@ func main() {
 
 	const autoclosureTaskName = "case_autoclosure"
 	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
+
+	const incidentAutocloseTaskName = "incident_autoclose"
+	incidentAutocloseTo, incidentAutocloseCc := recipientsFor(recipientOverrides, incidentAutocloseTaskName)
 
 	const cloudStatusTaskName = "cloud_status_webhooks"
 	cloudStatusTo, cloudStatusCc := recipientsFor(recipientOverrides, cloudStatusTaskName)
@@ -780,20 +1034,22 @@ func main() {
 		// Emails openCasesTo/Cc a report of every case created before
 		// yesterday that's still in "open" state (nobody has moved it out of
 		// initial triage) — see internal/opencases's own doc comment. Sends
-		// nothing (but still succeeds) if openCasesTo is empty. Default
-		// schedule is daily at 08:00 (again, TZ=UTC-dependent — see above);
-		// override via SUB_CRON_SCHEDULES if needed.
+		// nothing (but still succeeds) if openCasesTo is empty or there are no
+		// such cases. Default schedule is daily at 03:30 UTC, which is 09:00
+		// in Colombo, when the original report goes out (again,
+		// TZ=UTC-dependent — see above); override via SUB_CRON_SCHEDULES if
+		// needed.
 		{
 			Name:     openCasesTaskName,
-			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "0 8 * * *"),
-			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, worklogCaseLinkBase, alertsEnabled),
+			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "30 3 * * *"),
+			Handler:  opencases.SendReport(longOpenReportClient, openCasesEmail, openCasesTo, openCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
 			RunNowFlags: reportRunNowFlags,
 			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
-					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, worklogCaseLinkBase, alertsEnabled)
+					return opencases.SendReport(longOpenReportClient, email, orRecipients(openCasesTo, rec), openCasesCc, worklogCaseLinkBase, alertsEnabled)
 				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
@@ -971,6 +1227,7 @@ func main() {
 		// which send them seconds after the change rather than on this tick.
 	}
 	tasks = append(tasks, regressionTasks...)
+	tasks = append(tasks, eolUsageTask)
 
 	// Registered only when enabled, rather than registered-and-inert, so the
 	// ledger shows no run at all for a task that is switched off -- an inert
@@ -1076,6 +1333,77 @@ func main() {
 				Cc:       usageRollupMonthlyCc,
 			},
 		)
+	}
+
+	// PLG signups from Moesif, every 15 minutes by default. A run reads a
+	// window of at least two driver intervals (and 2 hours), so a missed or
+	// failed run is covered by the next; ingest is idempotent, so the overlap
+	// is harmless. The handler reads the wall clock, not the period start: the
+	// window must end now to catch the newest signups.
+	if plgMoesifSyncEnabled {
+		window := max(2*driverInterval, 2*time.Hour)
+		if minutes := envInt("PLG_MOESIF_SYNC_WINDOW_MINUTES", 0); minutes > 0 {
+			window = time.Duration(minutes) * time.Minute
+		}
+		// There is no cursor: a window shorter than the longest time between two
+		// runs (the schedule's gap, plus up to one driver interval of delay) loses events.
+		plgMoesifSyncSchedule := scheduleFor(scheduleOverrides, plgMoesifSyncTaskName, "*/15 * * * *")
+		gap, err := schedule.LongestGap(plgMoesifSyncSchedule, time.Now().UTC())
+		if err != nil {
+			slog.Error("plg moesif sync: invalid schedule", "err", err)
+			os.Exit(1)
+		}
+		if window < gap+driverInterval {
+			slog.Error("PLG_MOESIF_SYNC_WINDOW_MINUTES is shorter than the time between runs; events would be missed",
+				"window", window, "needed", gap+driverInterval)
+			os.Exit(1)
+		}
+		events := splitComma(os.Getenv("PLG_MOESIF_SYNC_EVENTS"))
+		if len(events) == 0 {
+			events = plgsignups.DefaultEvents
+		}
+		productFields := splitComma(os.Getenv("PLG_MOESIF_SYNC_PRODUCT_FIELDS"))
+		if len(productFields) == 0 {
+			productFields = plgsignups.DefaultProductFields
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     plgMoesifSyncTaskName,
+			Schedule: plgMoesifSyncSchedule,
+			Handler: plgsignups.Sync(moesifClient, plgSignupsClient, plgsignups.Options{
+				Events:        events,
+				ProductFields: productFields,
+				Window:        window,
+				BatchSize:     envInt("PLG_MOESIF_SYNC_BATCH_SIZE", 100),
+				MaxPages:      envInt("PLG_MOESIF_SYNC_MAX_PAGES", 100),
+			}, time.Now),
+			To: plgMoesifSyncTo,
+			Cc: plgMoesifSyncCc,
+		})
+	}
+
+	// Registration playbooks filled from Moesif activity, hourly, after the
+	// signups sync. A dry run (the default) derives and logs, writes nothing.
+	if plgValidationEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     plgValidationTaskName,
+			Schedule: scheduleFor(scheduleOverrides, plgValidationTaskName, "20 * * * *"),
+			Handler: plgvalidation.Run(moesifClient, plgValidationClient, plgvalidation.Options{
+				Products: plgValidationProducts,
+				Window:   time.Duration(envInt("PLG_REGISTRATION_VALIDATION_WINDOW_HOURS", 12)) * time.Hour,
+				Thresholds: plgvalidation.Thresholds{
+					Eligible: envInt("PLG_REGISTRATION_VALIDATION_ELIGIBLE_ACTIONS", 10),
+					Moderate: envInt("PLG_REGISTRATION_VALIDATION_MODERATE_ACTIONS", 5),
+				},
+				Grace:    time.Duration(envInt("PLG_REGISTRATION_VALIDATION_GRACE_HOURS", 24)) * time.Hour,
+				DryRun:   envBool("PLG_REGISTRATION_VALIDATION_DRY_RUN", true),
+				MaxPages: envInt("PLG_REGISTRATION_VALIDATION_MAX_PAGES", 100),
+				// Typed nils would make the interfaces non-nil.
+				Directory:  directoryOrNil(plgDirectory),
+				Classifier: classifierOrNil(plgClassifier),
+			}, time.Now),
+			To: plgValidationTo,
+			Cc: plgValidationCc,
+		})
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
@@ -1300,6 +1628,50 @@ func main() {
 		})
 	}
 
+	// Hourly, at whatever minute the Choreo trigger fires. A failed run is retried the next tick: closed
+	// incidents are no longer due, so only what is left is attempted.
+	if incidentAutocloseEnabled {
+		// A tryout runs against the real entity-service outside the ledger, so,
+		// as for case_autoclosure, it is always a dry run.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == incidentAutocloseTaskName && !incidentAutocloseCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is incident_autoclose: running as a dry run, nothing will be closed; set INCIDENT_AUTOCLOSE_DRY_RUN=true explicitly to silence this")
+			incidentAutocloseCfg.DryRun = true
+		}
+		// INCIDENT_AUTOCLOSE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=incident_autoclose).
+		// Anything but a boolean refuses to start, like the other
+		// INCIDENT_AUTOCLOSE_* settings.
+		incidentAutocloseScheduled, err := parseStrictBool("INCIDENT_AUTOCLOSE_SCHEDULED", os.Getenv("INCIDENT_AUTOCLOSE_SCHEDULED"), true)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		if !incidentAutocloseScheduled {
+			incidentAutocloseUnscheduled = true
+			slog.Info("incident_autoclose is not scheduled (INCIDENT_AUTOCLOSE_SCHEDULED=false): it runs only with --run-now=incident_autoclose")
+		}
+		// An on-demand run uses the configured settings narrowed by its arguments
+		// and writes no ledger row, like every run-now. That is safe beside the
+		// scheduled run: entity-service re-checks each incident under its row lock
+		// and recomputes the daily budget from its own data on every call.
+		incidentRunNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowIncidentAutoclose(incidentAutocloseCfg, o)
+			if err != nil {
+				return nil, nil, err
+			}
+			return incidentautoclose.Run(incidentAutocloseClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit}, nil
+		}
+		tasks = append(tasks, registry.Task{
+			Name:         incidentAutocloseTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, incidentAutocloseTaskName, "0 * * * *"),
+			Handler:      incidentautoclose.Run(incidentAutocloseClient, incidentAutocloseCfg),
+			RunNowNarrow: incidentRunNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit"},
+			To:           incidentAutocloseTo,
+			Cc:           incidentAutocloseCc,
+		})
+	}
 	// entity-service's daily ACP reopen check -- see internal/acp's
 	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
 	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
@@ -1343,12 +1715,14 @@ func main() {
 	// just the standing ALERT_RECIPIENTS audience. Skipped entirely when
 	// ALERTS_ENABLED=false — no email will ever be sent in that case, so an
 	// unset EMAIL_BASE_URL isn't a misconfiguration.
-	// The product regression reports keep their audience out of task.To (see
-	// their registration above), so it is checked here by name instead.
-	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
+	// The product regression reports and the EOL product usage report keep
+	// their audience out of task.To (see their registration above), so it is
+	// checked here by name instead.
+	reportTasksWithOwnRecipients := append(append([]string{}, regressionTasksWithRecipients...), eolUsageTaskWithRecipients...)
+	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(reportTasksWithOwnRecipients) > 0) {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
-			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+			"reportTasksWithOwnRecipients", reportTasksWithOwnRecipients)
 		os.Exit(1)
 	}
 
@@ -1385,7 +1759,10 @@ func main() {
 
 	engineTasks := tasks
 	if autoclosureUnscheduled {
-		engineTasks = withoutTask(tasks, autoclosureTaskName)
+		engineTasks = withoutTask(engineTasks, autoclosureTaskName)
+	}
+	if incidentAutocloseUnscheduled {
+		engineTasks = withoutTask(engineTasks, incidentAutocloseTaskName)
 	}
 	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 
@@ -1938,4 +2315,18 @@ func loadDotEnv(path string) {
 	if err := scanner.Err(); err != nil {
 		slog.Warn("loadDotEnv: error reading .env file", "err", err)
 	}
+}
+
+func directoryOrNil(c *plgvalidation.DirectoryClient) plgvalidation.Directory {
+	if c == nil {
+		return nil
+	}
+	return c
+}
+
+func classifierOrNil(c *plgvalidation.AIClient) plgvalidation.DomainClassifier {
+	if c == nil {
+		return nil
+	}
+	return c
 }

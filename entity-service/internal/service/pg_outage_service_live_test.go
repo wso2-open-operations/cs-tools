@@ -18,10 +18,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -67,6 +69,9 @@ SELECT so.id::text FROM service_offering so
  WHERE NOT EXISTS (SELECT 1 FROM cloud_monitor m WHERE m.service_offering_id = so.id)
  LIMIT 1`).Scan(&offeringID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			t.Skip("needs a service offering without a cloud monitor; this database has none")
+		}
 		t.Fatalf("find unmonitored offering: %v", err)
 	}
 

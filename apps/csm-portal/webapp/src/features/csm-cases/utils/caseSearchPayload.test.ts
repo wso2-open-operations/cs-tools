@@ -537,6 +537,18 @@ describe("buildCaseSearchFilters — anyOf (OR groups)", () => {
   });
 });
 
+describe("buildCaseSearchFilters — salesRegion", () => {
+  it("emits a salesRegion `in` filter when regions are selected", () => {
+    expect(filterOf({ ...DEFAULT_CASES_FILTERS, salesRegions: ["EMEA", "APAC"] }, "salesRegion")).toEqual([
+      { field: "salesRegion", op: "in", values: ["EMEA", "APAC"] },
+    ]);
+  });
+
+  it("omits the filter when no region is selected", () => {
+    expect(filterOf(DEFAULT_CASES_FILTERS, "salesRegion")).toEqual([]);
+  });
+});
+
 describe("resolveCaseFilterDates", () => {
   const now = new Date(2026, 9, 13, 10, 0, 0);
 

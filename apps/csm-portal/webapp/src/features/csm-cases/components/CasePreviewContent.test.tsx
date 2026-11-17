@@ -26,6 +26,10 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
 }));
 
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: { id: "user-1", email: "jane.doe@example.com" }, isLoading: false, isError: false }),
+}));
+
 import CasePreviewContent from "@features/csm-cases/components/CasePreviewContent";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 

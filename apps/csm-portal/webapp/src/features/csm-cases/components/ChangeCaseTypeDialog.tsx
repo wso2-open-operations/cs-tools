@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Box,
   Button,
   CircularProgress,
@@ -56,6 +57,7 @@ import QueryErrorState from "@components/QueryErrorState";
 import {
   caseTypeTransferLabel,
   computeTransferPreview,
+  serviceRequestSeverityNote,
   SUPPORTED_TRANSFER_TARGETS,
   TRANSFERABLE_CASE_TYPES,
 } from "@features/csm-cases/utils/caseTypeTransfer";
@@ -190,6 +192,7 @@ export default function ChangeCaseTypeDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const preview = computeTransferPreview(currentType, targetType, hasAttachments);
+  const severityNote = serviceRequestSeverityNote(targetType, currentSeverity);
   const isSupportedTarget = SUPPORTED_TRANSFER_TARGETS.includes(targetType);
   const engagementTypeMissing = targetType === "engagement" && engagementType === "";
   const engagementPaymentTypeMissing =
@@ -585,6 +588,15 @@ export default function ChangeCaseTypeDialog({
                 </Box>
               ))}
 
+            {severityNote && (
+              <Alert
+                severity={severityNote.kind === "downgrade" ? "warning" : "info"}
+                data-testid="transfer-severity-note"
+              >
+                {severityNote.message}
+              </Alert>
+            )}
+
             {targetType === "service_request" && (
               <>
                 <Box
@@ -720,6 +732,15 @@ export default function ChangeCaseTypeDialog({
               </Typography>
               .
             </Typography>
+
+            {severityNote && (
+              <Alert
+                severity={severityNote.kind === "downgrade" ? "warning" : "info"}
+                data-testid="transfer-review-severity-note"
+              >
+                {severityNote.message}
+              </Alert>
+            )}
 
             {preview.lostFields.length > 0 && (
               <Typography variant="body2" color="text.secondary">

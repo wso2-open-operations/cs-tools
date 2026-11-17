@@ -63,6 +63,7 @@ import DateLocalField from "@components/date-time-picker/DateLocalField";
 export default function UpdateHistoryTab({
   updates,
   productName,
+  fallbackProductName,
   productVersion,
   isLoading,
   onSaveUpdates,
@@ -88,23 +89,6 @@ export default function UpdateHistoryTab({
   const isAddUpdateSectionLoading = isLoadingProductUpdateLevels;
   const isEditInlineLoading = isLoadingProductUpdateLevels;
 
-  const availableUpdateLevels = useMemo(() => {
-    if (!productName || !productVersion || productUpdateLevels.length === 0) {
-      return [];
-    }
-
-    const productItem = productUpdateLevels.find(
-      (item) => item.productName === productName,
-    );
-    if (!productItem) return [];
-
-    const allLevels = productItem.productUpdateLevels
-      .filter((entry) => entry.productBaseVersion === productVersion)
-      .flatMap((entry) => entry.updateLevels);
-
-    return [...new Set(allLevels)].sort((a, b) => b - a);
-  }, [productName, productVersion, productUpdateLevels]);
-
   const sortedUpdates = useMemo(() => {
     return [...updates].sort(
       (a, b) => (b.updateLevel ?? 0) - (a.updateLevel ?? 0),
@@ -121,6 +105,50 @@ export default function UpdateHistoryTab({
   const currentUpdateLevel = useMemo(() => {
     return sortedLevels.length > 0 ? sortedLevels[0] : null;
   }, [sortedLevels]);
+
+  const availableUpdateLevels = useMemo(() => {
+    if (!productName || !productVersion || productUpdateLevels.length === 0) {
+      return [];
+    }
+
+    const levelsFor = (name: string): number[] => {
+      const productItem = productUpdateLevels.find(
+        (item) => item.productName === name,
+      );
+      if (!productItem) return [];
+
+      const allLevels = productItem.productUpdateLevels
+        .filter((entry) => entry.productBaseVersion === productVersion)
+        .flatMap((entry) => entry.updateLevels);
+
+      return [...new Set(allLevels)].sort((a, b) => b - a);
+    };
+    const hasLevelAbove = (levels: number[]): boolean =>
+      levels.some((l) => currentUpdateLevel === null || l > currentUpdateLevel);
+
+    const levels = levelsFor(productName);
+    if (!fallbackProductName || fallbackProductName === productName) {
+      return levels;
+    }
+    // The profile's own stream is preferred. Use the product's stream instead
+    // when the profile's has nothing for this version, or nothing above the
+    // level already recorded: that level came from the product's numbering,
+    // from before profiles had streams of their own, and the row must not end
+    // up unable to add an update it could add before.
+    if (levels.length === 0 || !hasLevelAbove(levels)) {
+      const fallback = levelsFor(fallbackProductName);
+      if (levels.length === 0 || hasLevelAbove(fallback)) {
+        return fallback;
+      }
+    }
+    return levels;
+  }, [
+    productName,
+    fallbackProductName,
+    productVersion,
+    productUpdateLevels,
+    currentUpdateLevel,
+  ]);
 
   const secondHighestUpdateLevel = useMemo(() => {
     return sortedLevels.length > 1 ? sortedLevels[1] : null;

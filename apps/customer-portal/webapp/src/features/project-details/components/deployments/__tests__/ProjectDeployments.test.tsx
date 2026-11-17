@@ -21,8 +21,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
+import { ApiError } from "@utils/ApiError";
 import ProjectDeployments from "@features/project-details/components/deployments/ProjectDeployments";
-import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
+import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
 
 const mockDeployments = {
   deployments: [
@@ -40,6 +41,9 @@ const mockDeployments = {
 };
 
 vi.mock("@api/usePostProjectDeploymentsSearch");
+vi.mock("@api/useGetProjectDetails", () => ({
+  default: () => ({ data: undefined }),
+}));
 vi.mock("@features/project-details/api/usePostDeploymentProductsSearch", () => ({
   usePostDeploymentProductsSearchAll: () => ({
     data: [],
@@ -154,21 +158,36 @@ vi.mock("@components/error-banner/ErrorBanner", () => ({
   ),
 }));
 
+type InfiniteResult = ReturnType<typeof usePostProjectDeploymentsSearchInfinite>;
+
+/** Builds the infinite-query result the component reads (pages[].deployments/totalRecords). */
+function mockInfiniteResult(overrides: Record<string, unknown> = {}) {
+  vi.mocked(usePostProjectDeploymentsSearchInfinite).mockReturnValue({
+    data: undefined,
+    isLoading: false,
+    isPending: false,
+    isError: false,
+    error: null,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+    ...overrides,
+  } as unknown as InfiniteResult);
+}
+
+function pagesOf(deployments: unknown[], totalRecords = deployments.length) {
+  return { pages: [{ deployments, totalRecords }], pageParams: [0] };
+}
+
 describe("ProjectDeployments", () => {
   beforeEach(() => {
-    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
-      data: mockDeployments.deployments,
-      isLoading: false,
-      isPending: false,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
+    mockInfiniteResult({ data: pagesOf(mockDeployments.deployments) });
   });
 
   it("should render deployment cards when data is loaded", () => {
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
-    expect(screen.getByText("1 deployment environment")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 1 deployment environment")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Production" }),
     ).toBeInTheDocument();
@@ -184,13 +203,7 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show loading skeletons when isLoading is true", () => {
-    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      isPending: true,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
+    mockInfiniteResult({ data: undefined, isLoading: true, isPending: true });
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -198,13 +211,7 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show loading skeletons when isPending is true and isLoading is false", () => {
-    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
-      data: null,
-      isLoading: false,
-      isPending: true,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
+    mockInfiniteResult({ data: null, isPending: true });
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -212,13 +219,7 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show empty state when data is undefined and not loading (initial state)", () => {
-    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isPending: false,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
+    mockInfiniteResult({ data: undefined });
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -227,27 +228,32 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show error state when isError is true", () => {
-    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isPending: false,
-      isError: true,
-      error: new Error("Network error"),
-    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
+    mockInfiniteResult({ data: undefined, isError: true, error: new Error("Network error") });
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
-    expect(screen.getByTestId("error-state-icon")).toBeInTheDocument();
+    // The error illustration is decorative; the state is announced via an alert.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Failed to load deployments. Please try again.",
+    );
+  });
+
+  it("should show the backend message when the error carries one", () => {
+    mockInfiniteResult({
+      data: undefined,
+      isError: true,
+      error: new ApiError(403, "Forbidden", "Access to deployments is denied"),
+    });
+
+    renderWithProviders(<ProjectDeployments projectId="project-123" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Access to deployments is denied",
+    );
   });
 
   it("should show empty state when deployments are empty", () => {
-    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
-      data: [],
-      isLoading: false,
-      isPending: false,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
+    mockInfiniteResult({ data: pagesOf([]) });
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 

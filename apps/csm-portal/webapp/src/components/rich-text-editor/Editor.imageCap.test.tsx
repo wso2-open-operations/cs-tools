@@ -196,3 +196,55 @@ describe("Editor image cap (upload on paste)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Images can't be added to this field.");
   });
 });
+
+describe("a picture beside table HTML (Excel, LibreOffice Calc)", () => {
+  const TABLE = "<table><tr><td>Name</td><td>Age</td></tr><tr><td>Bob</td><td>30</td></tr></table>";
+
+  /** Pastes `data` with a png file item; returns the event. */
+  async function pasteWith(data: Record<string, string>): Promise<ClipboardEvent> {
+    const file = png("cells.png");
+    const clipboardData = {
+      getData: (type: string) => data[type] ?? "",
+      items: [
+        ...Object.keys(data).map((type) => ({ type, kind: "string", getAsFile: () => null })),
+        { type: file.type, kind: "file", getAsFile: () => file },
+      ],
+    } as unknown as DataTransfer;
+    const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData } as ClipboardEventInit & {
+      clipboardData: DataTransfer;
+    });
+    await act(async () => {
+      screen.getByTestId("case-description-editor").dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it("does not upload or insert the picture; the table HTML goes through the Keep/Remove prompt", async () => {
+    const { onImageUpload, onPasteError } = setup();
+    const event = await pasteWith({ "text/html": TABLE, "text/plain": "Name\tAge\nBob\t30" });
+    expect(onImageUpload).not.toHaveBeenCalled();
+    expect(onPasteError).not.toHaveBeenCalled();
+    expect(editorImages()).toHaveLength(0);
+    expect(event.defaultPrevented).toBe(true); // by the paste handler holding it for the prompt
+    expect(await screen.findByRole("button", { name: "Keep Formatting" })).toBeInTheDocument();
+  });
+
+  it("does not refuse the picture either when there is no uploader (nothing is reported)", async () => {
+    const { onPasteError } = setup(false);
+    await pasteWith({ "text/html": TABLE, "text/plain": "Name\tAge\nBob\t30" });
+    expect(onPasteError).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Keep Formatting" })).toBeInTheDocument();
+  });
+
+  it("still stores the picture when the HTML carries an <img> of its own (text + screenshot, a web picture)", async () => {
+    const { onImageUpload } = setup();
+    await pasteWith({ "text/html": '<p>caption</p><img src="https://example.com/a.png">', "text/plain": "caption" });
+    expect(onImageUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("still stores a picture that comes with no HTML at all", async () => {
+    const { onImageUpload } = setup();
+    await pasteWith({});
+    expect(onImageUpload).toHaveBeenCalledTimes(1);
+  });
+});

@@ -19,6 +19,7 @@ import {
   stripWhitespaceStyleAndUnwrapSpans,
   stripWhitespaceStyleFromHtml,
   stripLexicalTableStylingFromHtml,
+  markNestedListItemsInHtml,
 } from "./richTextEditor";
 
 describe("stripWhitespaceStyleAndUnwrapSpans", () => {
@@ -152,7 +153,9 @@ describe("stripWhitespaceStyleFromHtml", () => {
     const out = stripWhitespaceStyleFromHtml(html);
     const elapsedMs = performance.now() - start;
 
-    expect(elapsedMs).toBeLessThan(2000);
+    // Guards against super-linear blow-up, not absolute speed: ~0.3s alone, but
+    // 2.3s+ under parallel full-suite load, so leave generous headroom.
+    expect(elapsedMs).toBeLessThan(8000);
     expect(out).not.toContain("white-space");
     expect((out.match(/<span/g) ?? []).length).toBe(0);
     expect((out.match(/<strong/g) ?? []).length).toBe(RUNS);
@@ -213,5 +216,22 @@ describe("stripLexicalTableStylingFromHtml", () => {
     expect(out).toContain('style="color: red"');
     expect(out).not.toContain("border");
     expect(out).not.toContain("width");
+  });
+});
+
+describe("markNestedListItemsInHtml", () => {
+  it("adds list-style-type: none to a nested-list wrapper item, keeping other attributes", () => {
+    const html = '<ul><li value="1">a</li><li value="2" class="editor-list-item-nested"><ul><li value="1">b</li></ul></li></ul>';
+    expect(markNestedListItemsInHtml(html)).toBe(
+      '<ul><li value="1">a</li><li value="2" class="editor-list-item-nested" style="list-style-type: none"><ul><li value="1">b</li></ul></li></ul>',
+    );
+  });
+
+  it("appends to an existing style, is idempotent and leaves other HTML alone", () => {
+    const once = markNestedListItemsInHtml('<ul><li class="editor-list-item-nested" style="color: red"><ul><li>b</li></ul></li></ul>');
+    expect(once).toContain('style="color: red; list-style-type: none"');
+    expect(markNestedListItemsInHtml(once)).toBe(once);
+    const plain = "<p>a</p><ul><li>x</li></ul>";
+    expect(markNestedListItemsInHtml(plain)).toBe(plain);
   });
 });

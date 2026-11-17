@@ -57,7 +57,7 @@ export default function Header({
     projectId?: string;
   }>();
   const { isLoading: isAuthLoading } = useAsgardeo();
-  const { isProjectSuspended } = useErrorPageContext();
+  const { isProjectSuspended, isErrorPageDisplayed } = useErrorPageContext();
   const isStackedHeader = useIsStackedHeaderLayout();
 
   const isProjectHub = location.pathname === "/";
@@ -86,6 +86,8 @@ export default function Header({
   }, [isError, logger]);
 
   const totalRecords = getTotalRecords(data);
+  // Single-project users have nowhere to switch to, except off an error page.
+  const isBrandNavigationDisabled = totalRecords <= 1 && !isErrorPageDisplayed;
 
   useEffect(() => {
     if (projects.length > 0) {
@@ -194,7 +196,7 @@ export default function Header({
               />
             )}
             <Box sx={{ minWidth: 0, flex: "0 1 auto" }}>
-              <Brand isNavigationDisabled={totalRecords <= 1} />
+              <Brand isNavigationDisabled={isBrandNavigationDisabled} />
             </Box>
             <HeaderUI.Spacer />
             <Actions hideGetHelp={hideProjectControls} />
@@ -243,7 +245,7 @@ export default function Header({
             <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
           )}
           <Box sx={{ flexShrink: 0 }}>
-            <Brand isNavigationDisabled={totalRecords <= 1} />
+            <Brand isNavigationDisabled={isBrandNavigationDisabled} />
           </Box>
           {showProjectToolbar && (
             <Box

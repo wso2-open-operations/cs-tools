@@ -286,8 +286,13 @@ func TestCaseTypeTransferIntegration_OutOfCase_IncidentAndQuery(t *testing.T) {
 				if res.PreviousSeverity == nil || *res.PreviousSeverity != src.wantPrevSev {
 					t.Errorf("PreviousSeverity = %v, want %v", res.PreviousSeverity, src.wantPrevSev)
 				}
-				if res.Severity != nil {
-					t.Errorf("a transfer out of case has no severity, got %v", *res.Severity)
+				// Only a service request holds a severity of its own: the case's
+				// carries over (S2/S4 here, neither needs the S0 downgrade).
+				if (target == "service_request") != (res.Severity != nil) {
+					t.Errorf("Severity = %v after a transfer out of case to %s", res.Severity, target)
+				}
+				if target == "service_request" && (res.Severity == nil || *res.Severity != src.wantPrevSev || res.SeverityDowngrade != nil) {
+					t.Errorf("service request severity = %v (downgrade %v), want %v unchanged", res.Severity, res.SeverityDowngrade, src.wantPrevSev)
 				}
 				if res.State == nil || *res.State != src.wantState {
 					t.Errorf("State = %v, want %v", res.State, src.wantState)
@@ -382,7 +387,9 @@ func TestCaseTypeTransferIntegration_IntoCase_QueryAndIncident(t *testing.T) {
 				if err != nil {
 					t.Fatalf("TransferCaseType: %v", err)
 				}
-				if res.PreviousType != from || res.Type != "case" || res.PreviousSeverity != nil {
+				// A service request carries a severity of its own (S4 by default); the
+				// other source types carry none.
+				if res.PreviousType != from || res.Type != "case" || (res.PreviousSeverity != nil) != (from == "service_request") {
 					t.Errorf("result = %+v", res)
 				}
 				if res.Severity == nil || *res.Severity != sv.sev {

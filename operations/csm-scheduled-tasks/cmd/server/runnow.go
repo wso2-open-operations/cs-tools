@@ -28,6 +28,8 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
@@ -258,6 +260,25 @@ func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (aut
 	return cfg, nil
 }
 
+// narrowIncidentAutoclose is narrowAutoclosure for incident_autoclose, which has
+// no states: a dry run stays a dry run, and the limit may not exceed a
+// configured daily limit (when none is configured it sets one for the run).
+func narrowIncidentAutoclose(cfg incidentautoclose.Config, a registry.RunNowOptions) (incidentautoclose.Config, error) {
+	if a.DryRun {
+		cfg.DryRun = true
+	}
+	if a.Limit > 0 {
+		if cfg.DailyLimit != 0 && a.Limit > cfg.DailyLimit {
+			return cfg, fmt.Errorf("--limit=%d exceeds INCIDENT_AUTOCLOSE_DAILY_LIMIT=%d; a run-now can only tighten the configured limit", a.Limit, cfg.DailyLimit)
+		}
+		if a.Limit > incidentautoclose.MaxDailyLimit {
+			return cfg, fmt.Errorf("--limit=%d exceeds the largest daily limit, %d", a.Limit, incidentautoclose.MaxDailyLimit)
+		}
+		cfg.DailyLimit = a.Limit
+	}
+	return cfg, nil
+}
+
 // narrowACP applies an on-demand run's arguments to acp_closure's configured
 // settings. They can only tighten: a dry run stays a dry run, and the limit may
 // not exceed a configured ACP_DAILY_LIMIT (when none is configured it sets one
@@ -427,6 +448,7 @@ func reportTaskNames() []string {
 		"cs_worklogs_daily_report", "cs_worklogs_weekly_report", "migration_case_report",
 		"open_cases_report", "stale_cases_report", "unresolved_products_digest",
 		"query_hours_usage_notifications", "query_hours_weekly_report",
+		eolusagescan.TaskName,
 	}
 	for _, v := range regressionscan.DefaultVariants() {
 		names = append(names, regressionscan.TaskName(v))

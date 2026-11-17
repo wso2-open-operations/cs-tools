@@ -15,6 +15,9 @@
 // under the License.
 
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Breadcrumbs,
   Button,
@@ -24,11 +27,15 @@ import {
   Grid,
   Link as OxygenLink,
   Paper,
+  Snackbar,
   Stack,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import type { Theme } from "@mui/material/styles";
+import { ArrowLeft, ChevronDown, Clock, Layers } from "@wso2/oxygen-ui-icons-react";
+import { useMemo, useState, type JSX, type MouseEvent } from "react";
 import { Link, useParams } from "react-router";
 import { isClientError, isNotFoundError } from "@api/backend/client";
 import { isValidId } from "@api/backend/types";
@@ -37,30 +44,42 @@ import { useArticle, useKnowledgeBases, useRelatedArticles } from "@api/useKb";
 import LoadingState from "@components/LoadingState";
 import NotFoundState from "@components/NotFoundState";
 import QueryErrorState from "@components/QueryErrorState";
+import SupportCallout from "@components/SupportCallout";
+import { accessibleLinkSx } from "@config/a11yThemeOverrides";
+import { opaquePaper } from "@config/colorUtils";
+import ArticleActions from "@features/kb/components/ArticleActions";
 import ArticleCard from "@features/kb/components/ArticleCard";
 import ArticleList, { ArticleListItem } from "@features/kb/components/ArticleList";
+import TableOfContents from "@features/kb/components/TableOfContents";
 import { useDocumentTitle } from "@hooks/useDocumentTitle";
-import { accessibleLinkSx } from "@config/a11yThemeOverrides";
+import { buildArticleOutline, CODE_BLOCK_CLASS, CODE_COPY_ATTR, CODE_COPY_CLASS } from "@utils/articleOutline";
 import { browseUrl } from "@utils/browseUrl";
-import { formatDate } from "@utils/formatDate";
+import { formatDate, formatRelativeDate } from "@utils/formatDate";
+import { formatReadingTime, readingTimeMinutes } from "@utils/readingTime";
 import { sanitizeArticleHtml } from "@utils/sanitizeHtml";
+import { toPlainText } from "@utils/snippet";
 
-const BODY_SX = {
-  maxWidth: "80ch",
+/** Height of the sticky header plus breathing room, so anchored headings are not hidden under it. */
+const SCROLL_MARGIN_TOP = 96;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const bodySx = (theme: Theme) => ({
+  maxWidth: "76ch",
   fontSize: "1.0625rem",
   lineHeight: 1.75,
   color: "text.primary",
   overflowWrap: "anywhere",
   "& > *:first-of-type": { mt: 0 },
   "& h1, & h2, & h3, & h4": {
-    fontWeight: 600,
+    fontWeight: 650,
     lineHeight: 1.3,
     mt: 5,
     mb: 1.5,
+    scrollMarginTop: SCROLL_MARGIN_TOP,
     "& a.headerlink, & .headerlink": { display: "none" },
   },
   "& h1": { fontSize: "1.75rem" },
-  "& h2": { fontSize: "1.4rem" },
+  "& h2": { fontSize: "1.45rem", pb: 1, borderBottom: 1, borderColor: "divider" },
   "& h3": { fontSize: "1.2rem" },
   "& h4": { fontSize: "1.05rem" },
   "& p": { my: 2 },
@@ -76,29 +95,58 @@ const BODY_SX = {
     fontFamily: "monospace",
     fontSize: "0.9em",
   },
+  [`& .${CODE_BLOCK_CLASS}`]: { position: "relative", my: 3 },
   "& pre": {
     overflowX: "auto",
     p: 2,
-    my: 3,
-    borderRadius: 1,
+    pr: 9,
+    m: 0,
+    borderRadius: 1.5,
     bgcolor: "action.hover",
     border: 1,
     borderColor: "divider",
-    "& code": { bgcolor: "transparent", px: 0, py: 0 },
+    fontSize: "0.9rem",
+    lineHeight: 1.6,
+    "& code": { bgcolor: "transparent", px: 0, py: 0, fontSize: "inherit" },
+  },
+  [`& .${CODE_COPY_CLASS}`]: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    px: 1.25,
+    py: 0.5,
+    borderRadius: 1,
+    border: 1,
+    borderColor: "divider",
+    bgcolor: opaquePaper(theme),
+    boxShadow: 1,
+    color: "text.secondary",
+    font: "inherit",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    lineHeight: 1.4,
+    cursor: "pointer",
+    "&:hover, &:focus-visible": { borderColor: "primary.main", color: "text.primary" },
+    "@media print": { display: "none" },
   },
   "& blockquote": {
     my: 3,
-    ml: 0,
-    pl: 2,
-    borderLeft: 3,
-    borderColor: "divider",
-    color: "text.secondary",
+    mx: 0,
+    px: 2.5,
+    py: 1.5,
+    borderLeft: 4,
+    borderColor: "primary.main",
+    borderRadius: 1,
+    bgcolor: "action.hover",
+    color: "text.primary",
+    "& p": { my: 0.5 },
   },
   "& img": { maxWidth: "100%", height: "auto", borderRadius: 1, my: 2 },
-  "& table": { width: "100%", borderCollapse: "collapse", my: 3, fontSize: "0.9375rem" },
-  "& td, & th": { border: 1, borderColor: "divider", p: 1.25 },
+  "& table": { width: "100%", borderCollapse: "collapse", my: 3, fontSize: "0.9375rem", display: "block", overflowX: "auto" },
+  "& td, & th": { border: 1, borderColor: "divider", p: 1.25, verticalAlign: "top" },
   "& th": { bgcolor: "action.hover", fontWeight: 600, textAlign: "left" },
-} as const;
+  "& hr": { border: 0, borderTop: 1, borderColor: "divider", my: 4 },
+});
 
 export default function KBArticlePage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
@@ -169,11 +217,72 @@ interface ArticleViewProps {
 
 function ArticleView({ article, knowledgeBaseTitle, relatedArticles }: ArticleViewProps): JSX.Element {
   useDocumentTitle(article.title);
+  const theme = useTheme();
+  const wideLayout = useMediaQuery(theme.breakpoints.up("md"));
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const outline = useMemo(() => buildArticleOutline(sanitizeArticleHtml(article.body)), [article.body]);
+  const readingTime = useMemo(() => formatReadingTime(readingTimeMinutes(toPlainText(article.body))), [article.body]);
+
   const published = formatDate(article.publishedOn);
+  const updated = formatRelativeDate(article.updatedOn);
+  // "Updated" only when it adds information: a same-day edit after publishing is noise.
+  const showUpdated =
+    !!updated &&
+    (!article.publishedOn || new Date(article.updatedOn).getTime() - new Date(article.publishedOn).getTime() > DAY_MS);
+
+  // The copy buttons live inside the article HTML, so one delegated handler
+  // serves all of them.
+  const onBodyClick = (event: MouseEvent<HTMLDivElement>): void => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(`[${CODE_COPY_ATTR}]`);
+    if (!button) return;
+    const code = button.parentElement?.querySelector("pre")?.textContent ?? "";
+    // navigator.clipboard is undefined outside a secure context (plain http),
+    // so the call itself can throw: catch synchronously as well as the promise.
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(code);
+        button.textContent = "Copied";
+        window.setTimeout(() => {
+          button.textContent = "Copy";
+        }, 2000);
+        setNotice("Code copied to clipboard");
+      } catch {
+        setNotice("The code could not be copied");
+      }
+    })();
+  };
+
+  const rail = (
+    <Stack spacing={4}>
+      {wideLayout && <TableOfContents headings={outline.headings} />}
+      {relatedArticles.length > 0 && (
+        <Box component="aside" aria-labelledby="related-heading">
+          <Typography
+            id="related-heading"
+            variant="overline"
+            component="h2"
+            color="text.secondary"
+            sx={{ display: "block", mb: 1, letterSpacing: 1 }}
+          >
+            Related articles
+          </Typography>
+          <ArticleList label="Related articles">
+            {relatedArticles.map((a) => (
+              <ArticleListItem key={a.id}>
+                <ArticleCard id={a.id} title={a.title} compact />
+              </ArticleListItem>
+            ))}
+          </ArticleList>
+        </Box>
+      )}
+      <SupportCallout compact />
+    </Stack>
+  );
 
   return (
-    <Container maxWidth="xl" sx={{ py: 5 }}>
-      <Breadcrumbs aria-label="Breadcrumb" sx={{ mb: 3 }}>
+    <Container maxWidth="xl" sx={{ py: { xs: 3, md: 5 } }}>
+      <Breadcrumbs aria-label="Breadcrumb" className="kb-no-print" sx={{ mb: 3 }}>
         <OxygenLink component={Link} to="/" underline="hover" color="inherit">
           Knowledge Base
         </OxygenLink>
@@ -187,65 +296,138 @@ function ArticleView({ article, knowledgeBaseTitle, relatedArticles }: ArticleVi
             {knowledgeBaseTitle}
           </OxygenLink>
         )}
-        <Typography color="text.primary" variant="body2" aria-current="page">
+        <Typography color="text.primary" variant="body2" aria-current="page" sx={{ overflowWrap: "anywhere" }}>
           {article.title}
         </Typography>
       </Breadcrumbs>
 
-      <Grid container spacing={5}>
-        <Grid size={{ xs: 12, md: 9 }}>
-          <Paper component="article" variant="outlined" sx={{ p: { xs: 3, md: 5 }, borderRadius: 2 }}>
-            {article.number && (
-              <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", mb: 1 }}>
-                {article.number}
-              </Typography>
-            )}
-            <Typography variant="h4" component="h1" sx={{ fontWeight: 700, mb: 1.5 }}>
-              {article.title}
-            </Typography>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ color: "text.secondary" }}>
+      <Grid container spacing={{ xs: 4, md: 5 }}>
+        <Grid size={{ xs: 12, md: 8, lg: 9 }}>
+          <Paper component="article" variant="outlined" sx={{ p: { xs: 2.5, sm: 4, md: 5 }, borderRadius: 2 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              flexWrap="wrap"
+              useFlexGap
+              sx={{ gap: 1, mb: 2, color: "text.secondary" }}
+            >
               {knowledgeBaseTitle && (
                 <Chip
                   size="small"
                   variant="outlined"
+                  color="primary"
+                  icon={<Layers size={14} aria-hidden />}
                   label={knowledgeBaseTitle}
                   component={Link}
                   to={browseUrl({ knowledgeBaseId: article.knowledgeBaseId })}
                   clickable
                 />
               )}
-              {published && article.publishedOn && (
-                <Typography variant="body2">
-                  Published{" "}
-                  <time dateTime={article.publishedOn}>{published}</time>
+              {article.number && (
+                <Typography variant="caption" sx={{ fontFamily: "monospace", letterSpacing: 0.5 }}>
+                  {article.number}
                 </Typography>
               )}
             </Stack>
+            <Typography
+              variant="h3"
+              component="h1"
+              sx={{ fontWeight: 750, letterSpacing: "-0.01em", lineHeight: 1.2, fontSize: { xs: "1.75rem", md: "2.25rem" }, mb: 2 }}
+            >
+              {article.title}
+            </Typography>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              justifyContent="space-between"
+              alignItems={{ xs: "flex-start", sm: "center" }}
+              spacing={1.5}
+              useFlexGap
+            >
+              <Stack
+                direction="row"
+                alignItems="center"
+                flexWrap="wrap"
+                useFlexGap
+                sx={{ gap: 2, color: "text.secondary", typography: "body2" }}
+              >
+                {published && article.publishedOn && (
+                  <span>
+                    Published <time dateTime={article.publishedOn}>{published}</time>
+                  </span>
+                )}
+                {showUpdated && updated && (
+                  <span>
+                    Updated{" "}
+                    <time dateTime={updated.iso} title={updated.absolute}>
+                      {updated.label}
+                    </time>
+                  </span>
+                )}
+                {readingTime && (
+                  <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
+                    <Clock size={14} aria-hidden />
+                    {readingTime}
+                  </Box>
+                )}
+              </Stack>
+              <ArticleActions onNotify={setNotice} />
+            </Stack>
             <Divider sx={{ my: 3 }} />
-            <Box
-              sx={BODY_SX}
-              dangerouslySetInnerHTML={{ __html: sanitizeArticleHtml(article.body) }}
-            />
+
+            {!wideLayout && outline.headings.length >= 2 && (
+              <Accordion
+                variant="outlined"
+                disableGutters
+                className="kb-no-print"
+                sx={{ mb: 3, borderRadius: 1.5, "&::before": { display: "none" } }}
+              >
+                <AccordionSummary expandIcon={<ChevronDown size={18} aria-hidden />}>
+                  <Typography variant="subtitle2">On this page</Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ pt: 0 }}>
+                  <TableOfContents headings={outline.headings} />
+                </AccordionDetails>
+              </Accordion>
+            )}
+
+            <Box sx={bodySx} onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: outline.html }} />
+
+            <Divider sx={{ mt: 5, mb: 3 }} className="kb-no-print" />
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1.5}
+              alignItems={{ sm: "center" }}
+              justifyContent="space-between"
+              className="kb-no-print"
+            >
+              <Typography variant="body2" color="text.secondary">
+                {knowledgeBaseTitle ? `Part of the ${knowledgeBaseTitle} knowledge base.` : "Part of the WSO2 Knowledge Base."}
+              </Typography>
+              <Button
+                component={Link}
+                to={knowledgeBaseTitle ? browseUrl({ knowledgeBaseId: article.knowledgeBaseId }) : browseUrl()}
+                variant="text"
+                startIcon={<ArrowLeft size={16} aria-hidden />}
+                sx={{ flexShrink: 0 }}
+              >
+                {knowledgeBaseTitle ? `More ${knowledgeBaseTitle} articles` : "Browse all articles"}
+              </Button>
+            </Stack>
           </Paper>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 3 }}>
-          {relatedArticles.length > 0 && (
-            <Box component="aside" aria-labelledby="related-heading">
-              <Typography id="related-heading" variant="subtitle2" component="h2" sx={{ fontWeight: 600, mb: 1.5 }}>
-                Related articles
-              </Typography>
-              <ArticleList label="Related articles">
-                {relatedArticles.map((a) => (
-                  <ArticleListItem key={a.id}>
-                    <ArticleCard id={a.id} title={a.title} />
-                  </ArticleListItem>
-                ))}
-              </ArticleList>
-            </Box>
-          )}
+        <Grid size={{ xs: 12, md: 4, lg: 3 }} className="kb-no-print">
+          <Box sx={{ position: { md: "sticky" }, top: { md: 88 } }}>{rail}</Box>
         </Grid>
       </Grid>
+
+      <Snackbar
+        open={notice !== null}
+        autoHideDuration={2500}
+        onClose={() => setNotice(null)}
+        message={notice}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Container>
   );
 }

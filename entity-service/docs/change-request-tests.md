@@ -8,8 +8,8 @@ Not every scenario is a Playwright test. The rules (who may answer, what Accept 
 
 | Layer | Where | Needs | Proves |
 |---|---|---|---|
-| Go unit | `entity-service/internal/repository/change_request_*_test.go` (files without `integration`), `entity-service/internal/service`, `internal/domain`, `internal/apierror`, `internal/server`, `apps/csm-portal/backend/internal/handler/change_requests_test.go`, `apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go` | nothing (`go test ./...`) | the transition graph, predicates, locks, error codes, the proposer rule's inputs, the BFFs' pass-through of refusals and `errorCode` |
-| Go integration | `entity-service/internal/repository/change_request_*_integration_test.go` | a Postgres 18 migrated by `scripts/csm-compose/migrate-and-seed.sh`, `CHANGE_REQUEST_TEST_DSN` (superuser) and, for the RLS runs, the same suite as `csm_app`; also run on a copy whose enum columns have the sync's shape | the whole flow on real rows: Request Approval, CAB, the customer's answer, proposals, Accept, counter, decline, Re-schedule, visibility, the Emergency rule, no-bypass, migrated-shaped rows |
+| Go unit | `entity-service/internal/repository/change_request_*_test.go` (files without `integration`), `entity-service/internal/service`, `internal/domain`, `internal/apierror`, `internal/server`, `internal/handler` (`change_request_*_decode_test.go`), `apps/csm-portal/backend/internal/handler/change_requests_test.go`, `apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go` | nothing (`go test ./...`) | the transition graph, predicates, locks, error codes, the proposer rule's inputs, the BFFs' pass-through of refusals and `errorCode` |
+| Go integration | `entity-service/internal/repository/change_request_*_integration_test.go`, `entity-service/internal/handler/change_request_patch_integration_test.go` | a Postgres 18 migrated with the row-level policies of the `1NNNNN` migrations (`make migrate`; `scripts/csm-compose/migrate-and-seed.sh` does not apply them, see section 2), `CHANGE_REQUEST_TEST_DSN` (superuser) and, for the RLS runs, the same suite as `csm_app`; also run on a copy whose enum columns have the sync's shape | the whole flow on real rows: Request Approval, CAB, the customer's answer, proposals, Accept, counter, decline, Re-schedule, visibility, the Emergency rule, no-bypass, migrated-shaped rows |
 | Vitest | CSM webapp `src/features/csm-operations` and `src/features/help`; customer webapp `src/features/operations`; both microapps | nothing (`node_modules/.bin/vitest run`) | UI logic: dialogs, banners, the stepper, gating, `errorCode` handling, the timeline function |
 | Playwright, CSM portal | `apps/csm-portal/webapp/tests/e2e/specs/operations/change-request-{lifecycle,creation,detail}.spec.ts` | the describes marked "mocked backend" run against a faked API; the ones marked "real stack" or "local stack" need the compose stack (`apps/csm-portal/webapp/tests/e2e/auth/README.md`) | staff UI flows end to end |
 | Playwright, customer portal | `apps/customer-portal/webapp/tests/e2e/specs/local/customer-change-request*.spec.ts` | the local compose stack (`apps/customer-portal/webapp/tests/e2e/README.md`, "Local stack") | the customer's UI flows on real data |
@@ -35,7 +35,7 @@ cd apps/customer-portal/webapp && node_modules/.bin/playwright test --list tests
 cd apps/csm-portal/webapp && node_modules/.bin/vitest list src/features/csm-operations src/features/help
 ```
 
-Run the integration tests twice, as the superuser and as `csm_app`: five tests of the repository package (two migration-idempotence tests and three seed tests) need table ownership or bypass RLS and fail as `csm_app`; that is expected and they pass as the superuser.
+Run the integration tests twice, as the superuser and as `csm_app`, on a database that carries the row-level policies of the `1NNNNN` migrations (`scripts/csm-compose/migrate-and-seed.sh` does not apply those; `make migrate` does). Nine tests of the repository package fail as `csm_app` and pass as the superuser: two migration-idempotence tests and three seed tests, which need table ownership or bypass the row-level policies, and four of the Review checkpoint tests (`TestChangeRequestIntegration_PatchReviewProvisionsApproversFromGroupMembers`, `..._PatchReviewDoesNotReprovisionWhenStageExists`, `..._PatchReviewDeduplicatesGroupMembers`, `..._PatchReviewProvisionsRequesterAsCancelled`). The re-run tests of migrations 0249 and 0250 (`..._ProposerMigrationIsSafeToRunAgain`, `..._KeepLegacyProposerMigrationIsSafeToRunAgain`) are skipped as `csm_app`: they need the owner of the table.
 
 ## 3. Scenario map
 
@@ -46,21 +46,37 @@ The files below are where each scenario is tested first; most scenarios appear i
 | Create, Request Approval, the lifecycle and the transition graph | `change_request_repo_integration_test.go`, `change_request_create_integration_test.go`, `change_request_transitions_integration_test.go`, `change_request_transitions_test.go` (unit), `change_request_seed_integration_test.go` | CSM `change-request-lifecycle` ("approval flow" Normal / Standard, "state machine", "stepper and action bar"), `change-request-creation`, `change-request-detail` |
 | The customer's answer: who may answer, the customer stages, the lock on the two requirement boxes | `change_request_customer_outcome_integration_test.go`, `change_request_customer_can_answer_integration_test.go`, `change_request_customer_lock_integration_test.go`, `change_request_customer_group_integration_test.go`, `change_request_customer_privacy_integration_test.go` | CSM `change-request-lifecycle` ("customer group", "the customer's own answer is the only way on", "customer requirements lock (real stack)"); customer `customer-change-request-answer`, `-approval`, `-access` |
 | Nobody answers for the customer; nobody to ask; stale approvals | `change_request_no_bypass_integration_test.go`, `change_request_nobody_to_ask_integration_test.go`, `change_request_stale_approvals_integration_test.go` | CSM `change-request-lifecycle` ("nobody answers for the customer", "Request Approval is refused when nobody can be asked") |
-| A customer's proposed time: propose, Accept, counter, decline, Re-schedule; who proposed it; timestamps | `change_request_proposal_integration_test.go`, `change_request_proposal_proposer_integration_test.go`, `change_request_customer_proposal_integration_test.go`, `change_request_reschedule_legacy_integration_test.go`, `change_request_timestamp_echo_integration_test.go`, `change_request_dates_integration_test.go`; unit: `change_request_customer_proposal_test.go`, `change_request_proposer_test.go`, `change_request_window_test.go` | CSM `change-request-lifecycle` ("a customer's proposed time" mocked and real stack, "Re-schedule"); customer `customer-change-request-propose`, `-dates` |
+| A customer's proposed time: propose, Accept, counter, decline, Re-schedule; who proposed it; timestamps | `change_request_proposal_integration_test.go`, `change_request_proposal_proposer_integration_test.go`, `change_request_proposal_legacy_keep_integration_test.go`, `change_request_customer_proposal_integration_test.go`, `change_request_reschedule_legacy_integration_test.go`, `change_request_timestamp_echo_integration_test.go`, `change_request_dates_integration_test.go`; unit: `change_request_customer_proposal_test.go`, `change_request_proposer_test.go`, `change_request_window_test.go` | CSM `change-request-lifecycle` ("a customer's proposed time" mocked and real stack, "Re-schedule"); customer `customer-change-request-propose`, `-dates` |
 | Emergency changes: one CAB approval, no customer step, the boxes ignored | `change_request_emergency_integration_test.go`, `change_request_emergency_test.go` (unit), `change_request_customer_group_integration_test.go` | CSM `change-request-creation` ("an Emergency change proceeds without customer approval or review"), `change-request-lifecycle` ("approval flow, Emergency", "an Emergency change never reaches a customer state"); customer `customer-change-request-visibility` |
 | Which change requests a customer sees, and when | `change_request_visibility_integration_test.go`, `change_request_visibility_state_filter_integration_test.go`, `change_request_visibility_test.go` and `change_request_visibility_lint_test.go` (unit) | customer `customer-change-request-visibility`, `customer-change-requests` |
 | Migrated (synced) rows: unlabeled stages, the sync's enum shapes, legacy rows | `change_request_synced_stages_integration_test.go`, `change_request_synced_stages_test.go` (unit), `change_request_deployment_rls_integration_test.go`; the integration suite re-run on the enum-shaped copy | CSM `change-request-lifecycle` ("migrated (legacy) change requests (real stack)"); customer `customer-change-request-legacy` |
+| The deviation from the implementation plan: recorded from Implement on (Implement, Review, Customer Review), final once closed, canceled or rolled back, copied by a clone (which must clear it before Request Approval), internal; blank (no text once the markup is removed, the webapp's isBlankHtml) is none | `change_request_deviation_integration_test.go`, `change_request_deviation_test.go` (unit), `rich_text_blank_test.go` (unit), `internal/service/change_request_service_deviation_test.go` (unit), `internal/service/sn_change_request_service_test.go` (unit: the data source that talks to the previous system directly refuses it), `internal/server/change_request_routes_test.go` (the create route is internal-only) | CSM `change-request-lifecycle` ("the deviation from the implementation plan") |
+| PATCH: what a null does, a service-only PATCH, priority (and on create impact and risk), what is not mirrored | `internal/handler/change_request_patch_integration_test.go` (PATCH and both creates, real JSON through the handler); unit: `internal/handler/change_request_patch_decode_test.go`, `internal/handler/change_request_create_decode_test.go`, `internal/domain/change_request_patch_json_test.go`, `internal/service/change_request_service_mirror_test.go`, `internal/service/sn_change_request_service_test.go` | none |
 | Refusals and their `errorCode` | `change_request_error_codes_integration_test.go`, `internal/apierror/errors_test.go` (unit), the two BFF handler tests | customer `customer-change-request-error-codes`; CSM dialogs in `change-request-lifecycle` (mocked backend) |
 | Colour contrast of the answer buttons | none | customer `customer-change-request-contrast` |
 
 ## Appendix A. Go test functions (snapshot)
 
-`entity-service/internal/repository`: 39 files, 391 test functions. Subtests (`t.Run`) are in addition. The one test function whose name carries the previous system's name (the test of the mirror to it) is counted in its file's total but not listed by name; the `grep` in section 2 lists every one.
+`entity-service/internal/repository`: 47 files, 435 test functions in `change_request_*_test.go` (the `grep` in section 2), and `rich_text_blank_test.go` (4) below. Subtests (`t.Run`) are in addition. The test functions whose names carry the previous system's name (the tests of the mirror to it and of the create that writes it first) are counted in their file's total but not listed by name; the `grep` in section 2 lists every one.
 
 **`change_request_approvals_group_integration_test.go`** (integration, 1)
 - TestChangeRequestFlowIntegration_ApprovalsCarryTheAssignmentGroup
 
-**`change_request_create_integration_test.go`** (integration, 4)
+**`change_request_approved_lock_integration_test.go`** (integration, 3)
+- TestChangeRequestApprovedLockIntegration_ApprovedStatesAreReadOnly
+- TestChangeRequestApprovedLockIntegration_EditableUntilApproved
+- TestChangeRequestPlannedDateSortIntegration_NonFiniteDatesAreNoDate
+
+**`change_request_approved_lock_test.go`** (unit, 7)
+- TestChangeRequestContentApproved_EveryState
+- TestChangeRequestLinksLockedStates_CoverEveryApprovedState
+- TestChangeRequestPatchTouchesApprovedContent
+- TestApprovedLockFields_StaffTimeResponseMovesOnlyTheWindow
+- TestApprovedLockFields_ExplicitNullBindsNothing
+- TestApprovedContentQuery_NumbersEveryBoundValueAfterTheID
+- TestApprovedContentLockedMsg
+
+**`change_request_create_integration_test.go`** (integration, 5)
 - TestChangeRequestCreateIntegration_PortalPersistsAssignmentGroup
 - TestChangeRequestCreateIntegration_PortalWithoutAssignmentGroupLeavesItNull
 - TestChangeRequestCreateIntegration_PortalUnknownAssignmentGroupIsValidationError
@@ -185,6 +201,27 @@ The files below are where each scenario is tested first; most scenarios appear i
 **`change_request_deployment_rls_integration_test.go`** (integration, 1)
 - TestChangeRequestDeploymentRLS_InternalSessionCanUpsertWhatTheSyncWrites
 
+**`change_request_deviation_integration_test.go`** (integration, 8)
+- TestChangeRequestDeviationIntegration_PerState
+- TestChangeRequestDeviationIntegration_FinalStatesKeepTheRecord
+- TestChangeRequestDeviationIntegration_TheStoredStateIsJudged
+- TestChangeRequestDeviationIntegration_RequestApprovalNeedsItFoldedIn
+- TestChangeRequestDeviationIntegration_CreateCarriesIt
+- TestChangeRequestDeviationIntegration_CustomersNeverReadOrWriteIt
+- TestChangeRequestDeviationIntegration_BlankMarkupIsNoDeviation
+- TestChangeRequestDeviationIntegration_ACustomerCannotCreateWithOne
+
+**`change_request_deviation_test.go`** (unit, 9)
+- TestNormalizeImplementationDeviation
+- TestSameImplementationDeviation
+- TestRefuseExternalCreateDeviation
+- TestCreateChangeRequest_RefusesACustomersDeviationBeforeAnyWrite
+- TestDeviationFinalMsg
+- TestDeviationNotYetMsg
+- TestDeviationEditRefusal_PerState
+- TestCheckDeviationEditable_RecordableStatesAreNotJudged
+- TestCheckRequestApprovalDeviationCleared_RequestValue
+
 **`change_request_emergency_integration_test.go`** (integration, 10)
 - TestChangeRequestEmergencyIntegration_CreateRefusesTheBoxes
 - TestChangeRequestEmergencyIntegration_BoxesAreRefusedInEveryState
@@ -214,6 +251,9 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestErrorCodesIntegration_NothingPending
 - TestChangeRequestErrorCodesIntegration_NotProposableOutOfState
 
+**`change_request_links_group_test.go`** (unit, 1)
+- TestResolveChangeRequestLinks_AssignmentGroup
+
 **`change_request_no_bypass_integration_test.go`** (integration, 7)
 - TestChangeRequestNoBypassIntegration_ManualScheduledOutOfCustomerApprovalIsRefused
 - TestChangeRequestNoBypassIntegration_ManualClosedOutOfCustomerReviewIsRefused
@@ -233,6 +273,11 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestNobodyToAskIntegration_ALegacyDeadEndRowIsNotRejudged
 - TestChangeRequestNobodyToAskIntegration_AMigratedShapedChangeInNewIsUnaffected
 - TestChangeRequestNobodyToAskIntegration_TheRefusalPredictsTheProvisioningOutcome
+
+**`change_request_plan_fields_integration_test.go`** (integration, 4)
+- TestChangeRequestPlanFieldsIntegration_PortalCreateShowsThePlanAtOnce
+- TestChangeRequestPlanFieldsIntegration_OlderRowsShowThePlanFromTheOlderColumns
+- TestChangeRequestPlanFieldsIntegration_EditReplacesAndClearsThePlan
 
 **`change_request_proposal_harness_integration_test.go`** (integration, 0)
 
@@ -255,20 +300,30 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestProposalIntegration_RacesHaveOneWinner
 - TestChangeRequestProposalIntegration_OutboxRowsCarryTheTurnsOfTheNotices
 
-**`change_request_proposal_proposer_integration_test.go`** (integration, 8)
+**`change_request_proposal_proposer_integration_test.go`** (integration, 14)
 - TestChangeRequestProposalIntegration_AcceptNeedsARecordedProposer
 - TestChangeRequestProposalIntegration_AStoredTimeNobodyProposedIsNoProposalToAnswer
-- TestChangeRequestProposalIntegration_AGenuineProposalAfterAnUnrelatedStaffEditReadsNotRecorded
-- TestChangeRequestProposalIntegration_TheProposerIsTheLastWriterAndNothingElse
+- TestChangeRequestProposalIntegration_AGenuineProposalStaysRecordedAfterAnyStaffWrite
+- TestChangeRequestProposalIntegration_TheProposerIsTheRecordNotTheLastWriter
+- TestChangeRequestProposalIntegration_TheRecordNamesTheProposerOfTheStoredTimeOnly
+- TestChangeRequestProposalIntegration_ALegacyProposalIsReadByItsLastWriter
 - TestChangeRequestProposalIntegration_AStoredTimeNobodyProposedInEveryShape
 - TestChangeRequestProposalIntegration_NoStatementReadsACommentToNameAProposer
 - TestChangeRequestProposalIntegration_ARecordedProposerIsAcceptedEndToEnd
 - TestChangeRequestProposalIntegration_ACustomerCannotClaimAStoredTimeByWritingItAgain
+- TestChangeRequestProposalIntegration_APlainRescheduleVoidsTheRecord
+- TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain
+- TestChangeRequestProposalIntegration_TheRecordedUserIsAForeignKeyClearedOnDelete
+- TestChangeRequestProposalIntegration_TheProposalNoticeNamesTheRecordedProposer
+
+**`change_request_proposal_legacy_keep_integration_test.go`** (integration, 2)
+- TestChangeRequestProposalIntegration_AWriteKeepsALegacyProposer
+- TestChangeRequestProposalIntegration_KeepLegacyProposerMigrationIsSafeToRunAgain
 
 **`change_request_proposer_test.go`** (unit, 4)
 - TestNewLastWriter
-- TestResolveProposer_TheLastWriterAndNothingElse
-- TestReadProposer_ReadsTheLastWriterAndNothingElse
+- TestResolveProposer_TheRecordAndTheLegacyLastWriter
+- TestReadProposer_ReadsTheRecordAndTheLegacyLastWriter
 - TestProposalFile_NoSQLReadsTheCommentTable
 
 **`change_request_repo_integration_test.go`** (integration, 101)
@@ -456,6 +511,11 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestRuntimeApprovalStageKind_NeverOutOfState
 - TestExcludedMembersSummary
 
+**`change_request_tags_integration_test.go`** (integration, 3)
+- TestChangeRequestTagsIntegration_DetailCarriesTagsAddedThroughTheCasePath
+- TestChangeRequestTagsIntegration_MigratedTagsAreReadAddedAlongsideAndRemoved
+- TestChangeRequestTagsIntegration_CustomersNeverSeeOrReachTags
+
 **`change_request_timestamp_echo_integration_test.go`** (integration, 2)
 - TestChangeRequestTimestampEchoIntegration_TheReadPrintsWhatTheWritePathKept
 - TestChangeRequestTimestampEchoIntegration_EveryAnswerAcceptsWhatTheReadPrinted
@@ -525,7 +585,13 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestParseExpectedTimestamp
 - TestRedactInternalApprovalStages
 
-Service, domain, error-code, route and BFF tests (the tests of the other data source's service files are not listed here):
+**`rich_text_blank_test.go`** (unit, 4; the blank rule of the deviation, not only of change requests)
+- TestIsBlankRichText
+- TestIsBlankRichText_EmptyEditorMarkup
+- TestIsBlankRichText_LinearTime
+- TestIsBlankRichText_TooDeepIsNotBlank
+
+Service, domain, error-code, route, handler and BFF tests (the tests of the other data source's service files are not listed here, and a test whose name carries the previous system's name is counted but not listed):
 
 **`entity-service/internal/service/change_request_filters_test.go`** (8)
 - TestParseChangeRequestFieldFilters_CreatedOnRelativeDate
@@ -578,7 +644,16 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 **`entity-service/internal/service/change_request_service_lock_test.go`** (1)
 - TestChangeRequestService_PatchChangeRequest_RefusalIsNeverMirrored
 
-**`entity-service/internal/service/cr_notice_service_test.go`** (13)
+**`entity-service/internal/service/change_request_service_deviation_test.go`** (4)
+- TestChangeRequestService_PatchChangeRequest_DeviationAloneIsAPatch
+- TestChangeRequestService_PatchChangeRequest_DeviationStaysOutOfTheMirror
+- TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresOnly
+- TestChangeRequestService_CreateChangeRequest_RefusesACustomersDeviationBeforeThePreviousSystem
+
+**`entity-service/internal/service/change_request_service_mirror_test.go`** (1)
+- TestChangeRequestService_PatchChangeRequest_PostgresOnlyFieldsAreNotMirrored
+
+**`entity-service/internal/service/cr_notice_service_test.go`** (17)
 - TestApprovalNotice_StateTable
 - TestApprovalNotice_OnlyOnTransition
 - TestTeamFromGitReference
@@ -590,6 +665,10 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestPlanDate_ADeclineSendsTheSameNoticeAsADifferentTime
 - TestPlanDate_WSO2ActorSuppressesCustomerProposed
 - TestPlanDate_CustomerProposedNotifiesInternalGroup
+- TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast
+- TestPlanDate_AStaleRecordFallsBackToTheLastWriter
+- TestPlanDate_NoRecordFallsBackToTheLastWriter
+- TestPlanDate_KeepingALegacyProposerSendsNothing
 - TestHandleChange_IgnoresUnrelatedEntityType
 - TestHandleChange_SecondBranchRunsAfterFirstFails
 
@@ -597,16 +676,44 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestChangeRequest_CustomerCanAnswerJSONContract
 - TestSearchChangeRequestView_HasNoCustomerCanAnswer
 
-**`entity-service/internal/apierror/errors_test.go`** (4)
+**`entity-service/internal/domain/change_request_patch_json_test.go`** (6)
+- TestPatchChangeRequestRequest_ExplicitNull
+- TestPatchChangeRequestRequest_ValuesStillDecode
+- TestPatchChangeRequestRequest_NullStaysOmittedElsewhere
+- TestPatchChangeRequestRequest_CaseInsensitiveKey
+- TestPatchChangeRequestRequest_RejectsUnknownFields
+- TestPatchChangeRequestRequest_MarshalRoundTrip
+
+**`entity-service/internal/apierror/errors_test.go`** (5)
 - TestInvalidValue
 - TestWriteJSON_HasNoErrorCodeUnlessGiven
 - TestWriteJSONWithCode_AddsErrorCodeBesideTheMessage
 - TestCodes_AreStableLowerSnakeCase
+- TestPrefixed_KeepsTheRefusalsTypeAndCode
 
-**`entity-service/internal/server/change_request_routes_test.go`** (1)
+**`entity-service/internal/server/change_request_routes_test.go`** (2)
 - TestChangeRequestLinkOptionsIsInternalOnly
+- TestChangeRequestCreateIsInternalOnly
 
-**`apps/csm-portal/backend/internal/handler/change_requests_test.go`** (19)
+**`entity-service/internal/handler/change_request_patch_decode_test.go`** (5)
+- TestPatchChangeRequestOverHTTP_ExplicitNullClears
+- TestPatchChangeRequestOverHTTP_RemovedFieldsRefuseNull
+- TestPatchChangeRequestOverHTTP_UnknownFieldStillRefused
+- TestPatchChangeRequestOverHTTP_ServiceAloneIsAPatch
+- TestPatchChangeRequestOverHTTP_PriorityIsValidated
+
+**`entity-service/internal/handler/change_request_create_decode_test.go`** (2)
+- TestCreateChangeRequestOverHTTP_LevelsAreValidated
+- TestCreateChangeRequestOverHTTP_SettableLevelsAreCreated
+
+**`entity-service/internal/handler/change_request_patch_integration_test.go`** (integration, 5)
+- TestChangeRequestPatchIntegration_ExplicitNullClears
+- TestChangeRequestPatchIntegration_ServiceAloneIsAPatch
+- TestChangeRequestPatchIntegration_PriorityIsValidated
+- TestChangeRequestPatchIntegration_HoldIsNotMirrored
+- TestChangeRequestCreateLevelsIntegration_BothCreates
+
+**`apps/csm-portal/backend/internal/handler/change_requests_test.go`** (20)
 - TestCreateChangeRequest
 - TestGetChangeRequest
 - TestPatchChangeRequest
@@ -623,11 +730,12 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestCreateChangeRequest_CustomerGateFlags
 - TestPatchChangeRequest_CustomerGateFlags
 - TestGetChangeRequest_ReturnsCustomerGateFlags
+- TestGetChangeRequest_PassesTagsThrough
 - TestChangeRequestScopeFieldValidation
 - TestChangeRequestLinkOptions
 - TestChangeRequestBodyGuardsIgnoreTheCaseOfKeys
 
-**`apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go`** (15)
+**`apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go`** (16)
 - TestPatchChangeRequest_CustomerAllowedBodies
 - TestPatchChangeRequest_CustomerCannotSendAnyOtherField
 - TestPatchChangeRequest_CustomerMalformedAndAmbiguousBodies
@@ -636,6 +744,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestPatchChangeRequest_StaffCannotCarryTheExpectedWindow
 - TestPatchChangeRequest_CustomerUpstreamErrors
 - TestGetChangeRequest_CarriesCustomerCanAnswer
+- TestGetChangeRequest_CarriesTheRequirementBoxesOnlyWithACustomerRead
 - TestGetChangeRequest_CarriesTheCustomerProposal
 - TestMapChangeRequestDetails_NeverPassesOnWhoProposedOrWSO2sOwnFacts
 - TestPatchChangeRequest_CustomerProposalIsValidatedBeforeItIsSent
@@ -646,7 +755,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 
 ## Appendix B. Playwright, CSM portal (snapshot)
 
-192 tests in 3 files.
+202 tests in 4 files.
 
 **`specs/operations/change-request-creation.spec.ts`** (29)
 - change request creation — page structure › offers exactly Normal, Standard and Emergency, with none pre-selected
@@ -683,7 +792,13 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - change request detail — Request Approval › transitions the approval section to a requested/pending state
 - change request detail — approve/reject › approves the signed-in user's own pending stage, self-skipping on 403 or no button
 
-**`specs/operations/change-request-lifecycle.spec.ts`** (161)
+**`specs/operations/change-request-editor-size.spec.ts`** (4)
+- change request create form — panel size › a panel is made taller with the arrow keys and by dragging, and Home restores it
+- change request create form — panel size › Expand opens the field full screen; what is typed there is in the form after Done
+- change request edit form — panel size › the rollback plan typed full screen is what Save sends
+- change request edit form — panel size › an approved change request's plan opens full screen read-only
+
+**`specs/operations/change-request-lifecycle.spec.ts`** (167)
 - seeded fixtures (local stack) › change request lifecycle — compulsory team gate › Request Approval is disabled with no assigned team, and states why
 - seeded fixtures (local stack) › change request lifecycle — Assess-entry auto-provisioning › Request Approval succeeds once a team is assigned, and provisions that team's INTERNAL members as approvers
 - seeded fixtures (local stack) › change request lifecycle — approve cascades to Authorize › an internal approver sees the peer stage and approving it cascades to Authorize (CAB) and cancels the others
@@ -713,7 +828,8 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - change request approval flow — an Emergency change never reaches a customer state › an OLDER Emergency change with a live ECAB stage still shows it, its asked approver can still decide it, and the CAB approval schedules it
 - change request approval flow — Standard with Customer Approval › Request Approval goes to Customer Approval (not Scheduled), and only the customer's answer schedules it
 - change request approval flow — editing the customer checkboxes › both are editable before their gate, are sent via PATCH, and show on the Approval tab afterwards
-- change request approval flow — editing the customer checkboxes › Customer Approval is disabled with an explanation once the CR is scheduled; Customer Review can still be added (the project is stored)
+- change request approval flow — editing the customer checkboxes › once the CR is scheduled (approved) both boxes are read-only with the notice, and only a work note can be added
+- change request approval flow — editing the customer checkboxes › after the CAB approval every field is read-only, the implementation plan included, and a work note is added on its own
 - change request approval flow — editing the customer checkboxes › Customer Review is disabled once the CR has reached customer review
 - change request approval flow — editing the customer checkboxes › shows the backend's refusal when the gate passed while the dialog was open (400)
 - change request approval flow — the Edit dialog follows the lock in every state › new (approval unticked, review unticked, no project): the project is editable, the approval box open, the review box open
@@ -722,11 +838,11 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - change request approval flow — the Edit dialog follows the lock in every state › assess (approval unticked, review unticked, no project): the project is read-only with its reason, the approval box read-only, the review box read-only
 - change request approval flow — the Edit dialog follows the lock in every state › authorize (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box open, the review box open
 - change request approval flow — the Edit dialog follows the lock in every state › authorize (approval ticked, review ticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
-- change request approval flow — the Edit dialog follows the lock in every state › customer_approval (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
-- change request approval flow — the Edit dialog follows the lock in every state › scheduled (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › customer_approval (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › scheduled (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
 - change request approval flow — the Edit dialog follows the lock in every state › scheduled (approval unticked, review unticked, no project): the project is read-only with its reason, the approval box read-only, the review box read-only
-- change request approval flow — the Edit dialog follows the lock in every state › implement (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
-- change request approval flow — the Edit dialog follows the lock in every state › review (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › implement (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › review (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
 - change request approval flow — the Edit dialog follows the lock in every state › review (approval unticked, review ticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
 - change request approval flow — the Edit dialog follows the lock in every state › customer_review (approval ticked, review ticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
 - change request approval flow — the Edit dialog follows the lock in every state › customer_review (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
@@ -735,12 +851,17 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - change request approval flow — the Edit dialog follows the lock in every state › a client that resends the whole form is not punished: the stored project and boxes are accepted, and saving changes nothing it should not
 - change request approval flow — the Edit dialog follows the lock in every state › no Customer Project: a box cannot be turned on after New, in the backend's words; and Request Approval with a box ticked and no project is refused in them too
 - change request approval flow — Standard › Request Approval goes straight to Scheduled, with no approval stages
+- change request lifecycle — the deviation from the implementation plan (mocked backend) › once approved the plan is read-only, but the deviation is recorded beside a work note and shown under the plan
+- change request lifecycle — the deviation from the implementation plan (mocked backend) › final once the change request is closed: read-only in the form, and the API refuses a change in the backend's words
+- change request lifecycle — the deviation from the implementation plan (mocked backend) › before implementation it cannot be recorded: Scheduled offers no field, and the move to Implement cannot carry it
+- change request lifecycle — the deviation from the implementation plan (mocked backend) › Clone carries the deviation into the create form, read-only, and sends it; the new change clears it before Request Approval
 - change request lifecycle — project and deployments (mocked backend) › Normal change: create with project + deployments, see them on the detail page, edit the scope, approve, and have it locked once implementing
 - change request lifecycle — project and deployments (mocked backend) › editing: changing the project clears the dependents and sends the new project with empty lists
 - change request lifecycle — project and deployments (mocked backend) › editing: picking deployments of a new project derives the products
 - change request lifecycle — project and deployments (mocked backend) › editing: the category is sent on its own when only it changed
 - change request lifecycle — project and deployments (mocked backend) › editing: shows the backend's refusal verbatim when a chosen deployment was deactivated behind the dialog
 - change request lifecycle — project and deployments (mocked backend) › the detail Overview shows a dash for each field a change request has none of
+- change request tags (mocked backend) › a tag the previous system migrated is shown; an engineer adds one from the vocabulary and removes one, through the case tag routes
 - change request approval flow — customer group (the project's registered contacts) › Normal with Customer Approval and Customer Review on a project with registered contacts: every step shows the right state, stage rows and buttons for the creator and a non-contact, and the customer's answers (applied server-side) show up
 - change request approval flow — customer group (the project's registered contacts) › a contact rejecting the Customer Approval (in the customer portal) cancels the change request, and the CSM page shows it
 - change request approval flow — customer group (the project's registered contacts) › a contact rejecting the Customer Review (in the customer portal) moves the change request to Rollback (terminal, no actions left), and the CSM page shows it
@@ -838,7 +959,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request sitting in Customer Approval with nobody asked: the Approvals tab says so, and staff cannot answer for the customer (Re-schedule and Cancel change only; the API refuses {state: scheduled})
 - migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request sitting in Customer Review with nobody asked: the note names Roll back or Cancel change as the ways out, Roll back is enabled, there is no Close, and the API refuses {state: closed}
 - migrated (legacy) change requests in the CSM portal (real stack) › Re-schedule on a legacy change in Customer Approval whose requirement box is false (migration 0189 defaulted it) asks the customer again and the change stays in Customer Approval: no CAB, the box is not written, and only the customer's own answer schedules it
-- migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request in Scheduled with its flags false and a Customer Project: the Edit dialog freezes the project, closes the approval box (its gate is passed) and still lets the review box be added
+- migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request in Scheduled with its flags false and a Customer Project: the Edit dialog freezes the project and, the change being approved, every field: the review box can no longer be added
 - a customer's proposed time (real stack) › Dave proposes a start: the change waits in Customer Approval with its window untouched and nothing else written; the banner names him, and Accept proposed time schedules it by the proposal, with no CAB, no new request and nothing stamped as the customer's approval
 - a customer's proposed time (real stack) › Propose a different time asks the customer again (no CAB) and answers the proposal DISAGREE; a decline keeps the window and the customers' live request; the customer's next proposal brings the banner back
 - a customer's proposed time (real stack) › on the rows the sync writes: a migrated change in Customer Approval with a customer date and no answer is a stored time nobody is recorded as having proposed: Accept is refused (page and API), and Propose a different time is a plain Re-schedule that writes no answer
@@ -940,22 +1061,25 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - `src/features/csm-operations/api/useDecideChangeRequestApproval.test.tsx` (6)
 - `src/features/csm-operations/api/usePatchChangeRequest.test.tsx` (3)
 - `src/features/csm-operations/api/useQuickChangeRequestSearch.test.tsx` (7)
+- `src/features/csm-operations/components/BulkEditChangeRequestsDialog.test.tsx` (16)
 - `src/features/csm-operations/components/ChangeRequestAcceptProposedTimeDialog.test.tsx` (8)
-- `src/features/csm-operations/components/ChangeRequestActionBar.test.tsx` (86)
+- `src/features/csm-operations/components/ChangeRequestActionBar.test.tsx` (91)
 - `src/features/csm-operations/components/ChangeRequestApprovals.test.tsx` (51)
 - `src/features/csm-operations/components/ChangeRequestLifecycleStepper.test.tsx` (37)
 - `src/features/csm-operations/components/ChangeRequestProposedTimeBanner.test.tsx` (18)
 - `src/features/csm-operations/components/ChangeRequestRescheduleDialog.test.tsx` (28)
 - `src/features/csm-operations/components/ChangeRequestTransitionReasonDialog.test.tsx` (24)
 - `src/features/csm-operations/components/ChangeRequestsFilterBar.test.tsx` (4)
-- `src/features/csm-operations/components/ChangeRequestsTab.test.tsx` (5)
-- `src/features/csm-operations/components/EditChangeRequestDialog.test.tsx` (83)
+- `src/features/csm-operations/components/ChangeRequestsTab.test.tsx` (23)
+- `src/features/csm-operations/components/EditChangeRequestDialog.test.tsx` (112)
+- `src/features/csm-operations/components/ImplementationDeviationSection.test.tsx` (2)
 - `src/features/csm-operations/hooks/useChangeRequestScope.test.tsx` (17)
-- `src/features/csm-operations/pages/CreateChangeRequestPage.test.tsx` (104)
-- `src/features/csm-operations/pages/CsmChangeRequestDetailPage.test.tsx` (171)
-- `src/features/csm-operations/utils/__tests__/changeRequestReportPdf.test.ts` (5)
+- `src/features/csm-operations/pages/CreateChangeRequestPage.test.tsx` (109)
+- `src/features/csm-operations/pages/CsmChangeRequestDetailPage.test.tsx` (186)
+- `src/features/csm-operations/utils/__tests__/bulkChangeRequestEdit.test.ts` (32)
+- `src/features/csm-operations/utils/__tests__/changeRequestReportPdf.test.ts` (8)
 - `src/features/csm-operations/utils/__tests__/changeRequestStages.test.ts` (57)
-- `src/features/csm-operations/utils/__tests__/changeRequests.test.ts` (152)
+- `src/features/csm-operations/utils/__tests__/changeRequests.test.ts` (167)
 - `src/features/csm-operations/utils/changeRequestsFiltersUrl.test.ts` (11)
 
 **`apps/customer-portal/webapp`**
@@ -964,7 +1088,9 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - `src/features/dashboard/api/__tests__/useGetProjectChangeRequestsStats.test.tsx` (1)
 - `src/features/operations/api/__tests__/fetchChangeRequestSearchResults.test.ts` (2)
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestDetailsLoadingSkeleton.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestFiltersPanel.test.tsx` (2)
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestRejectConfirmDialog.test.tsx` (8)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestWorkflow.test.tsx` (9)
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestsCalendarSkeleton.test.tsx` (1)
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestsCalendarView.test.tsx` (3)
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestsCsvExportButton.test.tsx` (1)
@@ -974,21 +1100,22 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestsSearchBar.test.tsx` (1)
 - `src/features/operations/components/change-requests/__tests__/ChangeRequestsStatCards.test.tsx` (1)
 - `src/features/operations/components/change-requests/__tests__/ProposeNewImplementationTimeModal.test.tsx` (34)
-- `src/features/operations/components/change-requests/__tests__/ScheduledMaintenanceWindowCard.test.tsx` (7)
+- `src/features/operations/components/change-requests/__tests__/ScheduledMaintenanceWindowCard.test.tsx` (11)
 - `src/features/operations/pages/__tests__/ChangeRequestDetailsPage.focus.test.tsx` (19)
-- `src/features/operations/pages/__tests__/ChangeRequestDetailsPage.test.tsx` (51)
+- `src/features/operations/pages/__tests__/ChangeRequestDetailsPage.test.tsx` (59)
 - `src/features/operations/pages/__tests__/ChangeRequestsPage.test.tsx` (1)
 - `src/features/operations/pages/__tests__/ChangeRequestsPage.visibility.test.tsx` (3)
+- `src/features/operations/utils/__tests__/changeRequestDetailsPdf.test.ts` (3)
 - `src/features/operations/utils/__tests__/changeRequestSchedule.test.ts` (31)
 - `src/features/operations/utils/__tests__/changeRequestUi.test.ts` (8)
-- `src/features/operations/utils/__tests__/changeRequests.test.ts` (64)
+- `src/features/operations/utils/__tests__/changeRequests.test.ts` (97)
 - `src/features/operations/utils/__tests__/changeRequestsCsvExport.test.ts` (3)
 - `src/features/operations/utils/__tests__/changeRequestsSchedulePdf.test.ts` (1)
 
 **`apps/customer-portal/microapp`**
 
-- `src/utils/changeRequestProgress.test.ts` (16)
+- `src/utils/changeRequestProgress.test.ts` (28)
 
 **`apps/csm-portal/microapp`**
 
-- `src/types/changeRequest.model.test.ts` (6)
+- `src/types/changeRequest.model.test.ts` (8)
