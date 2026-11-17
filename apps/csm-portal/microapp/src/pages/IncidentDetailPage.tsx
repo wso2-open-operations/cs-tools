@@ -108,7 +108,7 @@ function IncidentDetailContent({ id }: { id: string }) {
             {/* "Caused by" has no confirmed target record type (could be a change request, a
                 problem, or something else), same caveat the webapp's own detail page notes — left
                 as plain text rather than guessing a route. */}
-            <DetailRow label="Caused By" value={incident.causedBy?.name} />
+            <DetailRow label="Caused By" value={stripStaffNameMarker(incident.causedBy?.name) || undefined} />
           </Stack>
         </SectionCard>
       )}
