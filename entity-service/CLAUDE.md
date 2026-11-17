@@ -497,19 +497,21 @@ config, not hardcoded into the endpoint.
 
 Backs a dashboard's MTTR numbers: for each severity band (`S1-S4`, `S1-S3`, `S1`, `S2`, `S3`,
 `S4`, plus `S0`/catastrophic as its own band; the two combined bands S1-S4 and S1-S3 never include S0, so the overall figure keeps its original meaning), the average time from a case's `created_on` to the
-**last** time it entered Solution Proposed, over cases whose last such entry falls within a
-trailing window: `months` (`1`/`3`/`6`/`12`) or `days` (`7`), exactly one of them -- anything else is a 400; the response's `windowMonths` is 0 and `windowDays` set for a day window. An optional
+**last** time it entered Solution Proposed, over cases created in a trailing window whose
+last such entry also falls within it. The window is `months` (`1`/`3`/`6`/`12`) or `days` (`7`), exactly one of them -- anything else is a 400; the response's `windowMonths` is 0 and `windowDays` set for a day window. An optional
 repeated `creTeamId` query param restricts to cases whose account's CRE team
 (`account.cre_team_id`) is one of the given `"group"` ids; omitted, every team is included.
 `internalOnly`-gated at the route, like `/reports/long-open-cases`, and not registered at all
 under `DATA_SOURCE=servicenow` -- it reads the Postgres case/`work_item_activity` tables only.
 
-**Filtered by when a case was resolved, not when it was created.** An earlier case-created-date
-filter was considered and rejected: a case opened four months ago and resolved last month should
-count toward a 3-month MTTR, because the metric answers "how fast are we resolving things
-lately" -- filtering on `created_on` instead would exclude it and bias the average toward only
-recently-opened, already-fast cases. This also matches the ServiceNow report this feature
-mirrors, which filtered on the state-change date range, not the opened date.
+**Opened in the window AND resolved in it.** A case counts only if it was created inside the window and its last
+Solution Proposed entry is also inside it, so "MTTR for a month" is about the cases opened that month. Earlier the
+filter was the resolution date alone, which also counted older cases that finally closed inside the window; in a
+real month that lifted one severity's average from about 108 h (45 cases) to about 237 h (63 cases), the 18 old cases
+averaging about 560 h. The cost of the stricter rule: an old case that closes in the window is left out, and a case opened in the
+window but not resolved yet is left out until it is, so a recent window looks faster than it will end up. The
+other half of that trade-off is why the original rule used the resolution date (it also matches the ServiceNow
+report this feature mirrors).
 
 **Only cases that are resolved now.** A case counts only while its current state (`"case".state`) is
 Solution Proposed or Closed. A rejected proposal sends the case back (e.g. to Work In Progress) but its

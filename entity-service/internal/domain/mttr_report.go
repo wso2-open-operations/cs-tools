@@ -22,10 +22,11 @@ import "time"
 // each severity band, the average time from a case's creation to the LAST
 // time it entered Solution Proposed (a rejected proposal bounces a case back
 // for more work before a later one sticks, so the last entry, not the
-// first, is when the case was actually resolved), counted over cases whose
-// last entry falls within the requested trailing window -- not over cases
-// created in the window, which would miss an old case resolved recently and
-// bias the average toward fast, recently-opened cases.
+// first, is when the case was actually resolved), counted over cases that
+// were created in the requested trailing window and whose last entry also
+// falls within it. A case opened before the window is not counted even when
+// it was resolved inside it, and a case opened in the window but not yet
+// resolved is not counted until it is.
 type MTTRReportRequest struct {
 	// WindowMonths is how many trailing months to measure, counted back from
 	// Now. One of 1, 3, 6 or 12. Exactly one of WindowMonths and WindowDays
