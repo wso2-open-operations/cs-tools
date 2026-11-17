@@ -1624,3 +1624,42 @@ func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvIntInRange(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{"unset uses the default", "", 3},
+		{"lowest allowed", "2", 2},
+		{"in range", "6", 6},
+		{"highest allowed", "24", 24},
+		{"below the range uses the default", "1", 3},
+		{"above the range uses the default", "25", 3},
+		{"not a number uses the default", "many", 3},
+		{"zero uses the default", "0", 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CSM_TEST_MONTHS_AHEAD", tc.value)
+			if got := envIntInRange("CSM_TEST_MONTHS_AHEAD", 3, 2, 24); got != tc.want {
+				t.Errorf("envIntInRange(%q) = %d, want %d", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoad_AuditLogEnabled pins the audit log's switch: off unless it parses as
+// true, so a typo leaves the upkeep endpoint unregistered.
+func TestLoad_AuditLogEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"": false, "true": true, "TRUE": true, "1": true,
+		"false": false, "0": false, "yes": false, "on": false, "garbage": false,
+	} {
+		t.Setenv("CSM_AUDIT_LOG_ENABLED", value)
+		if got := Load().AuditLogEnabled; got != want {
+			t.Errorf("CSM_AUDIT_LOG_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}

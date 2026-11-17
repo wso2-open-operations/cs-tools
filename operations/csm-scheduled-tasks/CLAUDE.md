@@ -993,6 +993,16 @@ the run-now is safe beside the scheduled run for the reason above: entity-servic
 `AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
 the logs (`run-now: ...`).
 
+## Audit log maintenance
+
+**`audit_log_maintenance`** (default `0 1 * * *`, daily at 01:00 UTC) is the daily upkeep of entity-service's field-level audit log (its migration `0295`). It is a trigger, not a calculator: `internal/auditlog.Client` calls `POST /audit-log/maintenance` (service credentials only: this component's client id must be in entity-service's `M2M_CLIENT_IDS`), and the work runs in the database. Entity-service creates the coming monthly partitions, checks the log's health and puts back audit triggers that were missing or disabled; its own CLAUDE.md ("Audit log maintenance") has the details. This is the only scheduler of that upkeep: entity-service has none of its own.
+
+A 200 from entity-service means the steps ran, not that all is well, so `auditlog.Maintenance` reads the lists in the response and **returns an error for any of them**: a step that could not run (`stepErrors`), a health problem (rows in the catch-all partition, fewer than two future months), a trigger that was repaired (the history had a gap while it was off) or one still wrong after the repair. The error names each, the engine mails it, and the next tick retries. The upkeep is safe to repeat, so the retry succeeds once nothing is wrong any more, which is also how a repaired trigger stops alerting.
+
+**Off unless `AUDIT_LOG_MAINTENANCE_ENABLED=true`** (default false): neither the client nor the task is created otherwise. Turn it on only once entity-service has `CSM_AUDIT_LOG_ENABLED=true` (without it the endpoint answers 404), migration `0295` applied and its database role has `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health()` and `audit_reconcile(boolean)`; before that every run fails and mails. A failed audit write fails the business write, so once the audit log is in use, a stopped upkeep is an outage a few months out: alert on `SELECT count(*) FROM audit_partition_health()` too, which does not depend on this task.
+
+Retiring old partitions is not part of this task. An admin does it monthly with `audit_retire_partitions` (see entity-service's CLAUDE.md).
+
 ## Usage rollups
 
 Two sub-crons that rebuild the usage summary tables: **`usage_rollup_daily`** (default `30 0 * * *`)
@@ -1205,6 +1215,7 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
