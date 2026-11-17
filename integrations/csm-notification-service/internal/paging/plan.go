@@ -525,6 +525,12 @@ func (t Trigger) stopInstruction(quoted bool) string {
 	return "Update the ticket status to Work In Progress and add a public comment to stop further notifications."
 }
 
+// supportAlertOpening is the first sentence of every paging call, naming the
+// configured company (EMAIL_TEMPLATE_COMPANY_NAME).
+func supportAlertOpening() string {
+	return notifications.CompanyName() + " Support Alert."
+}
+
 // VoiceSpeech renders section 10.0's alert as a structured SSML document, in
 // the order and with the pauses the specification's own template produces.
 //
@@ -544,7 +550,7 @@ func (t Trigger) VoiceSpeech() notifications.Speech {
 		return notifications.Sentence{Parts: parts}
 	}
 	sentences := []notifications.Sentence{
-		sentence(notifications.Say("WSO2 Support Alert.")),
+		sentence(notifications.Say(supportAlertOpening())),
 		sentence(notifications.Say(fmt.Sprintf("Trigger Type - %s.", t.Kind))),
 	}
 	if t.Priority != "" {
@@ -854,7 +860,7 @@ func (t Trigger) VoiceMessagePlain() string {
 	// plain-text stand-in for the SSML version's slowed prosody: a case id
 	// spoken at normal speed is the part listeners most often mishear.
 	parts := []string{
-		"WSO2 Support Alert.",
+		supportAlertOpening(),
 		fmt.Sprintf("Trigger type, %s.", t.Kind),
 	}
 	if t.Priority != "" {
