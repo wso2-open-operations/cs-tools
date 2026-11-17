@@ -30,6 +30,7 @@ import {
   incidentStateLabel,
 } from "@components/operations/incidentConfig";
 import { formatDate } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 // Read-only counterpart of the webapp's CsmIncidentDetailPage.tsx (no Edit dialog, no comment
 // composer, no attachments — see the scope note on OperationsPage.tsx). Layout follows this app's
@@ -91,7 +92,7 @@ function IncidentDetailContent({ id }: { id: string }) {
           <DetailRow label="Service Offering" value={incident.serviceOffering?.name} />
           <DetailRow label="Configuration Item" value={incident.configurationItem?.name} />
           <DetailRow label="Assignment Group" value={incident.assignmentGroup?.name} />
-          <DetailRow label="Assigned To" value={incident.assignedTo?.name} />
+          <DetailRow label="Assigned To" value={stripStaffNameMarker(incident.assignedTo?.name) || undefined} />
           <DetailRow label="Opened" value={incident.openedOn ? formatDate(incident.openedOn) : undefined} />
           <DetailRow label="Created By" value={incident.createdBy} />
           <DetailRow label="Created On" value={incident.createdOn ? formatDate(incident.createdOn) : undefined} />

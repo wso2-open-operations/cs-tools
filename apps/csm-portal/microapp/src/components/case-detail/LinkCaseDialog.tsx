@@ -36,6 +36,7 @@ import { cases, QUICK_SEARCH_MIN_QUERY_LEN } from "@src/services/cases";
 import type { CaseSummary } from "@src/types";
 import { SeverityChip, StatusChip } from "@components/support/Chips";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export type CaseLinkType = "parent" | "related";
 
@@ -132,7 +133,7 @@ export function LinkCaseDialog({ currentCaseId, isLinking, onClose, onLink }: Li
                   {selected.severity && <SeverityChip severity={selected.severity} />}
                   {selected.assignedEngineer?.name && (
                     <Typography variant="caption" color="text.secondary" noWrap>
-                      {selected.assignedEngineer.name}
+                      {stripStaffNameMarker(selected.assignedEngineer.name)}
                     </Typography>
                   )}
                 </Stack>

@@ -71,6 +71,7 @@ import { formatDate } from "@utils/dateTime";
 import { Logger } from "@utils/logger";
 import { toApiError } from "@utils/ApiError";
 import type { PendingAttachment } from "@utils/attachments";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 type CaseTabId = "activities" | "details" | "related" | "sla" | "attachments" | "time" | "call-requests";
 
@@ -677,14 +678,18 @@ function CaseMetadataSection({ caseDetail }: { caseDetail: CaseDetail }) {
       { icon: Package, label: "Product", value: caseDetail.product?.name },
     ],
     [
-      { icon: UserCog, label: "Assigned Engineer", value: caseDetail.assignedEngineer?.name },
+      {
+        icon: UserCog,
+        label: "Assigned Engineer",
+        value: stripStaffNameMarker(caseDetail.assignedEngineer?.name) || undefined,
+      },
       {
         icon: PenLine,
         label: "Created By",
         // Falls back to "Unknown" rather than leaving this undefined — this section's groups are
         // filtered to only fields with a truthy value, so an undefined here would silently drop
         // the whole "Created By" row instead of showing that the creator is unknown.
-        value: caseDetail.createdBy?.name || caseDetail.createdBy?.email || "Unknown",
+        value: stripStaffNameMarker(caseDetail.createdBy?.name) || caseDetail.createdBy?.email || "Unknown",
       },
     ],
     [
