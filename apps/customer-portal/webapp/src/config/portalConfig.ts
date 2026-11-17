@@ -41,6 +41,11 @@ export interface CustomerPortalWindowConfig {
    */
   CUSTOMER_PORTAL_COMPANY_NAME?: string;
   /**
+   * Billing team's email address, shown on the suspended-project notice.
+   * Defaults to "billing@wso2.com".
+   */
+  CUSTOMER_PORTAL_BILLING_EMAIL?: string;
+  /**
    * Logo for the light colour scheme; also used for dark when no dark-mode logo is set.
    * The PDF report footers draw this one (the dark-mode one only when it is unset), and
    * have no logo when neither is set. A URL on another origin must allow CORS for that.

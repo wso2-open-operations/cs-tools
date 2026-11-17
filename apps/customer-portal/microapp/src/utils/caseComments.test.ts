@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { commentEntries, createdCommentDto, toCommentDto } from "./caseComments";
+import { SYSTEM_AUTHOR_LABEL, commentEntries, createdCommentDto, toCommentDto } from "./caseComments";
 
 describe("commentEntries", () => {
   it("keeps only comment entries, across pages", () => {
@@ -63,9 +63,31 @@ describe("toCommentDto", () => {
     });
   });
 
-  it("falls back to createdBy, then to an empty name", () => {
+  it("does not let a full name that is only the staff marker hide the real author", () => {
+    expect(
+      toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "agent@example.com", createdByFullName: "ⓦ" })
+        .createdBy,
+    ).toBe("agent@example.com");
+    expect(
+      toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "ⓦ", createdByFullName: "Ⓦ" }).createdBy,
+    ).toBe("System");
+    expect(
+      toCommentDto({
+        id: "c",
+        type: "comment",
+        createdOn: "x",
+        createdBy: "x@example.com",
+        createdByFullName: "First Last ⓦ",
+      }).createdBy,
+    ).toBe("First Last");
+  });
+
+  it("falls back to createdBy, then to System rather than a blank author", () => {
     expect(toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "system" }).createdBy).toBe("system");
-    expect(toCommentDto({ id: "c", type: "comment", createdOn: "x" }).createdBy).toBe("");
+    expect(toCommentDto({ id: "c", type: "comment", createdOn: "x" }).createdBy).toBe(SYSTEM_AUTHOR_LABEL);
+    expect(
+      toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "  ", createdByFullName: " " }).createdBy,
+    ).toBe("System");
   });
 });
 
