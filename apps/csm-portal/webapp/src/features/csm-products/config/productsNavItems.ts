@@ -14,7 +14,8 @@
  * the whole catalogue, which is what a deployment whose entity service has no
  * catalogue yet should do. (Until 2026-11 this was a top-level "Products"
  * section with ids `products`, `products.catalogue`, `products.release-lines`;
- * its `/products/...` links redirect here.)
+ * its `/products/...` links redirect here, and those old override keys still
+ * apply through `LEGACY_NAV_ID_ALIASES` in `featureFlags.ts`.)
  */
 import type { CsmNavNode } from "@config/csmNavItems";
 

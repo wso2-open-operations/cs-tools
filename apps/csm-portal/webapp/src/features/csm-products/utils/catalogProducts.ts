@@ -160,7 +160,7 @@ export function filterCatalogListings(listings: readonly CatalogListing[], query
 /** The EOL filter's choices: every version, past EOL, reaching EOL within one, three or six months, or with no EOL date. */
 export type CatalogEolFilter = "all" | "past" | "within1Month" | "within3Months" | "within6Months" | "none";
 
-/** How many months ahead each "EOL within" choice looks. */
+/** How many calendar months ahead each "EOL within" choice looks. */
 const EOL_WINDOW_MONTHS: Partial<Record<CatalogEolFilter, number>> = { within1Month: 1, within3Months: 3, within6Months: 6 };
 
 /** The products table's filters, beside the search box. Empty lists mean "any". */
@@ -177,17 +177,24 @@ export function hasListingFilters(filters: CatalogListingFilters): boolean {
   return filters.productIds.length > 0 || filters.statuses.length > 0 || filters.eol !== "all";
 }
 
-/** `date` ("YYYY-MM-DD") moved by `months` calendar months, in UTC. */
-function addMonths(date: string, months: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  return d.toISOString().slice(0, 10);
+/**
+ * `date` ("YYYY-MM-DD") moved by `months` calendar months, in UTC, with the
+ * day clamped to the target month's last day: 31 January plus one month is
+ * 28 February (29 in a leap year), not 3 March as Date's own overflow gives.
+ */
+export function addMonthsClamped(date: string, months: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
 }
 
 /**
  * The listings that pass every filter. `today` ("YYYY-MM-DD") decides the EOL
  * filter: past EOL is an EOL date before today; within N months is from
- * today up to (not including) N months from now.
+ * today up to and including the same day N months on (clamped to that
+ * month's last day).
  */
 export function applyListingFilters(
   listings: readonly CatalogListing[],
@@ -195,7 +202,7 @@ export function applyListingFilters(
   today: string,
 ): CatalogListing[] {
   const window = EOL_WINDOW_MONTHS[filters.eol];
-  const soon = window === undefined ? today : addMonths(today, window);
+  const soon = window === undefined ? today : addMonthsClamped(today, window);
   return listings.filter(({ product, version }) => {
     if (filters.productIds.length > 0 && !filters.productIds.includes(product.id)) return false;
     if (filters.statuses.length > 0 && (!version.currentSupportStatus || !filters.statuses.includes(version.currentSupportStatus))) {
@@ -208,7 +215,7 @@ export function applyListingFilters(
       case "within1Month":
       case "within3Months":
       case "within6Months":
-        return Boolean(eol) && (eol as string) >= today && (eol as string) < soon;
+        return Boolean(eol) && (eol as string) >= today && (eol as string) <= soon;
       case "none":
         return !eol;
       default:
@@ -242,6 +249,19 @@ export function sortListings(
       return x === y ? a.index - b.index : (x < y ? -1 : 1) * dir;
     })
     .map(({ listing }) => listing);
+}
+
+/**
+ * Whether a version dialog shows the Carbon platform fields: when the
+ * product's latest live version has Carbon data (a Carbon-based product), or
+ * once any Carbon field holds a value, so typed or existing data never hides.
+ * Products with no Carbon data (cloud services, newer products) never show them.
+ */
+export function showsCarbonFields(
+  latest: CatalogVersion | null,
+  carbon: Readonly<Record<string, string>>,
+): boolean {
+  return Boolean(latest?.carbon) || Object.values(carbon).some((value) => value.trim() !== "");
 }
 
 /**

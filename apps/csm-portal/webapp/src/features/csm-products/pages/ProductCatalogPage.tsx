@@ -120,9 +120,12 @@ export default function ProductCatalogPage(): JSX.Element {
     () => catalogListings(products.data ?? [], versions.data ?? []),
     [products.data, versions.data],
   );
+  // Read on every render and a dependency of the memo, so a page left open
+  // past midnight re-classifies the EOL dates on its next render.
+  const today = todayLocal();
   const visible = useMemo(
-    () => sortListings(applyListingFilters(filterCatalogListings(listings, search), filters, todayLocal()), sort),
-    [listings, search, filters, sort],
+    () => sortListings(applyListingFilters(filterCatalogListings(listings, search), filters, today), sort),
+    [listings, search, filters, sort, today],
   );
   // The products that have a listed version, by code, for the Product filter.
   const productOptions = useMemo(() => {
@@ -130,7 +133,10 @@ export default function ProductCatalogPage(): JSX.Element {
     for (const { product } of listings) seen.set(product.id, productDisplayCode(product));
     return [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [listings]);
-  const filtered = hasListingFilters(filters) || search.trim() !== "";
+  // Clear shows whenever the view differs from the default: a search, a
+  // filter or a column sort. Header clicks only flip asc/desc, so Clear is the
+  // way back to the default order.
+  const showClear = hasListingFilters(filters) || search.trim() !== "" || sort !== null;
   // A version can only be added to a listed (on-premise, not end-of-life) product.
   const versionTargets = useMemo(() => (products.data ?? []).filter(isListedProduct), [products.data]);
   const loading = products.isLoading || versions.isLoading;
@@ -196,12 +202,13 @@ export default function ProductCatalogPage(): JSX.Element {
             </MenuItem>
           ))}
         </TextField>
-        {filtered && (
+        {showClear && (
           <Button
             size="small"
             onClick={() => {
               setSearch("");
               setFilters(NO_LISTING_FILTERS);
+              setSort(null);
             }}
           >
             Clear

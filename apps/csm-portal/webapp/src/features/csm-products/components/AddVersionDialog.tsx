@@ -37,9 +37,9 @@ import VersionListingFields from "@features/csm-products/components/VersionListi
 import VersionSupportFields from "@features/csm-products/components/VersionSupportFields";
 import type { CatalogProduct } from "@features/csm-products/types/productCatalog";
 import {
-  CARBON_KEYS,
   buildVersionCreatePayload,
   emptyVersionForm,
+  isPublicAbbreviationRequired,
   validateVersionForm,
   type VersionFormValues,
 } from "@features/csm-products/utils/catalogChange";
@@ -49,6 +49,7 @@ import {
   listingFormFrom,
   normalizeProfiles,
   productDisplayCode,
+  showsCarbonFields,
   type ListingFormValues,
 } from "@features/csm-products/utils/catalogProducts";
 
@@ -98,7 +99,7 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
   );
   const prefilled = useMemo(() => listingFormFrom(latest), [latest]);
   const advanced = advancedEdits ?? prefilled;
-  const showCarbon = Boolean(latest?.carbon) || CARBON_KEYS.some((key) => advanced.carbon[key].trim() !== "");
+  const showCarbon = showsCarbonFields(latest, advanced.carbon);
   const editAdvanced = (patch: Partial<ListingFormValues>): void => setAdvancedEdits({ ...advanced, ...patch });
   const profileOptions = useMemo(
     () =>
@@ -214,6 +215,7 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
             errors={errors}
             showErrors={submitted}
             showCarbon={showCarbon}
+            abbreviationRequired={isPublicAbbreviationRequired({ ...form, ...advanced }, { productCode: product?.code ?? null })}
           />
           {error && <Alert severity="error">{error}</Alert>}
         </Box>

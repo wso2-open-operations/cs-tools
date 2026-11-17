@@ -33,6 +33,8 @@ interface VersionListingFieldsProps {
   showErrors: boolean;
   /** The Carbon platform fields; only Carbon-based products use them. */
   showCarbon: boolean;
+  /** Marks Public abbreviation required while saving needs one (isPublicAbbreviationRequired). */
+  abbreviationRequired?: boolean;
 }
 
 /**
@@ -48,6 +50,7 @@ export default function VersionListingFields({
   errors,
   showErrors,
   showCarbon,
+  abbreviationRequired = false,
 }: VersionListingFieldsProps): JSX.Element {
   const text = (key: ListingTextKey, label: string) => ({
     label,
@@ -75,7 +78,7 @@ export default function VersionListingFields({
         label="On Release Matrix"
       />
       <TextField {...text("publicName", "Public name")} />
-      <TextField {...text("publicAbbreviation", "Public abbreviation")} />
+      <TextField {...text("publicAbbreviation", "Public abbreviation")} required={abbreviationRequired} />
       <TextField
         select
         size="small"

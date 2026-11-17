@@ -116,6 +116,24 @@ describe("override parsing", () => {
     );
   });
 
+  it("applies a renamed catalogue id to its new id and warns to rename it", () => {
+    setOverrides({ products: "hidden" });
+    expect(featureState("admin.product-catalog")).toBe("hidden");
+    expect(featureState("admin.product-catalog.products")).toBe("hidden");
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"products" was renamed to "admin.product-catalog"'));
+
+    setOverrides({ "products.catalogue": "wip", "products.release-lines": "hidden" });
+    expect(featureState("admin.product-catalog.products")).toBe("wip");
+    expect(featureState("admin.product-catalog.release-lines")).toBe("hidden");
+  });
+
+  it("lets the new id win when both the old and the new id are set", () => {
+    setOverrides({ products: "hidden", "admin.product-catalog": "enabled" });
+    expect(featureState("admin.product-catalog")).toBe("enabled");
+    setOverrides({ "admin.product-catalog": "enabled", products: "hidden" });
+    expect(featureState("admin.product-catalog")).toBe("enabled");
+  });
+
   it("ignores an unknown state and warns", () => {
     setOverrides({ updates: "disabled" });
     expect(featureState("updates")).toBe("enabled");

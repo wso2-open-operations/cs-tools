@@ -26,6 +26,7 @@ import {
   navSectionForPath,
   navViewForSearch,
 } from "@config/csmNavItems";
+import { enabledNavChildren, isFeatureVisible, visibleNavSections } from "@config/featureFlags";
 import { getPortalAccess } from "@context/current-user/portalAccess";
 
 describe("nav tree invariants", () => {
@@ -126,6 +127,28 @@ describe("product catalogue in Settings", () => {
     expect(sees(["cs_engineer"])).toBe(false);
     expect(sees(["cs_engineer", "product_catalog_manager"])).toBe(true);
     expect(sees(["admin"])).toBe(true);
+  });
+
+  it("shows Settings, with the catalogue as its only tab, to a manager who is not a CS engineer", () => {
+    const access = getPortalAccess(["viewer", "product_catalog_manager"]);
+    expect(visibleNavSections(access).map((section) => section.id)).toContain("admin");
+    const settings = navNodeById("admin");
+    expect(settings && enabledNavChildren(settings, access).map((tab) => tab.id)).toEqual(["admin.product-catalog"]);
+    expect(isFeatureVisible("admin.user-management", access)).toBe(false);
+    expect(isFeatureVisible("admin.user-management.users", access)).toBe(false);
+    expect(isFeatureVisible("admin.dashboards", access)).toBe(false);
+  });
+
+  it("keeps Settings' other tabs, and hides the catalogue, for a CS engineer who is not a manager", () => {
+    const access = getPortalAccess(["cs_engineer"]);
+    expect(visibleNavSections(access).map((section) => section.id)).toContain("admin");
+    expect(isFeatureVisible("admin.user-management", access)).toBe(true);
+    expect(isFeatureVisible("admin.product-catalog", access)).toBe(false);
+  });
+
+  it("hides Settings from staff who hold neither role", () => {
+    const access = getPortalAccess(["viewer", "escalator"]);
+    expect(visibleNavSections(access).map((section) => section.id)).not.toContain("admin");
   });
 
   it("resolves each tab's route, and the catalogue's own path to it", () => {

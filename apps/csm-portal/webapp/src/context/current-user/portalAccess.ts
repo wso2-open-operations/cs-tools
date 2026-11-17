@@ -298,6 +298,15 @@ export interface PortalAccess {
    */
   canViewSettings: boolean;
   /**
+   * The Settings section's nav entry and `/admin` shell: {@link canViewSettings}
+   * holders, plus catalogue managers ({@link canManageProductCatalog}), whose
+   * only Settings tab is Product catalogue. Settings' other tabs (user
+   * management, dashboards, banners, SLA engine) still require
+   * {@link canViewSettings} on their own nav nodes, so a catalogue manager who
+   * is not a CS engineer sees Settings with the catalogue tab alone.
+   */
+  canViewSettingsSection: boolean;
+  /**
    * Whether a project's Work items tab shows its staff framing: the "Work
    * items" label (vs. plain "Cases"), the Chats sub-tab, and the sub-tab
    * strip itself. `cs_engineer`/`admin` (full access), or the
@@ -374,6 +383,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canViewStaffSections: true,
       canViewTeamSchedule: true,
       canViewSettings: true,
+      canViewSettingsSection: true,
       canViewWorkItemsStaffView: true,
       isAdmin: true,
       canViewSlaTab: true,
@@ -410,6 +420,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canViewStaffSections: !(held.size === 1 && has(PORTAL_ROLE.viewer)),
     canViewTeamSchedule: full || has(PORTAL_ROLE.commentUpdater),
     canViewSettings: full,
+    canViewSettingsSection: full || has(PORTAL_ROLE.productCatalogManager),
     canViewWorkItemsStaffView: full || has(PORTAL_ROLE.timecardApprover),
     isAdmin,
     canViewSlaTab: full || has(PORTAL_ROLE.securityTeam),

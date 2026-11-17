@@ -23,12 +23,14 @@ import {
   type SectionTab,
   enabledPathTabKeys,
   firstEnabledPathTab,
+  firstEnabledTabHref,
   routeTabForPath,
   usePathSectionTabs,
   useQueryParamTabs,
   useRouteTabs,
 } from "@hooks/useSectionTabs";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
+import { getPortalAccess } from "@context/current-user/portalAccess";
 import {
   CaseRouteOverrideProvider,
   type CaseRouteOverrideValue,
@@ -272,6 +274,19 @@ function renderQueryParamTabsAt(
     </MemoryRouter>,
   );
 }
+
+describe("firstEnabledTabHref for the product catalogue", () => {
+  const manager = getPortalAccess(["product_catalog_manager"]);
+
+  it("opens Products first", () => {
+    expect(firstEnabledTabHref("admin.product-catalog", manager)).toBe("/admin/product-catalog/products");
+  });
+
+  it("opens Release lines when a deployment hides Products", () => {
+    setOverrides({ "admin.product-catalog.products": "hidden" });
+    expect(firstEnabledTabHref("admin.product-catalog", manager)).toBe("/admin/product-catalog/release-lines");
+  });
+});
 
 describe("useQueryParamTabs", () => {
   it("defaults to the given default tab when ?tab= is absent", () => {

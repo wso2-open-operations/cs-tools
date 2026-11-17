@@ -239,10 +239,24 @@ export function useRouteTabs(sectionId: string): SectionTabsState {
 /**
  * Where a section's index route should land: its first usable tab. Returns
  * `undefined` when every tab is restricted, leaving the caller to decide.
+ * Pass the caller's `access` (and preview overrides) so a tab their roles do
+ * not unlock is skipped, e.g. Settings for a catalogue manager who is not a
+ * CS engineer lands on Product catalogue, not on User management.
  */
-export function firstEnabledTabHref(sectionId: string): string | undefined {
+export function firstEnabledTabHref(
+  sectionId: string,
+  access?: PortalAccess,
+  previewOverrides?: Record<string, boolean>,
+): string | undefined {
   const section = navNodeById(sectionId);
-  return section ? enabledNavChildren(section)[0]?.href : undefined;
+  return section ? enabledNavChildren(section, access, previewOverrides)[0]?.href : undefined;
+}
+
+/** {@link firstEnabledTabHref} for the signed-in user. */
+export function useFirstEnabledTabHref(sectionId: string): string | undefined {
+  const access = usePortalAccess();
+  const { overrides: previewOverrides } = useFeaturePreviewOverrides(useSafeCurrentUserId());
+  return firstEnabledTabHref(sectionId, access, previewOverrides);
 }
 
 /**

@@ -476,14 +476,19 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "admin",
     label: "Settings",
     href: "/admin",
-    // cs_engineer/admin only -- see canViewSettings's own doc comment.
-    requires: "canViewSettings",
+    // cs_engineer/admin, plus catalogue managers -- see
+    // canViewSettingsSection's own doc comment. Every tab but Product
+    // catalogue keeps the narrower canViewSettings (or isAdmin) on its own
+    // node, so a manager who is not a CS engineer sees the catalogue alone.
+    requires: "canViewSettingsSection",
     icon: Settings,
     children: [
       {
         id: "admin.user-management",
         label: "User management",
         href: "/admin/user-management",
+        // cs_engineer/admin only -- see canViewSettings's own doc comment.
+        requires: "canViewSettings",
         children: [
           {
             id: "admin.user-management.users",
@@ -534,6 +539,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         id: "admin.dashboards",
         label: "Dashboards",
         href: "/admin/dashboards",
+        requires: "canViewSettings",
       },
       // Settings is also open to a CS engineer. This tab is admin only, so
       // the sidebar and Quick-nav hide it the same way the Settings tabs do.

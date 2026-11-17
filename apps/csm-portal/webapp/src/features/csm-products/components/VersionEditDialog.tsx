@@ -30,19 +30,26 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { useCatalogWrite } from "@features/csm-products/api/useCatalogWrite";
+import { useGetCatalogVersions } from "@features/csm-products/api/useGetCatalogVersions";
 import { useGetReleaseLines } from "@features/csm-products/api/useGetReleaseLines";
 import VersionListingFields from "@features/csm-products/components/VersionListingFields";
 import VersionSupportFields from "@features/csm-products/components/VersionSupportFields";
 import type { CatalogProduct, CatalogVersion } from "@features/csm-products/types/productCatalog";
 import {
   buildVersionEditPayload,
+  isPublicAbbreviationRequired,
   validateVersionForm,
   versionToForm,
   type VersionFormValues,
 } from "@features/csm-products/utils/catalogChange";
-import { productDisplayCode, type ListingFormValues } from "@features/csm-products/utils/catalogProducts";
+import {
+  latestLiveVersion,
+  productDisplayCode,
+  showsCarbonFields,
+  type ListingFormValues,
+} from "@features/csm-products/utils/catalogProducts";
 
 /** The Advanced section's fields; an error in one opens the section on save. */
 const ADVANCED_KEYS = ["releaseDate", "publicName", "publicAbbreviation", "tags", "releaseLinks"];
@@ -83,7 +90,12 @@ export default function VersionEditDialog({
   const save = useCatalogWrite();
   const releaseLines = useGetReleaseLines();
   const pending = save.isPending;
-  const errors = validateVersionForm(form, "update", { productCode: product.code ?? null });
+  const productVersions = useGetCatalogVersions(product.id);
+  const latest = useMemo(() => latestLiveVersion(productVersions.data ?? []), [productVersions.data]);
+  // Same rule as Add version: Carbon fields only for a Carbon-based product,
+  // or when this version already holds Carbon data.
+  const showCarbon = Boolean(version.carbon) || showsCarbonFields(latest, form.carbon);
+  const errors = validateVersionForm(form, "update", { productCode: product.code ?? null, live: version });
   const name = `${productDisplayCode(product)} ${version.version}${listingName ? ` (${listingName})` : ""}`;
 
   const handleSave = async (): Promise<void> => {
@@ -156,6 +168,8 @@ export default function VersionEditDialog({
                   type="date"
                   size="small"
                   fullWidth
+                  // A release date the row has can be corrected, not cleared.
+                  required={Boolean(version.releaseDate)}
                   value={form.releaseDate}
                   onChange={(event) => setForm((prev) => ({ ...prev, releaseDate: event.target.value }))}
                   error={submitted && Boolean(errors.releaseDate)}
@@ -169,7 +183,8 @@ export default function VersionEditDialog({
                   releaseLines={releaseLines.data ?? []}
                   errors={errors}
                   showErrors={submitted}
-                  showCarbon
+                  showCarbon={showCarbon}
+                  abbreviationRequired={isPublicAbbreviationRequired(form, { productCode: product.code ?? null, live: version })}
                 />
               </Box>
             </AccordionDetails>

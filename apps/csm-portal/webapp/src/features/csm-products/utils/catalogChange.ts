@@ -223,11 +223,16 @@ export function formWireValue(form: VersionFormValues, key: VersionUpdateKey): u
   }
 }
 
-/** The wire value a live row holds for one key, normalized like the form's. */
+/**
+ * The wire value a live row holds for one key, normalized exactly like the
+ * form's (text trimmed, "" as null, tags trimmed and de-duplicated), so a
+ * stored value with stray padding or a repeated tag never reads as a change
+ * the user did not make.
+ */
 export function liveWireValue(version: CatalogVersion, key: VersionUpdateKey): unknown {
   switch (key) {
     case "tags":
-      return version.tags ?? [];
+      return parseTags((version.tags ?? []).map(String).join(","));
     case "carbon":
       return normalizeCarbon(version.carbon);
     case "isPublic":
@@ -235,7 +240,8 @@ export function liveWireValue(version: CatalogVersion, key: VersionUpdateKey): u
       return Boolean(version[key]);
     default: {
       const value = version[key];
-      return value === undefined || value === "" ? null : value;
+      if (value === undefined || value === null) return null;
+      return typeof value === "string" ? textOrNull(value) : value;
     }
   }
 }
@@ -243,6 +249,26 @@ export function liveWireValue(version: CatalogVersion, key: VersionUpdateKey): u
 /** Structural equality for wire values (scalars, arrays, flat objects). */
 export function sameWireValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** {@link sameWireValue} for one key: tags compare as a set, so a reorder is no change. */
+export function sameFieldValue(key: VersionUpdateKey, a: unknown, b: unknown): boolean {
+  if (key === "tags" && Array.isArray(a) && Array.isArray(b)) {
+    return sameWireValue([...a].map(String).sort(), [...b].map(String).sort());
+  }
+  return sameWireValue(a, b);
+}
+
+/**
+ * Whether the form changes `key` on the live row. A Tags box still holding
+ * the text it was loaded with is no change, whatever the stored tags look
+ * like: the box is comma separated, so a stored tag containing a comma would
+ * otherwise come back split, and the PATCH would rewrite it on every live
+ * profile when the user only changed another field.
+ */
+export function changesField(live: CatalogVersion, form: VersionFormValues, key: VersionUpdateKey): boolean {
+  if (key === "tags" && form.tags === versionToForm(live).tags) return false;
+  return !sameFieldValue(key, formWireValue(form, key), liveWireValue(live, key));
 }
 
 /**
@@ -253,8 +279,7 @@ export function sameWireValue(a: unknown, b: unknown): boolean {
 export function buildVersionEditPayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
   const payload: CatalogChangePayload = {};
   for (const key of VERSION_EDIT_KEYS) {
-    const next = formWireValue(form, key);
-    if (!sameWireValue(next, liveWireValue(live, key))) payload[key] = next;
+    if (changesField(live, form, key)) payload[key] = formWireValue(form, key);
   }
   return payload;
 }
@@ -263,8 +288,7 @@ export function buildVersionEditPayload(live: CatalogVersion, form: VersionFormV
 export function buildVersionUpdatePayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
   const payload: CatalogChangePayload = {};
   for (const key of VERSION_UPDATE_KEYS) {
-    const next = formWireValue(form, key);
-    if (!sameWireValue(next, liveWireValue(live, key))) payload[key] = next;
+    if (changesField(live, form, key)) payload[key] = formWireValue(form, key);
   }
   return payload;
 }
@@ -292,13 +316,43 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Client-side checks that save a round trip; entity-service repeats them (and
  * more) when it applies the change. Returns field key -> message for each problem.
+ *
+ * With `context.live` (an update), the checks mirror what entity-service
+ * applies to a PATCH: the date format and order always (it checks the row the
+ * write leaves behind), but length limits only on fields the form changes,
+ * and the public-abbreviation rule only when the form changes `isPublic`,
+ * `showInSupportMatrix` or `publicAbbreviation`. So a legacy row that breaks a
+ * publishing rule still accepts an edit that does not touch it. A release
+ * date the row already has can be corrected but not cleared.
  */
+/**
+ * Whether saving needs a public abbreviation: the product has no code (the
+ * public feeds sort by abbreviation and fall back to the code) and the
+ * version is on a public feed. On an update (`context.live`) only when the
+ * form changes a feed switch or the abbreviation, as entity-service checks
+ * it on a PATCH. The dialogs mark the field required while this holds, and
+ * validateVersionForm refuses an empty one.
+ */
+export function isPublicAbbreviationRequired(
+  form: VersionFormValues,
+  context: { productCode?: string | null; live?: CatalogVersion } = {},
+): boolean {
+  if (context.productCode === undefined || context.productCode?.trim()) return false;
+  if (!form.isPublic && !form.showInSupportMatrix) return false;
+  const { live } = context;
+  if (!live) return true;
+  return (["isPublic", "showInSupportMatrix", "publicAbbreviation"] as const).some((key) => changesField(live, form, key));
+}
+
 export function validateVersionForm(
   form: VersionFormValues,
   mode: "create" | "update",
-  context: { productCode?: string | null } = {},
+  context: { productCode?: string | null; live?: CatalogVersion } = {},
 ): Record<string, string> {
   const errors: Record<string, string> = {};
+  const { live } = context;
+  // Without a live row (create), every field is checked.
+  const changed = (key: VersionUpdateKey): boolean => !live || changesField(live, form, key);
   if (mode === "create") {
     if (!form.version.trim()) errors.version = "Version is required.";
     else if (form.version.trim().length > 20) errors.version = "At most 20 characters.";
@@ -324,19 +378,20 @@ export function validateVersionForm(
   if (ok("supportEolAnnouncementDate") && ok("supportEolDate") && form.supportEolAnnouncementDate > form.supportEolDate) {
     errors.supportEolAnnouncementDate = "EOL announcement cannot be after the EOL date.";
   }
-  if (form.publicId.trim() && !/^\d+$/.test(form.publicId.trim())) errors.publicId = "A whole number.";
-  if (form.publicName.trim().length > 150) errors.publicName = "At most 150 characters.";
-  if (form.publicAbbreviation.trim().length > 64) errors.publicAbbreviation = "At most 64 characters.";
-  else if (
-    context.productCode !== undefined &&
-    (form.isPublic || form.showInSupportMatrix) &&
-    !form.publicAbbreviation.trim() &&
-    !context.productCode?.trim()
-  ) {
+  if (live?.releaseDate && !form.releaseDate.trim()) {
+    // The release date orders the public feeds and picks a product's latest
+    // version; a row that has one keeps one.
+    errors.releaseDate = "Release date can't be cleared; enter the correct date.";
+  }
+  if (changed("publicId") && form.publicId.trim() && !/^\d+$/.test(form.publicId.trim())) errors.publicId = "A whole number.";
+  if (changed("publicName") && form.publicName.trim().length > 150) errors.publicName = "At most 150 characters.";
+  if (changed("publicAbbreviation") && form.publicAbbreviation.trim().length > 64) {
+    errors.publicAbbreviation = "At most 64 characters.";
+  } else if (isPublicAbbreviationRequired(form, context) && !form.publicAbbreviation.trim()) {
     // The public feeds sort by abbreviation; it falls back to the product code.
     errors.publicAbbreviation = "Needed on the public feeds: this product has no code.";
   }
-  if (form.releaseLinks.trim().length > 255) errors.releaseLinks = "At most 255 characters.";
+  if (changed("releaseLinks") && form.releaseLinks.trim().length > 255) errors.releaseLinks = "At most 255 characters.";
   return errors;
 }
 

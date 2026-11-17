@@ -236,9 +236,10 @@ function FeatureRouteGuard(): JSX.Element {
 }
 
 /**
- * Redirects a legacy detail path (`/accounts/:id`, `/projects/:id`) to its new
- * home under `/customers`, preserving the id. Exists only so old pinned/deep
- * links survive the Accounts+Projects → Customers menu merge.
+ * Redirects a legacy path to its new home, preserving the query string, the
+ * hash and, for a detail path (`/accounts/:id`, `/projects/:id` → under
+ * `/customers`), the id. Exists only so old pinned/deep links survive a menu
+ * move (Accounts+Projects → Customers, Products → Settings ▸ Product catalogue).
  */
 function LegacyDetailRedirect({ to }: { to: string }): JSX.Element {
   const { id } = useParams();
@@ -420,7 +421,9 @@ export default function App(): JSX.Element {
                         Matrix and Release Matrix. Catalogue managers only. */}
                     <Route path="product-catalog" element={<ProductCatalogRouteGuard />}>
                       <Route element={<ProductsLayout />}>
-                        <Route index element={<Navigate to="products" replace />} />
+                        {/* The first catalogue tab this person may open: a deployment can hide
+                            Products and keep Release lines through feature overrides. */}
+                        <Route index element={<SectionIndexRedirect sectionId="admin.product-catalog" />} />
                         <Route path="products" element={<ProductCatalogPage />} />
                         <Route path="release-lines" element={<ReleaseLinesPage />} />
                       </Route>
@@ -713,18 +716,19 @@ export default function App(): JSX.Element {
 
                   {/* The product catalogue was a top-level "Products" section
                       until it moved to Settings ▸ Product catalogue; its old
-                      links land on the new pages. */}
+                      links land on the new pages, query string and hash
+                      included (LegacyDetailRedirect, with no :id here). */}
                   <Route
                     path="products"
-                    element={<Navigate to="/admin/product-catalog/products" replace />}
+                    element={<LegacyDetailRedirect to="/admin/product-catalog/products" />}
                   />
                   <Route
                     path="products/catalogue"
-                    element={<Navigate to="/admin/product-catalog/products" replace />}
+                    element={<LegacyDetailRedirect to="/admin/product-catalog/products" />}
                   />
                   <Route
                     path="products/release-lines"
-                    element={<Navigate to="/admin/product-catalog/release-lines" replace />}
+                    element={<LegacyDetailRedirect to="/admin/product-catalog/release-lines" />}
                   />
 
                   {/* Usage Metrics and Customer Health are gated by their own
