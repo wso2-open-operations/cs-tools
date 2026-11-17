@@ -21,6 +21,7 @@ import type { JSX } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { linkifyBareUrls } from "@features/support/utils/support";
+import { NESTED_LIST_SX } from "@components/rich-text-editor/nestedListSx";
 
 const SAFE_PROTOCOLS = ["http:", "https:"];
 
@@ -252,6 +253,7 @@ export default function ChatMessageCard({
           "& li": {
             mb: 0.5,
           },
+          ...NESTED_LIST_SX,
           "& p": {
             margin: "0 0 0.25em 0",
             whiteSpace: "pre-wrap",
