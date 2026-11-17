@@ -553,9 +553,12 @@ De-escalating is allowed for the leads of the case's own ABT team (`team_member`
 the stored role `case_deescalator` (no migration seeds it: the first admin grant creates the role row, by name), returned as `deescalators` (active internal users only) on the
 same response, so the portal decides from one read. A CSM admin manages the list through
 `GET /case-escalation-access/deescalators` and `PUT`/`DELETE /case-escalation-access/deescalators/{userId}`
-(`CaseEscalationAccessService`): all three need a user token that is a CSM admin (a token role from
-`AUTH_ADMIN_ROLES`, or the stored `admin` role), as for rota access; a grant needs an active internal user; both
-changes are idempotent and audited; a deactivated admin (`is_active = FALSE`) is refused whichever way they are an admin. A holder who stops being active internal staff is listed as `active: false` (so
+(`CaseEscalationAccessService`): all three are gated on the caller's client id (`CSM_PORTAL_BACKEND_CLIENT_ID`) plus a
+forwarded signed-in person, exactly as portal banners are (`requireCSMPortalBackendCaller`), not on `AUTH_ADMIN_ROLES` or the
+stored `admin` role: csm-portal-backend's `PermAdmin` gate on these routes is the one admin check, so a second,
+separately-configured role list here cannot disagree with it (it did: a real admin got a 403 from an unset copy). Any other
+caller is refused. A grant needs an active internal user; both changes are idempotent and audited; a deactivated person
+(`is_active = FALSE`) is refused even through the portal backend. A holder who stops being active internal staff is listed as `active: false` (so
 it can be removed) and is left out of `deescalators`. Escalating is unchanged (any internal engineer).
 entity-service does not enforce de-escalation itself, as before: csm-portal-backend decides from this response.
 

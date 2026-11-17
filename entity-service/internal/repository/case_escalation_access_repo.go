@@ -43,9 +43,6 @@ type CaseEscalationAccessRepository interface {
 	RevokeDeescalator(ctx context.Context, userID, actorEmail string) (bool, error)
 	// UserIsInternal is whether userID is an active internal user.
 	UserIsInternal(ctx context.Context, userID string) (bool, error)
-	// IsPortalAdmin is whether the active person with this email holds the
-	// stored admin role.
-	IsPortalAdmin(ctx context.Context, userEmail string) (bool, error)
 	// IsDeactivated is whether a user with this email exists and has been
 	// deactivated (is_active = FALSE). No such user, or an unset flag, is not.
 	IsDeactivated(ctx context.Context, userEmail string) (bool, error)
@@ -163,25 +160,6 @@ func (r *caseEscalationAccessRepository) UserIsInternal(ctx context.Context, use
 		                  AND COALESCE(is_active, TRUE))`, userID).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("check internal user: %w", err)
-	}
-	return ok, nil
-}
-
-// IsPortalAdmin implements CaseEscalationAccessRepository.
-func (r *caseEscalationAccessRepository) IsPortalAdmin(ctx context.Context, userEmail string) (bool, error) {
-	var ok bool
-	err := r.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		  SELECT 1
-		    FROM "user" u
-		    JOIN user_role ur ON ur.user_id = u.id
-		    JOIN role ro      ON ro.id = ur.role_id
-		   WHERE lower(u.email) = lower($1)
-		     AND u.user_type = 'INTERNAL'::user_type_enum
-		     AND COALESCE(u.is_active, TRUE)
-		     AND ro.name = 'admin')`, userEmail).Scan(&ok)
-	if err != nil {
-		return false, fmt.Errorf("portal admin: %w", err)
 	}
 	return ok, nil
 }

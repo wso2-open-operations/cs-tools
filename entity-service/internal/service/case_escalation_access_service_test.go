@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 type fakeCaseEscalationAccessRepo struct {
 	grants   []domain.CaseDeescalatorGrant
 	internal bool
-	portal   bool
 	gone     bool
 	granted  []string
 	revoked  []string
@@ -53,74 +53,87 @@ func (f *fakeCaseEscalationAccessRepo) UserIsInternal(context.Context, string) (
 	return f.internal, nil
 }
 
-func (f *fakeCaseEscalationAccessRepo) IsPortalAdmin(context.Context, string) (bool, error) {
-	return f.portal, nil
-}
-
 func (f *fakeCaseEscalationAccessRepo) IsDeactivated(context.Context, string) (bool, error) {
 	return f.gone, nil
 }
 
 const deescalatorUserID = "6d300000-0000-4000-8000-000000000001"
 
+const caseEscalationTestClientID = "csm-portal-backend-client"
+
 func newCaseEscalationAccess(repo *fakeCaseEscalationAccessRepo) CaseEscalationAccessService {
-	return NewCaseEscalationAccessService(repo, alwaysUnrestrictedAccess{}, []string{"cs_admin"})
+	return NewCaseEscalationAccessService(repo, alwaysUnrestrictedAccess{}, caseEscalationTestClientID)
 }
 
-// Only a CSM admin (a token role, or the stored admin role) may read or change
-// the list; everybody else is refused before anything is read or written.
-func TestCaseEscalationAccessIsForAdminsOnly(t *testing.T) {
+// viaCSMPortal is what an admin's call looks like by the time it reaches this
+// service: csm-portal-backend's own client id plus the forwarded person's email.
+func viaCSMPortal(email string) context.Context {
+	return auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: email, ClientID: caseEscalationTestClientID})
+}
+
+// The list is read and changed only through csm-portal-backend, which has
+// already run its own admin check. A call from any other client, or with no
+// signed-in person, is refused before anything is read or written, whatever
+// roles the token carries.
+func TestCaseEscalationAccessIsForTheCSMPortalBackendOnly(t *testing.T) {
 	repo := &fakeCaseEscalationAccessRepo{internal: true}
 	svc := newCaseEscalationAccess(repo)
-	engineer := callerWithRoles("engineer@example.com", "cs_engineer")
-
-	_, err := svc.ListDeescalators(engineer)
-	wantForbidden(t, err, "list by a non-admin")
-	wantForbidden(t, svc.GrantDeescalator(engineer, deescalatorUserID), "grant by a non-admin")
-	wantForbidden(t, svc.RevokeDeescalator(engineer, deescalatorUserID), "revoke by a non-admin")
+	for name, ctx := range map[string]context.Context{
+		"another client, even with a role": auth.WithIdentity(context.Background(), auth.Identity{
+			Validated: true, UserEmail: "admin@example.com", ClientID: "some-other-client", Roles: []string{"cs_admin"},
+		}),
+		"no client id":      callerWithRoles("admin@example.com", "cs_admin"),
+		"no signed-in user": auth.WithIdentity(context.Background(), auth.Identity{Validated: true, ClientID: caseEscalationTestClientID}),
+	} {
+		_, err := svc.ListDeescalators(ctx)
+		wantForbidden(t, err, "list: "+name)
+		wantForbidden(t, svc.GrantDeescalator(ctx, deescalatorUserID), "grant: "+name)
+		wantForbidden(t, svc.RevokeDeescalator(ctx, deescalatorUserID), "revoke: "+name)
+	}
 	if repo.listed || len(repo.granted) != 0 || len(repo.revoked) != 0 {
-		t.Fatalf("a non-admin reached the repository: %+v", repo)
+		t.Fatalf("a refused caller reached the repository: %+v", repo)
 	}
+}
 
-	admin := callerWithRoles("admin@example.com", "cs_admin")
-	if _, err := svc.ListDeescalators(admin); err != nil {
-		t.Fatalf("list by an admin: %v", err)
+// The portal backend's caller needs no role in this service's own token: the
+// admin decision was made upstream.
+func TestCaseEscalationAccessTrustsTheCSMPortalBackend(t *testing.T) {
+	repo := &fakeCaseEscalationAccessRepo{internal: true}
+	svc := newCaseEscalationAccess(repo)
+	ctx := viaCSMPortal("admin@example.com")
+	if _, err := svc.ListDeescalators(ctx); err != nil {
+		t.Fatalf("list: %v", err)
 	}
-	if err := svc.GrantDeescalator(admin, deescalatorUserID); err != nil {
-		t.Fatalf("grant by an admin: %v", err)
+	if err := svc.GrantDeescalator(ctx, deescalatorUserID); err != nil {
+		t.Fatalf("grant: %v", err)
 	}
-	if err := svc.RevokeDeescalator(admin, deescalatorUserID); err != nil {
-		t.Fatalf("revoke by an admin: %v", err)
+	if err := svc.RevokeDeescalator(ctx, deescalatorUserID); err != nil {
+		t.Fatalf("revoke: %v", err)
 	}
 	if len(repo.granted) != 1 || len(repo.revoked) != 1 {
 		t.Fatalf("granted=%v revoked=%v, want one each", repo.granted, repo.revoked)
 	}
 }
 
-// A deactivated admin is refused whether the admin comes from a token role or
-// the stored admin role.
-func TestCaseEscalationAccessRefusesADeactivatedAdmin(t *testing.T) {
-	repo := &fakeCaseEscalationAccessRepo{internal: true, portal: true, gone: true}
-	svc := newCaseEscalationAccess(repo)
-	for name, ctx := range map[string]context.Context{
-		"token admin role": callerWithRoles("admin@example.com", "cs_admin"),
-		"stored admin":     callerWithRoles("lead@example.com"),
-	} {
-		wantForbidden(t, svc.GrantDeescalator(ctx, deescalatorUserID), name)
-		_, err := svc.ListDeescalators(ctx)
-		wantForbidden(t, err, name)
-	}
-	if len(repo.granted) != 0 || repo.listed {
-		t.Fatalf("a deactivated admin reached the repository: %+v", repo)
-	}
+// With no CSM_PORTAL_BACKEND_CLIENT_ID configured nobody is let through.
+func TestCaseEscalationAccessRefusesEveryoneWithoutAConfiguredClientID(t *testing.T) {
+	repo := &fakeCaseEscalationAccessRepo{internal: true}
+	svc := NewCaseEscalationAccessService(repo, alwaysUnrestrictedAccess{}, "")
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: "admin@example.com"})
+	_, err := svc.ListDeescalators(ctx)
+	wantForbidden(t, err, "list with no configured client id")
 }
 
-// The stored portal admin role counts as an admin too, as for rota access.
-func TestCaseEscalationAccessAcceptsAStoredPortalAdmin(t *testing.T) {
-	repo := &fakeCaseEscalationAccessRepo{internal: true, portal: true}
+// A deactivated person is refused even through the portal backend.
+func TestCaseEscalationAccessRefusesADeactivatedPerson(t *testing.T) {
+	repo := &fakeCaseEscalationAccessRepo{internal: true, gone: true}
 	svc := newCaseEscalationAccess(repo)
-	if err := svc.GrantDeescalator(callerWithRoles("lead@example.com"), deescalatorUserID); err != nil {
-		t.Fatalf("grant by a portal admin: %v", err)
+	ctx := viaCSMPortal("admin@example.com")
+	wantForbidden(t, svc.GrantDeescalator(ctx, deescalatorUserID), "grant by a deactivated person")
+	_, err := svc.ListDeescalators(ctx)
+	wantForbidden(t, err, "list by a deactivated person")
+	if len(repo.granted) != 0 || repo.listed {
+		t.Fatalf("a deactivated person reached the repository: %+v", repo)
 	}
 }
 
@@ -129,7 +142,7 @@ func TestCaseEscalationAccessAcceptsAStoredPortalAdmin(t *testing.T) {
 func TestCaseEscalationAccessRefusesSomebodyNotInternal(t *testing.T) {
 	repo := &fakeCaseEscalationAccessRepo{internal: false}
 	svc := newCaseEscalationAccess(repo)
-	wantInvalid(t, svc.GrantDeescalator(callerWithRoles("admin@example.com", "cs_admin"), deescalatorUserID), "grant to a non-internal user")
+	wantInvalid(t, svc.GrantDeescalator(viaCSMPortal("admin@example.com"), deescalatorUserID), "grant to a non-internal user")
 	wantInvalid(t, svc.GrantDeescalator(callerWithRoles("admin@example.com", "cs_admin"), "not-a-uuid"), "grant with a bad id")
 	if len(repo.granted) != 0 {
 		t.Fatalf("granted %v, want nothing", repo.granted)

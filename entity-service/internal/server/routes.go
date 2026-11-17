@@ -1470,7 +1470,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		caseEscalationAccessRepo := repository.NewCaseEscalationAccessRepository(db)
 		caseEscalationSvc = service.WithCaseDeescalators(caseEscalationSvc, caseEscalationAccessRepo)
 		caseEscalationAccessHandler = handler.NewCaseEscalationAccessHandler(
-			service.NewCaseEscalationAccessService(caseEscalationAccessRepo, accessSvc, cfg.AuthAdminRoles),
+			service.NewCaseEscalationAccessService(caseEscalationAccessRepo, accessSvc, cfg.CSMPortalBackendClientID),
 		)
 	}
 	caseEscalationHandler := handler.NewCaseEscalationHandler(caseEscalationSvc)

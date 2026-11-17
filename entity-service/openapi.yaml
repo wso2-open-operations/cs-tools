@@ -11480,7 +11480,8 @@ paths:
       description: >
         Everyone holding the `case_deescalator` role, one entry per person, with who granted
         it and when. They may de-escalate any case besides the leads of the case's own ABT
-        team. CSM admin only (a user token; a service credential is refused). Postgres only.
+        team. Only through the CSM portal backend, which checks the caller is a CSM admin
+        (a user token; any other caller is refused). Postgres only.
       operationId: listCaseDeescalators
       responses:
         "200":
@@ -11496,7 +11497,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Not a CSM admin.
+          description: Not called through the CSM portal backend, or the caller is deactivated.
           content:
             application/json:
               schema:
@@ -11517,7 +11518,8 @@ paths:
     put:
       summary: Let somebody de-escalate any case.
       description: >
-        Grants the `case_deescalator` role. CSM admin only. The person must be active internal
+        Grants the `case_deescalator` role. Only through the CSM portal backend, which checks the
+        caller is a CSM admin. The person must be active internal
         staff. Granting what is already held changes nothing. Audited.
       operationId: grantCaseDeescalator
       parameters:
@@ -11544,7 +11546,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Not a CSM admin.
+          description: Not called through the CSM portal backend, or the caller is deactivated.
           content:
             application/json:
               schema:
@@ -11564,7 +11566,8 @@ paths:
     delete:
       summary: Stop letting somebody de-escalate any case.
       description: >
-        Removes the `case_deescalator` role. CSM admin only. Removing what is not held is not an
+        Removes the `case_deescalator` role. Only through the CSM portal backend, which checks the
+        caller is a CSM admin. Removing what is not held is not an
         error. A team lead keeps the ability to de-escalate their own team's cases. Audited.
       operationId: revokeCaseDeescalator
       parameters:
@@ -11591,7 +11594,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Not a CSM admin.
+          description: Not called through the CSM portal backend, or the caller is deactivated.
           content:
             application/json:
               schema:

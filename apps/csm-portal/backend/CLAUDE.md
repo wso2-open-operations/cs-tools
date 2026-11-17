@@ -751,7 +751,7 @@ the case's ABT team leads (`teamLeads`), who still needs `PermEscalate`. Both li
 `GET /cases/{id}/escalations` (`deescalationStanding`); matched by platform id, else case-insensitive email when an id
 is missing. It fails closed on any lookup error. The admin names them through `CaseEscalationAccessHandler`
 (`GET /case-escalation-access/deescalators`, `PUT`/`DELETE .../{userId}`), all `PermAdmin`, forwarded to
-entity-service, which checks the admin role again from the caller's token and keeps its own refusal reason.
+entity-service, which does not re-check the admin role: it trusts this backend's client id (the one admin check is `PermAdmin` here), refuses any other caller, and keeps its own refusal reason.
 
 ## MTTR report (`GET /reports/mttr`) backs the dashboard builder's `mttr` resourceType
 
