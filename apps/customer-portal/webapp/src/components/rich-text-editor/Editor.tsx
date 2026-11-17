@@ -329,7 +329,6 @@ const DEFAULT_EDITOR_CONFIG = {
     list: {
       ul: "editor-list-ul",
       ol: "editor-list-ol",
-      nested: { listitem: "editor-nested-listitem" },
     },
     link: "editor-link",
     code: "editor-code",
@@ -535,9 +534,6 @@ const Editor = ({
             },
             "& .editor-list-ul": { ml: 3, listStyleType: "disc" },
             "& .editor-list-ol": { ml: 3, listStyleType: "decimal" },
-            // Lexical wraps a nested list in its own <li>; without this the
-            // wrapper renders a second, empty bullet before the nested items.
-            "& .editor-nested-listitem": { listStyleType: "none" },
             "& .editor-link": {
               color: "primary.main",
               textDecoration: "underline",
