@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -41,6 +42,17 @@ func newAuditMigrationTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+// auditSchema is the schema the test connection creates its tables in, which is
+// where the migration put the audit objects.
+func auditSchema(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	var schema string
+	if err := pool.QueryRow(context.Background(), "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatalf("current_schema: %v", err)
+	}
+	return schema
 }
 
 func auditExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
@@ -98,17 +110,18 @@ func TestAuditMigration_RegisterRejectsAMaskedOrExcludedKeyColumn(t *testing.T) 
 	const table = "zz_audit_test_keys"
 	auditTestTable(t, pool, table)
 	auditExec(t, pool, "CREATE TABLE "+table+" (id text PRIMARY KEY, secret text)")
+	schema := auditSchema(t, pool)
 
 	for name, sql := range map[string]string{
-		"masked":   "SELECT register_audit('public', '" + table + "', ARRAY['id'], '{}', ARRAY['id'])",
-		"excluded": "SELECT register_audit('public', '" + table + "', ARRAY['id'], ARRAY['id'], '{}')",
+		"masked":   "SELECT register_audit('" + schema + "', '" + table + "', ARRAY['id'], '{}', ARRAY['id'])",
+		"excluded": "SELECT register_audit('" + schema + "', '" + table + "', ARRAY['id'], ARRAY['id'], '{}')",
 	} {
 		_, err := pool.Exec(context.Background(), sql)
 		if err == nil || !strings.Contains(err.Error(), "cannot be excluded or masked") {
 			t.Errorf("%s key column: err = %v, want a refusal", name, err)
 		}
 	}
-	auditExec(t, pool, "SELECT register_audit('public', '"+table+"', ARRAY['id'], '{}', ARRAY['secret'])")
+	auditExec(t, pool, "SELECT register_audit('"+schema+"', '"+table+"', ARRAY['id'], '{}', ARRAY['secret'])")
 }
 
 func TestAuditMigration_ExcludingARegisteredTableStopsAuditingIt(t *testing.T) {
@@ -116,14 +129,15 @@ func TestAuditMigration_ExcludingARegisteredTableStopsAuditingIt(t *testing.T) {
 	const table = "zz_audit_test_exclude"
 	auditTestTable(t, pool, table)
 	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY, note text)")
-	auditExec(t, pool, "SELECT register_audit('public', '"+table+"')")
+	schema := auditSchema(t, pool)
+	auditExec(t, pool, "SELECT register_audit('"+schema+"', '"+table+"')")
 	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a')")
 	audited := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table)
 	if audited == 0 {
 		t.Fatal("registered table wrote no audit rows")
 	}
 
-	auditExec(t, pool, "SELECT exclude_from_audit('public', '"+table+"', 'not needed')")
+	auditExec(t, pool, "SELECT exclude_from_audit('"+schema+"', '"+table+"', 'not needed')")
 
 	if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger WHERE tgrelid = $1::regclass AND tgname = 'csm_audit_row_change'`, table); n != 0 {
 		t.Errorf("audit trigger still on an excluded table")
@@ -167,10 +181,14 @@ func TestAuditMigration_ATempTableCannotShadowTheRegistry(t *testing.T) {
 	defer conn.Release()
 
 	// A temp table is searched before any schema unless pg_temp is listed last.
+	var schema string
+	if err := conn.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatalf("current_schema: %v", err)
+	}
 	for _, sql := range []string{
-		"CREATE TEMP TABLE audit_config (LIKE public.audit_config INCLUDING DEFAULTS)",
+		"CREATE TEMP TABLE audit_config (LIKE " + pgx.Identifier{schema, "audit_config"}.Sanitize() + " INCLUDING DEFAULTS)",
 		`INSERT INTO pg_temp.audit_config (schema_name, table_name, key_columns)
-		   VALUES ('public', 'zz_audit_test_shadow', '{id}')`,
+		   VALUES ('` + schema + `', 'zz_audit_test_shadow', '{id}')`,
 	} {
 		if _, err := conn.Exec(ctx, sql); err != nil {
 			t.Fatalf("%s: %v", sql, err)
@@ -191,7 +209,7 @@ func TestAuditMigration_PartitionCopiesOfTheTriggerAreNotReported(t *testing.T) 
 	auditTestTable(t, pool, table)
 	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY) PARTITION BY RANGE (id)")
 	auditExec(t, pool, "CREATE TABLE "+table+"_1 PARTITION OF "+table+" FOR VALUES FROM (0) TO (100)")
-	auditExec(t, pool, "SELECT register_audit('public', '"+table+"')")
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"')")
 
 	if n := auditCount(t, pool, "SELECT count(*) FROM audit_reconcile(false) WHERE table_name LIKE $1", table+"%"); n != 0 {
 		t.Errorf("reconcile reports %d problem(s) for a registered partitioned table, want 0", n)
