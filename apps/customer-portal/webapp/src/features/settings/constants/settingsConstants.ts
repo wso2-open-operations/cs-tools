@@ -34,6 +34,7 @@ import {
 } from "@features/settings/types/settings";
 import { FONT_SIZE_PX } from "@context/font-size/FontSizeContext";
 import { NULL_PLACEHOLDER as COMMON_NULL_PLACEHOLDER } from "@constants/common";
+import { companyName } from "@config/brandingConfig";
 
 /** Placeholder for empty/null values in user management UI. */
 export const NULL_PLACEHOLDER = COMMON_NULL_PLACEHOLDER;
@@ -388,8 +389,14 @@ export const REGISTRY_ADMIN_ALERT_BODY =
 
 export const REGISTRY_PAGE_TITLE = "Registry Tokens";
 
-export const REGISTRY_PAGE_DESCRIPTION =
-  "Manage tokens for the WSO2 container registry. User tokens are for individual access to pull Docker images, while service tokens are for automation and CI/CD pipelines.";
+/**
+ * Registry Tokens page description, naming the configured company's container
+ * registry ("WSO2" when no company name is configured).
+ *
+ * @returns {string} The description.
+ */
+export const registryPageDescription = (): string =>
+  `Manage tokens for the ${companyName()} container registry. User tokens are for individual access to pull Docker images, while service tokens are for automation and CI/CD pipelines.`;
 
 export const REGISTRY_SUBTAB_USER_BASE = "User Tokens";
 
