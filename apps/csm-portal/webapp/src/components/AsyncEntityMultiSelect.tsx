@@ -100,10 +100,12 @@ export default function AsyncEntityMultiSelect<T>({
     () =>
       values.map((v) => {
         const match = items.find((item) => getId(item) === v);
-        const label = match ? getLabel(match) : (labelById[v] ?? v);
+        // `knownLabels` is read as it is now as well, not only as first
+        // rendered: a caller may still be loading it when this mounts.
+        const label = match ? getLabel(match) : (labelById[v] ?? knownLabels?.[v] ?? v);
         return { id: v, label };
       }),
-    [values, items, labelById, getId, getLabel],
+    [values, items, labelById, knownLabels, getId, getLabel],
   );
 
   const options = useMemo<AsyncEntityMultiSelectOption[]>(() => {
