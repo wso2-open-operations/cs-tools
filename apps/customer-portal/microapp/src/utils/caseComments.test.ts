@@ -63,6 +63,25 @@ describe("toCommentDto", () => {
     });
   });
 
+  it("does not let a full name that is only the staff marker hide the real author", () => {
+    expect(
+      toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "agent@example.com", createdByFullName: "ⓦ" })
+        .createdBy,
+    ).toBe("agent@example.com");
+    expect(
+      toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "ⓦ", createdByFullName: "Ⓦ" }).createdBy,
+    ).toBe("System");
+    expect(
+      toCommentDto({
+        id: "c",
+        type: "comment",
+        createdOn: "x",
+        createdBy: "x@example.com",
+        createdByFullName: "First Last ⓦ",
+      }).createdBy,
+    ).toBe("First Last");
+  });
+
   it("falls back to createdBy, then to System rather than a blank author", () => {
     expect(toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "system" }).createdBy).toBe("system");
     expect(toCommentDto({ id: "c", type: "comment", createdOn: "x" }).createdBy).toBe(SYSTEM_AUTHOR_LABEL);

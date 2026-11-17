@@ -16,6 +16,7 @@
 
 import type { CommentDto } from "@src/types";
 import { commentContentToHtml } from "./commentContent";
+import { stripStaffNameMarker } from "./staffNameMarker";
 
 /** The author shown for a comment that has none, as in the webapp (SYSTEM_AUTHOR_LABEL). */
 export const SYSTEM_AUTHOR_LABEL = "System";
@@ -51,7 +52,10 @@ export function toCommentDto(entry: CaseActivityEntry): CommentDto {
     content: commentContentToHtml(entry.content),
     type: "comment",
     createdOn: entry.createdOn,
-    createdBy: entry.createdByFullName?.trim() || entry.createdBy?.trim() || SYSTEM_AUTHOR_LABEL,
+    // Each name is cleaned before it is chosen: a full name that is only the staff marker is no name at
+    // all, so it must not shadow a real createdBy, and two empty names mean the system.
+    createdBy:
+      stripStaffNameMarker(entry.createdByFullName) || stripStaffNameMarker(entry.createdBy) || SYSTEM_AUTHOR_LABEL,
     isEscalated: "false",
     hasInlineAttachments: false,
     inlineAttachments: [],
