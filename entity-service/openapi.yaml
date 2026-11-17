@@ -29678,7 +29678,12 @@ components:
       properties:
         searchQuery:
           type: string
-          description: Free-text search query.
+          description: >
+            Free-text search query. With the PostgreSQL data source, every word
+            must appear, in any order, in the service offering's name or its
+            parent service's name ("integration automation eu"); names that
+            start with the query as typed come first, then names that contain
+            it, then the rest, each in name order.
 
     SearchConfigurationItemsRequest:
       type: object
