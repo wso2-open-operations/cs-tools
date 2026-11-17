@@ -135,6 +135,11 @@ export interface CustomerPortalWindowConfig {
    * "WSO2".
    */
   CUSTOMER_PORTAL_COMPANY_NAME?: string;
+  /**
+   * Billing team's email address, shown on the suspended-project notice.
+   * Defaults to "billing@wso2.com".
+   */
+  CUSTOMER_PORTAL_BILLING_EMAIL?: string;
 }
 
 declare global {
