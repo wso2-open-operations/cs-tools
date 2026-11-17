@@ -102,14 +102,6 @@ export default function AppWithConfig(): JSX.Element {
                     maxWidth: "100vw",
                     overflowX: "clip",
                   },
-                  // The rich text editor stores a nested list inside a wrapper <li> that
-                  // holds only the sub-list. Without this the wrapper draws its own bullet
-                  // or number in the editor and in every view of the saved HTML, and
-                  // counter-increment keeps it from using up a number in ordered lists.
-                  "li:has(> ul:only-child), li:has(> ol:only-child)": {
-                    listStyleType: "none",
-                    counterIncrement: "list-item 0",
-                  },
                   // Oxygen UI lifts the label of an empty Select by 7px to centre it in a
                   // medium field. MUI already centres it in a small one, where the lift puts
                   // it near the top border. The extra class outranks Oxygen's rule.
