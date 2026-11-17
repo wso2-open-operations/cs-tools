@@ -31,6 +31,7 @@ import {
 import { EditChangeRequestDialog } from "@components/operations/EditChangeRequestDialog";
 import { formatDate } from "@utils/dateTime";
 import { changeRequestApprovedReadOnlyReason } from "@src/types/changeRequest.model";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export default function ChangeRequestDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -123,7 +124,7 @@ function ChangeRequestDetailContent({ id }: { id: string }) {
           <DetailRow label="Linked case" value={cr.case?.name} />
           <DetailRow label="Deployment" value={cr.deployment?.name} />
           <DetailRow label="Product" value={cr.product?.name} />
-          <DetailRow label="Assigned Engineer" value={cr.assignedEngineer?.name} />
+          <DetailRow label="Assigned Engineer" value={stripStaffNameMarker(cr.assignedEngineer?.name) || undefined} />
           <DetailRow label="Assigned Team" value={cr.assignedTeam?.name} />
           <DetailRow label="Duration" value={cr.duration} />
           <DetailRow
@@ -144,7 +145,7 @@ function ChangeRequestDetailContent({ id }: { id: string }) {
             value={cr.hasCustomerApproved ? "Yes" : cr.proposedTimeAccepted ? "Proposed time accepted" : "No"}
           />
           <DetailRow label="Customer Reviewed" value={cr.hasCustomerReviewed ? "Yes" : "No"} />
-          <DetailRow label="Approved By" value={cr.approvedBy?.name} />
+          <DetailRow label="Approved By" value={stripStaffNameMarker(cr.approvedBy?.name) || undefined} />
           <DetailRow label="Approved On" value={cr.approvedOn ? formatDate(cr.approvedOn) : undefined} />
         </Stack>
       </SectionCard>

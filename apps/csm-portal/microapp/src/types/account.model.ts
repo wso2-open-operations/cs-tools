@@ -15,6 +15,7 @@
 // under the License.
 
 import type { AccountDto, AccountOwnerRefDto } from "./account.dto";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export interface Account {
   id: string;
@@ -70,9 +71,9 @@ export function toAccount(dto: AccountDto): Account {
     activationDate: dto.activationDate,
     deactivationDate: dto.deactivationDate ?? null,
     ownerId: resolveOwner(dto)?.id ?? dto.ownerId ?? null,
-    ownerName: resolveOwner(dto)?.name ?? null,
+    ownerName: stripStaffNameMarker(resolveOwner(dto)?.name) || null,
     technicalOwnerId: dto.technicalOwner?.id ?? dto.technicalOwnerId ?? null,
-    technicalOwnerName: dto.technicalOwner?.name ?? null,
+    technicalOwnerName: stripStaffNameMarker(dto.technicalOwner?.name) || null,
     agentEnabled: dto.hasAgent ?? dto.agentEnabled ?? false,
     kbReferencesEnabled: dto.hasKbReferences ?? dto.kbReferencesEnabled ?? false,
     createdOn: dto.createdOn,

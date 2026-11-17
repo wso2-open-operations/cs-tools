@@ -32,6 +32,7 @@ import type {
   UserRefDto,
 } from "./case.dto";
 import { parseBackendTimestamp, parseOptionalBackendTimestamp } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 // severity/issueType are only meaningful for the "case" type — the backend's create-payload docs
 // say as much ("Required for case type") — so service_request/security_report_analysis/etc. cases
@@ -127,8 +128,8 @@ export interface Comment {
 // commentAuthorLabel/attachmentAuthorLabel do for the same underlying shape elsewhere.
 function caseCreatorLabel(createdBy: CaseSearchViewDto["createdBy"] | null | undefined): string {
   if (!createdBy) return "Unknown";
-  if (typeof createdBy === "string") return createdBy.trim() || "Unknown";
-  return createdBy.name?.trim() || createdBy.email?.trim() || "Unknown";
+  if (typeof createdBy === "string") return stripStaffNameMarker(createdBy) || "Unknown";
+  return stripStaffNameMarker(createdBy.name) || createdBy.email?.trim() || "Unknown";
 }
 
 export function toCaseSummary(dto: CaseSearchViewDto): CaseSummary {
@@ -192,8 +193,8 @@ export function toCaseDetail(dto: CaseViewDto): CaseDetail {
 }
 function commentAuthorLabel(createdBy: CaseCommentDto["createdBy"] | null | undefined): string {
   if (!createdBy) return "Unknown";
-  if (typeof createdBy === "string") return createdBy.trim() || "Unknown";
-  return createdBy.name?.trim() || createdBy.email?.trim() || "Unknown";
+  if (typeof createdBy === "string") return stripStaffNameMarker(createdBy) || "Unknown";
+  return stripStaffNameMarker(createdBy.name) || createdBy.email?.trim() || "Unknown";
 }
 
 export function toComment(dto: CaseCommentDto): Comment {
