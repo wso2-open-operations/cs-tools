@@ -51,3 +51,21 @@ export function companyName(): string {
 export function hasConfiguredCompanyName(): boolean {
   return configuredString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) !== undefined;
 }
+
+/** Billing email used when `CUSTOMER_PORTAL_BILLING_EMAIL` is not set. */
+export const DEFAULT_BILLING_EMAIL = "billing@wso2.com";
+
+/** One plain address: something@something, no spaces. */
+const PLAIN_EMAIL = /^[^\s@]+@[^\s@]+$/;
+
+/**
+ * Billing team's email address shown on the suspended-project notice
+ * (`CUSTOMER_PORTAL_BILLING_EMAIL`), {@link DEFAULT_BILLING_EMAIL} when unset,
+ * blank or not a plain address. Read at call time.
+ *
+ * @returns {string} The billing email address.
+ */
+export function billingEmail(): string {
+  const configured = configuredString(window.config?.CUSTOMER_PORTAL_BILLING_EMAIL);
+  return configured && PLAIN_EMAIL.test(configured) ? configured : DEFAULT_BILLING_EMAIL;
+}
