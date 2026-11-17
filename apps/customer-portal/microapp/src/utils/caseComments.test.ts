@@ -48,15 +48,15 @@ describe("toCommentDto", () => {
         type: "comment",
         content: "Hi\nthere",
         createdOn: "2026-11-10T08:00:00Z",
-        createdBy: "jdoe@wso2.com",
-        createdByFullName: " Jane Doe ",
+        createdBy: "agent@example.com",
+        createdByFullName: " First Last ",
       }),
     ).toEqual({
       id: "c1",
       content: "Hi<br>there",
       type: "comment",
       createdOn: "2026-11-10T08:00:00Z",
-      createdBy: "Jane Doe",
+      createdBy: "First Last",
       isEscalated: "false",
       hasInlineAttachments: false,
       inlineAttachments: [],
@@ -71,17 +71,17 @@ describe("toCommentDto", () => {
 
 describe("createdCommentDto", () => {
   it("fills the comment shape from backend-v2's short response and the text that was sent", () => {
-    expect(createdCommentDto({ id: "c9", createdOn: "2026-11-10T09:00:00Z", createdBy: "Jane Doe" }, "Thanks")).toEqual(
-      {
-        id: "c9",
-        content: "Thanks",
-        type: "comment",
-        createdOn: "2026-11-10T09:00:00Z",
-        createdBy: "Jane Doe",
-        isEscalated: "false",
-        hasInlineAttachments: false,
-        inlineAttachments: [],
-      },
-    );
+    expect(
+      createdCommentDto({ id: "c9", createdOn: "2026-11-10T09:00:00Z", createdBy: "First Last" }, "Thanks"),
+    ).toEqual({
+      id: "c9",
+      content: "Thanks",
+      type: "comment",
+      createdOn: "2026-11-10T09:00:00Z",
+      createdBy: "First Last",
+      isEscalated: "false",
+      hasInlineAttachments: false,
+      inlineAttachments: [],
+    });
   });
 });
