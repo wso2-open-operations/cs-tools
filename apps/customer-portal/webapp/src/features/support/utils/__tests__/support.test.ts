@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   downloadSizeOf,
   getAvailableCaseActions,
+  getCallRequestStatusColor,
   getStatusColor,
   collapseCodeBlockWhitespace,
   collapseCommentSourceWhitespace,
@@ -762,5 +763,12 @@ describe("getStatusColor", () => {
   it("gives In Progress the same orange as the dashboard's cases table", () => {
     expect(getStatusColor("In Progress")).toBe("warning.main");
     expect(getStatusColor("Work In Progress")).toBe("warning.main");
+  });
+});
+
+describe("getCallRequestStatusColor", () => {
+  it("keeps a call request shown as In Progress in the pending colour", () => {
+    expect(getCallRequestStatusColor("In Progress")).toBe("warning.main");
+    expect(getCallRequestStatusColor("Pending on WSO2")).toBe("warning.main");
   });
 });

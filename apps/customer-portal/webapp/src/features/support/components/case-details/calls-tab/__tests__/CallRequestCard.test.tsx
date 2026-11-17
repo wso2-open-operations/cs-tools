@@ -54,6 +54,55 @@ describe("CallRequestCard", () => {
     expect(screen.queryByRole("button", { name: /reschedule/i })).not.toBeInTheDocument();
   });
 
+  it("shows a request pending on WSO2 as In Progress, keeping reschedule and cancel", () => {
+    render(
+      <ThemeProvider theme={createTheme()}>
+        <CallRequestCard
+          call={
+            {
+              id: "1",
+              state: { id: "pending_on_wso2", label: "Pending on WSO2" },
+              preferredTimes: [],
+            } as never
+          }
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
+    expect(screen.queryByText("Pending on WSO2")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reschedule/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  it("shows In Progress from the label when the state has no id", () => {
+    render(
+      <ThemeProvider theme={createTheme()}>
+        <CallRequestCard
+          call={{ id: "1", state: { label: "Pending On WSO2" }, preferredTimes: [] } as never}
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
+  });
+
+  it("keeps the label of a state whose id is not pending on WSO2", () => {
+    render(
+      <ThemeProvider theme={createTheme()}>
+        <CallRequestCard
+          call={
+            {
+              id: "1",
+              state: { id: "scheduled", label: "Scheduled" },
+              preferredTimes: [],
+            } as never
+          }
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText("Scheduled")).toBeInTheDocument();
+    expect(screen.queryByText("In Progress")).not.toBeInTheDocument();
+  });
+
   it("shows preferred times and the scheduled time once an agent has accepted", () => {
     render(
       <ThemeProvider theme={createTheme()}>
