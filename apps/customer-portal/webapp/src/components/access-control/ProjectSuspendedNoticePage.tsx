@@ -27,6 +27,7 @@ import { AlertCircle, Info } from "@wso2/oxygen-ui-icons-react";
 import suspensionIllustration from "@assets/access-control/project-suspended.svg";
 import type { ProjectDetails } from "@features/project-hub/types/projects";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { billingEmail, companyName } from "@config/brandingConfig";
 
 type ProjectSuspendedNoticePageProps = {
   project: ProjectDetails;
@@ -153,16 +154,16 @@ export default function ProjectSuspendedNoticePage({
             <Box sx={{ px: 3, py: 3, bgcolor: "action.hover", display: "flex", alignItems: "flex-start", gap: 1.5 }}>
               <AlertCircle size={18} style={{ marginTop: 2, flexShrink: 0, color: "var(--oxygen-palette-error-main, #f59e0b)" }} />
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.75 }}>
-                This project has been suspended. Please contact your WSO2 Account Manager for
-                assistance or reach our Billing team at{" "}
+                This project has been suspended. Please contact your {companyName()} Account
+                Manager for assistance or reach our Billing team at{" "}
                 <Typography
                   component="a"
-                  href="mailto:billing@wso2.com"
+                  href={`mailto:${billingEmail()}`}
                   variant="body2"
                   fontWeight={600}
                   color="text.primary"
                 >
-                  billing@wso2.com
+                  {billingEmail()}
                 </Typography>
                 .
               </Typography>
