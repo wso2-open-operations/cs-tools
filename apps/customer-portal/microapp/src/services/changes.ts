@@ -99,7 +99,7 @@ function toChangeRequest(dto: ChangeRequestDto): ChangeRequest {
     updatedOn: new Date(dto.updatedOn.replace(" ", "T")),
     createdBy: stripStaffNameMarker(dto.createdBy),
     approvedOn: dto.approvedOn ? new Date(dto.approvedOn.replace(" ", "T")) : undefined,
-    approvedBy: dto.approvedBy?.label ?? undefined,
+    approvedBy: stripStaffNameMarker(dto.approvedBy?.label) || undefined,
     duration: dto.duration ?? undefined,
     hasCustomerApproved: dto.hasCustomerApproved,
     isProposedTimeAccepted: isProposedTimeAccepted(dto.customerProposal?.answer, dto.state?.id),
