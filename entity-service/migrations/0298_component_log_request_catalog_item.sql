@@ -24,7 +24,7 @@
 -- environment (the CSM portal backend is configured with the item id) and the
 -- migration is safe to re-run.
 --
--- Staff only (csm_only, migration 0291): customers never see it, and a
+-- Staff only (csm_only, migration 0297): customers never see it, and a
 -- request raised from it by anyone but CSM-portal staff is refused.
 --
 -- Listed under the existing "Information Request" category, next to
@@ -38,11 +38,15 @@
 -- shows or submits (catalogVariables.ts). Types are the names the portal renders
 -- (catalogVariables.ts); date fields are also recognised by their text.
 --
--- The Cluster question gets no choices here: they differ per environment
--- (each is a collector runner label). Until clusters are stored per
--- deployment, each environment's choices are added separately.
+-- Cluster choice values are stable keys (azure-eu-cdp, ...), not runner
+-- names: the log collection pipeline maps each key to its runner, so the
+-- choices are the same in every environment.
 --
--- Routing rules (who sees the item) are in migration 0293.
+-- "People Who Need Access" is a List Collector: the portal offers a
+-- multi-select of internal users and submits their emails comma-separated.
+-- A portal without that type shows a text box, which takes the same value.
+--
+-- Routing rules (who sees the item) are in migration 0299.
 
 INSERT INTO catalog_item (id, created_on, updated_on, created_by, updated_by, name, owner_id, csm_only)
 SELECT '9d48f18f-0ae3-466b-b0ab-fdd14038864b', now(), now(), 'system', 'system',
@@ -100,7 +104,7 @@ VALUES
      'end_time', 'End Time', 'Date/Time', 600, TRUE, TRUE,
      FALSE, FALSE, NULL, NULL, NULL, NULL),
     ('1cae4e36-b64d-48e6-b196-8f62e0cfe044', now(), now(), 'system', 'system', '9d48f18f-0ae3-466b-b0ab-fdd14038864b',
-     'people_who_need_access', 'People Who Need Access', 'Multi Line Text', 700, TRUE, TRUE,
+     'people_who_need_access', 'People Who Need Access', 'List Collector', 700, TRUE, TRUE,
      FALSE, FALSE, NULL, NULL, NULL, NULL),
     ('f8f732aa-42d6-4da6-8872-2f3bc5bd0217', now(), now(), 'system', 'system', '9d48f18f-0ae3-466b-b0ab-fdd14038864b',
      'component', 'Component', 'Single Line Text', 800, FALSE, TRUE,
@@ -114,6 +118,12 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO catalog_variable_choice (id, created_on, updated_on, created_by, updated_by,
                                      catalog_variable_id, value, text, "order", is_inactive)
 VALUES
+    ('a5fd4c67-afc0-4d74-b7af-a717c5ebc4e9', now(), now(), 'system', 'system',
+     'f239e6be-0b03-49e9-8d66-4ea06858f161', 'azure-eu-cdp', 'Azure EU CDP', 100, FALSE),
+    ('7a50cf69-5fe3-4b78-9336-1acba4468930', now(), now(), 'system', 'system',
+     'f239e6be-0b03-49e9-8d66-4ea06858f161', 'azure-us-cdp', 'Azure US CDP', 200, FALSE),
+    ('288f2e84-a0b8-4dfb-805b-6e3b0d69f691', now(), now(), 'system', 'system',
+     'f239e6be-0b03-49e9-8d66-4ea06858f161', 'aws-eu-cdp', 'AWS EU CDP', 300, FALSE),
     ('2a5faf4d-3d1b-4c23-ae2c-85954f3e518f', now(), now(), 'system', 'system',
      '81f21d11-4ecd-43cb-ad44-256532137748', 'development', 'Development', 100, FALSE),
     ('a8a036b7-65f2-449d-8636-0bcc067c2b14', now(), now(), 'system', 'system',

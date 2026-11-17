@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Integration test for catalog_item.csm_only (migration 0291): an item marked
+// Integration test for catalog_item.csm_only (migration 0297): an item marked
 // csm_only is offered by SearchCatalogs, and its questions are returned by
 // GetCatalogItemVariables, only when includeCSMOnly is true (WSO2 staff in
 // the CSM portal). A category whose only item is csm_only disappears too.

@@ -40,7 +40,7 @@ func WithCSMOnlyCatalogItemCheck(svc CaseService, items csmOnlyCatalogItems) Cas
 }
 
 // validateCSMOnlyCatalogItem refuses a service request raised from a catalog
-// item marked csm_only (migration 0291) unless the caller is WSO2 staff in the
+// item marked csm_only (migration 0297) unless the caller is WSO2 staff in the
 // CSM portal (isCSMPortalStaff). The catalog already hides such items from
 // everyone else; this is the check that holds when a caller posts the item id
 // directly. A caller that can't be resolved is refused.

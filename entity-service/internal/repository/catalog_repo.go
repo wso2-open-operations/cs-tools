@@ -43,7 +43,7 @@ type CatalogRepository interface {
 	// a NotFoundError if the deployed product does not exist.
 	//
 	// includeCSMOnly is whether the caller is WSO2 staff in the CSM portal:
-	// when false, catalog items marked csm_only (migration 0291) are left out,
+	// when false, catalog items marked csm_only (migration 0297) are left out,
 	// and so is a catalog left with no items.
 	SearchCatalogs(ctx context.Context, deployedProductID string, includeCSMOnly bool, pagination domain.Pagination) ([]domain.Catalog, int, error)
 	// GetCatalogItemVariables returns the variables (form fields) of the
@@ -88,7 +88,7 @@ func NewCatalogRepository(db *Scoped) CatalogRepository {
 // than being shown every classification's items. TODO: once product.unit is
 // populated, make unit strict again.
 //
-// $2 is includeCSMOnly: an item marked catalog_item.csm_only (migration 0291)
+// $2 is includeCSMOnly: an item marked catalog_item.csm_only (migration 0297)
 // is available only when it is true, i.e. to WSO2 staff in the CSM portal.
 const availableCatalogItemsCTE = `
 	WITH dp AS (

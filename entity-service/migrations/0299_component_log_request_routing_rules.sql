@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- Who is offered the "Component Log Request" catalog item (migration 0292):
+-- Who is offered the "Component Log Request" catalog item (migration 0298):
 --
 --   PDP + CHOREO  private data plane customers' Choreo deployed products,
 --                 next to that pair's existing log items (Request LB Logs 50,

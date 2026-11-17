@@ -55,7 +55,7 @@ type catalogService struct {
 	// same source under dual-write.
 	snMirror CatalogService
 	// access tells WSO2 staff in the CSM portal from everyone else, for
-	// catalog items marked csm_only (migration 0291). Nil, or a caller it
+	// catalog items marked csm_only (migration 0297). Nil, or a caller it
 	// can't resolve, counts as not staff: those items stay hidden.
 	access AccessService
 }

@@ -1508,7 +1508,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// same *caseService the case handler already holds, so this reaches it.
 	activeCaseSvc = service.WithServiceRequestCatalog(activeCaseSvc, activeCatalogSvc)
 	// A service request raised from a catalog item marked csm_only (migration
-	// 0291) is refused for anyone but WSO2 staff in the CSM portal. The flag is
+	// 0297) is refused for anyone but WSO2 staff in the CSM portal. The flag is
 	// Postgres-only, so the plain servicenow data source has nothing to check.
 	if cfg.DataSource != config.DataSourceServiceNow {
 		activeCaseSvc = service.WithCSMOnlyCatalogItemCheck(activeCaseSvc, catalogRepo)
