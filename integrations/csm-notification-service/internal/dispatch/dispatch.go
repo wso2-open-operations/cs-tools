@@ -1739,7 +1739,9 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 // publishing: the audience comes from an approval group or a project's
 // contacts, and the subject reproduces ServiceNow's per-branch wording
 // verbatim. Re-deriving either here would mean maintaining a second copy of
-// logic that only exists to match a system being decommissioned.
+// logic that only exists to match a system being decommissioned. Only the
+// subject's "[WSO2 Support]" prefix is changed, to the configured company name
+// (crSubject).
 //
 // It also does not use groupByLink. That splits a case's recipients by which
 // portal each should be linked to, and needs a caseID to do it — a change
@@ -1814,7 +1816,7 @@ func (d *Dispatcher) handleCRApprovalRequested(ctx context.Context, record event
 	if p.Audience == crAudienceCustomer {
 		to, bcc = []string{d.email.FromAddress()}, recipients
 	}
-	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, p.Subject, body, nil); err != nil {
+	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, crSubject(p.Subject), body, nil); err != nil {
 		return fmt.Errorf("dispatch: send CR approval notice for %s: %w", p.ChangeRequestID, err)
 	}
 	slog.InfoContext(ctx, "dispatch: CR approval notice sent",
@@ -2371,6 +2373,22 @@ func subjectLine(wso2CaseID, caseNumber, caseID, title string) string {
 	return fmt.Sprintf("[%s Support] (%s/%s) %s", notifications.CompanyName(), displayInternalRef(wso2CaseID, caseID), displayCaseRef(caseNumber, caseID), title)
 }
 
+// crFlowSubjectPrefix is the prefix csm-flow-service writes at the start of
+// every change request subject it renders.
+const crFlowSubjectPrefix = "[WSO2 Support]"
+
+// crSubject is a change request notice's subject as the flow rendered it, with
+// its crFlowSubjectPrefix naming the configured company instead, the same
+// prefix subjectLine builds for a case email. The rest of the subject is the
+// flow's own wording and is sent unchanged, as is a subject without the prefix.
+func crSubject(subject string) string {
+	rest, ok := strings.CutPrefix(subject, crFlowSubjectPrefix)
+	if !ok {
+		return subject
+	}
+	return "[" + notifications.CompanyName() + " Support]" + rest
+}
+
 // maskPhone redacts all but the last 4 characters of an E.164 phone number
 // for logging — this repo's own convention is to log only ids and sanitised
 // summaries, not raw PII, and a phone number is PII the same way a recipient
@@ -2765,7 +2783,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 	if p.Audience == crAudienceCustomer {
 		to, bcc = []string{d.email.FromAddress()}, recipients
 	}
-	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, p.Subject, body, inlineAttachments(images)); err != nil {
+	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, crSubject(p.Subject), body, inlineAttachments(images)); err != nil {
 		return fmt.Errorf("dispatch: send plan date notice for %s: %w", p.ChangeRequestID, err)
 	}
 	slog.InfoContext(ctx, "dispatch: plan date notice sent",
