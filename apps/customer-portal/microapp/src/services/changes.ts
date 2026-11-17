@@ -34,6 +34,7 @@ import {
   CHANGE_REQUEST_STATS_ENDPOINT,
   PROJECT_CHANGE_REQUESTS_ENDPOINT,
 } from "@src/config/endpoints";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const getAllChangeRequests = async (
   id: string,
@@ -96,7 +97,7 @@ function toChangeRequest(dto: ChangeRequestDto): ChangeRequest {
     endDate: dto.endDate ? new Date(dto.endDate.replace(" ", "T")) : undefined,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
     updatedOn: new Date(dto.updatedOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     approvedOn: dto.approvedOn ? new Date(dto.approvedOn.replace(" ", "T")) : undefined,
     approvedBy: dto.approvedBy?.label ?? undefined,
     duration: dto.duration ?? undefined,

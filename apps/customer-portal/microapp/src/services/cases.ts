@@ -60,6 +60,7 @@ import {
   PROJECT_CASES_ENDPOINT,
   PROJECT_CASES_FILTERS_ENDPOINT,
 } from "@config/endpoints";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export const getAllCases = async (id: string, body: GetCasesRequestDto = {}): Promise<PaginatedArray<CaseSummary>> => {
   const response = (
@@ -181,10 +182,10 @@ export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     title: dto.title,
     description: dto.description ?? "",
-    assigned: dto.assignedEngineer?.label,
+    assigned: stripStaffNameMarker(dto.assignedEngineer?.label) || undefined,
     statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
@@ -199,17 +200,17 @@ export function toCase(dto: CaseDto): Case {
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     updatedOn: new Date(dto.updatedOn.replace(" ", "T")),
     title: dto.title,
     description: dto.description ?? "",
-    assigned: dto.assignedEngineer?.label,
+    assigned: stripStaffNameMarker(dto.assignedEngineer?.label) || undefined,
     statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
     product: dto.deployedProduct ? `${dto.deployedProduct?.label} ${dto.deployedProduct?.version}` : undefined,
     deployment: dto.deployment?.label ?? undefined,
-    reporter: dto.createdBy,
+    reporter: stripStaffNameMarker(dto.createdBy),
     account: dto.account?.label,
     parentCaseId: dto.parentCase?.id,
     conversationId: dto.conversation?.id,
@@ -222,14 +223,14 @@ export function toComment(dto: CommentDto): Comment {
     id: dto.id,
     content: dto.content,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     attachments: dto.inlineAttachments.map((attachment) => ({
       id: attachment.id,
       type: "others",
       fileName: attachment.fileName,
       downloadUrl: attachment.downloadUrl,
       createdOn: new Date(attachment.createdOn.replace(" ", "T")),
-      createdBy: attachment.createdBy,
+      createdBy: stripStaffNameMarker(attachment.createdBy),
     })),
   };
 }
@@ -243,7 +244,7 @@ export function toCaseFeedback(dto: CaseFeedbackDto): CaseFeedback {
     chips: dto.chips ?? undefined,
     additionalComment: dto.additionalComment ?? undefined,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
   };
 }
 
@@ -254,7 +255,7 @@ export function toAttachment(dto: AttachmentDto): Attachment {
     fileName: dto.name,
     downloadUrl: dto.downloadUrl,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
   };
 }
 
