@@ -188,8 +188,15 @@ window.config = {
   //   in the portal footer, printed as "© <year> <name> LLC" (leave "LLC" out
   //   of the name), and in the portal labels that name the company:
   //   "<name> Products" and "Add <name> Product" (project deployments),
-  //   "<name> Resolution" (vulnerability details).
+  //   "<name> Resolution" (vulnerability details), and "your <name> Account
+  //   Manager" on the suspended-project notice.
   // CUSTOMER_PORTAL_COMPANY_NAME: "<your-company-name>",
+  //
+  // CUSTOMER_PORTAL_BILLING_EMAIL  (optional — default: "billing@wso2.com")
+  //   Billing team's email address on the suspended-project notice, as both the
+  //   shown address and its mailto: link. A value that is not one plain address
+  //   is ignored and the default is used.
+  // CUSTOMER_PORTAL_BILLING_EMAIL: "<your-billing-email>",
 
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
