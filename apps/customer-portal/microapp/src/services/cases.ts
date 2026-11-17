@@ -16,7 +16,13 @@
 
 import axios from "axios";
 import apiClient from "@src/services/apiClient";
-import { commentEntries, toCommentDto, type CaseActivitiesPage } from "@utils/caseComments";
+import {
+  commentEntries,
+  createdCommentDto,
+  toCommentDto,
+  type CaseActivitiesPage,
+  type CreatedCommentResponse,
+} from "@utils/caseComments";
 import { infiniteQueryOptions, mutationOptions, queryOptions, skipToken } from "@tanstack/react-query";
 import type {
   CaseSummary,
@@ -155,8 +161,8 @@ const getComments = async (id: string): Promise<Comment[]> => {
 };
 
 const createComment = async (id: string, body: CreateCommentRequestDto): Promise<Comment> => {
-  const response = (await apiClient.post<CommentDto>(CASE_COMMENTS_ENDPOINT(id), body)).data;
-  return toComment(response);
+  const response = (await apiClient.post<CreatedCommentResponse>(CASE_COMMENTS_ENDPOINT(id), body)).data;
+  return toComment(createdCommentDto(response, body.content));
 };
 
 const getAttachments = async (id: string, body: Partial<Omit<Pagination, "totalRecords">>): Promise<Attachment[]> => {

@@ -54,3 +54,28 @@ export function toCommentDto(entry: CaseActivityEntry): CommentDto {
     inlineAttachments: [],
   };
 }
+
+/** What backend-v2 answers to POST /cases/{id}/comments: only the new comment's id, time and author. */
+export interface CreatedCommentResponse {
+  id: string;
+  createdOn: string;
+  createdBy: string;
+}
+
+/**
+ * The comment just posted, in the shape the comment mapper takes. The response carries no text or
+ * attachments, so the text is what was sent; without this the mapper fails on the missing
+ * attachments after the post has already succeeded, and the page never refreshes its timeline.
+ */
+export function createdCommentDto(response: CreatedCommentResponse, content: string): CommentDto {
+  return {
+    id: response.id,
+    content,
+    type: "comment",
+    createdOn: response.createdOn,
+    createdBy: response.createdBy,
+    isEscalated: "false",
+    hasInlineAttachments: false,
+    inlineAttachments: [],
+  };
+}

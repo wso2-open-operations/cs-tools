@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { commentEntries, toCommentDto } from "./caseComments";
+import { commentEntries, createdCommentDto, toCommentDto } from "./caseComments";
 
 describe("commentEntries", () => {
   it("keeps only comment entries, across pages", () => {
@@ -66,5 +66,22 @@ describe("toCommentDto", () => {
   it("falls back to createdBy, then to an empty name", () => {
     expect(toCommentDto({ id: "c", type: "comment", createdOn: "x", createdBy: "system" }).createdBy).toBe("system");
     expect(toCommentDto({ id: "c", type: "comment", createdOn: "x" }).createdBy).toBe("");
+  });
+});
+
+describe("createdCommentDto", () => {
+  it("fills the comment shape from backend-v2's short response and the text that was sent", () => {
+    expect(createdCommentDto({ id: "c9", createdOn: "2026-11-10T09:00:00Z", createdBy: "Jane Doe" }, "Thanks")).toEqual(
+      {
+        id: "c9",
+        content: "Thanks",
+        type: "comment",
+        createdOn: "2026-11-10T09:00:00Z",
+        createdBy: "Jane Doe",
+        isEscalated: "false",
+        hasInlineAttachments: false,
+        inlineAttachments: [],
+      },
+    );
   });
 });
