@@ -15,7 +15,7 @@
 // under the License.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_BILLING_EMAIL, billingEmail } from "@config/brandingConfig";
+import { DEFAULT_BILLING_EMAIL, billingEmail, billingEmailHref } from "@config/brandingConfig";
 import type { CustomerPortalWindowConfig } from "@config/portalConfig";
 
 const originalConfig = window.config;
@@ -44,9 +44,40 @@ describe("billingEmail", () => {
   });
 
   it("falls back to the default for a blank or malformed value", () => {
-    for (const value of ["   ", "billing", "billing@", "two words@acme.example", "a@b@c"]) {
+    for (const value of [
+      "   ",
+      "billing",
+      "billing@",
+      "two words@acme.example",
+      "a@b@c",
+      "mailto:billing@acme.example",
+      "billing@acme.example?subject=hi",
+    ]) {
       setBillingEmail(value);
       expect(billingEmail()).toBe(DEFAULT_BILLING_EMAIL);
     }
+  });
+
+  it("accepts a # in the local part, which RFC 5322 allows unquoted", () => {
+    setBillingEmail("billing#accounts@acme.example");
+    expect(billingEmail()).toBe("billing#accounts@acme.example");
+  });
+});
+
+describe("billingEmailHref", () => {
+  afterEach(() => {
+    window.config = originalConfig;
+  });
+
+  it("links the default address as is", () => {
+    setBillingEmail(undefined);
+    expect(billingEmailHref()).toBe("mailto:billing@wso2.com");
+  });
+
+  it("percent-encodes characters that would end the recipient", () => {
+    setBillingEmail("billing#accounts@acme.example");
+    expect(billingEmailHref()).toBe("mailto:billing%23accounts@acme.example");
+    setBillingEmail("bill?ing%x@acme.example");
+    expect(billingEmailHref()).toBe("mailto:bill%3Fing%25x@acme.example");
   });
 });
