@@ -18,6 +18,12 @@
 -- AFTER row trigger in the same transaction as the change, only for tables listed
 -- in audit_config. Registers no business table: each one calls register_audit().
 -- Requires PostgreSQL 18 (uuidv7()). Safe to re-run.
+--
+-- Everything is created in the schema this migration runs in (current_schema(),
+-- like every other migration). The SECURITY DEFINER functions are installed
+-- through the DO blocks below, which fill that schema into their search path and
+-- table names (__SCHEMA__ and __SCHEMA_LIT__ are replaced by it), so the file
+-- works the same in public and in a schema of its own.
 
 -- Registry: what is audited.
 CREATE TABLE IF NOT EXISTS audit_config (
@@ -131,9 +137,12 @@ $$;
 -- The trigger function shared by every registered table.
 -- Arguments (fixed when the trigger is created): key, excluded and masked
 -- columns, each comma-separated. SECURITY DEFINER, so callers need no INSERT right.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION audit_log_row_change() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     max_value_bytes CONSTANT INT := 8192;
     key_columns      TEXT[] := string_to_array(TG_ARGV[0], ',');
@@ -172,7 +181,7 @@ BEGIN
         IF octet_length(old_value::text) > max_value_bytes THEN old_value := '"[value too large]"'; END IF;
         IF octet_length(new_value::text) > max_value_bytes THEN new_value := '"[value too large]"'; END IF;
 
-        INSERT INTO public.csm_audit_log
+        INSERT INTO __SCHEMA__.csm_audit_log
             (schema_name, table_name, record_id, field_name, action, old_value, new_value,
              created_by, db_role, transaction_id, request_id)
         VALUES
@@ -182,7 +191,7 @@ BEGIN
 
     -- A changed key is also logged under the old key, so history can be followed.
     IF TG_OP = 'UPDATE' AND audit_record_key(old_row, key_columns) <> record_id THEN
-        INSERT INTO public.csm_audit_log
+        INSERT INTO __SCHEMA__.csm_audit_log
             (schema_name, table_name, record_id, field_name, action, old_value, new_value,
              created_by, db_role, transaction_id, request_id)
         VALUES
@@ -193,8 +202,15 @@ BEGIN
 
     RETURN NULL;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Registration. Only these functions write audit_config.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION register_audit(
     p_schema   TEXT,
     p_table    TEXT,
@@ -203,7 +219,7 @@ CREATE OR REPLACE FUNCTION register_audit(
     p_masked   TEXT[] DEFAULT '{}'
 ) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     table_oid  regclass := format('%I.%I', p_schema, p_table)::regclass;
     keys       TEXT[]   := p_keys;
@@ -261,11 +277,18 @@ BEGIN
     -- ALWAYS, so it still fires when session_replication_role = replica.
     EXECUTE format('ALTER TABLE %s ENABLE ALWAYS TRIGGER csm_audit_row_change', table_oid);
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Turn auditing off. A reason is required; old history stays.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION unregister_audit(p_schema TEXT, p_table TEXT, p_reason TEXT) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     table_oid regclass := to_regclass(format('%I.%I', p_schema, p_table));
 BEGIN
@@ -283,11 +306,18 @@ BEGIN
         EXECUTE format('DROP TRIGGER IF EXISTS csm_audit_row_change ON %s', table_oid);
     END IF;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Mark a table as deliberately not audited (staging, queues, ...).
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION exclude_from_audit(p_schema TEXT, p_table TEXT, p_reason TEXT) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     table_oid regclass := to_regclass(format('%I.%I', p_schema, p_table));
 BEGIN
@@ -304,12 +334,19 @@ BEGIN
         EXECUTE format('DROP TRIGGER IF EXISTS csm_audit_row_change ON %s', table_oid);
     END IF;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Partitions. Safe to run twice and from several replicas (advisory lock).
 -- Month boundaries are UTC.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION audit_create_partitions(p_months_ahead INT DEFAULT 3) RETURNS INT
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     this_month     DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
     month_start    DATE;
@@ -328,7 +365,7 @@ BEGIN
         month_end      := (this_month + make_interval(months => i + 1))::date;
         partition_name := 'csm_audit_log_' || to_char(month_start, 'YYYY_MM');
 
-        IF to_regclass(format('public.%I', partition_name)) IS NULL THEN
+        IF to_regclass(format('%I.%I', __SCHEMA_LIT__, partition_name)) IS NULL THEN
             -- Creating the partition would fail while rows for that month sit in the
             -- catch-all, and that failure would stop every later month too.
             IF EXISTS (SELECT 1 FROM csm_audit_log_default
@@ -339,10 +376,10 @@ BEGIN
             END IF;
 
             EXECUTE format(
-                'CREATE TABLE public.%I PARTITION OF public.csm_audit_log FOR VALUES FROM (%L) TO (%L)',
+                'CREATE TABLE __SCHEMA__.%I PARTITION OF __SCHEMA__.csm_audit_log FOR VALUES FROM (%L) TO (%L)',
                 partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
             EXECUTE format(
-                'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON public.%I
+                'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON __SCHEMA__.%I
                    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()', partition_name);
             created_count := created_count + 1;
         END IF;
@@ -350,18 +387,25 @@ BEGIN
 
     RETURN created_count;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Detach partitions that end before the retention cutoff, and return their names.
 -- The data stays in a standalone table; archiving and dropping it is a separate step.
 -- Detaching briefly locks csm_audit_log (the catch-all partition rules out
 -- CONCURRENTLY), so run it in a quiet window: lock_timeout makes it give up
 -- instead of blocking writes, and the caller retries.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION audit_retire_partitions(
     p_retention_months INT  DEFAULT 18,
     p_lock_timeout     TEXT DEFAULT '2s'
 ) RETURNS SETOF TEXT
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     cutoff TIMESTAMPTZ :=
         (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
@@ -375,19 +419,26 @@ BEGIN
         SELECT c.relname
           FROM pg_inherits i
           JOIN pg_class c ON c.oid = i.inhrelid
-         WHERE i.inhparent = 'public.csm_audit_log'::regclass
+         WHERE i.inhparent = format('%I.csm_audit_log', __SCHEMA_LIT__)::regclass
            AND pg_get_expr(c.relpartbound, c.oid) <> 'DEFAULT'
            AND (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1]::timestamptz <= cutoff
     LOOP
-        EXECUTE format('ALTER TABLE public.csm_audit_log DETACH PARTITION public.%I', old_partition);
+        EXECUTE format('ALTER TABLE __SCHEMA__.csm_audit_log DETACH PARTITION __SCHEMA__.%I', old_partition);
         RETURN NEXT old_partition;
     END LOOP;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Empty result = healthy.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION audit_partition_health() RETURNS TABLE (problem TEXT)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     this_month   DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
     future_count INT;
@@ -400,7 +451,7 @@ BEGIN
     SELECT count(*) INTO future_count
       FROM pg_inherits i
       JOIN pg_class c ON c.oid = i.inhrelid
-     WHERE i.inhparent = 'public.csm_audit_log'::regclass
+     WHERE i.inhparent = format('%I.csm_audit_log', __SCHEMA_LIT__)::regclass
        AND c.relname ~ '^csm_audit_log_\d{4}_\d{2}$'
        AND to_date(substr(c.relname, 15), 'YYYY_MM') > this_month;
     IF future_count < 2 THEN
@@ -408,14 +459,21 @@ BEGIN
         RETURN NEXT;
     END IF;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Compares the registry with the triggers that really exist. Empty result =
 -- consistent. With p_repair, missing or disabled triggers are put back; the rest
 -- is only reported.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION audit_reconcile(p_repair BOOLEAN DEFAULT false)
 RETURNS TABLE (schema_name TEXT, table_name TEXT, problem TEXT)
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     registered RECORD;
     trigger_state "char";
@@ -476,6 +534,10 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM audit_config ac
                         WHERE ac.schema_name = n.nspname AND ac.table_name = c.relname AND ac.enabled);
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Only the owner (and SECURITY DEFINER callers) may run the maintenance functions.
 REVOKE ALL ON FUNCTION register_audit(TEXT, TEXT, TEXT[], TEXT[], TEXT[]) FROM PUBLIC;
@@ -489,10 +551,13 @@ REVOKE ALL ON FUNCTION audit_reconcile(BOOLEAN) FROM PUBLIC;
 -- New-table alert. Attaches nothing; only warns when a new table is neither
 -- registered nor excluded. SECURITY DEFINER because every role that creates a
 -- table runs it, and none of them may read audit_config.
--- 'public' is a placeholder: the approved schemas are still to be decided.
+-- Watches the schema this migration ran in; other schemas still to be decided.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
 CREATE OR REPLACE FUNCTION audit_warn_unregistered_table() RETURNS event_trigger
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp AS $$
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     new_table RECORD;
 BEGIN
@@ -501,7 +566,7 @@ BEGIN
           FROM pg_event_trigger_ddl_commands() d
           JOIN pg_class c ON c.oid = d.objid
          WHERE d.object_type = 'table'
-           AND d.schema_name = 'public'
+           AND d.schema_name = __SCHEMA_LIT__
            AND NOT c.relispartition
            AND c.relname NOT LIKE 'csm\_audit\_log%'
     LOOP
@@ -512,6 +577,10 @@ BEGIN
         END IF;
     END LOOP;
 END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
 
 -- Needs superuser; skipped with a notice otherwise.
 DO $$
@@ -527,4 +596,4 @@ END $$;
 
 -- First partitions, and the registry audits its own changes.
 SELECT audit_create_partitions();
-SELECT register_audit('public', 'audit_config', ARRAY['schema_name', 'table_name']);
+SELECT register_audit(current_schema(), 'audit_config', ARRAY['schema_name', 'table_name']);
