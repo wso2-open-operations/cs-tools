@@ -119,6 +119,8 @@ export interface Comment {
   type: CaseCommentType;
   content: string;
   createdBy: string;
+  /** The author is a support engineer (an internal user), as the backend resolved it. */
+  createdByIsInternal: boolean;
   createdOn: Date;
 }
 
@@ -204,6 +206,8 @@ export function toComment(dto: CaseCommentDto): Comment {
     type: dto.type,
     content: dto.content,
     createdBy: commentAuthorLabel(dto.createdBy),
+    createdByIsInternal:
+      typeof dto.createdBy === "object" && dto.createdBy !== null && dto.createdBy.isInternal === true,
     createdOn: parseBackendTimestamp(dto.createdOn),
   };
 }
