@@ -38,11 +38,15 @@ export function stripStaffNameMarker(name: string | null | undefined): string {
  * removed first. A third word, or any other trailing marker, never reaches the avatar.
  */
 export function nameInitials(name: string | null | undefined): string {
-  return stripStaffNameMarker(name)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word.charAt(0))
-    .join("")
-    .toUpperCase();
+  return (
+    stripStaffNameMarker(name)
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      // The first code point, not the first UTF-16 unit: charAt(0) would split a character outside the
+      // basic plane (for example 𠮷) into a broken half.
+      .map((word) => Array.from(word)[0])
+      .join("")
+      .toUpperCase()
+  );
 }

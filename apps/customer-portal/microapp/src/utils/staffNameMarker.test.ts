@@ -49,4 +49,10 @@ describe("nameInitials", () => {
     expect(nameInitials("ⓦ")).toBe("");
     expect(nameInitials("")).toBe("");
   });
+
+  it("keeps a character outside the basic plane whole, and handles caseless scripts", () => {
+    expect(nameInitials("𠮷野 太郎")).toBe("𠮷太");
+    expect(nameInitials("山田 太郎")).toBe("山太");
+    expect(nameInitials("𠮷野 太郎 ⓦ")).toBe("𠮷太");
+  });
 });
