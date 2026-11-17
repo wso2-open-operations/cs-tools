@@ -25,34 +25,43 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// CaseEscalationAccessService lets a CSM admin name the people who may
-// de-escalate any case, besides the leads of the case's own ABT team.
+// CaseEscalationAccessService lets a CSM admin, through the CSM portal, name the
+// people who may de-escalate any case, besides the leads of the case's own ABT
+// team.
 type CaseEscalationAccessService interface {
-	// ListDeescalators returns every grant. Admin only.
+	// ListDeescalators returns every grant. CSM portal backend only.
 	ListDeescalators(ctx context.Context) (domain.CaseDeescalators, error)
-	// GrantDeescalator names userID. Admin only; active internal staff only.
+	// GrantDeescalator names userID. CSM portal backend only; active internal staff only.
 	GrantDeescalator(ctx context.Context, userID string) error
-	// RevokeDeescalator removes userID. Admin only; removing a grant that is
+	// RevokeDeescalator removes userID. CSM portal backend only; removing a grant that is
 	// not there is not an error.
 	RevokeDeescalator(ctx context.Context, userID string) error
 }
 
 type caseEscalationAccessService struct {
-	repo       repository.CaseEscalationAccessRepository
-	access     AccessService
-	adminRoles []string
+	repo                     repository.CaseEscalationAccessRepository
+	access                   AccessService
+	csmPortalBackendClientID string
 }
 
 // NewCaseEscalationAccessService constructs a CaseEscalationAccessService.
-// adminRoles is AUTH_ADMIN_ROLES.
-func NewCaseEscalationAccessService(repo repository.CaseEscalationAccessRepository, access AccessService, adminRoles []string) CaseEscalationAccessService {
-	return &caseEscalationAccessService{repo: repo, access: access, adminRoles: adminRoles}
+// csmPortalBackendClientID is CSM_PORTAL_BACKEND_CLIENT_ID -- see
+// requireCSMPortalBackendCaller for why the list is gated on the caller's
+// client id rather than on AUTH_ADMIN_ROLES.
+func NewCaseEscalationAccessService(repo repository.CaseEscalationAccessRepository, access AccessService, csmPortalBackendClientID string) CaseEscalationAccessService {
+	return &caseEscalationAccessService{repo: repo, access: access, csmPortalBackendClientID: csmPortalBackendClientID}
 }
 
-// requireAdmin is the gate: an internal caller with a user token that is a
-// CSM admin (a token role from AUTH_ADMIN_ROLES) or a portal admin. It
-// returns the caller's email for the audit trail.
-func (s *caseEscalationAccessService) requireAdmin(ctx context.Context) (string, error) {
+// requireCSMPortalBackendCaller gates the list, grant and revoke on the caller
+// being apps/csm-portal/backend itself, mirroring
+// portalBannerService.requireCSMPortalBackendCaller (see that method for the
+// full reasoning): whether the person is a CSM admin is decided once, by
+// csm-portal-backend's own PermAdmin gate on these routes, not a second time
+// here against an independently-configured AUTH_ADMIN_ROLES that can silently
+// disagree with it. It returns the signed-in person's email for the audit
+// trail. A deactivated person is still refused: that is who they are, not which
+// role they hold, and the portal backend's credential path reads no user row.
+func (s *caseEscalationAccessService) requireCSMPortalBackendCaller(ctx context.Context) (string, error) {
 	if err := RequireInternalCaller(ctx, s.access, "escalation access is only available to internal staff"); err != nil {
 		return "", err
 	}
@@ -60,8 +69,9 @@ func (s *caseEscalationAccessService) requireAdmin(ctx context.Context) (string,
 	if id.UserEmail == "" {
 		return "", &apierror.ForbiddenError{Msg: "escalation access needs a user token, not a service credential"}
 	}
-	// A deactivated admin must not pass on a token role (the portal backend's
-	// credential path reads no user row) or on the stored admin role.
+	if s.csmPortalBackendClientID == "" || id.ClientID != s.csmPortalBackendClientID {
+		return "", &apierror.ForbiddenError{Msg: "who may de-escalate can only be changed through the CSM Portal"}
+	}
 	gone, err := s.repo.IsDeactivated(ctx, id.UserEmail)
 	if err != nil {
 		return "", err
@@ -69,22 +79,12 @@ func (s *caseEscalationAccessService) requireAdmin(ctx context.Context) (string,
 	if gone {
 		return "", &apierror.ForbiddenError{Msg: "only a CSM admin can change who may de-escalate"}
 	}
-	if holdsAnyRole(id.Roles, s.adminRoles) {
-		return id.UserEmail, nil
-	}
-	portalAdmin, err := s.repo.IsPortalAdmin(ctx, id.UserEmail)
-	if err != nil {
-		return "", err
-	}
-	if !portalAdmin {
-		return "", &apierror.ForbiddenError{Msg: "only a CSM admin can change who may de-escalate"}
-	}
 	return id.UserEmail, nil
 }
 
 // ListDeescalators implements CaseEscalationAccessService.
 func (s *caseEscalationAccessService) ListDeescalators(ctx context.Context) (domain.CaseDeescalators, error) {
-	if _, err := s.requireAdmin(ctx); err != nil {
+	if _, err := s.requireCSMPortalBackendCaller(ctx); err != nil {
 		return domain.CaseDeescalators{}, err
 	}
 	grants, err := s.repo.ListDeescalators(ctx)
@@ -99,7 +99,7 @@ func (s *caseEscalationAccessService) GrantDeescalator(ctx context.Context, user
 	if err := requireGrantUserID(userID); err != nil {
 		return err
 	}
-	actor, err := s.requireAdmin(ctx)
+	actor, err := s.requireCSMPortalBackendCaller(ctx)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (s *caseEscalationAccessService) RevokeDeescalator(ctx context.Context, use
 	if err := requireGrantUserID(userID); err != nil {
 		return err
 	}
-	actor, err := s.requireAdmin(ctx)
+	actor, err := s.requireCSMPortalBackendCaller(ctx)
 	if err != nil {
 		return err
 	}
