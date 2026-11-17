@@ -84,3 +84,25 @@ func TestClient_DoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("err = %v, want the 302 as an error (redirect not followed)", err)
 	}
 }
+
+func TestSafeBaseURL(t *testing.T) {
+	for base, want := range map[string]bool{
+		"https://alert-core.internal.example": true,
+		"HTTPS://alert-core.internal.example": true,
+		"http://localhost:8080":               true,
+		"http://127.0.0.1:8080":               true,
+		"http://[::1]:8080":                   true,
+		"http://alert-core:8080":              false,
+		"http://10.0.0.5:8080":                false,
+		"ftp://alert-core":                    false,
+		"alert-core:8080":                     false,
+		"https://":                            false,
+	} {
+		if got := SafeBaseURL(base); got != want {
+			t.Errorf("SafeBaseURL(%q) = %v, want %v", base, got, want)
+		}
+	}
+	if NewClient(Config{BaseURL: "http://alert-core:8080", Token: "secret"}) != nil {
+		t.Fatal("NewClient accepted a plain-http, non-loopback base URL")
+	}
+}

@@ -229,7 +229,7 @@ Portal; this service exposes nothing else about them.
 sre-alert-core-service's read API for the CSM portal, through `internal/alertcore`, not
 entity-service. Alert-core answers only with its shared `ALERT_CORE_API_TOKEN`, which
 stays in this service: callers authenticate at the gateway like every other route, and
-alert-core needs no public endpoint (its `read-api` endpoint is Project visibility). Only
+alert-core needs no public endpoint (its `read-api` endpoint is Organization visibility, an https internal URL). The base URL must be https (http only for loopback), so the token is never sent in plaintext. Only
 the documented query parameters are forwarded, and rule ids are checked as UUIDs here.
 `ALERT_CORE_BASE_URL` or `ALERT_CORE_API_TOKEN` unset: these routes answer 503 and the
 service otherwise starts as normal.

@@ -90,7 +90,8 @@ func main() {
 	}); c != nil {
 		alertCoreHandler = handler.NewAlertCoreHandler(c)
 	} else {
-		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set; the muted-alerts and alert-field-values routes answer 503")
+		// Never log the URL or the token.
+		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set, or the base URL is not https (http only for loopback); the muted-alerts and alert-field-values routes answer 503")
 	}
 	cloudStatusHandler := handler.NewCloudStatusHandler(entityClient)
 	catalogHandler := handler.NewCatalogHandler(entityClient)

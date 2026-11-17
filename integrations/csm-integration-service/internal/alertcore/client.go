@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,12 +51,14 @@ type Client struct {
 	token   string
 }
 
-// NewClient returns a Client, or nil when either value is empty: the routes that
-// need it then answer 503, so a missing setting never fails startup.
+// NewClient returns a Client, or nil when either value is empty or the base URL
+// is not https (http is allowed only for a loopback host, for local runs): the
+// shared bearer token is never sent in plaintext. The routes that need the client
+// then answer 503, so a missing or unsafe setting never fails startup.
 func NewClient(cfg Config) *Client {
 	base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	token := strings.TrimSpace(cfg.Token)
-	if base == "" || token == "" {
+	if base == "" || token == "" || !SafeBaseURL(base) {
 		return nil
 	}
 	return &Client{
@@ -66,6 +69,28 @@ func NewClient(cfg Config) *Client {
 		},
 		baseURL: base,
 		token:   token,
+	}
+}
+
+// SafeBaseURL reports whether base may carry the bearer token: an absolute https
+// URL, or http to a loopback host (localhost, 127.0.0.0/8, ::1).
+func SafeBaseURL(base string) bool {
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		if strings.EqualFold(host, "localhost") {
+			return true
+		}
+		ip := net.ParseIP(host)
+		return ip != nil && ip.IsLoopback()
+	default:
+		return false
 	}
 }
 

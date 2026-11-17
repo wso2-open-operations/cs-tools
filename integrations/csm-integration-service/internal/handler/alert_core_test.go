@@ -56,8 +56,8 @@ func TestAlertCore_NotConfiguredAnswers503(t *testing.T) {
 	h := NewAlertCoreHandler(nil)
 	for target, msg := range map[string]string{
 		"/alert-mute-rules/" + testRuleID + "/muted-incidents": errMsgMutedAlertsNotConfigured,
-		"/alert-mute-rules/muted-counts?ids=" + testRuleID:      errMsgMutedAlertsNotConfigured,
-		"/alert-field-values?field=service":                     errMsgFieldValuesNotConfigured,
+		"/alert-mute-rules/muted-counts?ids=" + testRuleID:     errMsgMutedAlertsNotConfigured,
+		"/alert-field-values?field=service":                    errMsgFieldValuesNotConfigured,
 	} {
 		w := serveAlertCore(h, target)
 		assertStatus(t, w, http.StatusServiceUnavailable)
@@ -143,5 +143,28 @@ func TestAlertCore_UpstreamErrorsAreMapped(t *testing.T) {
 			assertStatus(t, w, tc.wantCode)
 			assertErrorMessage(t, w, tc.wantMsg)
 		})
+	}
+}
+
+func TestAlertCore_RuleIDsAreLowerCased(t *testing.T) {
+	upper := strings.ToUpper(testRuleID[:8]) + testRuleID[8:]
+	upper = strings.Replace(upper, "11111111", "AAAAAAAA", 1)
+	lower := strings.ToLower(upper)
+	var gotID string
+	var gotQ url.Values
+	h := NewAlertCoreHandler(&mockAlertCoreClient{
+		mutedIncidentsFn: func(_ context.Context, id string, _ url.Values) ([]byte, error) {
+			gotID = id
+			return []byte(`{}`), nil
+		},
+		mutedCountsFn: func(_ context.Context, q url.Values) ([]byte, error) {
+			gotQ = q
+			return []byte(`{}`), nil
+		},
+	})
+	assertStatus(t, serveAlertCore(h, "/alert-mute-rules/"+upper+"/muted-incidents"), http.StatusOK)
+	assertStatus(t, serveAlertCore(h, "/alert-mute-rules/muted-counts?ids="+upper+","+testRuleID), http.StatusOK)
+	if gotID != lower || gotQ.Get("ids") != lower+","+testRuleID {
+		t.Errorf("forwarded id %q ids %q, want lower-case %q", gotID, gotQ.Get("ids"), lower)
 	}
 }
