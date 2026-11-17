@@ -100,7 +100,7 @@ type store interface {
 	DueMembers(ctx context.Context, now time.Time) ([]string, error)
 	SetClock(ctx context.Context, caseID, clockType string, meta ClockMeta) error
 	GetClock(ctx context.Context, caseID, clockType string) (ClockMeta, bool, error)
-	SetPaused(ctx context.Context, caseID, clockType string, paused bool) error
+	SetPaused(ctx context.Context, caseID, clockType string, paused bool, slaID string) (applied bool, err error)
 	ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, oldBaselineSeconds, newBaselineSeconds int64) error
 	SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, oldBaselineSeconds, newBaselineSeconds int64) error
 	SetShiftedPauseSeconds(ctx context.Context, caseID, clockType string, seconds int64) error
@@ -110,7 +110,7 @@ type store interface {
 	ReleaseTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) error
 	WipeAll(ctx context.Context) error
 	ListClockKeys(ctx context.Context) ([]string, error)
-	DeleteClock(ctx context.Context, caseID, clockType string) error
+	DeleteClockIfMatch(ctx context.Context, caseID, clockType, slaID string) (applied bool, err error)
 }
 
 // eventPublisher abstracts eventbus.Producer for testability.
@@ -149,7 +149,7 @@ type emailSender interface {
 // deliberate, additive safety net, not something every caller must now wire
 // up.
 type entityClockStatusClient interface {
-	GetClockState(ctx context.Context, caseID, clockType string) (clockState, error)
+	GetClockState(ctx context.Context, caseID, clockType, slaID string) (clockState, error)
 }
 
 // entityClockStateRetryAttempts/entityClockStateRetryDelay bound a short
@@ -182,12 +182,16 @@ const (
 // entityClockStateRetryAttempts's own doc comment for why. A transport/
 // lookup error is returned immediately, unretried here: that's each
 // caller's own existing, separate concern (already logged and handled by
-// treating the clock as absent/not-paused).
-func getClockStateWithRetry(ctx context.Context, entity entityClockStatusClient, caseID, clockType string) (clockState, error) {
+// treating the clock as absent/not-paused). slaID is forwarded to
+// GetClockState unchanged — see that method's own doc comment for what it
+// narrows the lookup to; both current callers (RegisterClocks,
+// entityPauseStatus) pass "" since neither is re-checking a specific row
+// they already track.
+func getClockStateWithRetry(ctx context.Context, entity entityClockStatusClient, caseID, clockType, slaID string) (clockState, error) {
 	var state clockState
 	var err error
 	for attempt := 1; attempt <= entityClockStateRetryAttempts; attempt++ {
-		state, err = entity.GetClockState(ctx, caseID, clockType)
+		state, err = entity.GetClockState(ctx, caseID, clockType, slaID)
 		if err != nil || state.Found {
 			return state, err
 		}
@@ -519,7 +523,7 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 	}
 
 	for _, clockType := range clockTypesInOrder {
-		state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType)
+		state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType, "")
 		if err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to read clock state from entity-service, not registering this clock type", "caseId", caseID, "clockType", clockType, "err", err)
 			continue
@@ -547,6 +551,7 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 			Priority:       priority,
 			StartedAt:      startedAt,
 			Schedule:       state.Schedule,
+			SLAID:          state.ID,
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
@@ -621,13 +626,16 @@ func (e *Engine) ApplyStateEffects(ctx context.Context, caseID, newStatus string
 		if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResolution, 100, time.Time{}); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to complete resolution clock on case close", "caseId", caseID, "err", err)
 		}
-		e.setPaused(ctx, caseID, ClockWorkaround, true)
+		// "" (no identity to check): reacting to a live event right now,
+		// not a possibly-stale snapshot -- same posture AdvanceAlertedTier
+		// takes above with time.Time{}.
+		e.setPaused(ctx, caseID, ClockWorkaround, true, "")
 		return
 	}
 
 	for _, clockType := range []string{ClockWorkaround, ClockResolution} {
-		paused := e.entityPauseStatus(ctx, caseID, clockType)
-		e.setPaused(ctx, caseID, clockType, paused)
+		paused, slaID := e.entityPauseStatus(ctx, caseID, clockType)
+		e.setPaused(ctx, caseID, clockType, paused, slaID)
 		if !paused {
 			e.resumeShift(ctx, caseID, clockType)
 		}
@@ -642,19 +650,39 @@ func (e *Engine) ApplyStateEffects(ctx context.Context, caseID, newStatus string
 // sendBreachAlert's own entity-service check already uses: wrongly leaving a
 // clock paused forever would silently suppress a real breach alert, which is
 // worse than the occasional premature one from wrongly resuming it.
-func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string) bool {
+// entityPauseStatus returns the clock's own SLAID alongside its pause
+// verdict -- the identity this read was actually about, captured at read
+// time, for the caller to carry through to setPaused's own write. See
+// setPausedIfMatchScript's own doc comment (redis.go) for why that write
+// must be scoped to this exact identity rather than blindly keyed by
+// (caseID, clockType): ReviseClocks/refreshAndReconcileClock can replace
+// this clock with a fresh incarnation in the window between this read (a
+// real network round trip to entity-service) and that write, and an
+// identity-blind write would then stamp THIS verdict onto the NEW clock.
+func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string) (paused bool, slaID string) {
 	if e.entity == nil {
-		return false
+		return false, ""
 	}
-	state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType)
+	// slaID, when already known, narrows the lookup to the exact clock
+	// this engine is tracking rather than entity-service's own ambiguous
+	// "most recently started" default — same reasoning as
+	// verifyTierStillDue/resumeShift. A lookup failure here is swallowed the
+	// same way a genuine "not found" already is below: this is a best-effort
+	// refinement, not a prerequisite.
+	if e.store != nil {
+		if meta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+			slaID = meta.SLAID
+		}
+	}
+	state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType, slaID)
 	if err != nil {
 		slog.WarnContext(ctx, "slaengine: failed to read pause status from entity-service, treating clock as not paused", "caseId", caseID, "clockType", clockType, "err", err)
-		return false
+		return false, slaID
 	}
 	if !state.Found {
-		return false
+		return false, slaID
 	}
-	return state.IsPaused
+	return state.IsPaused, slaID
 }
 
 // setPaused is the plain Redis flag write only — see resumeShift for the
@@ -667,12 +695,24 @@ func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string
 // reconcileClock (to decide whether this clock needs a repair pass); every
 // other call site already ignored it before this return value existed and
 // is unaffected.
-func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused bool) bool {
-	if err := e.store.SetPaused(ctx, caseID, clockType, paused); err != nil {
+//
+// slaID is forwarded to Store.SetPaused unchanged -- see that method's own
+// doc comment for what it narrows the write to and why. A skipped write
+// (identity mismatch: this clock was replaced since slaID was captured) is
+// logged at INFO, not ERROR -- it isn't a failure, it's this call correctly
+// declining to act on a verdict that's no longer about the clock Redis is
+// now tracking; the replacement's own reconcileClock/RegisterClocks call
+// already wrote its own correct pause state.
+func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused bool, slaID string) bool {
+	applied, err := e.store.SetPaused(ctx, caseID, clockType, paused, slaID)
+	if err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to update clock paused state", "caseId", caseID, "clockType", clockType, "paused", paused, "err", err)
 		return false
 	}
-	return true
+	if !applied {
+		slog.InfoContext(ctx, "slaengine: skipped a pause-state write -- this clock has since been replaced by a different incarnation", "caseId", caseID, "clockType", clockType)
+	}
+	return applied
 }
 
 // resumeShift is the other half of setPaused(..., false): once a clock
@@ -716,7 +756,7 @@ func (e *Engine) resumeShift(ctx context.Context, caseID, clockType string) {
 	if !found {
 		return
 	}
-	state, err := e.entity.GetClockState(ctx, caseID, clockType)
+	state, err := e.entity.GetClockState(ctx, caseID, clockType, meta.SLAID)
 	if err != nil {
 		slog.WarnContext(ctx, "slaengine: failed to fetch pause duration from entity-service, wake schedule not shifted for this resume", "caseId", caseID, "clockType", clockType, "err", err)
 		return
@@ -824,7 +864,10 @@ func (e *Engine) CompleteResponseClock(ctx context.Context, caseID string) {
 // rather than being re-established by this same trigger firing again, so
 // retrying the record is still worth it over silently acknowledging it.
 func (e *Engine) PauseWorkaroundClock(ctx context.Context, caseID string) error {
-	if err := e.store.SetPaused(ctx, caseID, ClockWorkaround, true); err != nil {
+	// "" (no identity to check): reacting to a live case.workaround_provided
+	// event right now, not a possibly-stale snapshot -- same posture
+	// ApplyStateEffects' own CLOSED branch takes.
+	if _, err := e.store.SetPaused(ctx, caseID, ClockWorkaround, true, ""); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to pause workaround clock", "caseId", caseID, "err", err)
 		return fmt.Errorf("slaengine: pause workaround clock for %s: %w", caseID, err)
 	}
@@ -1058,15 +1101,48 @@ const (
 //     runs on a different trigger than this engine's own Redis
 //     registration, so "no row" can just as easily mean "never registered
 //     there" as "resolved", and must not be read as the latter;
-//   - that row is the SAME incarnation of the clock this wake entry is
-//     about (isSameClockIncarnation, comparing StartedOn) — a severity
-//     revision cancels the old clock and registers a fresh one for the same
-//     (case, clockType) pair, and a stale wake entry for the OLD
-//     incarnation must not be waved through just because entity-service now
-//     has an unrelated, currently-active NEW one;
-//   - and then one of two ways the live record disagrees with this wake:
-//   - isTerminalSLAStage(state.Stage) && !state.HasBreached — resolved
-//     cleanly, no breach ever recorded. Verdict: tierResolved.
+//   - and then one of four ways the live record disagrees with this wake,
+//     checked in this order:
+//   - meta.SLAID != "" && isTerminalSLAStage(state.Stage) && !state.HasBreached
+//     — resolved cleanly, no breach ever recorded, AND GetClockState was
+//     asked about this clock's own exact row (meta.SLAID non-empty), so the
+//     answer is guaranteed to be about the SAME clock regardless of
+//     incarnation. Verdict: tierResolved. Checked BEFORE the incarnation
+//     comparison below, deliberately: a severity revision cancels the old
+//     clock and registers a fresh one for the same (case, clockType) pair,
+//     and a terminal, unbreached stage for THIS exact row means there is no
+//     live clock left to alert about, whichever incarnation — old or new —
+//     this wake entry's own StartedOn happens to match. Confirmed as a real
+//     production false alert before this ordering existed: a clock
+//     cancelled at 59% (severity changed) still sent a 75% breach Chat
+//     alert, because the incarnation-mismatch branch below used to run
+//     first, unconditionally, and fail open before this check ever got a
+//     chance to run. Requiring meta.SLAID is itself a CodeRabbit-caught fix
+//     on top of that: without it, this branch could fire off an entirely
+//     unrelated SIBLING policy's row (entity-service genuinely lets two
+//     policies both have an open clock on one target at once — confirmed
+//     live, not theoretical), permanently losing a still-due tier's alert.
+//   - !isSameClockIncarnation(state.StartedOn, meta.StartedAt) — the row is
+//     a DIFFERENT incarnation of the clock this wake entry is about
+//     (isSameClockIncarnation, comparing StartedOn, 5-minute tolerance):
+//     entity-service now has an unrelated, currently-active NEW clock for
+//     this (case, clockType) pair, which this old wake entry can say
+//     nothing reliable about. Verdict: tierDue (fails open — see below).
+//     Reached whenever meta.SLAID is empty (the branch above requires it)
+//     or the exact-row lookup still disagrees for some other reason.
+//   - isTerminalSLAStage(state.Stage) && !state.HasBreached, UNGUARDED —
+//     reached only once incarnation match is already confirmed (so
+//     meta.SLAID was empty, and the row happened to pass the tolerance
+//     above too — the ordinary case when there's genuinely one policy on
+//     this target). Verdict: tierResolved, for the identical reason the
+//     pre-SLAID version of this whole function was: incarnation match is
+//     the only confirmation available when there's no row id. Known,
+//     pre-existing, NOT newly introduced limitation: the 5-minute tolerance
+//     can't tell two SIBLING policies that started close together apart
+//     from one clock's own processing-lag jitter, so a terminal sibling
+//     that merely started within that window can still reach this branch
+//     for an empty-SLAID clock — closing that needs a known SLAID, which
+//     this clock's own next severity revision or a Recalculate backfills.
 //   - state.IsPaused && !state.HasBreached — currently paused, no breach
 //     ever recorded. PAUSED isn't terminal (pausing is routine, not a
 //     resolution), so the check above alone never catches it — but a
@@ -1118,7 +1194,7 @@ func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType strin
 	if e.entity == nil {
 		return tierDue, clockState{}
 	}
-	state, err := e.entity.GetClockState(ctx, caseID, clockType)
+	state, err := e.entity.GetClockState(ctx, caseID, clockType, meta.SLAID)
 	switch {
 	case err != nil:
 		slog.WarnContext(ctx, "slaengine: failed to verify clock state before treating this tier as reached, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
@@ -1126,15 +1202,54 @@ func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType strin
 	case !state.Found:
 		slog.WarnContext(ctx, "slaengine: entity-service has no record of this clock, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return tierDue, state
+	case meta.SLAID != "" && isTerminalSLAStage(state.Stage) && !state.HasBreached:
+		// Checked before the incarnation comparison below, deliberately --
+		// but ONLY when meta.SLAID is known, which is what makes this safe:
+		// GetClockState was called WITH that id (see the call above), so
+		// state is guaranteed to be about the EXACT clock this wake entry
+		// tracks, not an ambiguous "whichever row is most recently
+		// started" guess. A severity change cancels the old clock and
+		// registers a fresh one (ReviseClocks), so the SAME wake entry that
+		// is "due" here can be about an incarnation entity-service has
+		// already moved past -- a terminal, unbreached stage for THIS exact
+		// row is unambiguous regardless of whose incarnation it belongs to,
+		// so this must not be skipped by the incarnation-mismatch fail-open
+		// branch just below. Confirmed as a real production false alert: a
+		// clock cancelled at 59% (severity changed) still sent a 75% breach
+		// Chat alert, because the old branch ordering let the incarnation
+		// mismatch win and fail open before this check ever ran.
+		//
+		// A CodeRabbit review on that fix caught the gap this guard closes:
+		// without requiring meta.SLAID, this branch would also fire for a
+		// clock whose SLAID isn't known yet (never registered with one, or
+		// a case this engine hasn't reconciled since this field shipped) --
+		// GetClockState then falls back to its own ambiguous default, and
+		// entity-service genuinely does let two policies both have an open
+		// clock on the same target at once (confirmed live, not
+		// theoretical). A terminal SIBLING policy's row could then wrongly
+		// finalize a DIFFERENT, still genuinely due policy's tier,
+		// permanently losing that alert. Requiring meta.SLAID here means an
+		// empty-SLAID clock falls through to the incarnation check next,
+		// exactly reproducing this function's behavior from before this
+		// whole SLAID mechanism existed -- a real regression risk closed,
+		// not just a documented one.
+		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
+		return tierResolved, state
 	case !isSameClockIncarnation(state.StartedOn, meta.StartedAt):
 		slog.WarnContext(ctx, "slaengine: entity-service is tracking a different clock incarnation than this wake entry, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return tierDue, state
 	case isTerminalSLAStage(state.Stage) && !state.HasBreached:
+		// Reached only when meta.SLAID was empty (the branch above requires
+		// it) and the row turned out to be the SAME incarnation anyway --
+		// the ordinary case when there's genuinely only one policy backing
+		// this target, which is still the common case. Safe for the
+		// identical reason the original, pre-SLAID version of this check
+		// was safe: incarnation match already confirmed above.
 		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
 		return tierResolved, state
 	case state.IsPaused && !state.HasBreached:
 		slog.WarnContext(ctx, "slaengine: entity-service shows this clock currently paused but this engine's own redis copy did not know, correcting it — this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier)
-		e.setPaused(ctx, caseID, clockType, true)
+		e.setPaused(ctx, caseID, clockType, true, meta.SLAID)
 		return tierNotYetDue, state
 	case state.HasBreached:
 		return tierDue, state
@@ -1845,8 +1960,21 @@ func (e *Engine) cleanupStaleClocks(ctx context.Context, existing []string, fres
 		if !ok {
 			continue
 		}
+		// slaID, when already known, narrows both the re-verification below
+		// and the delete itself to the exact clock Redis is (about to stop)
+		// tracking -- without it, entity-service's ambiguous "most recently
+		// started" default could confirm an unrelated, still-open sibling
+		// clock as terminal, and an identity-blind delete could wipe a
+		// genuinely live replacement that registered in the window between
+		// the verify and the delete. See DeleteClockIfMatch's own doc
+		// comment (redis.go) for why the delete must be skipped entirely,
+		// not just the hash, when the identity no longer matches.
+		var slaID string
+		if meta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+			slaID = meta.SLAID
+		}
 		if e.entity != nil {
-			state, err := e.entity.GetClockState(ctx, caseID, clockType)
+			state, err := e.entity.GetClockState(ctx, caseID, clockType, slaID)
 			if err != nil {
 				slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: verify candidate before delete failed, skipping it", "caseId", caseID, "clockType", clockType, "err", err)
 				continue
@@ -1855,8 +1983,13 @@ func (e *Engine) cleanupStaleClocks(ctx context.Context, existing []string, fres
 				continue
 			}
 		}
-		if err := e.store.DeleteClock(ctx, caseID, clockType); err != nil {
+		applied, err := e.store.DeleteClockIfMatch(ctx, caseID, clockType, slaID)
+		if err != nil {
 			slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: delete stale clock failed", "caseId", caseID, "clockType", clockType, "err", err)
+			continue
+		}
+		if !applied {
+			slog.InfoContext(ctx, "slaengine: recalculate: cleanup: skipped deleting a stale clock -- it has since been replaced by a different, live incarnation", "caseId", caseID, "clockType", clockType)
 			continue
 		}
 		removed++
@@ -1899,7 +2032,14 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 	if e.entity == nil {
 		return false, true
 	}
-	state, err := e.entity.GetClockState(ctx, display.CaseID, display.ClockType)
+	// "" deliberately: this call is discovering entity-service's CURRENT
+	// policy resolution for this clock type (which may now be an entirely
+	// different "sla" row than whatever display/Redis previously tracked,
+	// e.g. after a severity revision), not re-verifying a row this engine
+	// already knows it means -- passing display's own (possibly stale)
+	// SLAID here would wrongly narrow the lookup to a row that may no
+	// longer be the current one at all.
+	state, err := e.entity.GetClockState(ctx, display.CaseID, display.ClockType, "")
 	if err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to refresh clock state before rebuilding", "caseId", display.CaseID, "clockType", display.ClockType, "err", err)
 		return false, false
@@ -1917,6 +2057,7 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 		return false, true
 	}
 	c := display
+	c.ID = state.ID
 	c.IsPaused = state.IsPaused
 	c.StartedOn = state.StartedOn
 	c.PausedOn = state.PausedOn
@@ -2114,6 +2255,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		State:          c.State,
 		StartedAt:      startedAt,
 		Schedule:       c.Schedule,
+		SLAID:          c.ID,
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
@@ -2179,7 +2321,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	// true here would leave a stale paused=true in Redis forever, which
 	// Tick's own "drop if paused" check (processDueMember) would then
 	// silently swallow every future tier crossing for, never alerting.
-	if !e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused) {
+	if !e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused, c.ID) {
 		ok = false
 	}
 	return ok

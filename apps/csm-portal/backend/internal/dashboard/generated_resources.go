@@ -79,23 +79,26 @@ type fieldRule struct {
 
 // resourceRules is what a generated widget of one resourceType may hold.
 type resourceRules struct {
-	noun       string               // in messages: "a time card widget", "is not a time card filter"
-	shapes     []Shape              // allowed shapes
-	groupBy    []string             // allowed groupBy.field values
-	buckets    []string             // allowed groupBy.bucket values; with groupBy empty, a bucket is the only grouping
-	flat       map[string]valueRule // allowed flat query keys
-	dateKeys   map[string]bool      // flat keys that hold one date string, not a list
-	fields     map[string]fieldRule // allowed "filters" list fields; nil means no list
-	sortBy     []string             // allowed list sortBy fields; none means a list sets no sortBy
-	slicesVia  string               // the grouping to suggest when groupBy is not allowed
-	plainDates bool                 // dateKeys take YYYY-MM-DD or a relative date token, never an RFC 3339 time (the backing search rejects one)
-	groupByOn  []Shape              // the shapes a groupBy may be on; none means any
-	exclusive  [][2]string          // flat keys never set together in one query (with a slice's added), the second a JSON boolean set true
-	needs      map[string]string    // flat key -> the flat key a query holding it must hold too (with a slice's added)
-	groupNeeds map[string]string    // groupBy.field -> the flat key the widget's own query must hold
-	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
-	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
-	maxGroups  int                  // the largest groupBy.maxGroups the read takes (0 is its default); none means no bound here
+	noun         string               // in messages: "a time card widget", "is not a time card filter"
+	shapes       []Shape              // allowed shapes
+	groupBy      []string             // allowed groupBy.field values
+	buckets      []string             // allowed groupBy.bucket values; with groupBy empty, a bucket is the only grouping
+	flat         map[string]valueRule // allowed flat query keys
+	dateKeys     map[string]bool      // flat keys that hold one date string, not a list
+	fields       map[string]fieldRule // allowed "filters" list fields; nil means no list
+	sortBy       []string             // allowed list sortBy fields; none means a list sets no sortBy
+	slicesVia    string               // the grouping to suggest when groupBy is not allowed
+	plainDates   bool                 // dateKeys take YYYY-MM-DD or a relative date token, never an RFC 3339 time (the backing search rejects one)
+	groupByOn    []Shape              // the shapes a groupBy may be on; none means any
+	exclusive    [][2]string          // flat keys never set together in one query (with a slice's added), the second a JSON boolean set true
+	needs        map[string]string    // flat key -> the flat key a query holding it must hold too (with a slice's added)
+	groupNeeds   map[string]string    // groupBy.field -> the flat key the widget's own query must hold
+	fixedDates   bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
+	dayWindow    *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
+	maxGroups    int                  // the largest groupBy.maxGroups the read takes (0 is its default); none means no bound here
+	noSlices     bool                 // true: this type has no per-filter slicing concept at all (e.g. mttr's bands are a fixed server-side aggregate, not something a query filter can isolate) -- groupBy is its only grouping shape
+	requiredFlat []string             // flat keys that must be present in the widget's own query (not a slice's) -- e.g. mttr's "months", which the backing report has no default for
+	requiredOne  []string             // flat keys of which the widget's own query must hold exactly one -- e.g. mttr's window, "months" or "days"
 }
 
 // dayWindowRule is a "day" grouping's window: both keys must be set, and the
@@ -231,6 +234,41 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"reasons_neutral", "reasons_satisfied", "reasons_very_satisfied"},
 		slicesVia: "group with groupBy.bucket or with rating slices",
 	},
+	// MTTR (mean time to resolution): a flat months window and an optional CRE
+	// team restriction, always grouped on the server by the one fixed bucket
+	// "severity" -- entity-service's GET /reports/mttr returns all six bands
+	// (S1-S4, S1-S3, S1..S4) in one call, so there is nothing else to group by
+	// and no raw record to count or list.
+	ResourceMTTR: {
+		noun: "MTTR",
+		// bar only, never pie: the six bands overlap (S1-S4 and S1-S3 are
+		// sums of the individual ones), so they don't partition a whole the
+		// way a pie's wedges must -- and DashboardPieChart's percentage
+		// (slice.value / total) would divide hours by a case count anyway,
+		// which is meaningless even setting the overlap aside.
+		shapes: []Shape{ShapeBar, ShapeCount},
+		// A count shows one band's number, so it takes no groupBy and must
+		// name that band (see the MTTR check in checkGeneratedResourceWidget).
+		groupByOn: []Shape{ShapeBar},
+		flat: map[string]valueRule{
+			"months": {kind: valuesScalarEnum, values: []string{"1", "3", "6", "12"}},
+			"days":   {kind: valuesScalarEnum, values: []string{"7"}},
+			// How the times are shown; hours when omitted. A display choice
+			// only: the report itself is always in hours.
+			"unit":       {kind: valuesScalarEnum, values: []string{"hours", "days"}},
+			"creTeamIds": {kind: valuesTeamNames},
+			// Which bars to draw, in the order listed. The report computes
+			// every band; this only chooses what the widget shows. Omitted
+			// means S1 to S4, each its own bar. The combined "S1-S4"/"S1-S3"
+			// values stay valid only so a dashboard saved earlier still loads;
+			// the generator is told never to use them (catalogue section 5f).
+			"bands": {kind: valuesEnum, values: []string{"S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"}},
+		},
+		buckets:     []string{"severity"},
+		slicesVia:   "group with groupBy.bucket",
+		noSlices:    true,
+		requiredOne: []string{"months", "days"},
+	},
 	// PLG organisations and registrations (POST /plg/organizations/search,
 	// /plg/registrations/search) take the PLG list's flat filters, and only
 	// those a prompt can name: products, lifecycle stages, subscription
@@ -347,6 +385,9 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 	if !containsShape(rules.shapes, w.Shape) {
 		return fmt.Errorf("%w: %s: a %s widget's shape must be %s, not %q", ErrGeneratedInvalid, at, rules.noun, orList(shapeNames(rules.shapes)), w.Shape)
 	}
+	if rules.noSlices && len(w.Slices) > 0 {
+		return fmt.Errorf("%w: %s: a %s widget has no slices; %s", ErrGeneratedInvalid, at, rules.noun, rules.slicesVia)
+	}
 	if w.GroupBy != nil {
 		switch {
 		case len(rules.buckets) > 0:
@@ -388,6 +429,29 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		}
 	}
 
+	for _, k := range rules.requiredFlat {
+		if _, has := w.Query[k]; !has {
+			return fmt.Errorf("%w: %s.query: a %s widget needs %q", ErrGeneratedInvalid, at, rules.noun, k)
+		}
+	}
+	if len(rules.requiredOne) > 0 {
+		held := 0
+		for _, k := range rules.requiredOne {
+			if _, has := w.Query[k]; has {
+				held++
+			}
+		}
+		if held != 1 {
+			return fmt.Errorf("%w: %s.query: a %s widget needs exactly one of %s", ErrGeneratedInvalid, at, rules.noun, strings.Join(rules.requiredOne, ", "))
+		}
+	}
+	// An MTTR count is one band's number: exactly one band named, no groupBy
+	// (groupByOn above). The bar draws every band it names.
+	if w.ResourceType == ResourceMTTR && w.Shape == ShapeCount {
+		if b, ok := w.Query["bands"].([]any); !ok || len(b) != 1 {
+			return fmt.Errorf("%w: %s.query: an MTTR count shows one band, so \"bands\" must name exactly one", ErrGeneratedInvalid, at)
+		}
+	}
 	if err := checkGeneratedQuery(at+".query", w.Query, rules); err != nil {
 		return err
 	}

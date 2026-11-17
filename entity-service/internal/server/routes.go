@@ -372,6 +372,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// rest of the Team Schedule.
 	var rotaGenerateHandler *handler.RotaGenerateHandler
 	var rotaAccessHandler *handler.RotaAccessHandler
+	// Who may de-escalate any case; set once the database is available.
+	var caseEscalationAccessHandler *handler.CaseEscalationAccessHandler
 	var scheduleReminderHandler *handler.ScheduleReminderHandler
 	var rotaReminderSettingsHandler *handler.RotaReminderSettingsHandler
 	var rotaReminderRequestHandler *handler.RotaReminderRequestHandler
@@ -382,9 +384,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var longOpenCaseReportHandler *handler.LongOpenCaseReportHandler
+	var mttrReportHandler *handler.MTTRReportHandler
 	var runbookHandler *handler.RunbookHandler
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
+	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
 
@@ -624,6 +628,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Notify:          projectEventPublisher != nil,
 				DryRun:          cfg.ACPReopenDryRun,
 				TestProjectSfID: cfg.ACPReopenTestProjectSfID,
+				InternalDomains: cfg.ACPInternalEmailDomains,
 			}
 			// Dual-write: copy each reopen to the previous system, as PATCH
 			// /projects/{id} copies ACP's suspension.
@@ -1461,6 +1466,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// The ABT team leads (who may de-escalate) live in Postgres team data
 		// whatever DATA_SOURCE is.
 		caseEscalationSvc = service.WithCaseTeamLeads(caseEscalationSvc, escalationRepo)
+		// Besides them, the people an admin named (role case_deescalator).
+		caseEscalationAccessRepo := repository.NewCaseEscalationAccessRepository(db)
+		caseEscalationSvc = service.WithCaseDeescalators(caseEscalationSvc, caseEscalationAccessRepo)
+		caseEscalationAccessHandler = handler.NewCaseEscalationAccessHandler(
+			service.NewCaseEscalationAccessService(caseEscalationAccessRepo, accessSvc, cfg.CSMPortalBackendClientID),
+		)
 	}
 	caseEscalationHandler := handler.NewCaseEscalationHandler(caseEscalationSvc)
 
@@ -1732,6 +1743,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
 						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
 					}))
+			// MTTR report: average time from a case's creation to its last
+			// entry into Solution Proposed, by severity band (S1-S4, S1-S3,
+			// S1, S2, S3, S4) and trailing window (1/3/6/12 months), read
+			// from the Postgres case/work_item_activity tables only -- same
+			// reason as the long-open-cases report above.
+			mttrReportHandler = handler.NewMTTRReportHandler(
+				service.NewMTTRReportService(
+					repository.NewMTTRReportRepository(repository.NewScoped(db))))
 		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
@@ -1746,6 +1765,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewProductRegressionReportService(
 				repository.NewProductRegressionReportRepository(repository.NewScoped(db)),
 				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
+		// Weekly SLA breach reports: the clocks that breached last week, under
+		// each report's own stage and onboarding-status filters, for the
+		// scheduled tasks that mail them.
+		slaBreachReportHandler = handler.NewSLABreachReportHandler(
+			service.NewSLABreachReportService(
+				repository.NewSLABreachReportRepository(repository.NewScoped(db))))
 		caseAlertSettingsHandler = handler.NewCaseAlertSettingsHandler(
 			service.NewCaseAlertSettingsService(repository.NewCaseAlertSettingsRepository(db), repository.NewPagingChainRepository(db), accessSvc,
 				service.CaseAlertSettingsConfig{
@@ -2256,10 +2281,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// assigned to each; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/long-open-cases", internalOnly(accessSvc, longOpenCaseReportHandler.GetLongOpenCaseReport))
 	}
+	if mttrReportHandler != nil {
+		// internalOnly: an aggregate, but still an internal operational
+		// metric with no per-project/customer scoping concept -- same
+		// posture as the reports above.
+		mux.HandleFunc("GET /reports/mttr", internalOnly(accessSvc, mttrReportHandler.GetMTTRReport))
+	}
 	if productRegressionReportHandler != nil {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	if slaBreachReportHandler != nil {
+		// internalOnly, same reasoning as the regression report above: the
+		// report names customers' cases, accounts and assignees.
+		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
 	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
@@ -2313,6 +2349,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /team-schedule/absences/{id}", scheduleHandler.DeleteScheduleAbsence)
 		mux.HandleFunc("POST /team-schedule/absence-kinds", scheduleHandler.CreateScheduleAbsenceKind)
 		mux.HandleFunc("DELETE /team-schedule/absence-kinds/{code}", scheduleHandler.DeleteScheduleAbsenceKind)
+	}
+	if caseEscalationAccessHandler != nil {
+		// Who may de-escalate any case besides the case's team leads. The
+		// service requires a CSM admin's user token for all three.
+		mux.HandleFunc("GET /case-escalation-access/deescalators", caseEscalationAccessHandler.ListDeescalators)
+		mux.HandleFunc("PUT /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.GrantDeescalator)
+		mux.HandleFunc("DELETE /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.RevokeDeescalator)
 	}
 	if rotaAccessHandler != nil {
 		// Who holds a rota admin role or marks a team's rota, and changing

@@ -43,6 +43,7 @@ import type {
 } from "@src/types";
 import { toCaseDetail, toCaseSummary, toComment, type CaseDetail, type CaseSummary, type Comment } from "@src/types";
 import apiClient from "./apiClient";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export interface CaseSearchResult {
   items: CaseSummary[];
@@ -306,7 +307,7 @@ const searchChildCases = async (parentCaseId: string): Promise<{ cases: ChildCas
       subject: c.subject,
       severity: c.severity,
       state: c.state,
-      assigneeName: c.assignedEngineer?.name ?? null,
+      assigneeName: stripStaffNameMarker(c.assignedEngineer?.name) || null,
     })),
     total: result.total,
   };

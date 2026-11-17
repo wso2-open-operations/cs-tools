@@ -46,7 +46,7 @@ var reactivatedCC = []string{"lifecycle@example.com", "billing@example.com"}
 
 func TestDispatcher_ProjectReactivated_SendsTheBackToOpenEmail(t *testing.T) {
 	email := &mockEmailSender{}
-	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(reactivatedCC, "@example.com")
+	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(reactivatedCC, []string{"@example.com"})
 	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com","tech.owner@example.com"]`)
 	if err := d.Handle(context.Background(), rec); err != nil {
 		t.Fatalf("Handle: %v", err)
@@ -90,7 +90,7 @@ func TestDispatcher_ProjectReactivated_ReasonLines(t *testing.T) {
 	}
 	for reasons, line := range cases {
 		email := &mockEmailSender{}
-		d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, "@example.com")
+		d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, []string{"@example.com"})
 		if err := d.Handle(context.Background(), reactivatedRecord(reasons, `["owner@example.com"]`)); err != nil {
 			t.Fatalf("%s: %v", reasons, err)
 		}
@@ -103,7 +103,7 @@ func TestDispatcher_ProjectReactivated_ReasonLines(t *testing.T) {
 func TestDispatcher_ProjectReactivated_CCNeverRepeatsARecipient(t *testing.T) {
 	email := &mockEmailSender{}
 	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-		WithACPReactivation([]string{"OWNER@example.com", "billing@example.com", "billing@example.com"}, "@example.com")
+		WithACPReactivation([]string{"OWNER@example.com", "billing@example.com", "billing@example.com"}, []string{"@example.com"})
 	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestDispatcher_ProjectReactivated_CCNeverRepeatsARecipient(t *testing.T) {
 func TestDispatcher_ProjectReactivated_DebugModeRedirects(t *testing.T) {
 	email := &mockEmailSender{}
 	d := NewDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, true, []string{"debug@example.com"}, true, "", nil).
-		WithACPReactivation(reactivatedCC, "@example.com")
+		WithACPReactivation(reactivatedCC, []string{"@example.com"})
 	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestDispatcher_ProjectReactivated_SendsNothing(t *testing.T) {
 	})
 	t.Run("no recipients", func(t *testing.T) {
 		email := &mockEmailSender{}
-		d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, "@example.com")
+		d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, []string{"@example.com"})
 		if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `[]`)); err != nil || len(email.calls) != 0 {
 			t.Errorf("err = %v sent = %d", err, len(email.calls))
 		}
@@ -154,7 +154,7 @@ func TestDispatcher_ProjectReactivated_SendsNothing(t *testing.T) {
 
 func TestDispatcher_ProjectReactivated_SendFailureIsRetried(t *testing.T) {
 	email := &mockEmailSender{err: errors.New("email service down")}
-	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, "@example.com")
+	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, []string{"@example.com"})
 	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)
 	if err := d.Handle(context.Background(), rec); err == nil {
 		t.Fatal("a failed send was not returned, so the record would not be retried")
@@ -225,7 +225,7 @@ func TestDispatcher_ProjectReactivated_LedgerStopsDuplicates(t *testing.T) {
 	email := &mockEmailSender{}
 	ledger := &fakeReactivationLedger{state: map[string]string{}}
 	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-		WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(ledger)
+		WithACPReactivation(nil, []string{"@example.com"}).WithACPReactivationLedger(ledger)
 	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)
 	key := reactivatedTestProjectID + "/2026-10-29T09:30:00Z"
 
@@ -238,7 +238,7 @@ func TestDispatcher_ProjectReactivated_LedgerStopsDuplicates(t *testing.T) {
 	// Redelivered after a restart: the in-process claim is gone, the ledger
 	// still knows.
 	d2 := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-		WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(ledger)
+		WithACPReactivation(nil, []string{"@example.com"}).WithACPReactivationLedger(ledger)
 	if err := d2.Handle(context.Background(), rec); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestDispatcher_ProjectReactivated_LedgerStopsDuplicates(t *testing.T) {
 	before := len(email.calls)
 	failing := &fakeReactivationLedger{state: map[string]string{}, err: errors.New("redis down")}
 	d3 := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-		WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(failing)
+		WithACPReactivation(nil, []string{"@example.com"}).WithACPReactivationLedger(failing)
 	if err := d3.Handle(context.Background(), rec); err != nil || len(email.calls) != before+1 {
 		t.Errorf("err=%v sent=%d, want the email sent despite the ledger", err, len(email.calls)-before)
 	}
@@ -289,7 +289,7 @@ func TestDispatcher_ProjectReactivated_WaitsForAHeldReservation(t *testing.T) {
 	key := reactivatedTestProjectID + "/2026-10-29T09:30:00Z"
 	newDispatcher := func(email *mockEmailSender, ledger *fakeReactivationLedger) *Dispatcher {
 		d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-			WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(ledger)
+			WithACPReactivation(nil, []string{"@example.com"}).WithACPReactivationLedger(ledger)
 		d.acpReactivationWaitFor, d.acpReactivationPoll = time.Minute, time.Millisecond
 		return d
 	}
@@ -351,7 +351,7 @@ func TestDispatcher_ProjectReactivated_SendIsBoundedInsideTheReservation(t *test
 	}
 	email := &deadlineEmailSender{mockEmailSender: &mockEmailSender{}}
 	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-		WithACPReactivation(nil, "@example.com").
+		WithACPReactivation(nil, []string{"@example.com"}).
 		WithACPReactivationLedger(&fakeReactivationLedger{state: map[string]string{}})
 	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)); err != nil {
 		t.Fatal(err)
@@ -381,7 +381,7 @@ func (s *deadlineEmailSender) SendEmail(ctx context.Context, to, cc, bcc, replyT
 // error would be retried after the winner released the claim, and send again.
 func TestDispatcher_ProjectReactivated_ConcurrentDeliverySendsOnce(t *testing.T) {
 	email := &mockEmailSender{block: make(chan struct{})}
-	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, "@example.com")
+	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, []string{"@example.com"})
 	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)
 	done := make(chan error, 1)
 	go func() { done <- d.Handle(context.Background(), rec) }()
@@ -405,7 +405,7 @@ func TestDispatcher_ProjectReactivated_ConcurrentDeliverySendsOnce(t *testing.T)
 // rest still get the email; with none left the CC lists get it in To.
 func TestDispatcher_ProjectReactivated_RecipientsAreFilteredNotRejected(t *testing.T) {
 	email := &mockEmailSender{}
-	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(reactivatedCC, "@example.com")
+	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(reactivatedCC, []string{"@example.com"})
 	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com","Tech Owner","tech@customer.example","OWNER@example.com"]`)
 	if err := d.Handle(context.Background(), rec); err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func TestDispatcher_ProjectReactivated_RecipientsAreFilteredNotRejected(t *testi
 	}
 
 	email = &mockEmailSender{}
-	d = newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(reactivatedCC, "@example.com")
+	d = newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(reactivatedCC, []string{"@example.com"})
 	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["tech@customer.example"]`)); err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,7 @@ func TestDispatcher_ProjectReactivated_CrashThenRedeliverSendsOnce(t *testing.T)
 
 	email := &mockEmailSender{}
 	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
-		WithACPReactivation(nil, "@example.com").
+		WithACPReactivation(nil, []string{"@example.com"}).
 		WithACPReactivationLedger(NewRedisReactivationLedger(rdb)).
 		WithDurableDedup(rdb)
 	d.acpReactivationWaitFor, d.acpReactivationPoll = 5*time.Second, 10*time.Millisecond
@@ -476,7 +476,7 @@ func TestDispatcher_ProjectReactivated_DebugModeLeavesTheLedgerAlone(t *testing.
 	ledger := &fakeReactivationLedger{state: map[string]string{}}
 	d := NewDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, true,
 		[]string{"tester@example.com"}, true, "", nil).
-		WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(ledger)
+		WithACPReactivation(nil, []string{"@example.com"}).WithACPReactivationLedger(ledger)
 	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)); err != nil {
 		t.Fatal(err)
 	}
@@ -485,17 +485,39 @@ func TestDispatcher_ProjectReactivated_DebugModeLeavesTheLedgerAlone(t *testing.
 	}
 }
 
-// The internal domain always starts with "@", however it is configured, so
-// "wso2.com" cannot admit a lookalike such as "user@notwso2.com".
-func TestInternalDomainSuffix(t *testing.T) {
-	for in, want := range map[string]string{"": "@wso2.com", "@wso2.com": "@wso2.com", "wso2.com": "@wso2.com", " WSO2.com ": "@wso2.com"} {
-		if got := internalDomainSuffix(in); got != want {
-			t.Errorf("internalDomainSuffix(%q) = %q, want %q", in, got, want)
+// Every internal domain starts with "@", however it is configured, so
+// "wso2.com" cannot admit a lookalike such as "user@notwso2.com"; with none
+// configured only @wso2.com is internal.
+func TestInternalDomainSuffixes(t *testing.T) {
+	tests := []struct {
+		in   []string
+		want []string
+	}{
+		{nil, []string{"@wso2.com"}},
+		{[]string{" ", ""}, []string{"@wso2.com"}},
+		{[]string{"@wso2.com"}, []string{"@wso2.com"}},
+		{[]string{"wso2.com", " Example.ORG "}, []string{"@wso2.com", "@example.org"}},
+	}
+	for _, tt := range tests {
+		if got := internalDomainSuffixes(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("internalDomainSuffixes(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
-	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, "example.com")
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, []string{"example.com"})
 	got := d.reactivationRecipients(context.Background(), []string{"owner@example.com", "user@notexample.com"}, nil)
 	if len(got) != 1 || got[0] != "owner@example.com" {
 		t.Errorf("recipients = %v, want only owner@example.com", got)
+	}
+}
+
+// With two internal domains configured an address in either is kept, and
+// any other domain or lookalike is dropped.
+func TestReactivationRecipients_SeveralInternalDomains(t *testing.T) {
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).
+		WithACPReactivation(nil, []string{"@example.com", "example.org"})
+	got := d.reactivationRecipients(context.Background(),
+		[]string{"owner@example.com", "renewals@Example.ORG", "tech@customer.example", "user@notexample.org"}, nil)
+	if want := []string{"owner@example.com", "renewals@Example.ORG"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("recipients = %v, want %v", got, want)
 	}
 }

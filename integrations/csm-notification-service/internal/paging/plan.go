@@ -240,6 +240,10 @@ type ruleNamer interface {
 	RuleFor(rc RoutingContext) (Rule, bool)
 }
 
+// shiftLeadsRepeatMax is the largest shift's-leads rung still called on every
+// attempt of its level; a larger one is called once (see BuildPlan).
+const shiftLeadsRepeatMax = 3
+
 func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolicy, r Resolver, channel Channel) (Plan, error) {
 	// Stamp the rule before anything reads it: every log line, the chat card
 	// and the work note report it, and they must name the row the recipients
@@ -330,6 +334,13 @@ func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolic
 			reachable = append(reachable, rec)
 		}
 
+		// A shift's leads rung of more than shiftLeadsRepeatMax people is
+		// called once, not once per attempt: seven ABT leads three times is
+		// twenty-one calls, which a call cap of twelve truncates before the
+		// heads -- and seven people called once have had their chance.
+		if haveRule && matched.Levels[level] == SourceShiftLeads && len(reachable) > shiftLeadsRepeatMax {
+			attempts = attempts[:1]
+		}
 		for _, a := range attempts {
 			for _, rec := range reachable {
 				plan.Calls = append(plan.Calls, PlannedCall{
@@ -514,6 +525,12 @@ func (t Trigger) stopInstruction(quoted bool) string {
 	return "Update the ticket status to Work In Progress and add a public comment to stop further notifications."
 }
 
+// supportAlertOpening is the first sentence of every paging call, naming the
+// configured company (EMAIL_TEMPLATE_COMPANY_NAME).
+func supportAlertOpening() string {
+	return notifications.CompanyName() + " Support Alert."
+}
+
 // VoiceSpeech renders section 10.0's alert as a structured SSML document, in
 // the order and with the pauses the specification's own template produces.
 //
@@ -533,7 +550,7 @@ func (t Trigger) VoiceSpeech() notifications.Speech {
 		return notifications.Sentence{Parts: parts}
 	}
 	sentences := []notifications.Sentence{
-		sentence(notifications.Say("WSO2 Support Alert.")),
+		sentence(notifications.Say(supportAlertOpening())),
 		sentence(notifications.Say(fmt.Sprintf("Trigger Type - %s.", t.Kind))),
 	}
 	if t.Priority != "" {
@@ -843,7 +860,7 @@ func (t Trigger) VoiceMessagePlain() string {
 	// plain-text stand-in for the SSML version's slowed prosody: a case id
 	// spoken at normal speed is the part listeners most often mishear.
 	parts := []string{
-		"WSO2 Support Alert.",
+		supportAlertOpening(),
 		fmt.Sprintf("Trigger type, %s.", t.Kind),
 	}
 	if t.Priority != "" {

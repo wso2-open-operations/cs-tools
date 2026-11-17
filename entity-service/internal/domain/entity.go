@@ -8522,6 +8522,11 @@ type CaseEscalationHistory struct {
 	// the account has no CRE team, the team has no lead, or the data source
 	// cannot resolve them.
 	TeamLeads []EscalationNotifiedUser `json:"teamLeads"`
+	// Deescalators are the active internal users an admin has named as
+	// allowed to de-escalate any case (role case_deescalator), besides the
+	// case's own team leads. Always present, an empty array when none is
+	// named or the data source cannot resolve them.
+	Deescalators []EscalationNotifiedUser `json:"deescalators"`
 }
 
 // --- case-grouped time cards (ServiceNow data source only) ---
@@ -8864,7 +8869,16 @@ type CreateSNWritebackFailureRequest struct {
 // same wire vocabulary integrations/csm-notification-service's own
 // clockType handling already expects.
 type SLAStatus struct {
-	CaseID                 string  `json:"caseId"`
+	CaseID string `json:"caseId"`
+	// ID is this exact "sla" row's own primary key -- added so a caller
+	// that remembers it (csm-notification-service's own Redis-held
+	// ClockMeta) can later ask GetClockState for THIS SPECIFIC row again,
+	// rather than "whichever row is most recently started" for (CaseID,
+	// ClockType), which is ambiguous whenever two policies both have a
+	// genuinely open clock on the same target at once -- see
+	// SLAStatusRepository.GetClockState's own doc comment for the full
+	// reasoning this closes.
+	ID                     string  `json:"id,omitempty"`
 	ClockType              string  `json:"clockType"`
 	BusinessElapsedPercent float64 `json:"businessElapsedPercent"`
 	// HasBreached mirrors sla.has_breached, ServiceNow's own verdict — not
@@ -9108,7 +9122,14 @@ type SLAStatusFilters struct {
 type SLAClockState struct {
 	// Found is false, with every other field at its zero value, when no
 	// "sla" row exists at all for the requested (work item, target, source).
-	Found       bool       `json:"found"`
+	Found bool `json:"found"`
+	// ID is this exact "sla" row's own primary key, the same column
+	// SLAStatus.ID exposes -- a caller that already knows which specific
+	// row it means (via GetClockState's own slaID parameter) gets it back
+	// unchanged here; a caller that let this method pick "whichever row
+	// is most recently started" gets whichever row that turned out to be,
+	// so it can remember it for next time.
+	ID          string     `json:"id,omitempty"`
 	IsActive    bool       `json:"isActive"`
 	Stage       string     `json:"stage"`
 	HasBreached bool       `json:"hasBreached"`

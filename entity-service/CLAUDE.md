@@ -77,6 +77,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_ACP_REOPEN_ENABLED` | no | `false` | Must be `"true"` for the ACP reopen check to run after `Project__c` / `Invoice__c` events (see "ACP reopen" below). Also needs a pool and the `SALES_ENTITY_*` client. Independent of the ingest flags |
 | `CSM_ACP_REOPEN_DRY_RUN` | no | `true` | The reopen check decides and logs `acp reopen: dry run, would reopen`, and writes nothing. Only an explicit `false` turns it off; an unparseable value keeps it on |
 | `CSM_ACP_REOPEN_TEST_PROJECT_SF_ID` | no | — | When set, the reopen check acts on this one Salesforce project only (15- or 18-character id). For staging tests |
+| `ACP_INTERNAL_EMAIL_DOMAINS` | no | `@wso2.com` | Comma-separated domains the "Back to Open state" notice may go to. Each must start with `@` (it is matched as a suffix, so `wso2.com` would admit `someone@notwso2.com`); `Validate` refuses anything else. Add a domain here, not in code, when internal addresses move to another one |
 | `ACP_REACTIVATION_POLL_INTERVAL` | no | `5s` | How often `ProjectReactivationDrainer` looks for queued "Back to Open state" notices. Its own setting, so tuning `INCIDENT_REPORT_POLL_INTERVAL` never changes it |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
@@ -491,6 +492,75 @@ Summary" dashboard's volume-trend widget to exclude announcements and service re
 does it elsewhere in this codebase: an inclusion-list `{"field": "type", "op": "in", "values":
 ["case", "engagement", "security_report_analysis"]}` filter, set in the dashboard's own JSON
 config, not hardcoded into the endpoint.
+
+## GET /reports/mttr: mean time to resolution by severity band
+
+Backs a dashboard's MTTR numbers: for each severity band (`S1-S4`, `S1-S3`, `S1`, `S2`, `S3`,
+`S4`, plus `S0`/catastrophic as its own band; the two combined bands S1-S4 and S1-S3 never include S0, so the overall figure keeps its original meaning), the average time from a case's `created_on` to the
+**last** time it entered Solution Proposed, over cases created in a trailing window whose
+last such entry also falls within it. The window is `months` (`1`/`3`/`6`/`12`) or `days` (`7`), exactly one of them -- anything else is a 400; the response's `windowMonths` is 0 and `windowDays` set for a day window. An optional
+repeated `creTeamId` query param restricts to cases whose account's CRE team
+(`account.cre_team_id`) is one of the given `"group"` ids; omitted, every team is included.
+`internalOnly`-gated at the route, like `/reports/long-open-cases`, and not registered at all
+under `DATA_SOURCE=servicenow` -- it reads the Postgres case/`work_item_activity` tables only.
+
+**Opened in the window AND resolved in it.** A case counts only if it was created inside the window and its last
+Solution Proposed entry is also inside it, so "MTTR for a month" is about the cases opened that month. Earlier the
+filter was the resolution date alone, which also counted older cases that finally closed inside the window; in a
+real month that lifted one severity's average from about 108 h (45 cases) to about 237 h (63 cases), the 18 old cases
+averaging about 560 h. The cost of the stricter rule: an old case that closes in the window is left out, and a case opened in the
+window but not resolved yet is left out until it is, so a recent window looks faster than it will end up. The
+other half of that trade-off is why the original rule used the resolution date (it also matches the ServiceNow
+report this feature mirrors).
+
+**Only cases that are resolved now.** A case counts only while its current state (`"case".state`) is
+Solution Proposed or Closed. A rejected proposal sends the case back (e.g. to Work In Progress) but its
+earlier Solution Proposed entry stays in `work_item_activity`, so without this check the case would count as
+resolved at that earlier time. It counts again once it is proposed again or closed. The check is on the
+`"case"` row the query already joins by primary key, after the window has narrowed the rows.
+
+**"Last entry", not "first entry", into Solution Proposed.** A case can be proposed a solution,
+have it rejected (bounced back for more work), and have a later proposal actually stick before
+the case closes. `work_item_activity` has no explicit "rejected" state -- it only logs state
+transitions, not why a case left one -- so there is no way to tell "the customer rejected it"
+apart from "we pulled it back for more work" from this table alone. Given that, `MAX(created_on)`
+per case (not `MIN`) is the deliberate choice: it measures how long the case actually took to
+reach a proposal that held, not how fast the first (possibly rejected) attempt was -- the explicit
+call made when this was raised as an open question.
+
+**Matches both casings the column actually carries.** `work_item_activity.new_value` for a
+state entry is written as either the raw enum label (`SOLUTION_PROPOSED`) or the display label
+(`Solution Proposed`), depending on the write path, confirmed directly against prod (roughly
+90k rows of the former, ~1.5k of the latter). `LOWER(new_value) IN ('solution_proposed',
+'solution proposed')` catches both -- the same case-insensitive convention the case search's own
+`stateEntered` filter already uses (see that filter's own comment in `case_repo.go`), served by
+the same partial index, `idx_work_item_activity_state_entered` (migration 0283).
+
+**`work_item_activity` has `FORCE ROW LEVEL SECURITY`.** A plain `psql` session with no
+`app.is_internal` session variable set sees zero rows from this table, not an error -- looking
+empty when it is not. `MTTRReportService.BuildReport` runs its repository read under
+`repository.WithSystemIdentity(ctx)` for exactly this reason, same as the long-open-cases report;
+a raw query against this table (e.g. ad hoc investigation) needs the identical session variable
+set, or it will silently read as empty.
+
+`internal/domain/mttr_report.go`, `internal/repository/mttr_report_repo.go`,
+`internal/service/mttr_report_service.go`, `internal/handler/mttr_report_handler.go`.
+
+## Who may de-escalate a case: team leads and the `case_deescalator` role
+
+De-escalating is allowed for the leads of the case's own ABT team (`team_member` role `lead` on
+`account.cre_team_id`, `teamLeads` on `GET /cases/{id}/escalations`) **and** for anyone an admin named: holders of
+the stored role `case_deescalator` (no migration seeds it: the first admin grant creates the role row, by name), returned as `deescalators` (active internal users only) on the
+same response, so the portal decides from one read. A CSM admin manages the list through
+`GET /case-escalation-access/deescalators` and `PUT`/`DELETE /case-escalation-access/deescalators/{userId}`
+(`CaseEscalationAccessService`): all three are gated on the caller's client id (`CSM_PORTAL_BACKEND_CLIENT_ID`) plus a
+forwarded signed-in person, exactly as portal banners are (`requireCSMPortalBackendCaller`), not on `AUTH_ADMIN_ROLES` or the
+stored `admin` role: csm-portal-backend's `PermAdmin` gate on these routes is the one admin check, so a second,
+separately-configured role list here cannot disagree with it (it did: a real admin got a 403 from an unset copy). Any other
+caller is refused. A grant needs an active internal user; both changes are idempotent and audited; a deactivated person
+(`is_active = FALSE`) is refused even through the portal backend. A holder who stops being active internal staff is listed as `active: false` (so
+it can be removed) and is left out of `deescalators`. Escalating is unchanged (any internal engineer).
+entity-service does not enforce de-escalation itself, as before: csm-portal-backend decides from this response.
 
 ## Salesforce Account ingest
 
@@ -1230,7 +1300,8 @@ reopen logs a WARN at every start as the reminder.
   email showed it) / key, start and end date, account owner name and email, `reasons` (`renewal`,
   `invoice_paid`, none for a project opened by hand), `recipients` and `reactivatedOn`.
   **Recipients** are the account owner, renewal account manager and technical owner, each once,
-  keeping only well-formed plain addresses in `@wso2.com` (`acpInternalAddress`): it is an internal
+  keeping only well-formed plain addresses in the internal domains (`acpInternalAddress`,
+  `ACP_INTERNAL_EMAIL_DOMAINS`, default `@wso2.com`): it is an internal
   notice, the technical owner in Salesforce is sometimes a customer's person, and the notification
   service rejects the whole event for one bad address. csm-notification-service sends the email and
   adds its own CC list. **Deploy csm-notification-service with `project.reactivated` first**: it
@@ -2707,12 +2778,43 @@ revision replaced it with a brand new incarnation" — all three look
 identical to that caller ("not in the active list" / "some other active row
 of this type exists"), and treating either of the latter two as "resolved"
 would wrongly suppress a genuine alert. `domain.SLAClockState`
-(`Found`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists specifically
-to make those three distinguishable: `GetClockState` returns the single
-most recently-started row for `(workItemID, target[, source])`,
-**regardless of `is_active`**, with `Found=false` (every other field zero)
-when no row exists at all. `StartedOn` is what lets the caller compare
-clock *incarnations*, not just clock types, after a severity revision.
+(`Found`/`ID`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists
+specifically to make those three distinguishable: `GetClockState` returns
+one row for `(workItemID, target)`, **regardless of `is_active`**, with
+`Found=false` (every other field zero) when no row exists at all. `StartedOn`
+is what lets the caller compare clock *incarnations*, not just clock types,
+after a severity revision. (The `source` query param this endpoint used to
+also take was removed along with `sla.source` itself — a caller that still
+sends one is simply ignored.)
+
+**`slaId`, an optional third parameter, narrows the lookup to one exact
+`sla` row instead of this method's own default — the real fix for a former
+"known, deliberate limitation" here.** Without it, this method always
+picked "whichever row is most recently started" for `(workItemID, target)`
+— a real problem once a caller tracks a *specific* clock over time, because
+the per-policy registration guard genuinely lets two policies both have a
+*open* clock on the same target at once (confirmed live, not theoretical —
+see `ActiveClockPolicies`' own doc comment below for the Hosting-case
+example, and staging/production both show plenty of real `RESPONSE`/
+`RESOLUTION` cases with more than one simultaneously-active policy). A
+caller with no row id to disambiguate could have this method's own terminal-
+stage answer about one sibling policy wrongly confirmed as "resolved" for a
+DIFFERENT, still genuinely due sibling. `csm-notification-service` found
+this the hard way: `verifyTierStillDue`'s own terminal-stage check (see that
+repo's own `CLAUDE.md`) had to be reordered to close a real production false
+alert, and a CodeRabbit review on that fix caught that the reordering could,
+in the two-simultaneously-open-policies case, now wrongly suppress a
+genuine alert instead. `ID` (this exact row's own primary key, on both
+`SLAClockState` and `SLAStatus`) is what that service now remembers — in its
+own Redis-held `ClockMeta.SLAID` — and passes back here as `slaId` every
+time it re-checks a clock it already tracks, so entity-service's answer is
+about THAT specific row, not an ambiguous "whichever one is newest." Passing
+`slaId=""` (or omitting it) keeps the original behavior, for a caller that's
+discovering entity-service's current policy resolution rather than
+re-verifying one it already knows (`ReviseClocks`'s own
+`refreshAndReconcileClock` call, deliberately — see that function's own doc
+comment there). A `slaId` matching no row for the given `(workItemID,
+target)` reports `Found=false`, same as no row existing at all.
 
 **`GetClockState` also resolves `AssigneeName`/`AssigneeEmail`/`TeamEmail`/
 `TeamLeadName`** (`work_item`/`account`/`"group"`/`"user"` joins, the exact

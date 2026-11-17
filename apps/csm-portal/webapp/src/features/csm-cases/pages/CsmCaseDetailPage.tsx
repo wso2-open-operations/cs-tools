@@ -37,6 +37,7 @@ import {
 import {
   Activity,
   ArrowLeft,
+  ArrowUpRight,
   CheckSquare,
   Clock,
   Eye,
@@ -327,6 +328,7 @@ type CaseTabId =
   | "related"
   | "watchers"
   | "sla"
+  | "escalation"
   | "attachments"
   | "time"
   | "call-requests"
@@ -359,6 +361,7 @@ const TAB_DEFS: Array<{
   { id: "related", label: "Linked Items", icon: <LinkIcon size={16} /> },
   { id: "watchers", label: "Watchers", icon: <Eye size={16} /> },
   { id: "sla", label: "SLAs", icon: <Clock size={16} /> },
+  { id: "escalation", label: "Escalation", icon: <ArrowUpRight size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
@@ -742,25 +745,26 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
-  // De-escalating is restricted to the case's ABT team leads (the backend
-  // enforces the same check -- this is a client-side affordance only,
-  // matching every other role/permission check in this app). Matched by
-  // platform id first (currentUser.id against a lead's own id, the same
-  // identity space the backend's own check uses), falling back to a
-  // case-insensitive email match against the signed-in user's ID token claim
-  // when either id is unavailable -- mirrors the BFF's own
-  // callerIsCaseTeamLead exactly.
+  // De-escalating is for the case's ABT team leads (who also need an
+  // escalation role) and for the people an admin named in Settings >
+  // Escalation access (who need none). The backend enforces the same rule;
+  // this is a client-side affordance only. Matched by platform id first
+  // (currentUser.id against a listed person's own id, the identity space the
+  // backend's check uses), falling back to a case-insensitive email match
+  // against the signed-in user's ID token claim when either id is unavailable
+  // -- mirrors the BFF's own deescalationStanding.
   const callerId = currentUser?.id;
   const callerEmail = claims?.email?.toLowerCase();
-  const callerIsCaseTeamLead = (escalationHistory?.teamLeads ?? []).some(
-    (u) => {
-      if (callerId && u.id && callerId === u.id) return true;
-      if ((!callerId || !u.id) && callerEmail && u.email) {
-        return u.email.toLowerCase() === callerEmail;
-      }
-      return false;
-    },
-  );
+  const isCaller = (u: { id?: string | null; email?: string | null }): boolean => {
+    if (callerId && u.id && callerId === u.id) return true;
+    if ((!callerId || !u.id) && callerEmail && u.email) {
+      return u.email.toLowerCase() === callerEmail;
+    }
+    return false;
+  };
+  const callerIsCaseTeamLead = (escalationHistory?.teamLeads ?? []).some(isCaller);
+  // Named by an admin: may de-escalate without holding an escalation role.
+  const callerIsNamedDeescalator = (escalationHistory?.deescalators ?? []).some(isCaller);
   // Display name for comments authored in this session, resolved from the
   // signed-in user's ID token. Falls back to the email local part so a token
   // without name claims still attributes the comment to the right person.
@@ -2844,6 +2848,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 ? c.watchers.length
                 : t.id === "sla"
                   ? slaList?.count
+                  : t.id === "escalation"
+                    ? escalationHistory?.escalations.length
                   : t.id === "attachments"
                     ? attachmentList.length
                     : t.id === "time"
@@ -3176,6 +3182,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRemove={isClosed || !canWrite ? undefined : (t) => onRemoveTag(t.id)}
             removingId={removeTag.isPending ? removeTag.variables : null}
           />
+        </Box>
+      )}
+
+      {activeTab === "escalation" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <EscalationWidget
             currentLevel={c.escalationLevel ?? null}
             history={escalationHistory?.escalations ?? []}
@@ -3190,9 +3201,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 : undefined
             }
             onDeescalate={
-              canEscalate &&
               canDeescalate(c.escalationLevel) &&
-              callerIsCaseTeamLead
+              ((canEscalate && callerIsCaseTeamLead) || callerIsNamedDeescalator)
                 ? () => setEscalationDialogAction("DEESCALATE")
                 : undefined
             }

@@ -22,6 +22,7 @@ import { LoadingFallback } from "@root/src/components/ui/LoadingFallback";
 import { AuthorizationFallback } from "@root/src/components/ui";
 import { ADMIN_USER_ROLE } from "@root/src/config/constants";
 import { getLastVisitedProjectId } from "@root/src/utils/others";
+import { isInternalUserRoles } from "@root/src/utils/caseActions";
 import { projects } from "@root/src/services/projects";
 import { useEffect, useState } from "react";
 import { useProject } from "../project";
@@ -76,6 +77,7 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
         id: meData.id,
         roles: meData.roles,
         isAdmin: meData.roles.includes(ADMIN_USER_ROLE),
+        isInternalUser: isInternalUserRoles(meData.roles),
         // ServiceNow returns "--None--" for unset choice fields; treat it as absent.
         timezone: meData.timezone && meData.timezone !== "--None--" ? meData.timezone : undefined,
       }}

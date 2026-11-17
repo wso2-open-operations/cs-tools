@@ -1320,6 +1320,27 @@ export interface BeCaseEscalationSearchResponse {
   /** The leads of the case's account's CRE (ABT) team -- the only users who
    * may de-escalate the case. */
   teamLeads?: BeCaseEscalationNotifiedUser[];
+  /** Users an admin named as allowed to de-escalate any case, besides the
+   * team leads above. */
+  deescalators?: BeCaseEscalationNotifiedUser[];
+}
+
+/** One person an admin named as allowed to de-escalate any case
+ * (`GET /case-escalation-access/deescalators`). `active` is false when the
+ * holder is no longer active internal staff: listed so it can be removed, but
+ * it lets nobody de-escalate. */
+export interface BeCaseDeescalator {
+  userId: string;
+  name: string;
+  email: string;
+  grantedBy: string;
+  grantedOn: string;
+  active: boolean;
+}
+
+/** Response of `GET /case-escalation-access/deescalators`. */
+export interface BeCaseDeescalatorsResponse {
+  deescalators: BeCaseDeescalator[];
 }
 
 /**
@@ -4469,7 +4490,8 @@ export type BeWidgetResourceType =
   | "incident_task"
   | "case_feedback"
   | "plg_organization"
-  | "plg_registration";
+  | "plg_registration"
+  | "mttr";
 
 /**
  * How a widget's resolved data should be rendered. `pie` and `bar` both
@@ -4564,8 +4586,12 @@ export interface BeDashboardGroupByConfig {
    * doesn't match) that calls `POST /cases/feedback/aggregate` with this
    * value and maps its bucketed response into the same per-slice
    * `PieSliceResult[]` shape every other pie/bar widget already renders. See
-   * {@link BeCaseFeedbackBucket} for what each value means. */
-  bucket?: BeCaseFeedbackBucket;
+   * {@link BeCaseFeedbackBucket} for what each value means.
+   *
+   * `"severity"` is the parallel case for `resourceType: "mttr"` — its one
+   * fixed bucket, resolved by `useMttrReportData` (`GET /reports/mttr`), not
+   * `useCaseFeedbackTrendData`. */
+  bucket?: BeCaseFeedbackBucket | "severity";
   /** Caps the number of returned buckets; anything beyond that rolls up
    * into the response's `othersCount`. Meaningless when `bucket` is set — a
    * date-bucketed aggregation has no "Others" folding. */
@@ -4702,6 +4728,31 @@ export interface BeFeedbackBucket {
 export interface BeCaseFeedbackAggregateResponse {
   buckets: BeFeedbackBucket[];
   totalRecords: number;
+}
+
+/** The MTTR severity bands `GET /reports/mttr` always returns, in this
+ * order -- see `useMttrReportData`. */
+export type BeMttrBand = "S1-S4" | "S1-S3" | "S0" | "S1" | "S2" | "S3" | "S4";
+
+/** One severity band's MTTR in a `GET /reports/mttr` response. */
+export interface BeMttrReportBand {
+  band: BeMttrBand;
+  caseCount: number;
+  avgResolutionHours: number;
+}
+
+/** `GET /reports/mttr` response: MTTR (mean time to resolution) by severity
+ * band, over a trailing window -- backs `resourceType: "mttr"`
+ * (`useMttrReportData`). */
+export interface BeMttrReport {
+  generatedOn: string;
+  /** 0 when the report was asked for a day window (`windowDays`). */
+  windowMonths: 0 | 1 | 3 | 6 | 12;
+  windowDays?: 7;
+  windowStart: string;
+  windowEnd: string;
+  creTeamIds: string[];
+  bands: BeMttrReportBand[];
 }
 
 /** Rendering hint for a {@link BeDashboardWidgetColumn}'s resolved value.

@@ -230,6 +230,23 @@ func TestVoiceSpeech_InstructionMatchesTrigger(t *testing.T) {
 	}
 }
 
+// TestVoiceMessage_OpensWithTheConfiguredCompanyName: both forms of the call
+// open with the configured company's name, never a hardcoded "WSO2".
+func TestVoiceMessage_OpensWithTheConfiguredCompanyName(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	trigger := testTrigger("P1", ShiftLK)
+	for name, msg := range map[string]string{
+		"ssml":  spokenText(trigger.VoiceSpeech()),
+		"plain": trigger.VoiceMessagePlain(),
+	} {
+		if !strings.HasPrefix(msg, "Acme Support Alert.") || strings.Contains(msg, "WSO2") {
+			t.Errorf("%s message = %q, want it to open with \"Acme Support Alert.\" and never name WSO2", name, msg)
+		}
+	}
+}
+
 // A sentence whose only content would be an empty value is skipped, rather
 // than spoken as "Account - ." — incidents in this platform carry no account.
 func TestVoiceSpeech_SkipsEmptySlots(t *testing.T) {

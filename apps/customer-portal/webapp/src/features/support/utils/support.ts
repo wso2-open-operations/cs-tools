@@ -1026,6 +1026,7 @@ export function getCallRequestStatusColor(status?: string): string {
     case normalized.includes(CallRequestStatus.SCHEDULED.toLowerCase()):
       return "info.main";
     case normalized.includes(CallRequestStatus.PENDING.toLowerCase()):
+    case normalized.includes(CallRequestStatus.IN_PROGRESS.toLowerCase()):
       return "warning.main";
     case normalized.includes(CallRequestStatus.COMPLETED.toLowerCase()):
       return "success.main";

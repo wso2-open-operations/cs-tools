@@ -1046,7 +1046,11 @@ paths:
       description: >
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
-        effect. Supported by the ServiceNow data source only.
+        effect. Escalating needs an escalation role (escalator, CS engineer or
+        admin). De-escalating is allowed for somebody an admin named (Settings
+        > User management > Escalation access), who needs no escalation role,
+        or for a lead of the case's ABT team, who does. Supported by the
+        ServiceNow data source only.
       operationId: postCasesIdEscalations
       parameters:
         - name: id
@@ -2563,6 +2567,147 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      operationId: listCaseDeescalators
+      description: >
+        Backed by entity-service. Admin-only. They may de-escalate any case besides the leads of the case's own ABT
+        team, who keep that ability for their team's cases.
+      responses:
+        "200":
+          description: The grants (userId, name, email, grantedBy, grantedOn, active).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deescalators:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string, format: uuid }
+                        name: { type: string }
+                        email: { type: string }
+                        grantedBy: { type: string }
+                        grantedOn: { type: string, format: date-time }
+                        active: { type: boolean }
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only; the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (the entity service has no database for it).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      operationId: putCaseDeescalator
+      description: >
+        Admin-only. The person must be active internal staff. Idempotent. Audited by the entity service.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID, or refused by the entity service with its reason, e.g. the person is not active internal staff).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      operationId: deleteCaseDeescalator
+      description: >
+        Admin-only. Idempotent. A team lead keeps the ability to de-escalate their own team's cases.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /teams/{id}/lead:
     post:
       summary: Assign a user as the team's one lead.
@@ -8279,6 +8424,80 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: No group with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /reports/mttr:
+    get:
+      summary: MTTR (mean time to resolution) by severity band, over a trailing window.
+      description: >-
+        Thin proxy of entity-service's own GET /reports/mttr -- backs the dashboard
+        builder's "mttr" resourceType. For each severity band (S1-S4, S1-S3, S0, S1, S2, S3,
+        S4 -- the two combined bands never include S0), the average time in hours from a case's creation to
+        the LAST time it entered Solution Proposed (a rejected proposal bounces a case
+        back for more work before a later one sticks, so the last entry, not the first,
+        is when it was actually resolved), over cases created in the window whose last such
+        entry also falls within it (a case opened before the window is not counted). creTeamId may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Same read audience as the other aggregate widgets
+        (e.g. POST /cases/feedback/aggregate).
+      operationId: getMTTRReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: months
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months. Exactly one of `months` and `days` is required.
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [7]
+          description: The trailing window, in days. Exactly one of `months` and `days` is required.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: exactly one of months (1, 3, 6 or 12) or days (7) is required; or a creTeamId is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
           content:
             application/json:
               schema:
@@ -17701,6 +17920,11 @@ paths:
   /team-schedule/absence-kinds/{code}:
     delete:
       summary: Delete a leave or allocation tag once nothing uses it.
+      description: >
+        A portal admin may delete any tag added from the portal; a rota admin
+        their own family's and the shared ones; a lead the families of the rota
+        teams they lead. A 403 and a 409 keep entity-service's message, so the
+        portal can say why (whose tag it is, how many entries still use it).
       operationId: deleteTeamScheduleAbsenceKind
       parameters:
         - name: code
@@ -17725,13 +17949,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: >
+            The caller may not delete this tag: a built-in one, another
+            family's, or a shared one for a caller who is no rota or portal
+            admin. The message says which.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: The tag is still used; the message says by how many entries.
           content:
             application/json:
               schema:
@@ -26154,6 +26387,55 @@ components:
         total:
           type: integer
           description: The number of members.
+
+    MTTRReport:
+      type: object
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [0, 1, 3, 6, 12]
+          description: 0 when the report was asked for a day window.
+        windowDays:
+          type: integer
+          enum: [7]
+          description: Present only for a day window.
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+
+    MTTRReportBand:
+      type: object
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
 
     ChangeRequestApprovalDecisionPayload:
       type: object

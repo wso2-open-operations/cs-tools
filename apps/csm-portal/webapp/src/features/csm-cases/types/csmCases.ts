@@ -174,11 +174,13 @@ export interface CaseEscalationNotifiedUser {
 
 /** The response for `GET /cases/{id}/escalations`: the case's full escalation
  * history, who was notified of its current level, and its ABT team leads --
- * the only people authorized to de-escalate it. */
+ * the people authorized to de-escalate it (with `deescalators`). */
 export interface CaseEscalationHistory {
   escalations: CaseEscalationRecord[];
   currentNotifiedUsers: CaseEscalationNotifiedUser[];
   teamLeads: CaseEscalationNotifiedUser[];
+  /** Named by an admin as allowed to de-escalate any case. */
+  deescalators: CaseEscalationNotifiedUser[];
 }
 
 export interface CsmCasesListResponse {

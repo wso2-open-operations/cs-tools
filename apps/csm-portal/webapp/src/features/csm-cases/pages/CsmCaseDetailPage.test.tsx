@@ -366,9 +366,25 @@ const postGithubIssueMutateMock = vi.fn();
 vi.mock("@features/csm-cases/api/useCsmCaseGithubIssue", () => ({
   usePostCaseGithubIssue: () => ({ mutate: postGithubIssueMutateMock, isPending: false }),
 }));
+// Mutable so the de-escalation tests below can name who may de-escalate.
+const { escalationHistory } = vi.hoisted(() => ({
+  escalationHistory: {
+    value: {
+      escalations: [],
+      currentNotifiedUsers: [],
+      teamLeads: [],
+      deescalators: [],
+    } as {
+      escalations: never[];
+      currentNotifiedUsers: never[];
+      teamLeads: { id: string; email: string }[];
+      deescalators: { id: string; email: string }[];
+    },
+  },
+}));
 vi.mock("@features/csm-cases/api/useGetCsmCaseEscalations", () => ({
   useGetCsmCaseEscalations: () => ({
-    data: { escalations: [], currentNotifiedUsers: [], teamLeads: [] },
+    data: escalationHistory.value,
     isLoading: false,
     isError: false,
   }),
@@ -696,7 +712,9 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
     </div>
   ),
   CustomerContextWidget: () => null,
-  EscalationWidget: () => null,
+  EscalationWidget: ({ onDeescalate }: { onDeescalate?: () => void }) => (
+    <div data-testid="escalation-widget-probe" data-can-deescalate={String(!!onDeescalate)} />
+  ),
   ProductContextWidget: () => null,
   // Stubbed to a probe rather than `null`: the tests below assert only that
   // the page mounts it for a service request and not for a plain case. The
@@ -973,6 +991,21 @@ describe("CsmCaseDetailPage — tab lives in the URL", () => {
     expect(screen.getByTestId("location-search-probe")).toHaveTextContent(
       "tab=watchers",
     );
+  });
+
+  it("shows the escalation widget in its own Escalation tab, not in Details", () => {
+    renderPageAt("/cases/case-1?tab=details");
+    expect(screen.queryByTestId("escalation-widget-probe")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /escalation/i }));
+    expect(screen.getByTestId("location-search-probe")).toHaveTextContent("tab=escalation");
+    expect(screen.getByTestId("escalation-widget-probe")).toBeInTheDocument();
+  });
+
+  it("opens the Escalation tab from a ?tab=escalation link", () => {
+    renderPageAt("/cases/case-1?tab=escalation");
+    expect(screen.getByRole("tab", { name: /escalation/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("escalation-widget-probe")).toBeInTheDocument();
   });
 
   it("falls back to Activities for ?tab=tasks, the hidden tab with no rendered <Tab>", () => {
@@ -1774,6 +1807,50 @@ describe("CsmCaseDetailPage — announcement comment composer", () => {
       name: /this case is closed — comments and work notes are read-only/i,
     });
     expect(toggle).toBeDisabled();
+  });
+});
+
+describe("CsmCaseDetailPage — who may de-escalate", () => {
+  const empty = { escalations: [], currentNotifiedUsers: [], teamLeads: [], deescalators: [] };
+  afterEach(() => {
+    currentUserRoles.value = ["cs_engineer"];
+    escalationHistory.value = empty;
+  });
+
+  function showEscalatedCase(): void {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      ...(defaultCaseDetailImpl(id) as object),
+      data: id ? { ...buildCase(id), escalationLevel: "2" } : undefined,
+    }));
+    renderPageAt("/cases/case-1?tab=escalation");
+  }
+  const canDeescalate = (): string | null =>
+    screen.getByTestId("escalation-widget-probe").getAttribute("data-can-deescalate");
+  const me = { id: CURRENT_USER_ID, email: "jane.doe@example.com" };
+
+  it("a team lead with an escalation role may de-escalate", () => {
+    escalationHistory.value = { ...empty, teamLeads: [me] };
+    showEscalatedCase();
+    expect(canDeescalate()).toBe("true");
+  });
+
+  it("a team lead with no escalation role may not", () => {
+    currentUserRoles.value = ["viewer"];
+    escalationHistory.value = { ...empty, teamLeads: [me] };
+    showEscalatedCase();
+    expect(canDeescalate()).toBe("false");
+  });
+
+  it("somebody an admin named may, with no escalation role", () => {
+    currentUserRoles.value = ["viewer"];
+    escalationHistory.value = { ...empty, deescalators: [me] };
+    showEscalatedCase();
+    expect(canDeescalate()).toBe("true");
+  });
+
+  it("somebody who is neither a team lead nor named may not, even with an escalation role", () => {
+    showEscalatedCase();
+    expect(canDeescalate()).toBe("false");
   });
 });
 

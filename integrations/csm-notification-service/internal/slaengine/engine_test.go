@@ -120,15 +120,21 @@ func (s *fakeStore) GetClock(_ context.Context, caseID, clockType string) (Clock
 	return meta, ok, nil
 }
 
-func (s *fakeStore) SetPaused(_ context.Context, caseID, clockType string, paused bool) error {
+func (s *fakeStore) SetPaused(_ context.Context, caseID, clockType string, paused bool, slaID string) (bool, error) {
 	if s.failSetPaused {
-		return errors.New("set paused failed")
+		return false, errors.New("set paused failed")
 	}
 	key := caseID + "|" + clockType
 	meta := s.clocks[key]
+	// Mirrors setPausedIfMatchScript: skip only when both sides are
+	// non-empty and disagree -- a confirmed replacement since slaID was
+	// captured.
+	if meta.SLAID != "" && slaID != "" && meta.SLAID != slaID {
+		return false, nil
+	}
 	meta.Paused = paused
 	s.clocks[key] = meta
-	return nil
+	return true, nil
 }
 
 // ShiftWake mirrors the real Store: the baseline is claimed against the
@@ -247,18 +253,25 @@ func (s *fakeStore) ListClockKeys(_ context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// DeleteClock mirrors the real Store.DeleteClock: removes the clock hash and
+// DeleteClockIfMatch mirrors the real Store.DeleteClockIfMatch: skips
+// entirely (applied=false) when the tracked clock's own SLAID disagrees
+// with the given one -- same compare-and-delete semantics as
+// deleteClockHashIfMatchScript -- otherwise removes the clock hash and
 // every tier's wake entry (a delete on an absent wake member is a no-op,
 // same as the real RemoveWake).
-func (s *fakeStore) DeleteClock(_ context.Context, caseID, clockType string) error {
+func (s *fakeStore) DeleteClockIfMatch(_ context.Context, caseID, clockType, slaID string) (bool, error) {
 	if s.failDeleteClock {
-		return errors.New("delete clock failed")
+		return false, errors.New("delete clock failed")
 	}
-	delete(s.clocks, caseID+"|"+clockType)
+	key := caseID + "|" + clockType
+	if meta, ok := s.clocks[key]; ok && meta.SLAID != "" && slaID != "" && meta.SLAID != slaID {
+		return false, nil
+	}
+	delete(s.clocks, key)
 	for _, tier := range tierSequence {
 		delete(s.wake, wakeMember(caseID, clockType, tier))
 	}
-	return nil
+	return true, nil
 }
 
 // fakeChat is a chatSender test double.
@@ -851,7 +864,7 @@ func TestApplyStateEffects_Resume_NoEntityClient_SkipsShiftWithoutPanicking(t *t
 	// Pause the clock directly (bypassing ApplyStateEffects' own
 	// entity-based pause detection, which is not what this test is about)
 	// to set up the "currently paused" precondition a resume needs.
-	if err := st.SetPaused(context.Background(), "case-1", ClockWorkaround, true); err != nil {
+	if _, err := st.SetPaused(context.Background(), "case-1", ClockWorkaround, true, ""); err != nil {
 		t.Fatalf("seed pause: %v", err)
 	}
 
@@ -1187,14 +1200,41 @@ type fakeEntityClockStatus struct {
 	// registered in entity-service), so a test only needs to name the clock
 	// it specifically cares about.
 	states map[string]clockState
-	err    error
-	calls  []string // "<caseID>|<clockType>", in call order
+	// statesBySLAID, keyed by slaID alone, is checked FIRST when the caller
+	// passes a non-empty slaID -- models the real entity-service behavior a
+	// non-empty slaId query parameter narrows to (an exact row), as opposed
+	// to states' own "whichever row is most recently started" default,
+	// which real GetClockState falls back to only for an empty slaID. Lets
+	// a test simulate two policies backing the same (caseID, clockType) --
+	// one terminal, one still genuinely due -- and prove the right one is
+	// consulted when the caller knows which row it means.
+	statesBySLAID map[string]clockState
+	err           error
+	calls         []string // "<caseID>|<clockType>", in call order
+	// slaIDs records the slaID each GetClockState call was made with, in
+	// the same order as calls -- lets a test assert that the right call
+	// site passed meta.SLAID through (or passed "" where it deliberately
+	// should, e.g. refreshAndReconcileClock's own discovery lookup).
+	slaIDs []string
 }
 
-func (f *fakeEntityClockStatus) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+func (f *fakeEntityClockStatus) GetClockState(_ context.Context, caseID, clockType, slaID string) (clockState, error) {
 	f.calls = append(f.calls, caseID+"|"+clockType)
+	f.slaIDs = append(f.slaIDs, slaID)
 	if f.err != nil {
 		return clockState{}, f.err
+	}
+	if slaID != "" {
+		// Mirrors the real entity-service: a non-empty slaId that matches no
+		// row for this (workItemId, target) reports Found=false, never the
+		// case/type default -- a test that passes a wrong or stale slaID
+		// must see a miss, not have it silently pass by matching whatever
+		// the ambiguous default happens to be.
+		state, ok := f.statesBySLAID[slaID]
+		if !ok {
+			return clockState{Found: false}, nil
+		}
+		return state, nil
 	}
 	return f.states[caseID+"|"+clockType], nil
 }
@@ -1209,7 +1249,7 @@ type flakyThenFoundEntityClockStatus struct {
 	found         clockState
 }
 
-func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseID, clockType, slaID string) (clockState, error) {
 	f.calls++
 	if f.calls <= f.notFoundCalls {
 		return clockState{Found: false}, nil
@@ -1220,7 +1260,7 @@ func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseI
 func TestGetClockStateWithRetry(t *testing.T) {
 	t.Run("found on the first attempt makes no extra calls", func(t *testing.T) {
 		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 0, found: clockState{Found: true, DurationSeconds: 900}}
-		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1232,7 +1272,7 @@ func TestGetClockStateWithRetry(t *testing.T) {
 	t.Run("not found once then found succeeds within the retry budget", func(t *testing.T) {
 		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 1, found: clockState{Found: true, DurationSeconds: 900}}
 		start := time.Now()
-		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1249,7 +1289,7 @@ func TestGetClockStateWithRetry(t *testing.T) {
 
 	t.Run("never found returns the last not-found answer after exhausting retries", func(t *testing.T) {
 		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 1000}
-		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1263,7 +1303,7 @@ func TestGetClockStateWithRetry(t *testing.T) {
 
 	t.Run("a lookup error is returned immediately, never retried", func(t *testing.T) {
 		entity := &fakeEntityClockStatus{err: errors.New("entity-service unreachable")}
-		_, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		_, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err == nil {
 			t.Fatal("expected an error")
 		}
@@ -1878,9 +1918,13 @@ func TestTick_EntityServiceHasNoRecordOfClock_SendsAnywayFailOpen(t *testing.T) 
 // TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen is
 // the regression guard for the other CodeRabbit-caught gap: a severity
 // revision cancels the old clock and registers a fresh one for the same
-// (case, clockType) pair. entity-service reporting that NEW, currently-active
-// incarnation must not be read as confirming the OLD, Redis-tracked
-// incarnation (the one this wake entry is actually about) is resolved.
+// (case, clockType) pair. entity-service reporting that NEW, currently-active,
+// NON-terminal incarnation must not be read as confirming the OLD,
+// Redis-tracked incarnation (the one this wake entry is actually about) is
+// resolved -- there is nothing conclusive to go on, so this still fails open.
+// (A terminal new incarnation is the different, now-fixed case covered by
+// TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses
+// below -- that one IS conclusive, regardless of which incarnation it is.)
 func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
@@ -1890,12 +1934,11 @@ func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *t
 	redisStartedAt := time.Now().Add(-4 * time.Hour)
 	// entity-service's own row started far more recently than Redis's own
 	// copy of this clock -- a different incarnation, well outside
-	// clockIncarnationTolerance, even though its stage happens to be
-	// terminal/non-breached (what would otherwise look like a clean
-	// suppression candidate).
+	// clockIncarnationTolerance -- and its stage is still live (IN_PROGRESS,
+	// not terminal), so there is genuinely nothing conclusive here.
 	entityStartedOn := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"case-1|response": {Found: true, IsActive: false, Stage: "ACHIEVED", HasBreached: false, StartedOn: &entityStartedOn},
+		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", HasBreached: false, StartedOn: &entityStartedOn},
 	}}
 
 	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt}
@@ -1905,7 +1948,141 @@ func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *t
 		t.Fatalf("Tick() error = %v, want nil", err)
 	}
 	if len(chat.calls) == 0 {
-		t.Error("chat calls = none, want at least one -- a mismatched incarnation must not confirm this wake entry's own clock is resolved")
+		t.Error("chat calls = none, want at least one -- a mismatched, still-live incarnation must not confirm this wake entry's own clock is resolved")
+	}
+}
+
+// TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses
+// is the regression guard for a real production false alert: a clock
+// cancelled at 59% business-elapsed (a severity change replaced it with a
+// fresh incarnation) still sent a 75% breach Chat alert, because the old
+// verifyTierStillDue branch ordering let an incarnation mismatch win and
+// fail open before the terminal-stage check ever ran. A terminal,
+// non-breached stage is conclusive regardless of which incarnation it
+// belongs to -- there is no live clock left to alert about either way -- so
+// this must suppress even though entity-service's row is a different
+// incarnation from this wake entry's own.
+//
+// meta.SLAID is set here, matching the real production scenario: by the
+// time a severity change's own ReviseClocks call has run (synchronously, in
+// the same Handle call that triggered it), the clock's own SLAID is already
+// known, so GetClockState is asked about this EXACT row, not entity-service's
+// ambiguous "most recently started" default -- see
+// TestTick_EmptySLAID_DifferentIncarnationButTerminal_StillFailsOpen for the
+// (deliberately different) empty-SLAID case this does NOT cover.
+func TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+
+	const rowID = "the-cancelled-row"
+	redisStartedAt := time.Now().Add(-4 * time.Hour)
+	entityStartedOn := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{statesBySLAID: map[string]clockState{
+		rowID: {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &entityStartedOn, ID: rowID},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt, SLAID: rowID}
+	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %d, want 0 -- a cancelled, non-breached clock must never alert, whatever incarnation it is", len(chat.calls))
+	}
+	if pub.calls != 0 {
+		t.Errorf("publisher calls = %d, want 0", pub.calls)
+	}
+}
+
+// TestTick_EmptySLAID_DifferentIncarnationButTerminal_StillFailsOpen is the
+// regression guard for a second CodeRabbit-caught gap in the fix above: the
+// terminal-check-first branch only applies when meta.SLAID is non-empty --
+// for a clock Redis hasn't learned an SLAID for yet (predates this field, or
+// was registered before its first reconciliation), GetClockState falls back
+// to entity-service's own ambiguous "most recently started" row. entity-service
+// genuinely lets two policies both have a live clock on the same target at
+// once (confirmed live, not theoretical), so that ambiguous row could be a
+// terminal SIBLING policy's, not the one this wake entry is actually about.
+// Without this guard, the terminal check would wrongly finalize a
+// still-genuinely-due tier and lose its alert permanently (finishTier
+// advances the cursor). This must instead fall through to the
+// incarnation-mismatch check and fail open -- exactly the behavior this
+// whole verifyTierStillDue check had before the SLAID mechanism existed, so
+// an empty-SLAID clock is no worse off than it always was.
+func TestTick_EmptySLAID_DifferentIncarnationButTerminal_StillFailsOpen(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+
+	redisStartedAt := time.Now().Add(-4 * time.Hour)
+	entityStartedOn := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		// The slaID-less default answers with a terminal row -- but since
+		// meta.SLAID is empty below, this must NOT be trusted as "this
+		// wake entry's own clock is resolved": it could be an unrelated
+		// sibling policy's row.
+		"case-1|response": {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &entityStartedOn},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt} // SLAID left empty
+	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) == 0 {
+		t.Error("chat calls = none, want at least one -- with no SLAID to disambiguate, a terminal row must not be trusted as this wake entry's own clock; must fail open")
+	}
+}
+
+// TestTick_TwoPoliciesOnTheSameTarget_SLAIDPicksTheRightOne is the
+// regression guard for the CodeRabbit-flagged gap in the fix above:
+// GetClockState's own "most recently started row" default cannot tell two
+// policies that both have a genuinely open clock on the same (case,
+// clockType) target apart -- confirmed live, not theoretical (staging and
+// production both show RESPONSE/RESOLUTION cases with more than one
+// simultaneously-active policy). Without a row id, a terminal SIBLING
+// policy's row answering for the whole target would make the fix above
+// wrongly finalize a tier that belongs to a DIFFERENT, still genuinely due
+// policy. meta.SLAID (threaded through to GetClockState's own slaID
+// parameter) closes this: the live policy's own row is asked for by its
+// exact id, never entity-service's ambiguous default.
+func TestTick_TwoPoliciesOnTheSameTarget_SLAIDPicksTheRightOne(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+
+	const liveRowID = "live-policy-row"
+	redisStartedAt := time.Now().Add(-4 * time.Hour)
+	liveStartedOn := redisStartedAt // same incarnation as the wake entry
+
+	e.entity = &fakeEntityClockStatus{
+		// The ambiguous, slaID-less default answers with a DIFFERENT
+		// policy's row -- terminal, no breach -- simulating "most recently
+		// started" picking the wrong sibling.
+		states: map[string]clockState{
+			"case-1|response": {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &liveStartedOn},
+		},
+		// The EXACT row this wake entry's own clock is tracking, reachable
+		// only by its own id -- still genuinely live, same incarnation.
+		statesBySLAID: map[string]clockState{
+			liveRowID: {Found: true, IsActive: true, Stage: "IN_PROGRESS", HasBreached: false, StartedOn: &liveStartedOn, ID: liveRowID},
+		},
+	}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt, SLAID: liveRowID}
+	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) == 0 {
+		t.Error("chat calls = none, want at least one -- the live policy's own clock (asked for by its exact id) was genuinely due, a terminal SIBLING policy's row must not suppress it")
 	}
 }
 
@@ -2156,7 +2333,7 @@ func (f *fakeActiveClocksClient) GetActiveCSMSLAClocks(context.Context) ([]activ
 // entity-service again, don't trust a stale snapshot" behavior), so a test
 // that sets up f.clocks for one case/type also gets a matching
 // GetClockState answer for free.
-func (f *fakeActiveClocksClient) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+func (f *fakeActiveClocksClient) GetClockState(_ context.Context, caseID, clockType, slaID string) (clockState, error) {
 	if f.clockStateErr != nil {
 		return clockState{}, f.clockStateErr
 	}
@@ -3274,21 +3451,21 @@ func TestApplyStateEffects_PauseStatus_DrivenByEntityService_NotByStatusString(t
 
 func TestEntityPauseStatus_NoEntityClient_DefaultsToNotPaused(t *testing.T) {
 	e := &Engine{}
-	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+	if got, _ := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
 		t.Error("entityPauseStatus() = true with no entity client, want false (fail open toward sending, not suppressing)")
 	}
 }
 
 func TestEntityPauseStatus_LookupFailure_DefaultsToNotPaused(t *testing.T) {
 	e := &Engine{entity: &fakeEntityClockStatus{err: errors.New("unreachable")}}
-	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+	if got, _ := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
 		t.Error("entityPauseStatus() = true on a lookup failure, want false (fail open)")
 	}
 }
 
 func TestEntityPauseStatus_NotFound_DefaultsToNotPaused(t *testing.T) {
 	e := &Engine{entity: &fakeEntityClockStatus{}} // no states -- Found: false
-	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+	if got, _ := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
 		t.Error("entityPauseStatus() = true when entity-service has no record, want false")
 	}
 }

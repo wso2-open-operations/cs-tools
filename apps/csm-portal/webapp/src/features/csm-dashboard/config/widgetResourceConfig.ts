@@ -1416,6 +1416,36 @@ export const WIDGET_RESOURCE_CONFIG: Record<
       return caseId ? `/cases/${caseId}` : undefined;
     },
   },
+  // MTTR (mean time to resolution): a pure server-side aggregate
+  // (`GET /reports/mttr`, see `useMttrReportData`) with no raw record of its
+  // own at all -- no search, no list, no count, no slices (backend-enforced,
+  // `noSlices` in generated_resources.go). `searchEndpoint`/`itemsKey`/
+  // `primaryLabel` are structurally required by `WidgetResourceConfig` but
+  // never actually read: ParseGenerated refuses every shape except
+  // `pie`/`bar` with `groupBy.bucket` for this resourceType, so `useWidgetData`
+  // (the only reader of `searchEndpoint`/`itemsKey`/`primaryLabel`) never
+  // runs for an mttr widget.
+  mttr: {
+    searchEndpoint: "/reports/mttr",
+    itemsKey: "bands",
+    primaryLabel: () => "—",
+    // No standalone MTTR list page exists (it's a chart-only metric), so —
+    // like `case_feedback`/`task` above — a click routes through the
+    // generic dashboard-widget preview page.
+    buildHref: (filters, ctx) =>
+      buildWidgetPreviewHref({
+        previewSlug: "mttr",
+        widgetId: ctx?.widgetId ?? "",
+        displayName: ctx?.displayName ?? "",
+        filters,
+        resourceType: "mttr",
+      }),
+    icon: Clock,
+    iconColor: "info",
+    previewSlug: "mttr",
+    // No detail page: a severity band isn't a single record.
+    detailHref: () => undefined,
+  },
   plg_organization: {
     searchEndpoint: "/plg/organizations/search",
     buildSearchRequestBody: plgOrganizationSearchBody,

@@ -173,8 +173,8 @@ type WorklogDeveloper struct {
 	// hours, which no time-card-derived count could produce. Public holidays are not modelled
 	// anywhere in the schema, so they are not deducted.
 	WorkedDays float64 `json:"workedDays"`
-	// Leave is daily-only: the absence kind's short code if the person is
-	// away that day, otherwise empty.
+	// Leave is daily-only: FD if the person is on a full-day leave that
+	// day, HD for a half day, otherwise empty. The leave kind is not shown.
 	Leave          string  `json:"leave,omitempty"`
 	ApprovedIssues int     `json:"approvedIssues"`
 	ApprovedHours  float64 `json:"approvedHours"`

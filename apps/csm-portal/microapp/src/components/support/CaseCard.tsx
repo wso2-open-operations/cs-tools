@@ -22,6 +22,7 @@ import type { CaseSummary } from "@src/types";
 import { fromNow } from "@utils/dateTime";
 import { SeverityChip, StatusChip } from "./Chips";
 import { TYPE_CONFIG } from "./config";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export function CaseCard({ item }: { item: CaseSummary }) {
   const theme = useTheme<OxygenTheme>();
@@ -66,7 +67,7 @@ export function CaseCard({ item }: { item: CaseSummary }) {
             </Typography>
           </Stack>
           <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-            {item.assignedEngineer?.name ?? "Unassigned"}
+            {stripStaffNameMarker(item.assignedEngineer?.name) || "Unassigned"}
           </Typography>
         </Stack>
       </Stack>

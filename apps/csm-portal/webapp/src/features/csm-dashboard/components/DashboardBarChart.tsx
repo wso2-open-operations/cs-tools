@@ -114,6 +114,10 @@ interface DashboardBarChartProps {
    * for a time card totals widget). Absent shows the plain number, as
    * before this prop existed. */
   formatValue?: (value: number) => string;
+  /** A shorter text for the label above each bar, when `formatValue` is too
+   * wide for the bars to share the tile (the tooltip still uses
+   * `formatValue`). Setting it also shrinks the label to 11px. */
+  formatLabel?: (value: number) => string;
 }
 
 /**
@@ -131,6 +135,7 @@ export default function DashboardBarChart({
   isError,
   onSliceClick,
   formatValue,
+  formatLabel,
 }: DashboardBarChartProps): JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
@@ -275,9 +280,13 @@ export default function DashboardBarChart({
             label={{
               position: "top",
               fill: isDarkMode ? theme.palette.common.white : theme.palette.text.primary,
-              fontSize: 13,
+              fontSize: formatLabel ? 11 : 13,
               fontWeight: 600,
-              ...(formatValue ? { formatter: (value: unknown) => formatValue(Number(value)) } : {}),
+              ...(formatLabel
+                ? { formatter: (value: unknown) => formatLabel(Number(value)) }
+                : formatValue
+                  ? { formatter: (value: unknown) => formatValue(Number(value)) }
+                  : {}),
             }}
             onMouseEnter={(_data: unknown, i: number) => setActiveIndex(i)}
             onMouseLeave={() => setActiveIndex(undefined)}

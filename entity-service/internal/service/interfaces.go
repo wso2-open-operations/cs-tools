@@ -343,9 +343,16 @@ type SLAStatusService interface {
 	// "active" -- unlike SearchActiveSLAStatuses, which only ever lists
 	// active rows. See domain.SLAClockState's own doc comment for why this
 	// distinction exists and who needs it. A ValidationError is returned
-	// for a malformed workItemId or an unrecognized target (must be
-	// "response"/"workaround"/"resolution", case-insensitive).
-	GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error)
+	// for a malformed workItemId, an unrecognized target (must be
+	// "response"/"workaround"/"resolution", case-insensitive), or a
+	// non-empty slaID that isn't a valid UUID.
+	//
+	// slaID, when non-empty, narrows the lookup to that exact "sla" row
+	// (its own id, as previously returned on this same field) instead of
+	// the ambiguous "most recently started row for this target" -- see
+	// repository.SLAStatusRepository.GetClockState's own doc comment for
+	// why that disambiguation exists.
+	GetClockState(ctx context.Context, workItemID, target, slaID string) (domain.SLAClockState, error)
 
 	// RequestRecalculation publishes TypeSLARecalculationRequested so
 	// csm-notification-service rebuilds its Redis-held SLA tracking from

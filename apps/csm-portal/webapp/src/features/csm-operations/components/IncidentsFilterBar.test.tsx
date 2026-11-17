@@ -56,6 +56,9 @@ vi.mock("@features/csm-cases/api/useUserSearch", () => ({
     isFetchingNextPage: false,
   }),
 }));
+vi.mock("@features/csm-users/api/useUserNamesById", () => ({
+  useUserNamesById: () => new Map(),
+}));
 // The extra incident assignment groups (security operations) come from their
 // own narrowed group search; tests steer its result per case.
 const useSearchIncidentExtraGroupsMock = vi.fn(

@@ -3054,6 +3054,58 @@ func TestDispatcher_Handle_CRApprovalRequested_UsesTheFlowsSubject(t *testing.T)
 	}
 }
 
+// TestDispatcher_Handle_CRNotices_SubjectUsesConfiguredCompanyName: the flow
+// writes "[WSO2 Support]" at the start of every change request subject, so a
+// deployment that configures EMAIL_TEMPLATE_COMPANY_NAME must see its own name
+// there, as it does on a case email, with the rest of the subject unchanged.
+func TestDispatcher_Handle_CRNotices_SubjectUsesConfiguredCompanyName(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	tests := []struct {
+		name   string
+		record eventbus.Record
+		want   string
+	}{
+		{"approval request", crRecord("internal", ""),
+			"[Acme Support] [CR][Choreo] (CHG0031234) Request for approval - Review"},
+		{"plan date notice", planDateRecord("accepted", "customer", "PROJ-1"),
+			"[Acme Support] [CR] (CHG0031234) Customer has updated the plan start date"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockEmailSender{}
+			d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+
+			if err := d.Handle(context.Background(), tt.record); err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+			if len(mock.calls) != 1 {
+				t.Fatalf("sent %d emails, want 1", len(mock.calls))
+			}
+			if got := mock.calls[0].subject; got != tt.want {
+				t.Errorf("subject = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCRSubject_LeavesASubjectWithoutTheFlowsPrefix: only the flow's own
+// leading prefix names the company; anything else is the flow's wording.
+func TestCRSubject_LeavesASubjectWithoutTheFlowsPrefix(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	for _, subject := range []string{
+		"[CR] (CHG0031234) Request for approval - Review",
+		"Re: [WSO2 Support] [CR] (CHG0031234) Request for approval - Review",
+	} {
+		if got := crSubject(subject); got != subject {
+			t.Errorf("crSubject(%q) = %q, want it unchanged", subject, got)
+		}
+	}
+}
+
 // TestDispatcher_Handle_CRApprovalRequested_LinksByAudience is the regression
 // guard for a link that pointed at /cases/<id>: a change request is not a case,
 // and the two audiences do not even share a portal.

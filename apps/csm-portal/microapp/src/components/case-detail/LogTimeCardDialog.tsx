@@ -66,6 +66,7 @@ import {
   timeCardDraftErrors,
   totalMinutes,
 } from "@utils/timecard";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const { LocalizationProvider, DatePicker } = DatePickers;
 
@@ -280,9 +281,9 @@ export function LogTimeCardDialog({
           <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
             <Stack direction="row" alignItems="center" gap={1}>
               <Avatar src={me?.avatarUrl} sx={{ width: 28, height: 28, fontSize: "0.75rem" }}>
-                {initialsOf(me?.name ?? "")}
+                {initialsOf(stripStaffNameMarker(me?.name))}
               </Avatar>
-              <Typography variant="body2">{me?.name}</Typography>
+              <Typography variant="body2">{stripStaffNameMarker(me?.name)}</Typography>
             </Stack>
             <TimeCardStateChip state="submitted" />
           </Stack>

@@ -107,6 +107,7 @@ var caseAlertKeys = map[string]caseAlertKey{
 	"teams.rotaTeams":                 listKey(caseAlertCRE, func(l *LadderConfig) *[]string { return &l.Teams.RotaTeams }),
 	"teams.unassignedTeamLead":        stringKey(caseAlertCRE, func(l *LadderConfig) *string { return &l.Teams.UnassignedTeamLead }),
 	"teams.unassignedTeamLeadCount":   intKey(caseAlertCRE, func(l *LadderConfig) *int { return &l.Teams.UnassignedTeamLeadCount }),
+	"teams.unassignedLeads":           stringKey(caseAlertCRE, func(l *LadderConfig) *string { return &l.Teams.UnassignedLeads }),
 	"teams.rotaMembersToCall": {
 		ladders: caseAlertCRE,
 		set: func(l *LadderConfig, raw json.RawMessage) error {

@@ -35,3 +35,50 @@ export function formatDayLabel(key: string): string {
   const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return day.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+/**
+ * A short label for the top of an MTTR bar, where seven bars share a narrow
+ * tile: whole hours from 100 up, one decimal below, no thousands separator
+ * ("3436h", "82.1h", "0.3h"). The tooltip keeps the full `formatMttrHours`.
+ */
+export function formatMttrBarLabel(hours: number): string {
+  const rounded = hours >= 100 ? Math.round(hours) : Math.round(hours * 10) / 10;
+  return `${rounded}h`;
+}
+
+/** An MTTR value in days for the chart tooltip and the count tile: at most
+ * two decimals, then " d" ("7.08 d", "0.3 d", "12 d"). */
+export function formatMttrDays(days: number): string {
+  return `${(Math.round(days * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })} d`;
+}
+
+/** A short days label for the top of an MTTR bar: one decimal, no space
+ * ("7.1d", "0.3d", "12d"). */
+export function formatMttrDaysBarLabel(days: number): string {
+  return `${Math.round(days * 10) / 10}d`;
+}
+
+/** The formatters for an MTTR widget's chosen unit (`query.unit`): the full
+ * value for the tooltip and count tile, and the short bar label. */
+export function mttrUnitFormatters(unit: unknown): {
+  value: (n: number) => string;
+  label: (n: number) => string;
+} {
+  return unit === "days"
+    ? { value: formatMttrDays, label: formatMttrDaysBarLabel }
+    : { value: formatMttrHours, label: formatMttrBarLabel };
+}
+
+/** Labels an MTTR widget's header count: "5 cases" ("1 case"). */
+export function formatMttrCases(count: number): string {
+  return `${count.toLocaleString("en-US")} ${count === 1 ? "case" : "cases"}`;
+}
+
+/**
+ * Formats an average resolution time (MTTR, in hours) for a chart, its
+ * tooltip and the tile's total: at most two decimals, thousands separated,
+ * then " h" ("1,259.64 h", "214.5 h", "0 h").
+ */
+export function formatMttrHours(hours: number): string {
+  return `${(Math.round(hours * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })} h`;
+}

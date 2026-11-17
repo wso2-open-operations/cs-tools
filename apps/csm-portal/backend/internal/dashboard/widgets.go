@@ -83,6 +83,13 @@ const (
 	// POST /plg/registrations/search. PLG users only, like
 	// ResourcePlgOrganization.
 	ResourcePlgRegistration ResourceType = "plg_registration"
+	// ResourceMTTR identifies a widget whose data is the MTTR (mean time to
+	// resolution) report, by severity band, over a trailing window --
+	// GET /reports/mttr (a thin proxy of entity-service's own route). Unlike
+	// every other ResourceType, there is no raw record this resolves to count
+	// or list: the server-side aggregate IS the widget's only shape
+	// (pie/bar with groupBy.bucket "severity" -- see generatedResourceRules).
+	ResourceMTTR ResourceType = "mttr"
 )
 
 // Shape is how a widget's resolved data should be rendered.

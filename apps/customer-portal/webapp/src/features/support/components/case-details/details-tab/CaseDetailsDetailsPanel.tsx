@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { NESTED_LIST_SX } from "@components/rich-text-editor/nestedListSx";
 import type { CaseDetailsDetailsPanelProps } from "@features/support/types/supportComponents";
 import {
   Autocomplete,
@@ -470,6 +471,7 @@ export default function CaseDetailsDetailsPanel({
                 color: "text.primary",
                 "& p": { mb: 0.5 },
                 "& p:last-child": { mb: 0 },
+                ...NESTED_LIST_SX,
                 "& code": {
                   display: "block",
                   p: 1,
