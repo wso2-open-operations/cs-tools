@@ -51,3 +51,38 @@ export function companyName(): string {
 export function hasConfiguredCompanyName(): boolean {
   return configuredString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) !== undefined;
 }
+
+/** Billing email used when `CUSTOMER_PORTAL_BILLING_EMAIL` is not set. */
+export const DEFAULT_BILLING_EMAIL = "billing@wso2.com";
+
+/**
+ * One plain address: an unquoted local part (no whitespace and none of RFC
+ * 5322's specials, so no "mailto:" prefix either), "@", and a hostname.
+ */
+const PLAIN_EMAIL = /^[^\s()<>[\]:;@\\,"]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/;
+
+/**
+ * Billing team's email address shown on the suspended-project notice
+ * (`CUSTOMER_PORTAL_BILLING_EMAIL`), {@link DEFAULT_BILLING_EMAIL} when unset,
+ * blank or not a plain address. Read at call time.
+ *
+ * @returns {string} The billing email address.
+ */
+export function billingEmail(): string {
+  const configured = configuredString(window.config?.CUSTOMER_PORTAL_BILLING_EMAIL);
+  return configured && PLAIN_EMAIL.test(configured) ? configured : DEFAULT_BILLING_EMAIL;
+}
+
+/**
+ * `mailto:` link for {@link billingEmail}. The local part is percent-encoded:
+ * `#`, `?` and `%` are legal in it but would otherwise start the link's
+ * fragment or query, or be read as an escape (RFC 6068). The domain is a plain
+ * hostname, so it needs none.
+ *
+ * @returns {string} The mailto link.
+ */
+export function billingEmailHref(): string {
+  const address = billingEmail();
+  const at = address.lastIndexOf("@");
+  return `mailto:${encodeURIComponent(address.slice(0, at))}@${address.slice(at + 1)}`;
+}

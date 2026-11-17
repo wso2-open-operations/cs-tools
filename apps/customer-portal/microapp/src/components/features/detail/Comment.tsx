@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 import { Avatar, Badge, Box, Card, Skeleton, Stack, Typography, colors } from "@wso2/oxygen-ui";
 import { Headset } from "@wso2/oxygen-ui-icons-react";
 import { stringAvatar } from "@utils/others";
+import { SYSTEM_AUTHOR_LABEL } from "@utils/caseComments";
 
 interface CommentProps {
   children: string | ReactNode;
@@ -62,12 +63,14 @@ function AuthorAvatar({ name, isInternal }: { name: string; isInternal: boolean 
       }
       sx={{ flexShrink: 0 }}
     >
-      <Avatar sx={{ width: 32, height: 32, fontSize: "0.75rem" }}>{stringAvatar(name) || "?"}</Avatar>
+      <Avatar sx={{ width: 32, height: 32, fontSize: "0.75rem" }}>{stringAvatar(name)}</Avatar>
     </Badge>
   );
 }
 
-export function Comment({ children, author, timestamp, isInternal = false }: CommentProps) {
+export function Comment({ children, author: authorName, timestamp, isInternal = false }: CommentProps) {
+  // A comment with no author is the system's, as in the webapp: never a blank name or a "?" avatar.
+  const author = authorName.trim() || SYSTEM_AUTHOR_LABEL;
   return (
     <Card component={Stack} sx={{ bgcolor: "background.default" }}>
       <Stack direction="row" alignItems="center" gap={1.25} p={1}>
