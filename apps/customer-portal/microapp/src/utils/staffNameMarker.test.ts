@@ -19,14 +19,14 @@ import { nameInitials, stripStaffNameMarker } from "./staffNameMarker";
 
 describe("stripStaffNameMarker", () => {
   it("removes the trailing circled W, lowercase or uppercase", () => {
-    expect(stripStaffNameMarker("Rashmika Silva ⓦ")).toBe("Rashmika Silva");
-    expect(stripStaffNameMarker("Rashmika Silva Ⓦ")).toBe("Rashmika Silva");
-    expect(stripStaffNameMarker("Rashmika Silvaⓦ")).toBe("Rashmika Silva");
+    expect(stripStaffNameMarker("First Last ⓦ")).toBe("First Last");
+    expect(stripStaffNameMarker("First Last Ⓦ")).toBe("First Last");
+    expect(stripStaffNameMarker("First Lastⓦ")).toBe("First Last");
   });
 
   it("leaves a name without the marker alone, and tolerates nothing", () => {
-    expect(stripStaffNameMarker("Rashmika Silva")).toBe("Rashmika Silva");
-    expect(stripStaffNameMarker("  Rashmika  ")).toBe("Rashmika");
+    expect(stripStaffNameMarker("First Last")).toBe("First Last");
+    expect(stripStaffNameMarker("  Single  ")).toBe("Single");
     expect(stripStaffNameMarker(undefined)).toBe("");
     expect(stripStaffNameMarker(null)).toBe("");
   });
@@ -36,23 +36,23 @@ describe("stripStaffNameMarker", () => {
   });
 
   it("does not touch a circled W that is not at the end", () => {
-    expect(stripStaffNameMarker("Jane ⓦ Doe")).toBe("Jane ⓦ Doe");
+    expect(stripStaffNameMarker("First ⓦ Last")).toBe("First ⓦ Last");
   });
 });
 
 describe("nameInitials", () => {
   it("uses the first two words only", () => {
-    expect(nameInitials("Rashmika Silva")).toBe("RS");
-    expect(nameInitials("Rashmika Silva ⓦ")).toBe("RS");
-    expect(nameInitials("Mary Jane Watson")).toBe("MJ");
-    expect(nameInitials("Rashmika")).toBe("R");
+    expect(nameInitials("First Last")).toBe("FL");
+    expect(nameInitials("First Last ⓦ")).toBe("FL");
+    expect(nameInitials("First Middle Last")).toBe("FM");
+    expect(nameInitials("Single")).toBe("S");
     expect(nameInitials("ⓦ")).toBe("");
     expect(nameInitials("")).toBe("");
   });
 
   it("keeps a character outside the basic plane whole, and handles caseless scripts", () => {
-    expect(nameInitials("𠮷野 太郎")).toBe("𠮷太");
-    expect(nameInitials("山田 太郎")).toBe("山太");
-    expect(nameInitials("𠮷野 太郎 ⓦ")).toBe("𠮷太");
+    expect(nameInitials("𠀀 𠀁")).toBe("𠀀𠀁");
+    expect(nameInitials("月 火")).toBe("月火");
+    expect(nameInitials("𠀀 𠀁 ⓦ")).toBe("𠀀𠀁");
   });
 });

@@ -18,7 +18,7 @@
 
 /**
  * Some internal (WSO2 staff) users carry a trailing circled "W" in their stored name (e.g.
- * "Jane Doe ⓦ"). That is upstream data, not something this app writes. It shows as either the
+ * "First Last ⓦ"). That is upstream data, not something this app writes. It shows as either the
  * lowercase (U+24E6) or uppercase (U+24CC) circled letter at the end of the name, optionally with
  * whitespace around it, and rarely as the whole string when there was no real name to attach it to.
  */
@@ -44,7 +44,7 @@ export function nameInitials(name: string | null | undefined): string {
       .filter(Boolean)
       .slice(0, 2)
       // The first code point, not the first UTF-16 unit: charAt(0) would split a character outside the
-      // basic plane (for example 𠮷) into a broken half.
+      // basic plane (for example 𠀀) into a broken half.
       .map((word) => Array.from(word)[0])
       .join("")
       .toUpperCase()
