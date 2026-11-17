@@ -17,8 +17,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
@@ -34,6 +37,10 @@ func NewAuditLogMaintenanceHandler(svc service.AuditLogMaintenanceService) *Audi
 
 // Run handles POST /audit-log/maintenance.
 func (h *AuditLogMaintenanceHandler) Run(w http.ResponseWriter, r *http.Request) {
+	// The call takes no options: an empty body (or {}) is fine, anything else is a 400.
+	if !decodeNoOptions(w, r) {
+		return
+	}
 	resp, err := h.svc.RunMaintenance(r.Context())
 	if err != nil {
 		writeServiceError(w, r, err)
@@ -41,4 +48,29 @@ func (h *AuditLogMaintenanceHandler) Run(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// decodeNoOptions accepts an empty body or a single empty JSON object, and
+// answers 400 for anything else. The upkeep takes no options, so a body that
+// names one is a mistake the caller should hear about.
+func decodeNoOptions(w http.ResponseWriter, r *http.Request) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var none struct{}
+	if err := dec.Decode(&none); err != nil {
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		apierror.WriteJSON(w, http.StatusBadRequest, decodeErrMsg(err))
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		apierror.WriteJSON(w, http.StatusBadRequest, "request body must contain a single JSON object")
+		return false
+	}
+	return true
 }

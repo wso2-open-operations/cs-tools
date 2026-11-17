@@ -102,11 +102,30 @@ CREATE TRIGGER csm_audit_log_no_truncate
     BEFORE TRUNCATE ON csm_audit_log
     FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
 
--- A row's key as text, e.g. '42' or 'acme|prod' for a composite key.
+-- The statement trigger above does not reach the partitions, and TRUNCATE on a
+-- partition skips the parent's, so every partition gets its own guard. New
+-- months get theirs in audit_create_partitions.
+DO $$
+DECLARE
+    part regclass;
+BEGIN
+    FOR part IN SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = 'csm_audit_log'::regclass LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS csm_audit_log_no_truncate ON %s', part);
+        EXECUTE format('CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON %s
+                          FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()', part);
+    END LOOP;
+END $$;
+
+-- A row's key as text: the plain value for a one-column key ('42'), a JSON array
+-- for a composite one ('["acme","prod"]'), so two different keys never give the
+-- same text.
 CREATE OR REPLACE FUNCTION audit_record_key(p_row JSONB, p_key_columns TEXT[]) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
-    SELECT string_agg(COALESCE(p_row ->> k, ''), '|' ORDER BY ord)
-      FROM unnest(p_key_columns) WITH ORDINALITY AS t(k, ord)
+    SELECT CASE WHEN cardinality(p_key_columns) = 1
+                THEN COALESCE(p_row ->> p_key_columns[1], '')
+                ELSE (SELECT jsonb_agg(COALESCE(p_row -> k, 'null'::jsonb) ORDER BY ord)::text
+                        FROM unnest(p_key_columns) WITH ORDINALITY AS t(k, ord))
+           END
 $$;
 
 -- The trigger function shared by every registered table.
@@ -114,7 +133,7 @@ $$;
 -- columns, each comma-separated. SECURITY DEFINER, so callers need no INSERT right.
 CREATE OR REPLACE FUNCTION audit_log_row_change() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     max_value_bytes CONSTANT INT := 8192;
     key_columns      TEXT[] := string_to_array(TG_ARGV[0], ',');
@@ -184,7 +203,7 @@ CREATE OR REPLACE FUNCTION register_audit(
     p_masked   TEXT[] DEFAULT '{}'
 ) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     table_oid  regclass := format('%I.%I', p_schema, p_table)::regclass;
     keys       TEXT[]   := p_keys;
@@ -204,6 +223,10 @@ BEGIN
     END IF;
     IF keys IS NULL THEN
         RAISE EXCEPTION 'audit: %.% has no primary key; pass p_keys', p_schema, p_table;
+    END IF;
+    -- The record id is built from the key columns and stored in clear.
+    IF keys && (p_excluded || p_masked) THEN
+        RAISE EXCEPTION 'audit: a key column of %.% cannot be excluded or masked', p_schema, p_table;
     END IF;
 
     SELECT array_agg(c) INTO bad_columns
@@ -242,7 +265,7 @@ END $$;
 -- Turn auditing off. A reason is required; old history stays.
 CREATE OR REPLACE FUNCTION unregister_audit(p_schema TEXT, p_table TEXT, p_reason TEXT) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     table_oid regclass := to_regclass(format('%I.%I', p_schema, p_table));
 BEGIN
@@ -264,7 +287,9 @@ END $$;
 -- Mark a table as deliberately not audited (staging, queues, ...).
 CREATE OR REPLACE FUNCTION exclude_from_audit(p_schema TEXT, p_table TEXT, p_reason TEXT) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+    table_oid regclass := to_regclass(format('%I.%I', p_schema, p_table));
 BEGIN
     IF NULLIF(btrim(p_reason), '') IS NULL THEN
         RAISE EXCEPTION 'audit: a reason is required to exclude a table';
@@ -273,13 +298,18 @@ BEGIN
     INSERT INTO audit_config (schema_name, table_name, enabled, reason)
     VALUES (p_schema, p_table, false, p_reason)
     ON CONFLICT (schema_name, table_name) DO UPDATE SET enabled = false, reason = EXCLUDED.reason;
+
+    -- A table that was audited stops being audited, as in unregister_audit.
+    IF table_oid IS NOT NULL THEN
+        EXECUTE format('DROP TRIGGER IF EXISTS csm_audit_row_change ON %s', table_oid);
+    END IF;
 END $$;
 
 -- Partitions. Safe to run twice and from several replicas (advisory lock).
 -- Month boundaries are UTC.
 CREATE OR REPLACE FUNCTION audit_create_partitions(p_months_ahead INT DEFAULT 3) RETURNS INT
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     this_month     DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
     month_start    DATE;
@@ -311,6 +341,9 @@ BEGIN
             EXECUTE format(
                 'CREATE TABLE public.%I PARTITION OF public.csm_audit_log FOR VALUES FROM (%L) TO (%L)',
                 partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
+            EXECUTE format(
+                'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON public.%I
+                   FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()', partition_name);
             created_count := created_count + 1;
         END IF;
     END LOOP;
@@ -328,7 +361,7 @@ CREATE OR REPLACE FUNCTION audit_retire_partitions(
     p_lock_timeout     TEXT DEFAULT '2s'
 ) RETURNS SETOF TEXT
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     cutoff TIMESTAMPTZ :=
         (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
@@ -354,7 +387,7 @@ END $$;
 -- Empty result = healthy.
 CREATE OR REPLACE FUNCTION audit_partition_health() RETURNS TABLE (problem TEXT)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     this_month   DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
     future_count INT;
@@ -382,7 +415,7 @@ END $$;
 CREATE OR REPLACE FUNCTION audit_reconcile(p_repair BOOLEAN DEFAULT false)
 RETURNS TABLE (schema_name TEXT, table_name TEXT, problem TEXT)
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     registered RECORD;
     trigger_state "char";
@@ -439,6 +472,7 @@ BEGIN
       JOIN pg_class c ON c.oid = g.tgrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE g.tgfoid = 'audit_log_row_change'::regproc
+       AND g.tgparentid = 0  -- not a copy of a partitioned table's trigger
        AND NOT EXISTS (SELECT 1 FROM audit_config ac
                         WHERE ac.schema_name = n.nspname AND ac.table_name = c.relname AND ac.enabled);
 END $$;
@@ -458,7 +492,7 @@ REVOKE ALL ON FUNCTION audit_reconcile(BOOLEAN) FROM PUBLIC;
 -- 'public' is a placeholder: the approved schemas are still to be decided.
 CREATE OR REPLACE FUNCTION audit_warn_unregistered_table() RETURNS event_trigger
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     new_table RECORD;
 BEGIN

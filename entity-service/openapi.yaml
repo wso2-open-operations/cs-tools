@@ -18573,6 +18573,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditLogMaintenanceResponse'
+        "400":
+          description: The request has a body that is not empty or a single JSON object (the call takes no options).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: No valid token.
           content:
