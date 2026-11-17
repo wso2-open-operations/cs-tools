@@ -605,8 +605,7 @@ sign-ups per month.
 
 **MTTR** is the average time from a case being created to the **last** time it entered Solution
 Proposed (a rejected proposal sends the case back for more work before a later one sticks, so the
-last one, not the first, is when it was actually resolved), over cases **opened in the window** that were
-also resolved in it (an older case resolved in the window is not counted). It is never computed from raw case
+last one, not the first, is when it was actually resolved). It is never computed from raw case
 records: there is no "MTTR record" to count or list, only this one server-side aggregate.
 
 `query` is a flat object with only:
