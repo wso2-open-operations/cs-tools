@@ -180,7 +180,7 @@ export default function CaseDetailPage() {
     return () => {
       layout.setEndSlotOverride(undefined);
     };
-  }, [data]);
+  }, [data, isInternalUser]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
