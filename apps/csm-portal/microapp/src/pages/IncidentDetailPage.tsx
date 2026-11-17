@@ -82,7 +82,7 @@ function IncidentDetailContent({ id }: { id: string }) {
 
       <SectionCard title="Overview">
         <Stack gap={1}>
-          <DetailRow label="Caller" value={incident.caller?.name} />
+          <DetailRow label="Caller" value={stripStaffNameMarker(incident.caller?.name) || undefined} />
           <DetailRow label="Category" value={incident.category} />
           <DetailRow label="Subcategory" value={incident.subcategory} />
           <DetailRow label="Channel" value={incident.channel} />
@@ -126,7 +126,7 @@ function IncidentDetailContent({ id }: { id: string }) {
         <SectionCard title="Watch list">
           <Stack direction="row" gap={1} flexWrap="wrap">
             {incident.watchList.map((w) => (
-              <Chip key={w.id} size="small" variant="outlined" label={w.name || w.email} />
+              <Chip key={w.id} size="small" variant="outlined" label={stripStaffNameMarker(w.name) || w.email} />
             ))}
           </Stack>
         </SectionCard>
