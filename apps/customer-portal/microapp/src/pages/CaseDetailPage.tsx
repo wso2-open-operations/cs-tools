@@ -230,10 +230,10 @@ export default function CaseDetailPage() {
                 }
               />
             </Grid>
-            <Grid size={6}>
+            <Grid size={12}>
               <InfoField label="Assignee" value={isLoading ? undefined : (data?.assigned ?? "N/A")} icon={Users} />
             </Grid>
-            <Grid size={6}>
+            <Grid size={12}>
               <InfoField label="Reporter" value={isLoading ? undefined : (data?.reporter ?? "N/A")} icon={User} />
             </Grid>
             <Grid size={6}>
