@@ -66,7 +66,7 @@ import {
 } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
-import { formatHours, formatMttrBarLabel, formatMttrCases, formatMttrHours } from "@features/csm-dashboard/utils/timeCardTotals";
+import { formatHours, formatMttrCases, mttrUnitFormatters } from "@features/csm-dashboard/utils/timeCardTotals";
 import DashboardLineChart from "@features/csm-dashboard/components/DashboardLineChart";
 
 // Hides the per-widget refresh button by default and reveals it on hover or
@@ -641,7 +641,7 @@ function DashboardWidgetTile({
   // Thousands separators for shape "count"'s big number -- used both in the
   // visible Typography and the tile's aria-label, so both stay in sync.
   const formattedCount = isMttrCount
-    ? formatMttrHours(mttrData.slices[0]?.value ?? 0)
+    ? mttrUnitFormatters(filters.unit).value(mttrData.slices[0]?.value ?? 0)
     : (data?.total ?? 0).toLocaleString();
 
   if (!config) {
@@ -904,7 +904,7 @@ function DashboardWidgetTile({
     // An mttr widget's bars are average resolution hours.
     const formatValue =
       resourceType === "mttr"
-        ? formatMttrHours
+        ? mttrUnitFormatters(filters.unit).value
         : groupBy?.measure === "hours"
           ? formatHours
           : undefined;
@@ -1042,7 +1042,7 @@ function DashboardWidgetTile({
                 {...(shape === "pie" ? { inlineLabels } : {})}
                 // An MTTR bar's own label is the short form; only the bar
                 // chart accepts it (MTTR is bar-only).
-                {...(shape === "bar" && resourceType === "mttr" ? { formatLabel: formatMttrBarLabel } : {})}
+                {...(shape === "bar" && resourceType === "mttr" ? { formatLabel: mttrUnitFormatters(filters.unit).label } : {})}
               />
             )}
           </Box>

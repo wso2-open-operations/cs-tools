@@ -780,9 +780,12 @@ ids once, right after generation, by `dashboardTeams.resolveMTTRTeams` (`dashboa
 the `mttr`-specific sibling of `resolveTimeCardTeams`; CRE-only, since an MTTR widget has no SRE
 equivalent and no `"__current_team__"` concept.
 
-The window is exactly one of `months` (1/3/6/12) or `days` (7, the trailing seven days; `GET /reports/mttr?days=7`). `S0` is its own band (the combined S1-S4/S1-S3 bars never include it). `shape: "count"` shows one band's number (`query.bands` names exactly one, no `groupBy`; the webapp reads the same report call and shows hours). The optional flat `bands` key (any of S1-S4, S1-S3, S0, S1..S4) only chooses which bars the webapp draws
-(`useMttrReportData` filters the one response client-side); the request to `GET /reports/mttr` is
-unchanged, so "S1-S4" in a prompt can mean the four individual bars. Values are average hours.
+The window is exactly one of `months` (1/3/6/12) or `days` (7, the trailing seven days; `GET /reports/mttr?days=7`). `S0` is its own band (the combined S1-S4/S1-S3 bars never include it). `shape: "count"` shows one band's number (`query.bands` names exactly one, no `groupBy`; the webapp reads the same report call and shows hours). The optional flat `bands` key (S0, S1..S4) only chooses which bars the webapp draws
+(`useMttrReportData` filters the one response client-side); with none named the webapp draws S1 to S4, each its own
+bar, and the generator is told to always name them and never use the combined `S1-S4`/`S1-S3` values (still accepted
+only so a dashboard saved earlier loads). The optional flat `unit` (`hours`, the default, or `days`) is display only:
+the webapp divides the report's hours by 24 and formats ("7.1d" on a bar, "7.08 d" in the tooltip and count tile). The
+request to `GET /reports/mttr` is unchanged.
 
 Tests: `TestGetMTTRReport` (`mttr_report_test.go`), `TestParseGenerated_MTTRBands`, `TestParseGenerated_AcceptsMTTRWidgets` /
 `_RejectsInvalidMTTRWidgets` / `_TheCatalogueMTTRExamplesAreValid` (`internal/dashboard/generated_mttr_test.go`

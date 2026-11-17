@@ -43,7 +43,7 @@ describe("useMttrReportData", () => {
     getResponseMock.mockReset();
   });
 
-  it("issues a single GET /reports/mttr request, forwarding the slot's abort signal, and maps bands into ordered, non-navigable avg-hours slices", async () => {
+  it("issues a single GET /reports/mttr request, forwarding the slot's abort signal, and by default draws S1 to S4 as separate, ordered, non-navigable avg-hours slices (no combined bars, no S0)", async () => {
     getResponseMock.mockResolvedValue(
       jsonResponse({
         generatedOn: "2026-11-16T00:00:00Z",
@@ -83,13 +83,12 @@ describe("useMttrReportData", () => {
     });
 
     expect(result.current.slices).toEqual([
-      { label: "S1-S4", query: {}, navigable: false, value: 25 },
-      { label: "S1-S3", query: {}, navigable: false, value: 15 },
       { label: "S1", query: {}, navigable: false, value: 5 },
       { label: "S2", query: {}, navigable: false, value: 10 },
       { label: "S3", query: {}, navigable: false, value: 20 },
       { label: "S4", query: {}, navigable: false, value: 40 },
     ]);
+    // 2 + 3 + 5 + 10 cases behind the four bars shown.
     expect(result.current.total).toBe(20);
   });
 
@@ -165,6 +164,38 @@ describe("useMttrReportData", () => {
     // The header counts the cases behind the bars shown (S0 1 + S1 2), not
     // the S1-S4 band that is not shown.
     expect(result.current.total).toBe(3);
+  });
+
+  it("shows the values in days when the widget asks for days, without changing the request", async () => {
+    getResponseMock.mockResolvedValue(
+      jsonResponse({
+        generatedOn: "2026-11-16T00:00:00Z",
+        windowMonths: 3,
+        windowStart: "2026-08-16T00:00:00Z",
+        windowEnd: "2026-11-16T00:00:00Z",
+        creTeamIds: [],
+        bands: [
+          { band: "S1", caseCount: 2, avgResolutionHours: 48 },
+          { band: "S2", caseCount: 3, avgResolutionHours: 170 },
+        ],
+      }),
+    );
+    const { result } = renderHook(
+      () =>
+        useMttrReportData(
+          "mttr_days_unit",
+          { months: "3", unit: "days" },
+          { bucket: "severity" },
+          undefined,
+          undefined,
+        ),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(getResponseMock).toHaveBeenCalledWith("/reports/mttr?months=3", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(result.current.slices.map((s) => s.value)).toEqual([2, 170 / 24]);
   });
 
   it("appends a repeated creTeamId per team", async () => {

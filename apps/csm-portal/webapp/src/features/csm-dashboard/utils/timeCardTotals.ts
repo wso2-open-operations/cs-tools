@@ -46,6 +46,29 @@ export function formatMttrBarLabel(hours: number): string {
   return `${rounded}h`;
 }
 
+/** An MTTR value in days for the chart tooltip and the count tile: at most
+ * two decimals, then " d" ("7.08 d", "0.3 d", "12 d"). */
+export function formatMttrDays(days: number): string {
+  return `${(Math.round(days * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })} d`;
+}
+
+/** A short days label for the top of an MTTR bar: one decimal, no space
+ * ("7.1d", "0.3d", "12d"). */
+export function formatMttrDaysBarLabel(days: number): string {
+  return `${Math.round(days * 10) / 10}d`;
+}
+
+/** The formatters for an MTTR widget's chosen unit (`query.unit`): the full
+ * value for the tooltip and count tile, and the short bar label. */
+export function mttrUnitFormatters(unit: unknown): {
+  value: (n: number) => string;
+  label: (n: number) => string;
+} {
+  return unit === "days"
+    ? { value: formatMttrDays, label: formatMttrDaysBarLabel }
+    : { value: formatMttrHours, label: formatMttrBarLabel };
+}
+
 /** Labels an MTTR widget's header count: "5 cases" ("1 case"). */
 export function formatMttrCases(count: number): string {
   return `${count.toLocaleString("en-US")} ${count === 1 ? "case" : "cases"}`;

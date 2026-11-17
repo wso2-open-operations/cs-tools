@@ -251,15 +251,20 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		// name that band (see the MTTR check in checkGeneratedResourceWidget).
 		groupByOn: []Shape{ShapeBar},
 		flat: map[string]valueRule{
-			"months":     {kind: valuesScalarEnum, values: []string{"1", "3", "6", "12"}},
-			"days":       {kind: valuesScalarEnum, values: []string{"7"}},
+			"months": {kind: valuesScalarEnum, values: []string{"1", "3", "6", "12"}},
+			"days":   {kind: valuesScalarEnum, values: []string{"7"}},
+			// How the times are shown; hours when omitted. A display choice
+			// only: the report itself is always in hours.
+			"unit":       {kind: valuesScalarEnum, values: []string{"hours", "days"}},
 			"creTeamIds": {kind: valuesTeamNames},
-			// Which bars to draw. The report always computes all six bands;
-			// this only chooses what the widget shows, in the order listed.
-			// Omitted means all six.
+			// Which bars to draw, in the order listed. The report computes
+			// every band; this only chooses what the widget shows. Omitted
+			// means S1 to S4, each its own bar. The combined "S1-S4"/"S1-S3"
+			// values stay valid only so a dashboard saved earlier still loads;
+			// the generator is told never to use them (catalogue section 5f).
 			"bands": {kind: valuesEnum, values: []string{"S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"}},
 		},
-		buckets:      []string{"severity"},
+		buckets:     []string{"severity"},
 		slicesVia:   "group with groupBy.bucket",
 		noSlices:    true,
 		requiredOne: []string{"months", "days"},
