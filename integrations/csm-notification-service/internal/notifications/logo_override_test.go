@@ -173,6 +173,28 @@ func TestSetTemplateCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	}
 }
 
+// TestRenderCRPlanDateNoticeEmail_ClosingLineUsesConfiguredCompanyName: the
+// accepted/rejected closing lines are written in Go, not baked into the
+// template, so SetTemplateCompanyName's phrase rewrite never reaches them —
+// they must read CompanyName() when rendered instead.
+func TestRenderCRPlanDateNoticeEmail_ClosingLineUsesConfiguredCompanyName(t *testing.T) {
+	SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { SetTemplateCompanyName(defaultCompanyName) })
+
+	for kind, want := range map[string]string{
+		"accepted": "The proposed plan start date accepted by the Acme Team.",
+		"rejected": "Acme Team request to change the plan start date.",
+	} {
+		body, _ := RenderCRPlanDateNoticeEmail(CRPlanDateEmailData{Kind: kind, Number: "CHG0031234"})
+		if !strings.Contains(body, want) {
+			t.Errorf("%s: body does not carry %q", kind, want)
+		}
+		if strings.Contains(body, "WSO2 Team") || strings.Contains(body, crPlanDateCompanySlot) {
+			t.Errorf("%s: body still names WSO2 or shows the unfilled company slot", kind)
+		}
+	}
+}
+
 func TestSetTemplateCompanyName_EmptyKeepsDefault(t *testing.T) {
 	before := caseCreatedTemplate
 	SetTemplateCompanyName("  ")

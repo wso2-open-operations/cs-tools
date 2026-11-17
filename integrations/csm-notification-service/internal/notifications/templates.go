@@ -1414,6 +1414,10 @@ type CRPlanDateEmailData struct {
 	IntendedFor string
 }
 
+// crPlanDateCompanySlot marks where a crPlanDateWording closing line names the
+// company; RenderCRPlanDateNoticeEmail fills it with CompanyName().
+const crPlanDateCompanySlot = "{company}"
+
 // crPlanDateWording is the per-kind text, reproduced from the ServiceNow
 // templates verbatim — including "Reject the proposed plan start date" as a
 // past-tense sentence and "<name> customer has updated…", both of which read
@@ -1425,11 +1429,11 @@ var crPlanDateWording = map[string]struct{ headlineSuffix, closing string }{
 	},
 	"accepted": {
 		"accepted the plan start date",
-		"The proposed plan start date accepted by the WSO2 Team.",
+		"The proposed plan start date accepted by the " + crPlanDateCompanySlot + " Team.",
 	},
 	"rejected": {
 		"Reject the proposed plan start date",
-		"WSO2 Team request to change the plan start date.",
+		crPlanDateCompanySlot + " Team request to change the plan start date.",
 	},
 }
 
@@ -1469,7 +1473,7 @@ func RenderCRPlanDateNoticeEmail(d CRPlanDateEmailData) (string, []InlineImage) 
 		"<!-- [PROJECT_AND_NUMBER] -->", projectAndNumber,
 		"<!-- [SHORT_DESCRIPTION] -->", shortDescription,
 		"<!-- [DESCRIPTION] -->", description,
-		"<!-- [CLOSING_LINE] -->", escapeHTML(w.closing),
+		"<!-- [CLOSING_LINE] -->", escapeHTML(strings.ReplaceAll(w.closing, crPlanDateCompanySlot, CompanyName())),
 		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
 	)
 	return replacer.Replace(tmpl), append(shortDescImages, descImages...)
