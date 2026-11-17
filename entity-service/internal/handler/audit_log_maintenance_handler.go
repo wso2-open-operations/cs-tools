@@ -34,6 +34,11 @@ func NewAuditLogMaintenanceHandler(svc service.AuditLogMaintenanceService) *Audi
 
 // Run handles POST /audit-log/maintenance.
 func (h *AuditLogMaintenanceHandler) Run(w http.ResponseWriter, r *http.Request) {
+	// The call takes no options: an empty body (or {}) is fine, anything else is a 400.
+	var none struct{}
+	if !decodeOptionalRequest(w, r, &none) {
+		return
+	}
 	resp, err := h.svc.RunMaintenance(r.Context())
 	if err != nil {
 		writeServiceError(w, r, err)

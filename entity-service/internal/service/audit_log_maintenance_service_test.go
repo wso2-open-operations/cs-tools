@@ -16,9 +16,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -35,6 +37,7 @@ type fakeAuditLogRepo struct {
 	repairedFound   []domain.AuditTriggerProblem // returned when repair is on
 	stillUnresolved []domain.AuditTriggerProblem // returned when repair is off
 	reconcileErr    error
+	verifyErr       error // returned only by the second (repair off) reconcile
 }
 
 func (f *fakeAuditLogRepo) CreatePartitions(_ context.Context, monthsAhead int) (int, error) {
@@ -54,6 +57,9 @@ func (f *fakeAuditLogRepo) Reconcile(_ context.Context, repair bool) ([]domain.A
 	}
 	if repair {
 		return f.repairedFound, nil
+	}
+	if f.verifyErr != nil {
+		return nil, f.verifyErr
 	}
 	return f.stillUnresolved, nil
 }
@@ -181,5 +187,28 @@ func TestAuditLogMaintenance_CancelledRequestIsAnError(t *testing.T) {
 
 	if _, err := NewAuditLogMaintenanceService(&fakeAuditLogRepo{}, 3).RunMaintenance(ctx); err == nil {
 		t.Fatal("a cancelled request should not be answered as a success")
+	}
+}
+
+func TestAuditLogMaintenance_FailedVerificationLogsWhatTheRepairTouched(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	repo := &fakeAuditLogRepo{
+		repairedFound: []domain.AuditTriggerProblem{triggerProblem("account", "registered table has no audit trigger")},
+		verifyErr:     errors.New("connection lost"),
+	}
+
+	resp, err := NewAuditLogMaintenanceService(repo, 3).RunMaintenance(context.Background())
+	if err != nil {
+		t.Fatalf("RunMaintenance: %v", err)
+	}
+	if len(resp.StepErrors) != 1 || resp.StepErrors[0] != "could not reconcile triggers" {
+		t.Errorf("StepErrors = %v, want the reconcile step reported", resp.StepErrors)
+	}
+	if got := logs.String(); !strings.Contains(got, "public.account") {
+		t.Errorf("log does not name the repaired table:\n%s", got)
 	}
 }

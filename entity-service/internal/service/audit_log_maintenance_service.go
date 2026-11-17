@@ -99,6 +99,9 @@ func (s *auditLogMaintenanceService) reconcileTriggers(ctx context.Context) (rep
 	}
 	unresolved, err = s.repo.Reconcile(ctx, false)
 	if err != nil {
+		// The repair already ran and the caller only gets the error, so say which
+		// tables it touched.
+		slog.WarnContext(ctx, "audit log: could not verify the trigger repair", "repairCandidates", tableNames(found))
 		return nil, nil, err
 	}
 
@@ -112,4 +115,13 @@ func (s *auditLogMaintenanceService) reconcileTriggers(ctx context.Context) (rep
 		}
 	}
 	return repaired, unresolved, nil
+}
+
+// tableNames lists the tables in problems as schema.table.
+func tableNames(problems []domain.AuditTriggerProblem) []string {
+	names := make([]string, 0, len(problems))
+	for _, p := range problems {
+		names = append(names, p.Schema+"."+p.Table)
+	}
+	return names
 }
