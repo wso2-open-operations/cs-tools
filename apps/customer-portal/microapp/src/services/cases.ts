@@ -16,6 +16,7 @@
 
 import axios from "axios";
 import apiClient from "@src/services/apiClient";
+import { commentEntries, toCommentDto, type CaseActivitiesPage } from "@utils/caseComments";
 import { infiniteQueryOptions, mutationOptions, queryOptions, skipToken } from "@tanstack/react-query";
 import type {
   CaseSummary,
@@ -29,7 +30,6 @@ import type {
   GetCasesRequestDto,
   Case,
   CaseDto,
-  CommentsDto,
   CommentDto,
   Comment,
   CreateCommentRequestDto,
@@ -53,6 +53,7 @@ import {
   CASE_ATTACHMENTS_ENDPOINT,
   CASE_CLASSIFICATION_ENDPOINT,
   CASE_COMMENTS_ENDPOINT,
+  CASE_ACTIVITIES_SEARCH_ENDPOINT,
   CASE_DETAILS_ENDPOINT,
   CASE_FEEDBACK_ENDPOINT,
   CASE_STATS_ENDPOINT,
@@ -131,9 +132,26 @@ const getCasesStats = async (id: string, body: Partial<GetCasesStatsRequestDto>)
   return (await apiClient.get<CasesStatsDto>(CASE_STATS_ENDPOINT(id), { params })).data;
 };
 
+// A case's comments are read from its activity feed: backend-v2 has no GET for comments (adding one is a
+// POST to /comments), and the feed is also the only place it says which authors are internal, which the
+// timeline shows as a headset badge. The feed is paged and newest first; every page is read, up to a cap
+// that keeps a very long case bounded (it then keeps the newest entries).
+const ACTIVITY_PAGE_SIZE = 50;
+const MAX_ACTIVITY_PAGES = 20;
+
 const getComments = async (id: string): Promise<Comment[]> => {
-  const response = (await apiClient.get<CommentsDto>(CASE_COMMENTS_ENDPOINT(id))).data;
-  return response.comments.map(toComment);
+  const pages: CaseActivitiesPage[] = [];
+  for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
+    const { data } = await apiClient.post<CaseActivitiesPage>(CASE_ACTIVITIES_SEARCH_ENDPOINT(id), {
+      pagination: { offset: page * ACTIVITY_PAGE_SIZE, limit: ACTIVITY_PAGE_SIZE },
+      includeFieldChanges: false,
+    });
+    pages.push(data);
+    if (!data.hasMore) break;
+  }
+  return commentEntries(pages)
+    .map((entry) => ({ ...toComment(toCommentDto(entry)), createdByIsInternal: entry.createdByIsInternal === true }))
+    .sort((a, b) => a.createdOn.getTime() - b.createdOn.getTime());
 };
 
 const createComment = async (id: string, body: CreateCommentRequestDto): Promise<Comment> => {
@@ -221,6 +239,8 @@ export function toComment(dto: CommentDto): Comment {
   return {
     id: dto.id,
     content: dto.content,
+    // Only the activity feed says who is internal; getComments sets this from it.
+    createdByIsInternal: false,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
     createdBy: dto.createdBy,
     attachments: dto.inlineAttachments.map((attachment) => ({
