@@ -27,7 +27,7 @@ import { AlertCircle, Info } from "@wso2/oxygen-ui-icons-react";
 import suspensionIllustration from "@assets/access-control/project-suspended.svg";
 import type { ProjectDetails } from "@features/project-hub/types/projects";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
-import { billingEmail, companyName } from "@config/brandingConfig";
+import { billingEmail, billingEmailHref, companyName } from "@config/brandingConfig";
 
 type ProjectSuspendedNoticePageProps = {
   project: ProjectDetails;
@@ -158,7 +158,7 @@ export default function ProjectSuspendedNoticePage({
                 Manager for assistance or reach our Billing team at{" "}
                 <Typography
                   component="a"
-                  href={`mailto:${billingEmail()}`}
+                  href={billingEmailHref()}
                   variant="body2"
                   fontWeight={600}
                   color="text.primary"
