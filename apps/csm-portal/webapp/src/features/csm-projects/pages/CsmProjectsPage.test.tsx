@@ -288,8 +288,13 @@ describe("CsmProjectsPage — column customisation", () => {
 
     const acme = (await screen.findByText("Acme Project")).closest("tr") as HTMLElement;
     const beta = screen.getByText("Beta Project").closest("tr") as HTMLElement;
-    expect(within(acme).getByText("APAC")).toBeInTheDocument();
-    expect(within(beta).getAllByText("—").length).toBeGreaterThan(0);
+    // The column picker is still open, which hides the page from role queries.
+    const regionCol = screen
+      .getAllByRole("columnheader", { hidden: true })
+      .findIndex((h) => h.textContent === "Region");
+    expect(regionCol).toBeGreaterThan(-1);
+    expect(within(acme).getAllByRole("cell", { hidden: true })[regionCol]).toHaveTextContent(/^APAC$/);
+    expect(within(beta).getAllByRole("cell", { hidden: true })[regionCol]).toHaveTextContent(/^—$/);
   });
 
   // Regression (CodeRabbit, PR #2907): the owner cell used to render
