@@ -16,8 +16,6 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  DEFAULT_REPORT_COMPANY_NAME,
-  hasConfiguredReportCompanyName,
   reportCompanyName,
   reportLogoUrl,
   reportSupportLine,
@@ -33,7 +31,6 @@ function setConfig(values: Partial<CustomerPortalWindowConfig>): void {
 describe("reportBrandingConfig", () => {
   beforeEach(() => {
     setConfig({
-      CUSTOMER_PORTAL_COMPANY_NAME: undefined,
       CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: undefined,
       CUSTOMER_PORTAL_LOGO_DARK_MODE_URL: undefined,
     });
@@ -43,23 +40,9 @@ describe("reportBrandingConfig", () => {
     window.config = originalConfig;
   });
 
-  it("prints the WSO2 support line when no company name is set", () => {
-    expect(reportCompanyName()).toBe(DEFAULT_REPORT_COMPANY_NAME);
-    expect(reportSupportLine()).toBe("WSO2 Support 24x7");
-    expect(hasConfiguredReportCompanyName()).toBe(false);
-  });
-
-  it("treats a blank company name as unset", () => {
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "   " });
-    expect(reportSupportLine()).toBe("WSO2 Support 24x7");
-    expect(hasConfiguredReportCompanyName()).toBe(false);
-  });
-
-  it("puts the configured company name in the support line", () => {
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "  Acme Corp " });
-    expect(reportCompanyName()).toBe("Acme Corp");
-    expect(reportSupportLine()).toBe("Acme Corp Support 24x7");
-    expect(hasConfiguredReportCompanyName()).toBe(true);
+  it("prints the company's support line", () => {
+    expect(reportCompanyName()).toBe("Choreo Labs");
+    expect(reportSupportLine()).toBe("Choreo Labs Support 24x7");
   });
 
   it("has no logo when neither logo is set", () => {
