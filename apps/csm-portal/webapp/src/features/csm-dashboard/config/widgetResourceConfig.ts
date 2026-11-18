@@ -658,6 +658,9 @@ const PROJECT_LIST_FILTER_KEYS = [
   "closureStates",
   "closureStatus",
   "excludeClosureStates",
+  "regions",
+  "onboardingOwnerIds",
+  "onboardingOwnerEmails",
   ...PROJECT_DATE_FILTER_KEYS.flatMap((k) => [`${k}From`, `${k}To`]),
 ] as const;
 
@@ -677,6 +680,9 @@ function translateProjectDashboardFilters(filters: Record<string, unknown>): Pro
   out.closureStates = asStringArray(filters.closureStates) ?? [];
   out.excludeClosureStates = asStringArray(filters.excludeClosureStates) ?? [];
   out.closureStatus = asString(filters.closureStatus) ?? "";
+  out.regions = asStringArray(filters.regions) ?? [];
+  out.onboardingOwnerIds = asStringArray(filters.onboardingOwnerIds) ?? [];
+  out.onboardingOwnerEmails = asStringArray(filters.onboardingOwnerEmails) ?? [];
   for (const k of PROJECT_DATE_FILTER_KEYS) {
     out[`${k}From`] = asString(filters[`${k}From`]) ?? "";
     out[`${k}To`] = asString(filters[`${k}To`]) ?? "";
