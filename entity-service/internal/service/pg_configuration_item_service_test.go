@@ -48,7 +48,7 @@ func TestNewConfigurationItemSearch(t *testing.T) {
 			t.Fatalf("whereArgs = %v, want %v", got.whereArgs, wantArgs)
 		}
 		for i := 1; i <= 3; i++ {
-			cond := "(so.name || ' ' || COALESCE(s.name, '')) ILIKE $" + string(rune('0'+i)) + ` ESCAPE '\'`
+			cond := "(COALESCE(so.name, '') || ' ' || COALESCE(s.name, '')) ILIKE $" + string(rune('0'+i)) + ` ESCAPE '\'`
 			if !strings.Contains(got.where, cond) {
 				t.Fatalf("where %q lacks %q", got.where, cond)
 			}
@@ -79,6 +79,18 @@ func TestNewConfigurationItemSearch(t *testing.T) {
 		got := newConfigurationItemSearch(strings.Repeat("word ", maxSearchTerms+5))
 		if len(got.whereArgs) != maxSearchTerms {
 			t.Fatalf("%d conditions, want %d", len(got.whereArgs), maxSearchTerms)
+		}
+	})
+
+	t.Run("ranking uses every word, past the filter's cap", func(t *testing.T) {
+		full := "Integration CP Automation Creation and Build Service Offering - US"
+		got := newConfigurationItemSearch(full)
+		if len(got.whereArgs) != maxSearchTerms {
+			t.Fatalf("%d conditions, want %d", len(got.whereArgs), maxSearchTerms)
+		}
+		want := []any{full + "%", "%" + full + "%"}
+		if !reflect.DeepEqual(got.orderArgs, want) {
+			t.Fatalf("orderArgs = %v, want %v", got.orderArgs, want)
 		}
 	})
 }
@@ -113,14 +125,18 @@ func TestPGConfigurationItemSearchLive(t *testing.T) {
 		`INSERT INTO service VALUES
 		   ('00000000-0000-0000-0000-000000000001', 'Integration Control Plane Service - US'),
 		   ('00000000-0000-0000-0000-000000000002', 'Integration Data Plane Service - EU'),
-		   ('00000000-0000-0000-0000-000000000003', 'Devant Control Plane Service - US')`,
+		   ('00000000-0000-0000-0000-000000000003', 'Devant Control Plane Service - US'),
+		   ('00000000-0000-0000-0000-000000000004', 'Integration Control Plane Service - EU')`,
 		`INSERT INTO service_offering VALUES
 		   ('10000000-0000-0000-0000-000000000001', 'Integration CP Automation Creation and Build Service Offering - US', '00000000-0000-0000-0000-000000000001'),
 		   ('10000000-0000-0000-0000-000000000002', 'Integration DP Automation Execution Service Offering - EU', '00000000-0000-0000-0000-000000000002'),
 		   ('10000000-0000-0000-0000-000000000003', 'Devant CP Integration Automation Service Offering - US', '00000000-0000-0000-0000-000000000003'),
 		   ('10000000-0000-0000-0000-000000000004', 'Devant CP 100%_Uptime Service Offering - US', '00000000-0000-0000-0000-000000000003'),
-		   ('10000000-0000-0000-0000-000000000005', 'Orphan Offering', NULL)`,
+		   ('10000000-0000-0000-0000-000000000005', 'Orphan Offering', NULL),
+		   ('10000000-0000-0000-0000-000000000006', 'Integration CP Automation Creation and Build Service Offering - EU', '00000000-0000-0000-0000-000000000004'),
+		   ('10000000-0000-0000-0000-000000000007', NULL, '00000000-0000-0000-0000-000000000002')`,
 	}
+	const unnamed = "<no name>"
 	for _, q := range setup {
 		if _, err := pool.Exec(ctx, q); err != nil {
 			t.Fatalf("setup %q: %v", q, err)
@@ -140,7 +156,8 @@ func TestPGConfigurationItemSearchLive(t *testing.T) {
 		names := make([]string, 0, len(resp.ConfigurationItems))
 		for _, ci := range resp.ConfigurationItems {
 			if ci.Name == nil {
-				t.Fatalf("search %q: item %s has no name", q, ci.ID)
+				names = append(names, unnamed)
+				continue
 			}
 			names = append(names, *ci.Name)
 		}
@@ -155,6 +172,7 @@ func TestPGConfigurationItemSearchLive(t *testing.T) {
 		// after the ones whose names start with the query.
 		{"automation integration", []string{
 			"Devant CP Integration Automation Service Offering - US",
+			"Integration CP Automation Creation and Build Service Offering - EU",
 			"Integration CP Automation Creation and Build Service Offering - US",
 			"Integration DP Automation Execution Service Offering - EU",
 		}},
@@ -165,11 +183,25 @@ func TestPGConfigurationItemSearchLive(t *testing.T) {
 		{"automation data plane", []string{
 			"Integration DP Automation Execution Service Offering - EU",
 		}},
-		// A name that starts with the query comes before one that only contains it.
+		// A name that starts with the query comes before one that only contains
+		// it; an offering with no name, found through its parent, comes last.
 		{"Integration", []string{
+			"Integration CP Automation Creation and Build Service Offering - EU",
 			"Integration CP Automation Creation and Build Service Offering - US",
 			"Integration DP Automation Execution Service Offering - EU",
 			"Devant CP Integration Automation Service Offering - US",
+			unnamed,
+		}},
+		// Ten words: the filter takes eight, which both twins match, and the
+		// ranking takes all ten, which only the US one starts with.
+		{"Integration CP Automation Creation and Build Service Offering - US", []string{
+			"Integration CP Automation Creation and Build Service Offering - US",
+			"Integration CP Automation Creation and Build Service Offering - EU",
+		}},
+		// An offering with no name still matches through its parent service.
+		{"data plane eu", []string{
+			"Integration DP Automation Execution Service Offering - EU",
+			unnamed,
 		}},
 		{"100%_", []string{"Devant CP 100%_Uptime Service Offering - US"}},
 		{"100%x", []string{}},
@@ -184,7 +216,7 @@ func TestPGConfigurationItemSearchLive(t *testing.T) {
 			t.Errorf("search %q: total %d, want %d", c.query, total, len(c.want))
 		}
 	}
-	if all, total := search(""); total != 5 || len(all) != 5 {
-		t.Errorf("empty query: %d items, total %d, want 5 and 5", len(all), total)
+	if all, total := search(""); total != 7 || len(all) != 7 {
+		t.Errorf("empty query: %d items, total %d, want 7 and 7", len(all), total)
 	}
 }

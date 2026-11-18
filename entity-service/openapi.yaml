@@ -29679,11 +29679,15 @@ components:
         searchQuery:
           type: string
           description: >
-            Free-text search query. With the PostgreSQL data source, every word
-            must appear, in any order, in the service offering's name or its
-            parent service's name ("integration automation eu"); names that
-            start with the query as typed come first, then names that contain
-            it, then the rest, each in name order.
+            Free-text search query. With the PostgreSQL data source, the query
+            is split into words on whitespace, and each of the first eight
+            words must appear, in any order and ignoring case, in the service
+            offering's name or its parent service's name ("integration
+            automation eu"); words after the eighth do not filter. "%" and "_"
+            match themselves, not as wildcards. Results are ranked on the whole
+            query, its whitespace collapsed to single spaces: names that start
+            with it come first, then names that contain it, then the rest, each
+            in name order.
 
     SearchConfigurationItemsRequest:
       type: object

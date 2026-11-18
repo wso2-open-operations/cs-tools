@@ -77,12 +77,16 @@ type configurationItemSearch struct {
 //
 // Ranking keeps the old behaviour for an exact name: a name that starts with
 // the query as typed comes first, then one that contains it, then the rest,
-// each in name order.
+// each in name order. It ranks on the whole query, spacing normalised, even
+// past the eighth word the filter stops at: a full name such as "Integration
+// CP Automation Creation and Build Service Offering - US" has ten, and its EU
+// twin would otherwise rank level with it and sort first.
 func newConfigurationItemSearch(query string) configurationItemSearch {
 	terms := strings.Fields(query)
 	if len(terms) == 0 {
 		return configurationItemSearch{orderBy: " ORDER BY so.name, so.id"}
 	}
+	phrase := likeEscaper.Replace(strings.Join(terms, " "))
 	if len(terms) > maxSearchTerms {
 		terms = terms[:maxSearchTerms]
 	}
@@ -90,12 +94,12 @@ func newConfigurationItemSearch(query string) configurationItemSearch {
 	conds := make([]string, 0, len(terms))
 	for _, t := range terms {
 		search.whereArgs = append(search.whereArgs, "%"+likeEscaper.Replace(t)+"%")
+		// service_offering.name may be NULL; the parent's name can still match.
 		conds = append(conds, fmt.Sprintf(
-			`(so.name || ' ' || COALESCE(s.name, '')) ILIKE $%d ESCAPE '\'`, len(search.whereArgs)))
+			`(COALESCE(so.name, '') || ' ' || COALESCE(s.name, '')) ILIKE $%d ESCAPE '\'`, len(search.whereArgs)))
 	}
 	search.where = " WHERE " + strings.Join(conds, " AND ")
 
-	phrase := likeEscaper.Replace(strings.Join(terms, " "))
 	search.orderArgs = []any{phrase + "%", "%" + phrase + "%"}
 	n := len(search.whereArgs)
 	search.orderBy = fmt.Sprintf(` ORDER BY CASE WHEN so.name ILIKE $%d ESCAPE '\' THEN 0`+
