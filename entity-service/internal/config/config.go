@@ -349,6 +349,12 @@ type Config struct {
 	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
 	// the audit log's own health check reports a problem every day.
 	AuditLogMonthsAhead int
+	// AuditLogRetentionMonths is how long audit rows are kept
+	// (CSM_AUDIT_LOG_RETENTION_MONTHS, default 18, from 12 to 120). Each daily
+	// maintenance run deletes the monthly partitions that ended at least this
+	// many months ago; the data is not archived. The floor stops a typo from
+	// deleting recent history.
+	AuditLogRetentionMonths int
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -1106,6 +1112,7 @@ func Load() *Config {
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
 	cfg.AuditLogEnabled = getBoolOrDefault("CSM_AUDIT_LOG_ENABLED", false)
 	cfg.AuditLogMonthsAhead = envIntInRange("CSM_AUDIT_LOG_MONTHS_AHEAD", 3, 2, 24)
+	cfg.AuditLogRetentionMonths = envIntInRange("CSM_AUDIT_LOG_RETENTION_MONTHS", 18, 12, 120)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))

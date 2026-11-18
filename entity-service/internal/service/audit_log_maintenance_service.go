@@ -28,7 +28,8 @@ import (
 // retries a failed run and sends the failure mail.
 type AuditLogMaintenanceService interface {
 	// RunMaintenance creates the coming monthly partitions, checks the log's
-	// health and puts back audit triggers that went missing. It always tries
+	// health, puts back audit triggers that went missing and deletes the
+	// partitions past the retention period. It always tries
 	// every step and returns what it found, including a step that could not run
 	// (StepErrors), so one failing step never hides the others' results. The
 	// error is set only when the request itself was cancelled.
@@ -36,20 +37,23 @@ type AuditLogMaintenanceService interface {
 }
 
 type auditLogMaintenanceService struct {
-	repo        repository.AuditLogRepository
-	monthsAhead int
+	repo            repository.AuditLogRepository
+	monthsAhead     int
+	retentionMonths int
 }
 
 // NewAuditLogMaintenanceService constructs the service. monthsAhead is how many
-// months past the current one get a partition.
-func NewAuditLogMaintenanceService(repo repository.AuditLogRepository, monthsAhead int) AuditLogMaintenanceService {
-	return &auditLogMaintenanceService{repo: repo, monthsAhead: monthsAhead}
+// months past the current one get a partition; retentionMonths is how long audit
+// rows are kept before their partition is deleted.
+func NewAuditLogMaintenanceService(repo repository.AuditLogRepository, monthsAhead, retentionMonths int) AuditLogMaintenanceService {
+	return &auditLogMaintenanceService{repo: repo, monthsAhead: monthsAhead, retentionMonths: retentionMonths}
 }
 
 // RunMaintenance implements AuditLogMaintenanceService.
 func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain.AuditLogMaintenanceResponse, error) {
 	// Empty slices, not nil, so the JSON shows [] and not null.
 	resp := domain.AuditLogMaintenanceResponse{
+		PartitionsRetired:  []string{},
 		HealthProblems:     []string{},
 		RepairedTriggers:   []domain.AuditTriggerProblem{},
 		UnresolvedTriggers: []domain.AuditTriggerProblem{},
@@ -75,8 +79,19 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 	resp.RepairedTriggers = append(resp.RepairedTriggers, repaired...)
 	resp.UnresolvedTriggers = append(resp.UnresolvedTriggers, unresolved...)
 
+	// Last, so a failure here never hides what the steps above found. Dropping
+	// is irreversible, so the names are logged.
+	retired, err := s.repo.RetirePartitions(ctx, s.retentionMonths)
+	if err != nil {
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not delete expired partitions", err))
+	}
+	resp.PartitionsRetired = append(resp.PartitionsRetired, retired...)
+	if len(retired) > 0 {
+		slog.InfoContext(ctx, "audit log: deleted expired partitions", "partitions", retired, "retentionMonths", s.retentionMonths)
+	}
+
 	slog.InfoContext(ctx, "audit log: maintenance run finished",
-		"partitionsCreated", resp.PartitionsCreated, "healthProblems", len(resp.HealthProblems),
+		"partitionsCreated", resp.PartitionsCreated, "partitionsRetired", len(resp.PartitionsRetired), "healthProblems", len(resp.HealthProblems),
 		"repairedTriggers", len(resp.RepairedTriggers), "unresolvedTriggers", len(resp.UnresolvedTriggers),
 		"failedSteps", len(resp.StepErrors))
 	return resp, ctx.Err()

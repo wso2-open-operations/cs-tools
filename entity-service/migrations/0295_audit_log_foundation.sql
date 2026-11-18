@@ -405,11 +405,13 @@ $fn$,
         '__SCHEMA_LIT__', quote_literal(current_schema()));
 END $install$;
 
--- Detach partitions that end before the retention cutoff, and return their names.
--- The data stays in a standalone table; archiving and dropping it is a separate step.
+-- Delete partitions that end before the retention cutoff (18 months by default),
+-- and return their names. Each is detached and dropped in the same transaction, so
+-- a failed drop puts the partition back, and the data is gone from disk once it
+-- commits: audit data past retention is not archived.
 -- Detaching briefly locks csm_audit_log (the catch-all partition rules out
--- CONCURRENTLY), so run it in a quiet window: lock_timeout makes it give up
--- instead of blocking writes, and the caller retries.
+-- CONCURRENTLY), so lock_timeout makes it give up instead of blocking writes; the
+-- daily run then tries again. The catch-all partition is never touched here.
 DO $install$
 BEGIN
     EXECUTE replace(replace($fn$
@@ -424,6 +426,12 @@ DECLARE
         (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
     old_partition TEXT;
 BEGIN
+    -- A zero or negative retention puts the cutoff in the future and would delete
+    -- everything, so refuse it.
+    IF p_retention_months IS NULL OR p_retention_months < 1 THEN
+        RAISE EXCEPTION 'audit_retire_partitions: retention must be at least 1 month, got %', p_retention_months;
+    END IF;
+
     PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
     PERFORM set_config('lock_timeout', p_lock_timeout, true);
 
@@ -437,6 +445,7 @@ BEGIN
            AND (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1]::timestamptz <= cutoff
     LOOP
         EXECUTE format('ALTER TABLE %1$I.csm_audit_log DETACH PARTITION %1$I.%2$I', __SCHEMA_LIT__, old_partition);
+        EXECUTE format('DROP TABLE %1$I.%2$I', __SCHEMA_LIT__, old_partition);
         RETURN NEXT old_partition;
     END LOOP;
 END $$;
