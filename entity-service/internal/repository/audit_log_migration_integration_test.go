@@ -283,10 +283,14 @@ func TestAuditMigration_AColumnAddedLaterIsAudited(t *testing.T) {
 	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a')")
 
 	auditExec(t, pool, "ALTER TABLE "+table+" ADD COLUMN added_later text")
+	// The log is append-only, so rows from an earlier run stay: count what this
+	// update adds, not what the log holds.
+	const countSQL = `SELECT count(*) FROM csm_audit_log
+	    WHERE table_name = $1 AND field_name = 'added_later' AND action = 'UPDATE'`
+	before := auditCount(t, pool, countSQL, table)
 	auditExec(t, pool, "UPDATE "+table+" SET added_later = 'x' WHERE id = 1")
 
-	if n := auditCount(t, pool, `SELECT count(*) FROM csm_audit_log
-	    WHERE table_name = $1 AND field_name = 'added_later' AND action = 'UPDATE'`, table); n != 1 {
+	if n := auditCount(t, pool, countSQL, table) - before; n != 1 {
 		t.Errorf("a column added after registration wrote %d audit rows, want 1", n)
 	}
 }
