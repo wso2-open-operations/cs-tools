@@ -67,7 +67,7 @@ func TestAuditLogRepository_HealthyAfterCreatingPartitions(t *testing.T) {
 	if _, err := repo.CreatePartitions(ctx, 3); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	problems, err := repo.PartitionHealth(ctx, 3, 18)
+	problems, err := repo.PartitionHealth(ctx, 3)
 	if err != nil {
 		t.Fatalf("health: %v", err)
 	}

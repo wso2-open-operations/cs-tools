@@ -33426,8 +33426,7 @@ components:
         healthProblems:
           type: array
           description: |
-            Rows in the catch-all partition, fewer future monthly partitions than CSM_AUDIT_LOG_MONTHS_AHEAD,
-            or a monthly partition or catch-all row older than the retention period (the deletion did not work).
+            Rows in the catch-all partition, or fewer future monthly partitions than CSM_AUDIT_LOG_MONTHS_AHEAD.
           items:
             type: string
         repairedTriggers:

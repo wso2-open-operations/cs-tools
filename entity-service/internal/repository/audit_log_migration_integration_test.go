@@ -895,11 +895,11 @@ func TestAuditMigration_PurgeDefaultPartitionRefusesAnUnsafeRetention(t *testing
 	}
 }
 
-func auditHealth(t *testing.T, repo repository.AuditLogRepository, monthsAhead, retentionMonths int) string {
+func auditHealth(t *testing.T, repo repository.AuditLogRepository, monthsAhead int) string {
 	t.Helper()
-	problems, err := repo.PartitionHealth(context.Background(), monthsAhead, retentionMonths)
+	problems, err := repo.PartitionHealth(context.Background(), monthsAhead)
 	if err != nil {
-		t.Fatalf("PartitionHealth(%d, %d): %v", monthsAhead, retentionMonths, err)
+		t.Fatalf("PartitionHealth(%d): %v", monthsAhead, err)
 	}
 	return strings.Join(problems, " | ")
 }
@@ -918,64 +918,14 @@ func TestAuditMigration_HealthReportsAMissedFuturePartition(t *testing.T) {
 	have := auditCount(t, pool, `SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
 	    WHERE i.inhparent = 'csm_audit_log'::regclass AND c.relname ~ '^csm_audit_log_\d{4}_\d{2}$'
 	      AND to_date(substr(c.relname, 15), 'YYYY_MM') > date_trunc('month', now() AT TIME ZONE 'UTC')::date`)
-	if got := auditHealth(t, repo, have, 18); got != "" {
+	if got := auditHealth(t, repo, have); got != "" {
 		t.Errorf("health with %d months ahead = %q, want healthy", have, got)
 	}
-	if got := auditHealth(t, repo, have+1, 18); !strings.Contains(got, "future monthly partition") {
+	if got := auditHealth(t, repo, have+1); !strings.Contains(got, "future monthly partition") {
 		t.Errorf("health with %d months ahead = %q, want a missing-partition problem", have+1, got)
 	}
 	// The monitoring call with no arguments keeps its old minimum of 2.
 	if n := auditCount(t, pool, "SELECT count(*) FROM audit_partition_health()"); n != 0 {
 		t.Errorf("audit_partition_health() = %d problems, want 0", n)
-	}
-}
-
-// A partition past retention that is still there means the deletion is not
-// working. Health runs after the deletion step, so it is never a false alarm.
-func TestAuditMigration_HealthReportsAPartitionPastRetention(t *testing.T) {
-	pool := newAuditMigrationTestPool(t)
-	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
-	if _, err := repo.CreatePartitions(context.Background(), 3); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	expired, recent := retentionPartitions(t, pool)
-
-	got := auditHealth(t, repo, 3, 18)
-	if !strings.Contains(got, "older than the 18-month retention") || !strings.Contains(got, "1 monthly partition") {
-		t.Errorf("health = %q, want exactly one partition past retention (%s, not %s)", got, expired, recent)
-	}
-
-	if _, err := repo.RetirePartitions(context.Background(), 18); err != nil {
-		t.Fatalf("retire: %v", err)
-	}
-	if got := auditHealth(t, repo, 3, 18); got != "" {
-		t.Errorf("health after the deletion = %q, want healthy", got)
-	}
-}
-
-func TestAuditMigration_HealthReportsCatchAllRowsPastRetention(t *testing.T) {
-	pool := newAuditMigrationTestPool(t)
-	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
-	if _, err := repo.CreatePartitions(context.Background(), 3); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	resetDefaultPartition(t, pool)
-	defaultRow(t, pool, "young", 3)
-
-	got := auditHealth(t, repo, 3, 18)
-	if !strings.Contains(got, "catch-all partition") || strings.Contains(got, "retention") {
-		t.Errorf("health = %q, want only the catch-all row, none past retention", got)
-	}
-
-	defaultRow(t, pool, "old", 40)
-	if got := auditHealth(t, repo, 3, 18); !strings.Contains(got, "1 catch-all row(s) are older than the 18-month retention") {
-		t.Errorf("health = %q, want the one expired catch-all row reported", got)
-	}
-
-	if _, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil {
-		t.Fatalf("purge: %v", err)
-	}
-	if got := auditHealth(t, repo, 3, 18); strings.Contains(got, "retention") {
-		t.Errorf("health after the purge = %q, want no retention problem", got)
 	}
 }

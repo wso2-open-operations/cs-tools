@@ -38,10 +38,9 @@ type AuditLogRepository interface {
 	// many it created.
 	CreatePartitions(ctx context.Context, monthsAhead int) (int, error)
 	// PartitionHealth returns one message per problem; none means healthy. It
-	// reports a catch-all row, fewer than monthsAhead future monthly partitions,
-	// and a partition or catch-all row past retentionMonths, so call it after the
-	// deletion steps.
-	PartitionHealth(ctx context.Context, monthsAhead, retentionMonths int) ([]string, error)
+	// reports a catch-all row and fewer than monthsAhead future monthly
+	// partitions.
+	PartitionHealth(ctx context.Context, monthsAhead int) ([]string, error)
 	// Reconcile compares the registry with the triggers that exist. With repair,
 	// missing or disabled triggers are put back.
 	Reconcile(ctx context.Context, repair bool) ([]domain.AuditTriggerProblem, error)
@@ -99,8 +98,8 @@ func (r *auditLogRepository) PurgeDefaultPartition(ctx context.Context, retentio
 }
 
 // PartitionHealth implements AuditLogRepository.
-func (r *auditLogRepository) PartitionHealth(ctx context.Context, monthsAhead, retentionMonths int) ([]string, error) {
-	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT problem FROM audit_partition_health($1, $2)`, monthsAhead, retentionMonths)
+func (r *auditLogRepository) PartitionHealth(ctx context.Context, monthsAhead int) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT problem FROM audit_partition_health($1)`, monthsAhead)
 	if err != nil {
 		return nil, fmt.Errorf("audit log: partition health: %w", err)
 	}
