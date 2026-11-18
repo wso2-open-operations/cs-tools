@@ -15,8 +15,9 @@
 // under the License.
 
 
+import { Autocomplete, Box, Checkbox, Link, ListItemText, TextField, Tooltip } from "@wso2/oxygen-ui";
 import { useMemo, type JSX } from "react";
-import MultiSelectField from "@components/MultiSelectField";
+import type * as React from "react";
 import { useAccountRegions } from "@features/csm-projects/api/useAccountRegions";
 
 interface ProjectRegionMultiSelectProps {
@@ -25,43 +26,93 @@ interface ProjectRegionMultiSelectProps {
   onChange: (next: string[]) => void;
 }
 
+const sameRegion = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 /**
- * The projects list's Region value picker: the account regions
- * ({@link useAccountRegions}), plus any chosen region the list does not hold
- * (one from a link or a dashboard click-through), so a selection never
- * silently disappears from the field.
+ * The projects list's Region value picker. The suggestions are the account
+ * regions {@link useAccountRegions} reads, which come from cases' accounts and
+ * so can miss a region only project accounts hold; a region can therefore
+ * also be typed (Enter adds it). A suggestion and a selected value that
+ * differ only in case are one option, keeping the selected spelling, so a
+ * region from a link shows as checked. A failed lookup is said under the
+ * field, which stays usable: a selected region can still be removed and
+ * another typed.
  */
 export default function ProjectRegionMultiSelect({
   id,
   values,
   onChange,
 }: ProjectRegionMultiSelectProps): JSX.Element {
-  const { data: regions, isLoading, isError } = useAccountRegions(true);
+  const { data: regions, isLoading, isError, refetch } = useAccountRegions(true);
   const options = useMemo(() => {
-    const all = [...(regions ?? [])];
-    const known = new Set(all.map((r) => r.toLowerCase()));
-    for (const v of values) {
-      if (!known.has(v.toLowerCase())) all.push(v);
+    const out = [...values];
+    for (const r of regions ?? []) {
+      if (!out.some((v) => sameRegion(v, r))) out.push(r);
     }
-    return all.map((r) => ({ value: r, label: r }));
+    return out;
   }, [regions, values]);
 
-  const unavailable = !isLoading && options.length === 0;
+  const add = (next: string[]): void => {
+    const deduped: string[] = [];
+    for (const raw of next) {
+      const v = raw.trim();
+      if (v && !deduped.some((d) => sameRegion(d, v))) deduped.push(v);
+    }
+    onChange(deduped);
+  };
+
   return (
-    <MultiSelectField
+    <Autocomplete<string, true, false, true>
+      multiple
+      freeSolo
+      size="small"
       id={id}
-      label="Value(s)"
-      values={values}
       options={options}
-      onChange={onChange}
-      disabled={isLoading || unavailable}
-      disabledTooltip={
-        isLoading
-          ? "Loading regions…"
-          : isError
-            ? "Regions couldn't be loaded."
-            : "No account has a region recorded."
-      }
+      value={values}
+      loading={isLoading}
+      disableCloseOnSelect
+      isOptionEqualToValue={(opt, val) => sameRegion(opt, val)}
+      onChange={(_event, next) => add(next)}
+      noOptionsText={isError ? "Regions couldn't be loaded. Type a region." : "No regions found. Type a region."}
+      renderTags={(value) => {
+        const displayText = value.join(", ");
+        const content = (
+          <Box
+            component="span"
+            sx={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pl: 1 }}
+          >
+            {displayText}
+          </Box>
+        );
+        return value.length === 1 ? content : <Tooltip title={displayText} placement="top">{content}</Tooltip>;
+      }}
+      renderOption={(props, option, { selected }) => {
+        const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & { key: string };
+        return (
+          <li key={key} {...liProps} style={{ paddingTop: 2, paddingBottom: 2 }}>
+            <Checkbox size="small" checked={selected} sx={{ mr: 1, p: 0.25 }} />
+            <ListItemText primary={option} slotProps={{ primary: { style: { fontSize: 13 } } }} />
+          </li>
+        );
+      }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label="Value(s)"
+          placeholder={values.length ? undefined : "Pick or type a region…"}
+          error={isError}
+          helperText={
+            isError ? (
+              <>
+                Regions couldn&apos;t be loaded; you can still type one.{" "}
+                <Link component="button" type="button" onClick={() => void refetch()}>
+                  Try again
+                </Link>
+              </>
+            ) : undefined
+          }
+        />
+      )}
     />
   );
 }
