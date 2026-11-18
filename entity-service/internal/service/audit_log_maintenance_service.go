@@ -66,12 +66,6 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 	}
 	resp.PartitionsCreated = created
 
-	healthProblems, err := s.repo.PartitionHealth(ctx)
-	if err != nil {
-		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not check partition health", err))
-	}
-	resp.HealthProblems = append(resp.HealthProblems, healthProblems...)
-
 	repaired, unresolved, err := s.reconcileTriggers(ctx)
 	if err != nil {
 		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not reconcile triggers", err))
@@ -100,6 +94,14 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 	if purged > 0 {
 		slog.InfoContext(ctx, "audit log: deleted expired rows from the catch-all partition", "rows", purged, "retentionMonths", s.retentionMonths)
 	}
+
+	// Last: it also reports what the deletion steps above should have removed, so
+	// run before them it would flag every partition on the day it expires.
+	healthProblems, err := s.repo.PartitionHealth(ctx, s.monthsAhead, s.retentionMonths)
+	if err != nil {
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not check partition health", err))
+	}
+	resp.HealthProblems = append(resp.HealthProblems, healthProblems...)
 
 	slog.InfoContext(ctx, "audit log: maintenance run finished",
 		"partitionsCreated", resp.PartitionsCreated, "partitionsRetired", len(resp.PartitionsRetired), "defaultRowsDeleted", resp.DefaultRowsDeleted, "healthProblems", len(resp.HealthProblems),

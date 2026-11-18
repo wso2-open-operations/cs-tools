@@ -37873,7 +37873,9 @@ components:
           description: Rows older than the retention period this run deleted from the catch-all partition.
         healthProblems:
           type: array
-          description: Rows in the catch-all partition, or fewer than two future months.
+          description: |
+            Rows in the catch-all partition, fewer future monthly partitions than CSM_AUDIT_LOG_MONTHS_AHEAD,
+            or a monthly partition or catch-all row older than the retention period (the deletion did not work).
           items:
             type: string
         repairedTriggers:
