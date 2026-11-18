@@ -151,10 +151,12 @@ import { LinkedServiceRequestsWidget } from "@features/csm-cases/components/Link
 import { LinkedChangeRequestsWidget } from "@features/csm-cases/components/LinkedChangeRequestsWidget";
 import { LinkedIncidentWidget } from "@features/csm-cases/components/LinkedIncidentWidget";
 import { LinkedIncidentsListWidget } from "@features/csm-cases/components/LinkedIncidentsListWidget";
+import { ProductIssuesWidget } from "@features/csm-cases/components/ProductIssuesWidget";
 import { useSearchLinkedIncidents } from "@features/csm-cases/api/useSearchLinkedIncidents";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
 import { isCloudSupportSubscription } from "@features/csm-projects/utils/subscriptionType";
 import { usePostCaseGithubIssue } from "@features/csm-cases/api/useCsmCaseGithubIssue";
+import { useOpenIdempotencyKey } from "@features/csm-cases/hooks/useOpenIdempotencyKey";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import { ACTIVITY_PAGE_SIZE } from "@features/csm-cases/utils/caseActivityFeed";
 import { scrollToFragmentWithRetry } from "@features/csm-cases/utils/permalinkScroll";
@@ -842,6 +844,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [githubIssueResult, setGithubIssueResult] =
     useState<BeCreateCaseGithubIssueResponse | null>(null);
   const postGithubIssue = usePostCaseGithubIssue();
+  // One Idempotency-Key per open of the dialog, reused by every submit.
+  const githubIssueKey = useOpenIdempotencyKey(githubIssueOpen);
   const postTimeCard = usePostTimeCard();
   const updateTimeCard = useUpdateTimeCard();
   // Attachment pending delete confirmation (drives the confirm dialog).
@@ -3172,6 +3176,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
               linkDisabled={isClosed || !canWrite}
             />
             {canUseOperations && <LinkedIncidentsListWidget caseId={c.id} />}
+            {/* Renders nothing unless the backend has git internals enabled. */}
+            <ProductIssuesWidget key={c.id} caseId={c.id} />
             {/* Change requests are only ever raised from a service request,
                 never directly from a plain case — gate solely on
                 `isServiceRequest` rather than falling back to
@@ -3630,7 +3636,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           onSubmit={(payload) => {
             setGithubIssueError(null);
             postGithubIssue.mutate(
-              { caseId: c.id, ...payload },
+              { caseId: c.id, idempotencyKey: githubIssueKey(payload), ...payload },
               {
                 onSuccess: (res) => {
                   // Dialog shows its own "created" view with a clickable

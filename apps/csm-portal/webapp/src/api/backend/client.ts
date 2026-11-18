@@ -27,6 +27,16 @@ export function backendBaseUrl(): string {
   return baseUrl;
 }
 
+const RESERVED_HEADERS = new Set(["content-type", CORRELATION_ID_HEADER.toLowerCase()]);
+
+/** Caller-supplied headers minus the ones the client owns (matched
+ * case-insensitively), so a caller can never override them. */
+function safeExtraHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers ?? {}).filter(([name]) => !RESERVED_HEADERS.has(name.toLowerCase())),
+  );
+}
+
 export class BackendApiError extends Error {
   status: number;
   payload?: BeErrorPayload;
@@ -87,6 +97,9 @@ async function readError(
  * need every existing call site to learn a new positional argument. */
 export interface BackendApiPostOptions {
   signal?: AbortSignal;
+  /** Extra request headers (e.g. `Idempotency-Key`); the content-type and
+   * correlation-id headers set by the client always win. */
+  headers?: Record<string, string>;
 }
 
 export interface BackendApi {
@@ -167,6 +180,7 @@ export function useBackendApi(): BackendApi {
         const response = await authFetch(buildUrl(path), {
           method: "POST",
           headers: {
+            ...safeExtraHeaders(options?.headers),
             "Content-Type": "application/json",
             [CORRELATION_ID_HEADER]: correlationId,
           },
