@@ -2281,8 +2281,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /pending-verifications/search", pendingVerificationHandler.SearchPendingVerifications)
 		mux.HandleFunc("PATCH /pending-verifications/{id}", pendingVerificationHandler.VerifyPendingVerification)
 	}
+	// Git internals: product issue deliveries are taken in front of the customer
+	// repository sync (newGithubDeliveryService). With the flag off this changes
+	// nothing: the handler is the one built above, or none.
+	if db != nil {
+		if svc := newGithubDeliveryService(cfg, db, githubSync); svc != nil && svc != githubSync {
+			githubDeliveryHandler = handler.NewGithubDeliveryHandler(svc, cfg.M2MClientIDs)
+		}
+	}
 	if githubDeliveryHandler != nil {
 		mux.HandleFunc("POST /github/deliveries", githubDeliveryHandler.Handle)
+	}
+	if githubServiceRequestHandler != nil {
 		mux.HandleFunc("POST /github/service-requests", githubServiceRequestHandler.Create)
 		mux.HandleFunc("PUT /github/service-requests/{owner}/{repository}/{issueNumber}/severity", githubServiceRequestHandler.SetSeverity)
 	}

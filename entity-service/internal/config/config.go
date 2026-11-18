@@ -870,6 +870,11 @@ type Config struct {
 	// Git issue management feature set. Off, none of its routes are registered.
 	// It needs EngineeringEntityBaseURL and a database pool (GitInternalsActive).
 	GitInternalsEnabled bool
+	// GitInternalsBotLogins is GIT_INTERNALS_BOT_LOGINS (comma-separated): the
+	// portal's own GitHub accounts. A comment they post on a product issue is not
+	// mirrored back as a new comment. github-project-automation[bot] is never
+	// ignored, even if listed (it sets every new issue's initial board status).
+	GitInternalsBotLogins []string
 	// EngineeringEntity* is the connection to the WSO2 engineering entity
 	// service (GitHub issues and projects). The three token fields are
 	// all-or-none; with none of them set the client sends no Authorization
@@ -1124,6 +1129,7 @@ func Load() *Config {
 		SalesEntityClientSecret:                       os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
 		SalesEntityScopes:                             os.Getenv("SALES_ENTITY_SCOPES"),
 		GitInternalsEnabled:                           os.Getenv("GIT_INTERNALS_ENABLED") == "true",
+		GitInternalsBotLogins:                         splitLoginList(os.Getenv("GIT_INTERNALS_BOT_LOGINS")),
 		EngineeringEntityBaseURL:                      strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")),
 		EngineeringEntityTokenURL:                     strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_TOKEN_URL")),
 		EngineeringEntityClientID:                     strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_CLIENT_ID")),
@@ -1517,6 +1523,11 @@ func (c *Config) Validate() error {
 	}
 	if (engTokenSet || c.EngineeringEntityScopes != "") && c.EngineeringEntityBaseURL == "" {
 		return fmt.Errorf("ENGINEERING_ENTITY_BASE_URL is required when any ENGINEERING_ENTITY_* variable is set")
+	}
+	for _, login := range c.GitInternalsBotLogins {
+		if strings.ContainsAny(login, " \t\r\n\"'<>@/\\") {
+			return fmt.Errorf("GIT_INTERNALS_BOT_LOGINS must be a comma-separated list of GitHub logins; %q is not one", login)
+		}
 	}
 	scimSet := c.SCIMBaseURL != "" || c.SCIMTokenURL != "" || c.SCIMClientID != "" || c.SCIMClientSecret != "" || c.SCIMScopes != ""
 	if scimSet && !c.SCIMConfigured() {
@@ -1953,4 +1964,16 @@ func (c *Config) applySREEventHubTopic() {
 	}
 	c.CREventHubTopic = c.SREEventHubTopic
 	c.OutageEventHubTopic = c.SREEventHubTopic
+}
+
+// splitLoginList splits a comma-separated list of logins, trimming each and
+// dropping empty entries.
+func splitLoginList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

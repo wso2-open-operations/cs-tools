@@ -1711,3 +1711,25 @@ func TestConfig_GitInternalsActive(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitLoginList(t *testing.T) {
+	got := splitLoginList(" a , ,b[bot],,c ")
+	if len(got) != 3 || got[0] != "a" || got[1] != "b[bot]" || got[2] != "c" {
+		t.Fatalf("got %q", got)
+	}
+	if splitLoginList("") != nil {
+		t.Error("empty must give none")
+	}
+}
+
+func TestConfig_Validate_RejectsAMalformedBotLogin(t *testing.T) {
+	c := baseValidConfig()
+	c.GitInternalsBotLogins = []string{"ok-bot", "not a login"}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GIT_INTERNALS_BOT_LOGINS") {
+		t.Fatalf("err = %v", err)
+	}
+	c.GitInternalsBotLogins = []string{"ok-bot", "app[bot]"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid logins refused: %v", err)
+	}
+}

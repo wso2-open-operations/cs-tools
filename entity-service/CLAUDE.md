@@ -66,6 +66,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
 | `GIT_INTERNALS_ENABLED` | no | `false` | Must be `"true"` to register the git-internals routes (`POST /cases/{id}/product-work-items`, internal only). Also needs a pool and `ENGINEERING_ENTITY_BASE_URL`. Off means the routes are **not registered at all** |
+| `GIT_INTERNALS_BOT_LOGINS` | no | — | Comma-separated GitHub logins of the portal's own accounts. A comment they post on a linked product issue is not mirrored back (comments only; their issue and board events are applied). **No login is ignored unless listed: set it to the bot account(s) the engineering entity writes as, or the comments the portal posts to GitHub are mirrored back as new comments** (startup logs a WARN while it is empty and git internals is active). `github-project-automation[bot]` is never ignored even if listed. Entries with spaces or `<>"'@/\` refuse to start |
 | `ENGINEERING_ENTITY_BASE_URL` | no* | — | WSO2 engineering entity service base URL. *Required when the gate is on or any `ENGINEERING_ENTITY_*` var is set |
 | `ENGINEERING_ENTITY_TOKEN_URL` | no* | — | OAuth2 token endpoint. Token URL, client id and client secret are all-or-none; with none set the client sends no `Authorization` header (local use) and startup logs a WARN |
 | `ENGINEERING_ENTITY_CLIENT_ID` | no* | — | OAuth2 client id |
@@ -13300,6 +13301,34 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
   request on to the route. The other id-addressed case routes already refuse a product issue by
   their own SQL (case-like type filter or a join to `"case"`). `POST /attachments/search`
   for a case (`SearchCaseAttachments`) and the stored-attachment parent lookup.
+- **Inbound webhook branch** (`service/product_issue_webhook.go`, `repository/product_issue_sync_repo.go`,
+  wired by `server/github_delivery_wiring.go`). `POST /github/deliveries` is registered when the customer
+  sync is on **or** git internals is active (`newGithubDeliveryService`; the service-request routes still need
+  the customer sync). With git internals off nothing is wrapped: the route and the code are as before.
+  With it on, `productIssueFrontDoor` offers each `issues` / `issue_comment` / `projects_v2_item` delivery to
+  `ProductIssueDeliveries` first (the handler passes the body as `Delivery.Raw`; a richer struct is decoded
+  from it). A delivery is the branch's when its issue (owner/repository/number, case-insensitive) or its board
+  item's `content_node_id` has a `github_issue_link`; otherwise it goes to the customer path unchanged (and is
+  skipped when that sync is off). Only a delivery that will write is claimed (`ClaimDelivery`; released on
+  failure, so GitHub's retry runs; ignored ones leave no claim). Each delivery is one transaction under the
+  system identity. Per event: `issues` opened/edited/labeled/unlabeled/closed/reopened apply the whole issue
+  (subject cut to 255, `labels`, state, reason, closed date, priority and category from the labels), skipped as
+  stale when older than `github_updated_on`; closed/reopened also write a status event (`CLOSED` / `REOPENED`,
+  keyed by the delivery id); the issue body is not stored (no column); `deleted` -> link `DELETED`;
+  `transferred` -> link `TRANSFERRED` + WARN (no fixture of the payload, so no re-pointing). A non-ACTIVE link
+  ignores later events. `issue_comment` created/edited/deleted mirror into `comment` as a **WORK_NOTE**
+  (`trg_github_outbound_comment` acts on type COMMENT only, and a product issue has no `github_*`) with
+  `created_by` = the GitHub login, plus `comment_github_ref` (origin GITHUB); an id already in the ref is not
+  inserted again; an edit keeps the old text in `comment_edit_history`; a delete sets `comment.deleted_at` and
+  `comment_github_ref.deleted_on`. `projects_v2_item` edited with `field_name == "Status"` is applied only when
+  `changes.field_value.project_number` (the payload carries it) is the `board_project_number` of a
+  `product_repo_mapping` row for the link's repository (and the payload's organisation is the link's owner):
+  raw name -> `board_status_map` (OTHER when unknown), `board_status_*` and `board_item_id` (the numeric item id)
+  on the link, and an event (source WEBHOOK, dedupe key = delivery id, `occurred_at` = the item's `updated_at`,
+  from = the link's previous board status); an older move is kept as history without moving the link. Item
+  `created` carries no project number, so it records the item only for a project node id a Status edit already
+  taught this process (in-memory cache); the Status edit records the item id anyway. `InsertStatusEvent`,
+  `InsertGitHubComment` and `ResolveBoardStatus` take a transaction for reconciliation and backfill to reuse.
 - **Read and link routes** (same gate and `internalOnly`; `service/product_issue_service.go`, all reads under the
   system identity, database only, no GitHub call on read). `GET /cases/{id}/product-work-items` lists the issues
   with an active `AFFECTS` link to a case-like work item (an untracked patch has no work item, so it is not
