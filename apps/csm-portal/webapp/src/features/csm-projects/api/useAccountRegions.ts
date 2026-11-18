@@ -26,12 +26,12 @@ interface RegionAggregateResponse {
 }
 
 /**
- * The account regions (e.g. "APAC") as the account records write them, for the
- * projects list's Region filter. Read from `POST /cases/aggregate` grouped by
- * region, the same list the backend checks a dashboard's region filter
- * against: there is no account-region endpoint, and a region no case's account
- * has is one almost no project has either. Sorted by name, blanks dropped.
- * A failed read yields an empty list (the filter then offers nothing to pick).
+ * Suggested account regions (e.g. "APAC") as the account records write them,
+ * for the projects list's Region filter. Read from `POST /cases/aggregate`
+ * grouped by region, the same list the backend checks a dashboard's region
+ * filter against: there is no account-region endpoint. A region held only by
+ * accounts whose projects have no cases is missing here, which is why the
+ * picker also accepts a typed region. Sorted by name, blanks dropped.
  *
  * @param enabled - Fetch only while the picker is open or a region is chosen.
  */
