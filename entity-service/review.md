@@ -98,6 +98,9 @@ failure class turns up during review that isn't on this list, add it here in the
 - [ ] A new table protected by row-level security is written to under the caller's own identity
       context, not as a superuser/bypass path, unless there's a documented, deliberate reason
       (internal ingest, migration backfill).
+- [ ] A branch of `ResolveScope` / `scopeForUser` that returns an `Unrestricted` scope sets `AuditActor`
+      to the person when there is one (never `ViewerEmail`, which `user_service.go` reads as "CSM portal
+      caller") — staff using a portal had no email on their scope, so the audit log named the database role.
 - [ ] A customer-visible response doesn't leak an internal-only field (WSO2 team routing, Salesforce
       ids, another customer's data) — check the field against what the BFF layer is expected to
       trim, don't assume entity-service's own shape is already customer-safe.
