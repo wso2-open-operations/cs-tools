@@ -46,7 +46,7 @@ describe("Footer", () => {
     render(<Footer />);
     expect(
       screen.getByText(
-        `© ${new Date().getFullYear()} WSO2 LLC. All rights reserved.`,
+        `© ${new Date().getFullYear()} Choreo Labs LLC. All rights reserved.`,
       ),
     ).toBeInTheDocument();
   });
