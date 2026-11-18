@@ -227,6 +227,176 @@ func TestAuditMigration_WorkItemIsAuditedInFull(t *testing.T) {
 	}
 }
 
+// Migration 0297 registers the work item types (their id is the work_item id).
+func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{
+		"announcement", "case", "change_request", "change_task", "conversation",
+		"engagement", "incident", "incident_alert_task", "incident_task", "problem",
+		"problem_task", "security_report_analysis", "service_request", "standard_change_proposal",
+	} {
+		if n := auditCount(t, pool, `SELECT count(*) FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table); n != 1 {
+			t.Errorf("%s is not registered with the audit log", table)
+			continue
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
+// Migration 0302 registers the team tables, every column recorded.
+func TestAuditMigration_TeamTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{"team", "team_member"} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if len(excluded) != 0 || len(masked) != 0 {
+			t.Errorf("%s excludes %v and masks %v, want every column recorded", table, excluded, masked)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
+// A column added to an audited table later is recorded with no change to the
+// registration: the trigger reads whatever columns the row has.
+func TestAuditMigration_AColumnAddedLaterIsAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	const table = "zz_audit_test_newcol"
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY, note text)")
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"')")
+	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a')")
+
+	auditExec(t, pool, "ALTER TABLE "+table+" ADD COLUMN added_later text")
+	// The log is append-only, so rows from an earlier run stay: count what this
+	// update adds, not what the log holds.
+	const countSQL = `SELECT count(*) FROM csm_audit_log
+	    WHERE table_name = $1 AND field_name = 'added_later' AND action = 'UPDATE'`
+	before := auditCount(t, pool, countSQL, table)
+	auditExec(t, pool, "UPDATE "+table+" SET added_later = 'x' WHERE id = 1")
+
+	if n := auditCount(t, pool, countSQL, table) - before; n != 1 {
+		t.Errorf("a column added after registration wrote %d audit rows, want 1", n)
+	}
+}
+
+// Migration 0301 registers case_escalation_notification_list, every column recorded.
+func TestAuditMigration_CaseEscalationNotificationListIsAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	var excluded, masked []string
+	err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+	    WHERE schema_name = $1 AND table_name = 'case_escalation_notification_list' AND enabled`,
+		auditSchema(t, pool)).Scan(&excluded, &masked)
+	if err != nil {
+		t.Fatalf("case_escalation_notification_list is not registered with the audit log: %v", err)
+	}
+	if len(excluded) != 0 || len(masked) != 0 {
+		t.Errorf("excludes %v and masks %v, want every column recorded", excluded, masked)
+	}
+	if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+	    WHERE tgrelid = 'case_escalation_notification_list'::regclass
+	      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`); n != 1 {
+		t.Errorf("%d enabled-always audit triggers, want 1", n)
+	}
+}
+
+// Migration 0300 registers the product, deployment and project access
+// definition tables, every column recorded.
+func TestAuditMigration_ProductAndDeploymentTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{
+		"deployed_product", "deployment", "deployment_attachment", "product", "product_version",
+		"product_vulnerability", "project_group", "project_group_role", "project_role", "project_type",
+	} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if len(excluded) != 0 || len(masked) != 0 {
+			t.Errorf("%s excludes %v and masks %v, want every column recorded", table, excluded, masked)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
+// Migration 0299 registers the work item related tables that are wanted in the
+// audit log, every column recorded.
+func TestAuditMigration_WorkItemRelatedTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{
+		"case_attachment", "case_escalation", "comment", "comment_attachment", "customer_call",
+		"sla", "time_card", "work_item_attachment", "work_item_feedback", "work_item_watcher",
+	} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if len(excluded) != 0 || len(masked) != 0 {
+			t.Errorf("%s excludes %v and masks %v, want every column recorded", table, excluded, masked)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
+// Migration 0298 registers the core people, access and customer tables. Only
+// account.sync_time_stamp (rewritten by every sync run) is left out.
+func TestAuditMigration_CoreTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for table, wantExcluded := range map[string]string{
+		"account": "sync_time_stamp", "account_contact": "", "project": "", "project_contact": "",
+		"project_contact_group": "", "user": "", "role": "", "user_role": "",
+	} {
+		var excluded []string
+		var masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if got := strings.Join(excluded, ","); got != wantExcluded || len(masked) != 0 {
+			t.Errorf("%s excludes %q and masks %v, want exclude %q and no mask", table, got, masked, wantExcluded)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
 func TestAuditMigration_PartitionCopiesOfTheTriggerAreNotReported(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	const table = "zz_audit_test_parent"
