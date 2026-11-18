@@ -20623,12 +20623,13 @@ paths:
         Registered only when CSM_AUDIT_LOG_ENABLED=true; otherwise the route does not exist and answers 404.
 
         Called daily by csm-scheduled-tasks. Creates the coming monthly partitions of the audit log,
-        checks the log's health, and puts back audit triggers that are missing or disabled on registered
-        tables. Safe to repeat. It tries every step even if one fails.
+        checks the log's health, puts back audit triggers that are missing or disabled on registered
+        tables, and deletes the monthly partitions that ended at least CSM_AUDIT_LOG_RETENTION_MONTHS
+        (default 18) ago, dropped for good and not archived. Safe to repeat. It tries every step even if one fails.
 
         A 200 means the request was handled, not that everything is fine: read the lists. Health
         problems, unresolved triggers and step errors need a person. A repaired trigger was off for a while, so the history had a
-        gap. Retiring old partitions is not part of this; an admin does that by hand.
+        gap.
       responses:
         "200":
           description: The upkeep ran; the body says what it found.
@@ -37860,6 +37861,11 @@ components:
         partitionsCreated:
           type: integer
           description: Monthly partitions this run created.
+        partitionsRetired:
+          type: array
+          description: Names of the monthly partitions this run deleted because they ended at least the retention period ago.
+          items:
+            type: string
         healthProblems:
           type: array
           description: Rows in the catch-all partition, or fewer than two future months.

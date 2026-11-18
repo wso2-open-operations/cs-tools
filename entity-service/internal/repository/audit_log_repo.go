@@ -24,9 +24,12 @@ import (
 
 // AuditLogRepository runs the audit log's upkeep functions (migration 0295).
 // They are SECURITY DEFINER, so the application role needs EXECUTE on them and
-// nothing else on the audit tables. Retiring old partitions is deliberately not
-// here: an admin does that by hand.
+// nothing else on the audit tables.
 type AuditLogRepository interface {
+	// RetirePartitions deletes the monthly partitions that ended at least
+	// retentionMonths ago (detached, then dropped) and returns their names. The
+	// catch-all partition is never touched.
+	RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error)
 	// CreatePartitions creates the missing monthly partitions and returns how
 	// many it created.
 	CreatePartitions(ctx context.Context, monthsAhead int) (int, error)
@@ -54,6 +57,28 @@ func (r *auditLogRepository) CreatePartitions(ctx context.Context, monthsAhead i
 		return 0, fmt.Errorf("audit log: create partitions: %w", err)
 	}
 	return created, nil
+}
+
+// RetirePartitions implements AuditLogRepository.
+func (r *auditLogRepository) RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT audit_retire_partitions($1, '2s')`, retentionMonths)
+	if err != nil {
+		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
+	}
+	defer rows.Close()
+
+	var retired []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("audit log: scan retired partition: %w", err)
+		}
+		retired = append(retired, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
+	}
+	return retired, nil
 }
 
 // PartitionHealth implements AuditLogRepository.

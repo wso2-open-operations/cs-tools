@@ -28,6 +28,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 func newAuditMigrationTestPool(t *testing.T) *pgxpool.Pool {
@@ -663,5 +665,115 @@ func TestAuditMigration_PartitionCopiesOfTheTriggerAreNotReported(t *testing.T) 
 
 	if n := auditCount(t, pool, "SELECT count(*) FROM audit_reconcile(false) WHERE table_name LIKE $1", table+"%"); n != 0 {
 		t.Errorf("reconcile reports %d problem(s) for a registered partitioned table, want 0", n)
+	}
+}
+
+// retentionPartitions makes two monthly partitions around the 18-month cutoff,
+// each holding one row: "expired" ended exactly 18 months ago, "recent" ended
+// 17 months ago. Both are dropped again after the test.
+func retentionPartitions(t *testing.T, pool *pgxpool.Pool) (expired, recent string) {
+	t.Helper()
+	expired, recent = "zz_audit_retention_expired", "zz_audit_retention_recent"
+	drop := func() {
+		for _, name := range []string{expired, recent} {
+			_, _ = pool.Exec(context.Background(), "DROP TABLE IF EXISTS "+name)
+		}
+	}
+	drop()
+	t.Cleanup(drop)
+
+	cutoff := `(date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => 18)) AT TIME ZONE 'UTC'`
+	for _, p := range []struct{ name, from, to string }{
+		{expired, cutoff + " - interval '1 month'", cutoff},
+		{recent, cutoff, cutoff + " + interval '1 month'"},
+	} {
+		var from, to string
+		if err := pool.QueryRow(context.Background(), "SELECT ("+p.from+")::text, ("+p.to+")::text").Scan(&from, &to); err != nil {
+			t.Fatalf("bounds for %s: %v", p.name, err)
+		}
+		auditExec(t, pool, "CREATE TABLE "+p.name+" PARTITION OF csm_audit_log FOR VALUES FROM ('"+from+"') TO ('"+to+"')")
+		auditExec(t, pool, `INSERT INTO csm_audit_log (created_on, schema_name, table_name, record_id, field_name, action, created_by, db_role, transaction_id)
+		    VALUES ($1::timestamptz, 'public', 'zz_retention', '1', 'f', 'UPDATE', 'tester', 'tester', 1)`, from)
+	}
+	return expired, recent
+}
+
+func TestAuditMigration_RetirePartitionsDeletesTheExpiredAndKeepsTheRest(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	expired, recent := retentionPartitions(t, pool)
+
+	got, err := repo.RetirePartitions(context.Background(), 18)
+	if err != nil {
+		t.Fatalf("RetirePartitions: %v", err)
+	}
+
+	names := strings.Join(got, " ")
+	if !strings.Contains(names, expired) {
+		t.Errorf("retired %q, want it to include %s (ended exactly 18 months ago)", names, expired)
+	}
+	if strings.Contains(names, recent) {
+		t.Errorf("retired %q, which includes %s (ended 17 months ago)", names, recent)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM pg_class WHERE relname = $1", expired); n != 0 {
+		t.Errorf("%s still exists: it must be dropped, not only detached", expired)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = 'zz_retention'"); n != 1 {
+		t.Errorf("zz_retention rows = %d, want 1: only the row in the recent partition survives", n)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM pg_class WHERE relname = 'csm_audit_log_default'"); n != 1 {
+		t.Error("the catch-all partition must never be deleted")
+	}
+}
+
+func TestAuditMigration_RetirePartitionsIsRepeatable(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	expired, _ := retentionPartitions(t, pool)
+
+	if _, err := repo.RetirePartitions(context.Background(), 18); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	again, err := repo.RetirePartitions(context.Background(), 18)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if strings.Contains(strings.Join(again, " "), expired) {
+		t.Errorf("second run retired %s again", expired)
+	}
+}
+
+// A longer retention keeps what a shorter one deletes.
+func TestAuditMigration_RetirePartitionsFollowsTheRetentionPeriod(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	expired, _ := retentionPartitions(t, pool)
+
+	if got, err := repo.RetirePartitions(context.Background(), 24); err != nil {
+		t.Fatalf("RetirePartitions(24): %v", err)
+	} else if strings.Contains(strings.Join(got, " "), expired) {
+		t.Errorf("a 24-month retention deleted %s, which ended 18 months ago", expired)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM pg_class WHERE relname = $1", expired); n != 1 {
+		t.Errorf("%s was deleted by a 24-month retention", expired)
+	}
+}
+
+// Zero or negative puts the cutoff in the future and would delete every
+// partition, so the function refuses it.
+func TestAuditMigration_RetirePartitionsRefusesAnUnsafeRetention(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	expired, recent := retentionPartitions(t, pool)
+
+	for _, months := range []int{0, -1} {
+		if _, err := repo.RetirePartitions(context.Background(), months); err == nil {
+			t.Errorf("RetirePartitions(%d) succeeded, want an error", months)
+		}
+	}
+	for _, name := range []string{expired, recent} {
+		if n := auditCount(t, pool, "SELECT count(*) FROM pg_class WHERE relname = $1", name); n != 1 {
+			t.Errorf("%s was deleted by a refused call", name)
+		}
 	}
 }

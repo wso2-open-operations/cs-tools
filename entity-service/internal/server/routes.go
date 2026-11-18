@@ -3065,7 +3065,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// EXECUTE on the audit_* functions for the application's database role.
 	if db != nil && cfg.AuditLogEnabled {
 		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
-			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead))
+			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead, cfg.AuditLogRetentionMonths))
 		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))
 	}
 
