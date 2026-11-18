@@ -35,6 +35,7 @@ import {
   type LucideIcon,
 } from "@wso2/oxygen-ui-icons-react";
 import type { BeCallRequestStateKey, BeWidgetResourceType } from "@api/backend/types";
+import { CURRENT_USER_PLACEHOLDER } from "@features/csm-dashboard/utils/currentUserFilterPlaceholder";
 import { humanizeState } from "@features/csm-dashboard/utils/abtDashboard";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 import {
@@ -673,6 +674,26 @@ const PROJECT_SORT_FIELDS: readonly string[] = [
   "productionReadinessCompletionDate",
 ];
 
+/** The free-text list keys the projects list reads back verbatim. */
+const PROJECT_FREE_LIST_KEYS = ["regions", "onboardingOwnerIds", "onboardingOwnerEmails"] as const;
+
+/**
+ * Whether a project widget's free-text list filters can open the projects
+ * list as they are: each must be absent or a list of strings (a scalar would
+ * read back as no filter at all, widening the list past what the tile
+ * counted), and an owner must not still be the unresolved
+ * `__current_user__` placeholder (the profile is still loading; the list
+ * would send it as an id and get a 400, while the preview page resolves it).
+ */
+function projectFreeListsCanOpenList(filters: Record<string, unknown>): boolean {
+  return PROJECT_FREE_LIST_KEYS.every((k) => {
+    const v = filters[k];
+    if (v === undefined) return true;
+    if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) return false;
+    return !v.includes(CURRENT_USER_PLACEHOLDER);
+  });
+}
+
 /** A widget's `project` filters as the projects list's own filter state. */
 function translateProjectDashboardFilters(filters: Record<string, unknown>): ProjectFilters {
   const out: ProjectFilters = { ...EMPTY_PROJECT_FILTERS };
@@ -1159,7 +1180,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     // otherwise land on a broader list than the tile counted, so that case
     // goes to the preview page instead.
     buildHref: (filters, ctx) => {
-      if (hasFiltersBeyond(filters, PROJECT_LIST_FILTER_KEYS)) {
+      if (hasFiltersBeyond(filters, PROJECT_LIST_FILTER_KEYS) || !projectFreeListsCanOpenList(filters)) {
         return widgetPreviewFallbackHref("projects", "project", filters, ctx);
       }
       const wanted = translateProjectDashboardFilters(filters);
