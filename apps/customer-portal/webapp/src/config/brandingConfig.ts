@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Company name used when `CUSTOMER_PORTAL_COMPANY_NAME` is not set. */
-export const DEFAULT_COMPANY_NAME = "WSO2";
+/** Company name shown in the portal's labels, footer and PDF reports. */
+export const COMPANY_NAME = "Choreo Labs";
 
 /**
  * A trimmed, non-empty string from `window.config`, else undefined.
@@ -30,61 +30,16 @@ export function configuredString(value: unknown): string | undefined {
 }
 
 /**
- * Company name shown in the portal's labels and PDF reports
- * (`CUSTOMER_PORTAL_COMPANY_NAME`), {@link DEFAULT_COMPANY_NAME} when unset or
- * blank. Read at call time.
+ * Company name shown in the portal's labels and PDF reports.
  *
- * @returns {string} The company name.
+ * @returns {string} {@link COMPANY_NAME}.
  */
 export function companyName(): string {
-  return (
-    configuredString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) ??
-    DEFAULT_COMPANY_NAME
-  );
+  return COMPANY_NAME;
 }
 
-/**
- * Whether `CUSTOMER_PORTAL_COMPANY_NAME` is set.
- *
- * @returns {boolean} True when a company name is configured.
- */
-export function hasConfiguredCompanyName(): boolean {
-  return configuredString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) !== undefined;
-}
+/** Billing team's email address, shown on the suspended-project notice. */
+export const BILLING_EMAIL = "billing@choreolabs.com";
 
-/** Billing email used when `CUSTOMER_PORTAL_BILLING_EMAIL` is not set. */
-export const DEFAULT_BILLING_EMAIL = "billing@wso2.com";
-
-/**
- * One plain address: an unquoted local part (no whitespace and none of RFC
- * 5322's specials, so no "mailto:" prefix either) whose dots each sit between
- * two non-empty parts, "@", and a hostname.
- */
-const PLAIN_EMAIL =
-  /^[^\s()<>[\]:;@\\,".]+(\.[^\s()<>[\]:;@\\,".]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/;
-
-/**
- * Billing team's email address shown on the suspended-project notice
- * (`CUSTOMER_PORTAL_BILLING_EMAIL`), {@link DEFAULT_BILLING_EMAIL} when unset,
- * blank or not a plain address. Read at call time.
- *
- * @returns {string} The billing email address.
- */
-export function billingEmail(): string {
-  const configured = configuredString(window.config?.CUSTOMER_PORTAL_BILLING_EMAIL);
-  return configured && PLAIN_EMAIL.test(configured) ? configured : DEFAULT_BILLING_EMAIL;
-}
-
-/**
- * `mailto:` link for {@link billingEmail}. The local part is percent-encoded:
- * `#`, `?` and `%` are legal in it but would otherwise start the link's
- * fragment or query, or be read as an escape (RFC 6068). The domain is a plain
- * hostname, so it needs none.
- *
- * @returns {string} The mailto link.
- */
-export function billingEmailHref(): string {
-  const address = billingEmail();
-  const at = address.lastIndexOf("@");
-  return `mailto:${encodeURIComponent(address.slice(0, at))}@${address.slice(at + 1)}`;
-}
+/** `mailto:` link for {@link BILLING_EMAIL}. */
+export const BILLING_EMAIL_HREF = `mailto:${BILLING_EMAIL}`;
