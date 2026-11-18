@@ -19,6 +19,7 @@ import {
   configuredString,
   DEFAULT_COMPANY_NAME,
   hasConfiguredCompanyName,
+  resolveLogoUrl,
 } from "@config/brandingConfig";
 
 /** Company name the PDF footers print when `CUSTOMER_PORTAL_COMPANY_NAME` is not set. */
@@ -61,13 +62,14 @@ export function reportSupportLine(): string {
  * Logo for the PDF report footers. The reports print on white, so the light-mode
  * logo (`CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL`) is used, and the dark-mode one
  * (`CUSTOMER_PORTAL_LOGO_DARK_MODE_URL`) only when that is not set. Undefined
- * when neither is set: the footer then has no logo, as before. Read at call time.
+ * when neither is set: the footer then has no logo, as before. A bare path is
+ * read from the site root, as for the header logo. Read at call time.
  *
  * @returns {string | undefined} The logo URL, or undefined.
  */
 export function reportLogoUrl(): string | undefined {
-  return (
+  return resolveLogoUrl(
     configuredString(window.config?.CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL) ??
-    configuredString(window.config?.CUSTOMER_PORTAL_LOGO_DARK_MODE_URL)
+      configuredString(window.config?.CUSTOMER_PORTAL_LOGO_DARK_MODE_URL),
   );
 }
