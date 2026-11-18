@@ -1758,6 +1758,21 @@ type SearchProjectsRequest struct {
 	ArrTodayGte string `json:"arrTodayGte"`
 	// SubRegion filters to projects whose linked account is in this sub-region.
 	SubRegion string `json:"subRegion"`
+	// Regions keeps projects whose linked account's region is any of the
+	// given values, exact but case-insensitive. A project with no account,
+	// or an account with no region, matches none. Postgres data sources only;
+	// rejected on the legacy data source.
+	Regions []string `json:"regions,omitempty"`
+	// OnboardingOwnerIDs keeps projects whose onboarding owner
+	// (OnboardingOwner) is any of the given platform user UUIDs. A project
+	// with no owner matches none. Postgres data sources only; rejected on the
+	// legacy data source.
+	OnboardingOwnerIDs []string `json:"onboardingOwnerIds,omitempty"`
+	// OnboardingOwnerEmails keeps projects whose onboarding owner's email is
+	// any of the given addresses, case-insensitive, for a caller that knows
+	// the person but not their id. ANDed with OnboardingOwnerIDs when both are
+	// set. Postgres data sources only; rejected on the legacy data source.
+	OnboardingOwnerEmails []string `json:"onboardingOwnerEmails,omitempty"`
 	// ExcludeClosureStates filters out projects whose closure state (see
 	// ProjectClosureFields.ClosureState — "Open"/"Suspended"/"Restricted") is
 	// any of the given values, e.g. ["Restricted", "Suspended"]. Unlike

@@ -202,6 +202,10 @@ func TestParseGenerated_AcceptsAccountAndProjectWidgets(t *testing.T) {
 		  "query":{"onboardingStatus":["In-Progress"],"excludeClosureStates":["Restricted","Suspended"]}}`,
 		`{"id":"ending","displayName":"Projects Ending This Quarter","resourceType":"project","shape":"list","gridWidth":6,"listLimit":5,
 		  "sortBy":{"field":"endDate","order":"asc"},"query":{"endDateFrom":"__startOfQuarter:0__","endDateTo":"__endOfQuarter:0__","closureStatus":"Open"}}`,
+		`{"id":"mine","displayName":"My Onboarding Projects in APAC","resourceType":"project","shape":"count","gridWidth":3,
+		  "query":{"onboardingStatus":["In-Progress"],"onboardingOwnerIds":["__current_user__"],"regions":["APAC"]}}`,
+		`{"id":"owners","displayName":"Onboarding by Owner","resourceType":"project","shape":"bar","gridWidth":6,"query":{"onboardingStatus":["In-Progress"]},
+		  "slices":[{"label":"Jane","query":{"onboardingOwnerEmails":["jane.doe@example.com"]}},{"label":"EU","query":{"regions":["EU"]}}]}`,
 	)
 	if _, err := ParseGenerated([]byte(raw)); err != nil {
 		t.Fatalf("ParseGenerated: %v", err)
@@ -264,6 +268,9 @@ func TestParseGenerated_RejectsAccountAndProjectWidgetsItCannotRun(t *testing.T)
 		{"account group by", acc("bar", `,"query":{},"groupBy":{"field":"lifeCycle","maxGroups":5}`), "cannot use groupBy"},
 		{"account sorted list", acc("list", `,"query":{},"listLimit":5,"sortBy":{"field":"name","order":"asc"}`), "a account list takes no sortBy"},
 		{"project upper-case status", proj("count", `,"query":{"onboardingStatus":["IN_PROGRESS"]}`), `"IN_PROGRESS" is not a project onboarding status`},
+		{"project owner id not the viewer", proj("count", `,"query":{"onboardingOwnerIds":["5e636a12-0000-4000-8000-000000000001"]}`), `onboardingOwnerIds can only be ["__current_user__"]`},
+		{"project owner email not an email", proj("count", `,"query":{"onboardingOwnerEmails":["Jane Doe"]}`), "onboardingOwnerEmails"},
+		{"project region as a string", proj("count", `,"query":{"regions":"APAC"}`), "regions"},
 		{"project by account", proj("count", `,"query":{"accountId":"5e636a12-0000-4000-8000-000000000001"}`), `"accountId" is not a project filter`},
 		{"project bad end date", proj("count", `,"query":{"endDateTo":"next month"}`), "endDateTo must be a date"},
 		{"project closure as a list", proj("count", `,"query":{"closureStatus":["Open"]}`), "closureStatus must be one of Open"},

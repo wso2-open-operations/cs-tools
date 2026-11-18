@@ -24008,6 +24008,29 @@ components:
             Only projects whose overall closure state is any of these values (the
             include-side counterpart of excludeClosureStates; a project with no
             recorded closure state matches none). Postgres data sources only.
+        regions:
+          type: array
+          items:
+            type: string
+          description: >
+            Only projects whose account's region is any of these (exact,
+            case-insensitive); a project whose account has no region matches
+            none. Postgres data sources only.
+        onboardingOwnerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            Only projects whose onboarding owner is any of these user ids; a
+            project with no owner matches none. Postgres data sources only.
+        onboardingOwnerEmails:
+          type: array
+          items:
+            type: string
+          description: >
+            Only projects whose onboarding owner's email is any of these
+            (case-insensitive). Postgres data sources only.
         sortBy:
           type: string
           enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
@@ -24314,6 +24337,12 @@ components:
               description: Null when the project has no linked account.
               allOf:
                 - $ref: '#/components/schemas/EntityRef'
+                - type: object
+                  properties:
+                    region:
+                      type: string
+                      nullable: true
+                      description: The account's region (e.g. "APAC"); null when none is recorded.
 
     ProjectDetails:
       description: >

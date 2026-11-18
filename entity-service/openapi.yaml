@@ -23144,6 +23144,31 @@ components:
         subRegion:
           type: string
           description: Only projects whose account has this sub-region (case-insensitive).
+        regions:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose account's region is any of these, e.g. "APAC"
+            (exact, case-insensitive); a project with no account region matches
+            none. Postgres only; a 400 on any other data source.
+        onboardingOwnerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only projects whose onboarding owner is any of these user ids; a
+            project with no owner matches none. A non-UUID returns 400. Postgres
+            only; a 400 on any other data source.
+        onboardingOwnerEmails:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose onboarding owner's email is any of these
+            (case-insensitive); ANDed with onboardingOwnerIds. Postgres only; a
+            400 on any other data source.
         arrTodayGte:
           type: string
           description: >-
