@@ -14,22 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  companyName,
-  configuredString,
-  DEFAULT_COMPANY_NAME,
-  hasConfiguredCompanyName,
-} from "@config/brandingConfig";
-
-/** Company name the PDF footers print when `CUSTOMER_PORTAL_COMPANY_NAME` is not set. */
-export const DEFAULT_REPORT_COMPANY_NAME = DEFAULT_COMPANY_NAME;
+import { companyName, configuredString } from "@config/brandingConfig";
 
 /** What follows the company name in the footer line. */
 export const REPORT_SUPPORT_LINE_SUFFIX = " Support 24x7";
 
 /**
- * Company name for the PDF report footers (`CUSTOMER_PORTAL_COMPANY_NAME`),
- * {@link DEFAULT_REPORT_COMPANY_NAME} when unset or blank. Read at call time.
+ * Company name for the PDF report footers.
  *
  * @returns {string} The company name.
  */
@@ -38,18 +29,7 @@ export function reportCompanyName(): string {
 }
 
 /**
- * Whether `CUSTOMER_PORTAL_COMPANY_NAME` is set. A report that prints no company
- * today only adds one when it is.
- *
- * @returns {boolean} True when a company name is configured.
- */
-export function hasConfiguredReportCompanyName(): boolean {
-  return hasConfiguredCompanyName();
-}
-
-/**
- * Footer line of the PDF reports: "<company> Support 24x7", which is
- * "WSO2 Support 24x7" when no company name is configured.
+ * Footer line of the PDF reports: "<company> Support 24x7".
  *
  * @returns {string} The footer text.
  */
