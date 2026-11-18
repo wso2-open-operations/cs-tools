@@ -249,6 +249,34 @@ func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
 	}
 }
 
+// Migration 0298 registers the core people, access and customer tables. Only
+// account.sync_time_stamp (rewritten by every sync run) is left out.
+func TestAuditMigration_CoreTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for table, wantExcluded := range map[string]string{
+		"account": "sync_time_stamp", "account_contact": "", "project": "", "project_contact": "",
+		"project_contact_group": "", "user": "", "role": "", "user_role": "",
+	} {
+		var excluded []string
+		var masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if got := strings.Join(excluded, ","); got != wantExcluded || len(masked) != 0 {
+			t.Errorf("%s excludes %q and masks %v, want exclude %q and no mask", table, got, masked, wantExcluded)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
 func TestAuditMigration_PartitionCopiesOfTheTriggerAreNotReported(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	const table = "zz_audit_test_parent"
