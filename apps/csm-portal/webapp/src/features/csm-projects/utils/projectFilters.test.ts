@@ -69,6 +69,13 @@ describe("readProjectFilters", () => {
     expect(f.onboardingOwnerEmails).toEqual(["owner@example.com"]);
   });
 
+  it("keeps a region holding a comma as one value through the URL", () => {
+    const f: ProjectFilters = { ...EMPTY_PROJECT_FILTERS, regions: ["Europe, Middle East", "APAC", "100%"] };
+    const params = writeProjectFilters(new URLSearchParams(), f);
+    expect(readProjectFilters(params).regions).toEqual(["Europe, Middle East", "APAC", "100%"]);
+    expect(read("regions=APAC,EU").regions).toEqual(["APAC", "EU"]);
+  });
+
   it("drops an end date before its start", () => {
     const f = read("goLivePlanDateFrom=2026-03-01&goLivePlanDateTo=2026-02-01");
     expect(f.goLivePlanDateFrom).toBe("2026-03-01");
