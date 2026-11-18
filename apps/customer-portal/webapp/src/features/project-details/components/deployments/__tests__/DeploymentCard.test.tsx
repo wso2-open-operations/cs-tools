@@ -151,7 +151,7 @@ describe("DeploymentCard", () => {
       />,
     );
 
-    expect(screen.getByText("WSO2 Products")).toBeInTheDocument();
+    expect(screen.getByText("Choreo Labs Products")).toBeInTheDocument();
     expect(screen.getAllByText("(0)").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("No products added yet")).toBeInTheDocument();
   });
