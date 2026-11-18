@@ -79,23 +79,11 @@ describe("generateChangeRequestDetailsPdf", () => {
     expect(pdf).not.toContain("\u0000");
   });
 
-  it("keeps the WSO2 Support 24x7 footer when no company name is configured", async () => {
+  it("puts the company's support line in the footer", async () => {
     await generateChangeRequestDetailsPdf({ number: "CHG0041411" } as ChangeRequestDetails);
 
-    expect(captured.pdfs[0]).toContain("(WSO2 Support 24x7) Tj");
+    expect(captured.pdfs[0]).toContain("(Choreo Labs Support 24x7) Tj");
+    expect(captured.pdfs[0]).not.toContain("WSO2 Support 24x7");
   });
 
-  it("puts the configured company name in the footer", async () => {
-    const originalConfig = window.config;
-    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
-    try {
-      await generateChangeRequestDetailsPdf({ number: "CHG0041412" } as ChangeRequestDetails);
-    } finally {
-      window.config = originalConfig;
-    }
-
-    const pdf = captured.pdfs[0];
-    expect(pdf).toContain("(Acme Corp Support 24x7) Tj");
-    expect(pdf).not.toContain("WSO2 Support 24x7");
-  });
 });
