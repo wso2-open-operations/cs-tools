@@ -139,3 +139,29 @@ func TestSLABreachEmails_IncidentWording(t *testing.T) {
 		t.Error("emails: placeholder left unreplaced")
 	}
 }
+
+// An incident's emails call the product its Service, and the 100% email's
+// preview says the SLA was violated; a case keeps "Product" and "SLA at risk"
+// at every tier.
+func TestSLABreachEmail_IncidentServiceLabelAndViolatedPreview(t *testing.T) {
+	base := SLABreachEmailData{ClockType: "resolution", Severity: "CRITICAL", CaseNumber: "INC0094500", CaseTitle: "Router 5xx", Product: "Choreo", Team: "Apollo SRE Group"}
+	for _, tc := range []struct {
+		incident             bool
+		tier, title, product string
+	}{
+		{true, "100", "<title>INC0094500 SLA violated</title>", "<b>Service :</b> Choreo"},
+		{true, "75", "<title>INC0094500 SLA at risk</title>", "<b>Service :</b> Choreo"},
+		{false, "100", "<title>INC0094500 SLA at risk</title>", "<b>Product :</b> Choreo"},
+		{false, "50", "<title>INC0094500 SLA at risk</title>", "<b>Product :</b> Choreo"},
+	} {
+		d := base
+		d.Incident, d.Tier = tc.incident, tc.tier
+		team := RenderSLABreachTeamEmail("Lead", d)
+		if !strings.Contains(team, tc.title) || !strings.Contains(team, tc.product) {
+			t.Errorf("incident=%v tier=%s team email: want %q and %q", tc.incident, tc.tier, tc.title, tc.product)
+		}
+		if assignee := RenderSLABreachAssigneeEmail("Engineer", d); !strings.Contains(assignee, tc.title) {
+			t.Errorf("incident=%v tier=%s assignee email: want %q", tc.incident, tc.tier, tc.title)
+		}
+	}
+}

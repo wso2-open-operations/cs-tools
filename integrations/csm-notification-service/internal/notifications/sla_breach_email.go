@@ -103,6 +103,25 @@ func (d SLABreachEmailData) itemNoun() string {
 	return "Case"
 }
 
+// productLabel names the team email's product row: an incident's is its
+// service, as the incident SLA Chat card calls it.
+func (d SLABreachEmailData) productLabel() string {
+	if d.Incident {
+		return "Service"
+	}
+	return "Product"
+}
+
+// titleStatus is the <title> text after the number, which mail clients show
+// as the preview. An incident's 100% email says it was violated; every other
+// email (all of a case's, as before) says "SLA at risk".
+func (d SLABreachEmailData) titleStatus() string {
+	if d.Incident && d.Tier == "100" {
+		return "SLA violated"
+	}
+	return "SLA at risk"
+}
+
 // RenderSLABreachAssigneeEmail fills in the short, personal "your case's
 // SLA is at risk" notice sent to the case's assigned engineer.
 // assigneeName may be empty (entity-service has no assignee name resolved,
@@ -119,6 +138,7 @@ func RenderSLABreachAssigneeEmail(assigneeName string, d SLABreachEmailData) str
 		"<!-- [CASE_NUMBER] -->", escapeHTML(d.CaseNumber),
 		"<!-- [CASE_LINK] -->", escapeHTML(d.CaseLink),
 		"<!-- [ITEM_NOUN] -->", d.itemNoun(),
+		"<!-- [TITLE_STATUS] -->", d.titleStatus(),
 		"<!-- [SLA_COLOR] -->", slaBreachColor(d.Tier),
 		"<!-- [TIER] -->", escapeHTML(d.Tier),
 	)
@@ -159,6 +179,8 @@ func RenderSLABreachTeamEmail(teamLeadName string, d SLABreachEmailData) string 
 		"<!-- [CASE_TITLE] -->", escapeHTML(truncateSLACardTitle(d.CaseTitle)),
 		"<!-- [CASE_NUMBER] -->", escapeHTML(d.CaseNumber),
 		"<!-- [ITEM_NOUN] -->", d.itemNoun(),
+		"<!-- [TITLE_STATUS] -->", d.titleStatus(),
+		"<!-- [PRODUCT_LABEL] -->", d.productLabel(),
 		"<!-- [CASE_TYPE] -->", escapeHTML(d.CaseType),
 		"<!-- [PRODUCT] -->", escapeHTML(d.Product),
 		"<!-- [TEAM_DISPLAY] -->", escapeHTML(teamDisplay),

@@ -73,3 +73,24 @@ func TestDispatcher_Handle_IncidentPriorityElevated_NoSLAEngine(t *testing.T) {
 		t.Errorf("Handle() with no SLA engine error = %v, want nil", err)
 	}
 }
+
+// Registration reads clocks from entity-service (and retries when none is
+// found), so it runs after the page: the on-call call is placed first.
+func TestDispatcher_Handle_IncidentCreated_PagesBeforeRegisteringSLAClocks(t *testing.T) {
+	call := &mockCallSender{}
+	sla := &mockSLAEngine{}
+	callsAtRegistration := -1
+	sla.onIncidentRegister = func() {
+		call.mu.Lock()
+		callsAtRegistration = len(call.calls)
+		call.mu.Unlock()
+	}
+	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "", nil).WithSLAEngine(sla)
+
+	if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(validIncidentRecord)}); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if callsAtRegistration != 1 {
+		t.Errorf("calls placed when SLA registration began = %d, want 1 (page first)", callsAtRegistration)
+	}
+}

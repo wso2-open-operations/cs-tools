@@ -979,7 +979,10 @@ func TestDispatcher_Handle_CommentAdded_TruncatedComment_FetchFailureFallsBackTo
 
 // mockSLAEngine is a hand-written fake for slaEngineService.
 type mockSLAEngine struct {
-	mu                    sync.Mutex
+	mu sync.Mutex
+	// onIncidentRegister, when set, runs at the start of RegisterIncidentClocks,
+	// so a test can see what already happened when registration began.
+	onIncidentRegister    func()
 	registerCalls         []struct{ caseID, priority, caseNumber string }
 	applyStateCalls       []struct{ caseID, newStatus string }
 	completeResponseCalls []string
@@ -1000,6 +1003,9 @@ type mockIncidentClockCall struct {
 }
 
 func (m *mockSLAEngine) RegisterIncidentClocks(_ context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string) {
+	if m.onIncidentRegister != nil {
+		m.onIncidentRegister()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.incidentCalls = append(m.incidentCalls, mockIncidentClockCall{incidentID, priority, number, title, assignmentGroup, service, createdAt})

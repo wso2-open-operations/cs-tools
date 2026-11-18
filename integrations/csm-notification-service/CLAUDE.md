@@ -285,7 +285,9 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   `IncidentRoutes.Groups`, so a default group fans out like its card), never
   `chataudience.Resolve`'s case audiences. No shared fallback room.
 - **Email:** the case emails, worded for an incident
-  (`SLABreachEmailData.Incident`): the assignee, and the assignment group's
+  (`SLABreachEmailData.Incident`: "Incident ID", "View Incident", "Service",
+  and an "SLA violated" preview at 100%; a case's wording is unchanged): the
+  assignee, and the assignment group's
   `group_email` (entity-service's `GetClockState` returns the incident's
   group as its team). No Americas copy, and no onboarding-team copy even
   when the incident's project is onboarding.

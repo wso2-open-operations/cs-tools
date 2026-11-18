@@ -2611,10 +2611,6 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 	chatKey := baseKey + "/chat"
 	endRecord := d.beginRecord(baseKey)
 
-	if d.slaEngine != nil {
-		d.slaEngine.RegisterIncidentClocks(ctx, incidentID, p.Priority, incidentEventTime(p.ReportedAt), p.Number, p.Title, p.Team, p.Service)
-	}
-
 	var errs []error
 
 	callTo := p.CallTo
@@ -2662,6 +2658,15 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 			errs = append(errs, chatErr)
 			d.forget(chatKey)
 		}
+	}
+
+	// After the call and the card: registration reads each clock from
+	// entity-service (with a short retry when none is found, the usual case
+	// for an incident outside the SLA policies), and that must not delay the
+	// page. Best effort and idempotent, so a redelivered record re-registering
+	// is harmless.
+	if d.slaEngine != nil {
+		d.slaEngine.RegisterIncidentClocks(ctx, incidentID, p.Priority, incidentEventTime(p.ReportedAt), p.Number, p.Title, p.Team, p.Service)
 	}
 
 	// endRecord runs exactly once per call, as in handleCaseCreated.
