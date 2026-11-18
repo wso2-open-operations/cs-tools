@@ -971,10 +971,15 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 			return &apierror.ValidationError{Msg: "sfIds must not contain leading or trailing whitespace: " + strconv.Quote(id)}
 		}
 	}
-	// A blank region would match no account, silently returning nothing.
+	// A blank region would match no account, silently returning nothing. A
+	// NUL cannot be bound as PostgreSQL text, so it is refused here rather
+	// than failing in the repository.
 	for _, r := range req.Regions {
 		if strings.TrimSpace(r) == "" {
 			return &apierror.ValidationError{Msg: "regions must not contain empty values"}
+		}
+		if strings.ContainsRune(r, 0) {
+			return &apierror.ValidationError{Msg: "regions must not contain NUL characters"}
 		}
 	}
 	// The repository binds these as uuid[], so a non-UUID would be a 500.
@@ -984,6 +989,9 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 	for _, e := range req.OnboardingOwnerEmails {
 		if strings.TrimSpace(e) == "" {
 			return &apierror.ValidationError{Msg: "onboardingOwnerEmails must not contain empty values"}
+		}
+		if strings.ContainsRune(e, 0) {
+			return &apierror.ValidationError{Msg: "onboardingOwnerEmails must not contain NUL characters"}
 		}
 	}
 	return nil
