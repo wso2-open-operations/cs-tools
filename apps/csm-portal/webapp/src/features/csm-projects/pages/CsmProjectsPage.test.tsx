@@ -151,19 +151,21 @@ describe("CsmProjectsPage — onboardingStatus filter from the URL", () => {
     }
 
     rtlRender(
-      <MemoryRouter initialEntries={["/customers/projects?onboardingStatus=In-Progress"]}>
-        <Routes>
-          <Route
-            path="/customers/projects"
-            element={
-              <>
-                <NavTrigger />
-                <CsmProjectsPage />
-              </>
-            }
-          />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/customers/projects?onboardingStatus=In-Progress"]}>
+          <Routes>
+            <Route
+              path="/customers/projects"
+              element={
+                <>
+                  <NavTrigger />
+                  <CsmProjectsPage />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     await waitFor(() => {
@@ -250,6 +252,44 @@ describe("CsmProjectsPage — column customisation", () => {
 
     expect(screen.getAllByText("In Progress").length).toBeGreaterThan(0);
     expect(await screen.findByText("Jane Doe")).toBeInTheDocument();
+  });
+
+  it("shows the account's region in the opt-in Region column, a dash when it has none", async () => {
+    const row = {
+      subscriptionType: "subscription" as const,
+      startDate: null,
+      endDate: null,
+      createdOn: "2024-01-01T00:00:00Z",
+      closureState: "open",
+      endDateClosureState: null,
+      invoiceDueDateClosureState: null,
+      complianceViolationClosureState: null,
+      complianceViolationDate: null,
+      suspensionProcessState: null,
+    };
+    mockResult({
+      data: {
+        projects: [
+          { ...row, id: "proj-1", name: "Acme Project", key: "ACME", account: { id: "a-1", name: "Acme", region: "APAC" } },
+          { ...row, id: "proj-2", name: "Beta Project", key: "BETA", account: { id: "a-2", name: "Beta", region: null } },
+        ],
+        total: 2,
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      },
+    });
+
+    render(<CsmProjectsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise projects columns" }));
+    const picker = screen.getByRole("list", { name: "Customise projects columns" });
+    fireEvent.click(within(picker).getByText("Region"));
+
+    const acme = (await screen.findByText("Acme Project")).closest("tr") as HTMLElement;
+    const beta = screen.getByText("Beta Project").closest("tr") as HTMLElement;
+    expect(within(acme).getByText("APAC")).toBeInTheDocument();
+    expect(within(beta).getAllByText("—").length).toBeGreaterThan(0);
   });
 
   // Regression (CodeRabbit, PR #2907): the owner cell used to render
@@ -565,6 +605,8 @@ describe("CsmProjectsPage — advanced filters", () => {
     expect(options).toEqual([
       "Project state",
       "Onboarding status",
+      "Onboarding owner",
+      "Region",
       "Project end date",
       "Onboarding start date",
       "Go-live plan date",
