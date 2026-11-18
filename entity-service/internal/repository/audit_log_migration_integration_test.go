@@ -227,6 +227,28 @@ func TestAuditMigration_WorkItemIsAuditedInFull(t *testing.T) {
 	}
 }
 
+// Migration 0297 registers the work item types (their id is the work_item id).
+func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{
+		"announcement", "case", "change_request", "change_task", "conversation",
+		"engagement", "incident", "incident_alert_task", "incident_task", "problem",
+		"problem_task", "security_report_analysis", "service_request", "standard_change_proposal",
+	} {
+		if n := auditCount(t, pool, `SELECT count(*) FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table); n != 1 {
+			t.Errorf("%s is not registered with the audit log", table)
+			continue
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
 func TestAuditMigration_PartitionCopiesOfTheTriggerAreNotReported(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	const table = "zz_audit_test_parent"
