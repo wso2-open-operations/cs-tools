@@ -24337,6 +24337,12 @@ components:
               description: Null when the project has no linked account.
               allOf:
                 - $ref: '#/components/schemas/EntityRef'
+                - type: object
+                  properties:
+                    region:
+                      type: string
+                      nullable: true
+                      description: The account's region (e.g. "APAC"); null when none is recorded.
 
     ProjectDetails:
       description: >
