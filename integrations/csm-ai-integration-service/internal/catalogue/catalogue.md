@@ -438,6 +438,9 @@ values are case-sensitive exactly as written.
 | `closureStatus` | one of `"Open"`, `"Suspended"`, `"Restricted"` |
 | `excludeClosureStates` | a list of `Open`, `Suspended`, `Restricted` to leave out |
 | `closureStates` | a list of `Open`, `Suspended`, `Restricted` to keep (the inverse of `excludeClosureStates`) |
+| `regions` | a list of the project's account regions, e.g. `["APAC", "EU"]` (case is ignored); a project whose account has no region never matches |
+| `onboardingOwnerIds` | **only** `["__current_user__"]`: the projects whose onboarding the viewer owns ("my onboarding projects") |
+| `onboardingOwnerEmails` | a list of onboarding owners' email addresses, **only those the request gives** ("onboarded by person@example.com"); a project with no onboarding owner never matches |
 | `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date (section 5) |
 | `onboardingStartDateFrom`, `onboardingStartDateTo` | the onboarding start date, from / to (inclusive): one date (section 5) |
 | `goLivePlanDateFrom`, `goLivePlanDateTo` | the planned go-live date, from / to (inclusive): one date (section 5) |
@@ -446,7 +449,7 @@ values are case-sensitive exactly as written.
 | `productionReadinessCompletionDateFrom`, `productionReadinessCompletionDateTo` | the production readiness completion date, from / to (inclusive): one date (section 5) |
 
 Each From / To pair is optional on either side (a missing side is open-ended), and the date filters, the
-closure keys and `onboardingStatus` combine in one widget (all must hold). A project with no value for a
+closure keys, `onboardingStatus`, `regions` and the onboarding owner keys combine in one widget (all must hold). A project with no value for a
 date never matches that date's filter.
 
 ```json
@@ -844,6 +847,7 @@ Never set both `slices` and `groupBy`.
 | "accounts with EOL products" / "not live yet" / "no cases in 6 months" / "with recent escalations" | `risks` `["hasEolProduct"]` / `["hasNoGoLive"]` / `["noSupportCases6mo"]` / `["hasRecentEscalations"]` |
 | "projects", "subscriptions" | `resourceType: "project"` (section 5c) |
 | "projects in onboarding" / "onboarding not started" / "onboarded" | `onboardingStatus` `["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
+| "my onboarding projects" / "projects onboarded by person@example.com" / "onboarding projects in APAC" | project `onboardingOwnerIds ["__current_user__"]` / `onboardingOwnerEmails ["person@example.com"]` / `regions ["APAC"]` (with `onboardingStatus` when asked for projects in onboarding); one project slice per owner or region for a pie / bar |
 | "projects by onboarding status" | a `pie` with one slice each for Not started, In progress, Completed |
 | "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStates ["Suspended"]` / `["Restricted"]` (or `closureStatus`); "suspended or restricted": `closureStates ["Suspended", "Restricted"]` |
 | "projects ending this month / this quarter", "expiring", "renewals due" | `endDateFrom` / `endDateTo` with the month or quarter tokens; a list sorted by `endDate` `asc` |
@@ -958,7 +962,7 @@ Never set both `slices` and `groupBy`.
 | a region by name: "APAC cases", "cases of EMEA customers", "security reports from the NA region", "sales region APAC" | `region in` the region as the request writes it, in **every** case-family widget the request is about; several regions: one `in` with all of them. "Region", "sales region" and "geo" all mean the customer's region. The portal matches it to the customers' regions, ignoring case, and tells the user the regions there are if none has it, so never refuse a region as unknown |
 | regions left out: "excluding APAC", "outside EMEA", "every region but NA" | `region notIn` with every region as written (one `notIn` with all of them), in **every** case-family widget the request is about; never a `region in` listing the other regions |
 | a country or city ("cases from Sri Lanka", "US customers"), unless the request calls it a region | not expressible: reply with `{"error": ...}` saying cases can be filtered by the customer's region (e.g. APAC), not by country |
-| a region on time cards, accounts, projects, customer satisfaction, operations or PLG widgets | not expressible: only case-family widgets take `region`; reply with `{"error": ...}` |
+| a region on time cards, accounts, customer satisfaction, operations or PLG widgets | not expressible: only case-family widgets take `region`, and project widgets `regions` (section 5c); reply with `{"error": ...}` |
 | "patch cases", "patch tag cases", "cases with a patch" (a Patch Git issue was filed from them) | `tag in ["patch"]` |
 | "internal discussion cases", "discussion cases" (a discussion Git issue was filed from them) | `tag in ["s_dip"]` |
 | "cases with a Git issue", "GitHub issue cases" | `tag in ["patch", "s_dip"]`; "without a Git issue": `tag notIn ["patch", "s_dip"]` |
