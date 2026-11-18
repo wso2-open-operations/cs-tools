@@ -311,6 +311,11 @@ describe("tags containing a comma", () => {
     expect(buildVersionEditPayload(live, versionToForm(live))).toEqual({});
   });
 
+  it("count as changed when an edit splits a stored tag", () => {
+    const live = liveVersion({ tags: ["alpha,beta"] });
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), tags: "alpha, beta" })).toEqual({ tags: ["alpha", "beta"] });
+  });
+
   it("are re-parsed only when the user edits the Tags box", () => {
     const live = liveVersion({ tags: ["alpha,beta"] });
     expect(buildVersionEditPayload(live, { ...versionToForm(live), tags: "alpha,beta, delta" })).toEqual({

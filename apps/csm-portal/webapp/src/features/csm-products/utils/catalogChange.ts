@@ -225,14 +225,17 @@ export function formWireValue(form: VersionFormValues, key: VersionUpdateKey): u
 
 /**
  * The wire value a live row holds for one key, normalized exactly like the
- * form's (text trimmed, "" as null, tags trimmed and de-duplicated), so a
+ * form's (text trimmed, "" as null, tags trimmed and de-duplicated, each
+ * stored tag kept whole), so a
  * stored value with stray padding or a repeated tag never reads as a change
  * the user did not make.
  */
 export function liveWireValue(version: CatalogVersion, key: VersionUpdateKey): unknown {
   switch (key) {
     case "tags":
-      return parseTags((version.tags ?? []).map(String).join(","));
+      // Trimmed and de-duplicated, but never split: a stored tag that itself
+      // contains a comma stays one tag, so an edit that splits it is a change.
+      return Array.from(new Set((version.tags ?? []).map((t) => String(t).trim()).filter(Boolean)));
     case "carbon":
       return normalizeCarbon(version.carbon);
     case "isPublic":
