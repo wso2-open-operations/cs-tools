@@ -454,6 +454,70 @@ $fn$,
         '__SCHEMA_LIT__', quote_literal(current_schema()));
 END $install$;
 
+-- Delete the rows in the catch-all partition that are older than the retention
+-- cutoff, and return how many. Dropping whole partitions (above) cannot reach them,
+-- and the log is append-only, so a DELETE is refused: instead the catch-all is
+-- detached, a fresh one takes its place, the younger rows are copied across, and
+-- the old table is dropped, all in one transaction. The row counts must add up
+-- before it commits, or it rolls back and nothing changes. Nothing happens (and
+-- nothing is locked) when no row is past retention, which is the usual case.
+-- While it runs, audit writes wait on the lock; the catch-all should hold almost
+-- nothing, so that is short, and lock_timeout makes it give up if the lock is busy.
+DO $install$
+BEGIN
+    EXECUTE replace(replace($fn$
+CREATE OR REPLACE FUNCTION audit_purge_default_partition(
+    p_retention_months INT  DEFAULT 18,
+    p_lock_timeout     TEXT DEFAULT '2s'
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
+DECLARE
+    cutoff TIMESTAMPTZ :=
+        (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
+    total_rows   BIGINT;
+    expired_rows BIGINT;
+    kept_rows    BIGINT;
+BEGIN
+    IF p_retention_months IS NULL OR p_retention_months < 1 THEN
+        RAISE EXCEPTION 'audit_purge_default_partition: retention must be at least 1 month, got %', p_retention_months;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM csm_audit_log_default WHERE created_on < cutoff) THEN
+        RETURN 0;
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
+    PERFORM set_config('lock_timeout', p_lock_timeout, true);
+
+    EXECUTE format('ALTER TABLE %1$I.csm_audit_log DETACH PARTITION %1$I.csm_audit_log_default', __SCHEMA_LIT__);
+    EXECUTE format('ALTER TABLE %1$I.csm_audit_log_default RENAME TO csm_audit_log_default_purge', __SCHEMA_LIT__);
+    EXECUTE format('CREATE TABLE %1$I.csm_audit_log_default PARTITION OF %1$I.csm_audit_log DEFAULT', __SCHEMA_LIT__);
+    EXECUTE format(
+        'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON %I.csm_audit_log_default
+           FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()', __SCHEMA_LIT__);
+
+    SELECT count(*), count(*) FILTER (WHERE created_on < cutoff)
+      INTO total_rows, expired_rows
+      FROM csm_audit_log_default_purge;
+
+    -- Through the parent, so a row whose month has a partition by now lands there.
+    INSERT INTO csm_audit_log SELECT * FROM csm_audit_log_default_purge WHERE created_on >= cutoff;
+    GET DIAGNOSTICS kept_rows = ROW_COUNT;
+
+    IF kept_rows + expired_rows <> total_rows THEN
+        RAISE EXCEPTION 'audit_purge_default_partition: % rows kept and % expired do not add up to %, rolled back',
+            kept_rows, expired_rows, total_rows;
+    END IF;
+
+    EXECUTE format('DROP TABLE %I.csm_audit_log_default_purge', __SCHEMA_LIT__);
+    RETURN expired_rows;
+END $$;
+$fn$,
+        '__SCHEMA__', quote_ident(current_schema())),
+        '__SCHEMA_LIT__', quote_literal(current_schema()));
+END $install$;
+
 -- Empty result = healthy.
 DO $install$
 BEGIN
@@ -568,6 +632,7 @@ REVOKE ALL ON FUNCTION exclude_from_audit(TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_partition_health() FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_create_partitions(INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_retire_partitions(INT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_purge_default_partition(INT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_reconcile(BOOLEAN) FROM PUBLIC;
 
 -- New-table alert. Attaches nothing; only warns when a new table is neither

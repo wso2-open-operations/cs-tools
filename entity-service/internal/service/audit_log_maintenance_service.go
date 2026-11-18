@@ -28,8 +28,8 @@ import (
 // retries a failed run and sends the failure mail.
 type AuditLogMaintenanceService interface {
 	// RunMaintenance creates the coming monthly partitions, checks the log's
-	// health, puts back audit triggers that went missing and deletes the
-	// partitions past the retention period. It always tries
+	// health, puts back audit triggers that went missing and deletes what is past
+	// the retention period (old partitions, and old rows in the catch-all). It always tries
 	// every step and returns what it found, including a step that could not run
 	// (StepErrors), so one failing step never hides the others' results. The
 	// error is set only when the request itself was cancelled.
@@ -90,8 +90,19 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 		slog.InfoContext(ctx, "audit log: deleted expired partitions", "partitions", retired, "retentionMonths", s.retentionMonths)
 	}
 
+	// The catch-all partition is outside the partition ranges above, so its
+	// expired rows are deleted on their own.
+	purged, err := s.repo.PurgeDefaultPartition(ctx, s.retentionMonths)
+	if err != nil {
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not delete expired rows from the catch-all partition", err))
+	}
+	resp.DefaultRowsDeleted = purged
+	if purged > 0 {
+		slog.InfoContext(ctx, "audit log: deleted expired rows from the catch-all partition", "rows", purged, "retentionMonths", s.retentionMonths)
+	}
+
 	slog.InfoContext(ctx, "audit log: maintenance run finished",
-		"partitionsCreated", resp.PartitionsCreated, "partitionsRetired", len(resp.PartitionsRetired), "healthProblems", len(resp.HealthProblems),
+		"partitionsCreated", resp.PartitionsCreated, "partitionsRetired", len(resp.PartitionsRetired), "defaultRowsDeleted", resp.DefaultRowsDeleted, "healthProblems", len(resp.HealthProblems),
 		"repairedTriggers", len(resp.RepairedTriggers), "unresolvedTriggers", len(resp.UnresolvedTriggers),
 		"failedSteps", len(resp.StepErrors))
 	return resp, ctx.Err()

@@ -35,6 +35,8 @@ type fakeAuditLogRepo struct {
 	createErr       error
 	retired         []string
 	retireErr       error
+	purged          int64
+	purgeErr        error
 	healthProblems  []string
 	repairedFound   []domain.AuditTriggerProblem // returned when repair is on
 	stillUnresolved []domain.AuditTriggerProblem // returned when repair is off
@@ -50,6 +52,11 @@ func (f *fakeAuditLogRepo) CreatePartitions(_ context.Context, monthsAhead int) 
 func (f *fakeAuditLogRepo) RetirePartitions(_ context.Context, retentionMonths int) ([]string, error) {
 	f.calls = append(f.calls, fmt.Sprintf("retire(%d)", retentionMonths))
 	return f.retired, f.retireErr
+}
+
+func (f *fakeAuditLogRepo) PurgeDefaultPartition(_ context.Context, retentionMonths int) (int64, error) {
+	f.calls = append(f.calls, fmt.Sprintf("purge(%d)", retentionMonths))
+	return f.purged, f.purgeErr
 }
 
 func (f *fakeAuditLogRepo) PartitionHealth(context.Context) ([]string, error) {
@@ -83,7 +90,7 @@ func TestAuditLogMaintenance_RunsEveryStepInOrder(t *testing.T) {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
 
-	want := "create(3) health reconcile(true) reconcile(false) retire(18)"
+	want := "create(3) health reconcile(true) reconcile(false) retire(18) purge(18)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
@@ -111,7 +118,7 @@ func TestAuditLogMaintenance_UsesTheConfiguredRetention(t *testing.T) {
 	if _, err := NewAuditLogMaintenanceService(repo, 3, 24).RunMaintenance(context.Background()); err != nil {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
-	if got := strings.Join(repo.calls, " "); !strings.Contains(got, "retire(24)") {
+	if got := strings.Join(repo.calls, " "); !strings.Contains(got, "retire(24) purge(24)") {
 		t.Errorf("calls = %q, want retire(24)", got)
 	}
 }
@@ -136,6 +143,41 @@ func TestAuditLogMaintenance_FailedDeleteIsReportedWithoutDetail(t *testing.T) {
 	}
 	if len(resp.PartitionsRetired) != 0 {
 		t.Errorf("PartitionsRetired = %v, want none after a failed delete", resp.PartitionsRetired)
+	}
+}
+
+func TestAuditLogMaintenance_ReportsTheExpiredRowsItDeletedFromTheCatchAll(t *testing.T) {
+	repo := &fakeAuditLogRepo{purged: 7}
+
+	resp, err := NewAuditLogMaintenanceService(repo, 3, 18).RunMaintenance(context.Background())
+	if err != nil {
+		t.Fatalf("RunMaintenance: %v", err)
+	}
+	if resp.DefaultRowsDeleted != 7 {
+		t.Errorf("DefaultRowsDeleted = %d, want 7", resp.DefaultRowsDeleted)
+	}
+}
+
+// A failed catch-all purge is a step error with no database detail, and the
+// partition deletion before it is still reported.
+func TestAuditLogMaintenance_FailedCatchAllPurgeIsReportedAndKeepsEarlierResults(t *testing.T) {
+	repo := &fakeAuditLogRepo{
+		retired:  []string{"csm_audit_log_2025_01"},
+		purgeErr: errors.New("rows kept 3 and expired 2 do not add up to 6 in csm_audit_log_default_purge"),
+	}
+
+	resp, err := NewAuditLogMaintenanceService(repo, 3, 18).RunMaintenance(context.Background())
+	if err != nil {
+		t.Fatalf("a failed step must be reported in the response, not as an error: %v", err)
+	}
+	if len(resp.StepErrors) != 1 || len(resp.PartitionsRetired) != 1 {
+		t.Errorf("stepErrors = %v, partitionsRetired = %v; want the failure and the earlier result both kept", resp.StepErrors, resp.PartitionsRetired)
+	}
+	if strings.Contains(resp.StepErrors[0], "csm_audit_log_default_purge") || strings.Contains(resp.StepErrors[0], "do not add up") {
+		t.Errorf("step error leaks database detail: %q", resp.StepErrors[0])
+	}
+	if resp.DefaultRowsDeleted != 0 {
+		t.Errorf("DefaultRowsDeleted = %d, want 0 after a failed purge", resp.DefaultRowsDeleted)
 	}
 }
 
@@ -173,7 +215,7 @@ func TestAuditLogMaintenance_FailedStepIsReportedAndDoesNotStopTheOthers(t *test
 		t.Fatalf("a failed step must be reported in the response, not as an error: %v", err)
 	}
 
-	want := "create(3) health reconcile(true) reconcile(false) retire(18)"
+	want := "create(3) health reconcile(true) reconcile(false) retire(18) purge(18)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}

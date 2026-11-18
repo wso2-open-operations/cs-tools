@@ -30,6 +30,10 @@ type AuditLogRepository interface {
 	// retentionMonths ago (detached, then dropped) and returns their names. The
 	// catch-all partition is never touched.
 	RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error)
+	// PurgeDefaultPartition deletes the rows in the catch-all partition that are
+	// older than retentionMonths, which whole-partition deletion cannot reach, and
+	// returns how many it deleted.
+	PurgeDefaultPartition(ctx context.Context, retentionMonths int) (int64, error)
 	// CreatePartitions creates the missing monthly partitions and returns how
 	// many it created.
 	CreatePartitions(ctx context.Context, monthsAhead int) (int, error)
@@ -79,6 +83,16 @@ func (r *auditLogRepository) RetirePartitions(ctx context.Context, retentionMont
 		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
 	}
 	return retired, nil
+}
+
+// PurgeDefaultPartition implements AuditLogRepository.
+func (r *auditLogRepository) PurgeDefaultPartition(ctx context.Context, retentionMonths int) (int64, error) {
+	var deleted int64
+	err := r.db.QueryRow(WithSystemIdentity(ctx), `SELECT audit_purge_default_partition($1, '2s')`, retentionMonths).Scan(&deleted)
+	if err != nil {
+		return 0, fmt.Errorf("audit log: purge default partition: %w", err)
+	}
+	return deleted, nil
 }
 
 // PartitionHealth implements AuditLogRepository.
