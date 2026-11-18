@@ -153,7 +153,9 @@ func (s *accessService) ResolveScope(ctx context.Context) (AccessScope, error) {
 			}
 			return AccessScope{}, &apierror.ForbiddenError{Msg: "csm portal caller's user email is not in an authorized domain"}
 		case s.client.M2MClientIDs[id.ClientID]:
-			return AccessScope{Unrestricted: true}, nil
+			// AuditActor, not ViewerEmail: the data scope stays unrestricted, but
+			// when the service forwards a user token the audit log names that person.
+			return AccessScope{Unrestricted: true, AuditActor: id.UserEmail}, nil
 		}
 	}
 
@@ -216,7 +218,9 @@ func (s *accessService) scopeForUser(ctx context.Context, email string) (AccessS
 		// comment for why that distinction has to survive this branch.
 		return AccessScope{ProjectIDs: ids, ViewerEmail: email, HasInternalAccess: internal}, nil
 	case internal && !other:
-		return AccessScope{Unrestricted: true, HasInternalAccess: true}, nil
+		// AuditActor, not ViewerEmail (which also marks a CSM portal caller, see
+		// user_service.go): staff using a portal are still named in the audit log.
+		return AccessScope{Unrestricted: true, HasInternalAccess: true, AuditActor: email}, nil
 	default:
 		return AccessScope{}, &apierror.ForbiddenError{Msg: "no access for this user"}
 	}
