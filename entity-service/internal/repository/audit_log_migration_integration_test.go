@@ -275,14 +275,14 @@ func TestAuditMigration_TeamTablesAreAudited(t *testing.T) {
 }
 
 // Migration 0303 registers the Salesforce opportunity and invoice tables,
-// sla_policy and plg_note_revision. Only sync_time_stamp on the four Salesforce
-// tables (rewritten by every ingest run) is left out.
+// sla_policy and plg_note_revision. Only sync_time_stamp and updated_on on the four
+// Salesforce tables (both rewritten by every ingest run) are left out.
 func TestAuditMigration_SalesforceSlaAndNoteTablesAreAudited(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	schema := auditSchema(t, pool)
 	for table, wantExcluded := range map[string]string{
-		"sf_invoice": "sync_time_stamp", "sf_opportunity": "sync_time_stamp",
-		"sf_opportunity_link": "sync_time_stamp", "sf_opportunity_product": "sync_time_stamp",
+		"sf_invoice": "sync_time_stamp,updated_on", "sf_opportunity": "sync_time_stamp,updated_on",
+		"sf_opportunity_link": "sync_time_stamp,updated_on", "sf_opportunity_product": "sync_time_stamp,updated_on",
 		"sla_policy": "", "plg_note_revision": "",
 	} {
 		var excluded, masked []string
