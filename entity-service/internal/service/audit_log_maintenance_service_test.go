@@ -59,8 +59,8 @@ func (f *fakeAuditLogRepo) PurgeDefaultPartition(_ context.Context, retentionMon
 	return f.purged, f.purgeErr
 }
 
-func (f *fakeAuditLogRepo) PartitionHealth(context.Context) ([]string, error) {
-	f.calls = append(f.calls, "health")
+func (f *fakeAuditLogRepo) PartitionHealth(_ context.Context, monthsAhead, retentionMonths int) ([]string, error) {
+	f.calls = append(f.calls, fmt.Sprintf("health(%d,%d)", monthsAhead, retentionMonths))
 	return f.healthProblems, nil
 }
 
@@ -90,7 +90,7 @@ func TestAuditLogMaintenance_RunsEveryStepInOrder(t *testing.T) {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
 
-	want := "create(3) health reconcile(true) reconcile(false) retire(18) purge(18)"
+	want := "create(3) reconcile(true) reconcile(false) retire(18) purge(18) health(3,18)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
@@ -118,7 +118,7 @@ func TestAuditLogMaintenance_UsesTheConfiguredRetention(t *testing.T) {
 	if _, err := NewAuditLogMaintenanceService(repo, 3, 24).RunMaintenance(context.Background()); err != nil {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
-	if got := strings.Join(repo.calls, " "); !strings.Contains(got, "retire(24) purge(24)") {
+	if got := strings.Join(repo.calls, " "); !strings.Contains(got, "retire(24) purge(24) health(3,24)") {
 		t.Errorf("calls = %q, want retire(24)", got)
 	}
 }
@@ -215,7 +215,7 @@ func TestAuditLogMaintenance_FailedStepIsReportedAndDoesNotStopTheOthers(t *test
 		t.Fatalf("a failed step must be reported in the response, not as an error: %v", err)
 	}
 
-	want := "create(3) health reconcile(true) reconcile(false) retire(18) purge(18)"
+	want := "create(3) reconcile(true) reconcile(false) retire(18) purge(18) health(3,18)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
