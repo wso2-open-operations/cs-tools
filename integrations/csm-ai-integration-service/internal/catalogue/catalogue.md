@@ -462,7 +462,8 @@ sort only by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` o
 flat too), e.g. one slice per risk or per onboarding status.
 
 **Not expressible** (section 1): "my accounts" or a
-named account manager's / owner's accounts; a region or sub-region; a product; ARR or revenue; a named
+named account manager's / owner's accounts; a region or sub-region on accounts, or a sub-region on projects (a
+project's region is `regions`); a product; ARR or revenue; a named
 account's projects; grouping on the server (`groupBy`).
 
 ### 5d. Customer satisfaction (`resourceType: "case_feedback"`)
@@ -993,7 +994,7 @@ If two readings are plausible and the table does not settle it, pick the one abo
 
 1. Only fields, ops, values and shapes from this file. No ids. A date is a token of section 5 for a
    period counted from today, or a plain `YYYY-MM-DD` date only for a period the request names. Email addresses only in
-   `createdBy in` and PLG `ownerEmails`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
+   `createdBy in`, PLG `ownerEmails` and project `onboardingOwnerEmails`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
 2. Every widget has `id`, `displayName`, `resourceType`, `shape`, `gridWidth` 1-12, `query`.
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
