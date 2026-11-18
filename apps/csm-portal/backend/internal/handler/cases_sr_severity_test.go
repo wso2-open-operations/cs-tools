@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -114,7 +115,16 @@ func TestPatchCase_SeverityAndTransferWarningPassThrough(t *testing.T) {
 			w := httptest.NewRecorder()
 			h.PatchCase(w, r)
 			assertStatus(t, w, http.StatusOK)
-			if forwarded != tc.body {
+			// The handler re-serialises the body (to strip adminReopen), so key
+			// order is not preserved; what must hold is that nothing is added or lost.
+			var fwd, sent map[string]any
+			if err := json.Unmarshal([]byte(forwarded), &fwd); err != nil {
+				t.Fatalf("forwarded body is not JSON: %v", err)
+			}
+			if err := json.Unmarshal([]byte(tc.body), &sent); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(fwd, sent) {
 				t.Errorf("forwarded body = %s, want %s", forwarded, tc.body)
 			}
 			var got, want map[string]any

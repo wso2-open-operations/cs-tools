@@ -114,7 +114,7 @@ func watchListUserEmails(watchList []domain.WatchListUser) []string {
 	return recipients
 }
 
-// resolveCaseDefaultWatcherEmails resolves cv's account's four default-
+// resolveCaseDefaultWatcherEmails resolves cv's account's default-
 // watcher stakeholder emails fresh, for every case.* publisher below to
 // union into its own WatchList-derived recipients — see
 // CaseRepository.AccountDefaultWatcherEmails' own doc comment for why these
@@ -1230,7 +1230,7 @@ func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.Creat
 //   - "case"/"engagement"/"service_request"/"security_report_analysis": the
 //     case's own WatchList emails (per explicit decision — this service has
 //     no other notion of "who should be emailed" for these types), unioned
-//     with the account's four default-watcher stakeholders resolved fresh via
+//     with the account's default-watcher stakeholders resolved fresh via
 //     resolveAccountDefaultWatcherEmails — see CaseRepository.
 //     AccountDefaultWatcherEmails' own doc comment for why these are never
 //     persisted into WatchList/work_item_watcher at all (so a later
@@ -3090,6 +3090,20 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// under DATA_SOURCE=postgres-servicenow-dual-write.
 	if req.MarkFixIssued != nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "markFixIssued is only supported for the Postgres data source"}
+	}
+
+	// AdminReopen/ReopenReason are Postgres-only for the same reason
+	// MarkFixIssued is just above: the admin-reopen bypass (see
+	// UpdateCaseRequest.AdminReopen's own doc comment) is a caseService-only
+	// state-transition-table override with a write-only Postgres audit
+	// column (reopen_reason) backing it -- there is no ServiceNow-native
+	// equivalent for either. Rejected explicitly rather than silently
+	// accepted and dropped: under plain DATA_SOURCE=servicenow this method
+	// IS the active CaseService, so a caller's AdminReopen would otherwise
+	// reach ServiceNow as an ordinary state update with the admin's
+	// reopenReason discarded and no error at all.
+	if req.AdminReopen != nil || req.ReopenReason != nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen and reopenReason are only supported for the Postgres data source"}
 	}
 
 	hasResolutionFields := req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil

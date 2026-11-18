@@ -101,6 +101,7 @@ import RoleMembersPage from "@features/csm-admin/pages/RoleMembersPage";
 import CsmGroupsPage from "@features/csm-admin/pages/CsmGroupsPage";
 import GroupMembersPage from "@features/csm-admin/pages/GroupMembersPage";
 import CsmTeamsPage from "@features/csm-admin/pages/CsmTeamsPage";
+import CsmEscalationAccessPage from "@features/csm-admin/pages/CsmEscalationAccessPage";
 import TeamMembersPage from "@features/csm-admin/pages/TeamMembersPage";
 import DashboardBuilderRouteGuard from "@features/csm-admin/dashboards/pages/DashboardBuilderRouteGuard";
 import CsmDashboardBuilderListPage from "@features/csm-admin/dashboards/pages/CsmDashboardBuilderListPage";
@@ -393,6 +394,10 @@ export default function App(): JSX.Element {
                     <Route path="user-management/roles" element={<CsmRolesPage />} />
                     <Route path="user-management/groups" element={<CsmGroupsPage />} />
                     <Route path="user-management/teams" element={<CsmTeamsPage />} />
+                    <Route
+                      path="user-management/escalation-access"
+                      element={<CsmEscalationAccessPage />}
+                    />
                     <Route
                       path="user-management/permissions"
                       element={

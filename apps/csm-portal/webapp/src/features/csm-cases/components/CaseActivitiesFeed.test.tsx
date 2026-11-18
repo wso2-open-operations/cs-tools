@@ -21,6 +21,28 @@ import { useState, type ComponentProps, type JSX, type ReactElement } from "reac
 import { MemoryRouter } from "react-router";
 import "@testing-library/jest-dom/vitest";
 
+vi.hoisted(() => {
+  // The feed's import tree reads this at module load (apiConfig throws
+  // without it), so this file could only run after another file in the same
+  // worker had set it. Same hoisted shape as CaseMetaBand.test.tsx.
+  window.config = {
+    ...window.config,
+    CSM_PORTAL_BACKEND_BASE_URL: "http://localhost:9090",
+  };
+});
+
+// A comment bubble reads `useCurrentUser` for its author-or-admin edit check;
+// mocked rather than rendering a real `CurrentUserProvider`, which would hit
+// the real backend client — same convention as CsmCaseCommentBubble.test.tsx.
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({
+    user: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 // The real client reads runtime config at module load, which isn't present
 // under vitest (same approach as useQuickCaseSearch.test.tsx). `UserRefLink`
 // (used for the attachment uploader) resolves an unknown id through
@@ -203,9 +225,10 @@ describe("CaseActivitiesFeed", () => {
     );
 
     expect(screen.getByText("State:")).toBeInTheDocument();
-    // The line reads "State: In Progress → Resolved" across sibling text nodes
-    // (muted old value, arrow, then new value) — assert on combined row text.
-    expect(container.textContent).toContain("In progress");
+    // The line reads "State: In progress → Resolved" across sibling text nodes
+    // (muted old value, arrow, then new value; the state goes through
+    // `stateLabel`, which sentence-cases it) — assert on combined row text.
+    expect(container.textContent).toMatch(/In progress/i);
     expect(container.textContent).toContain("→");
     expect(container.textContent).toContain("Resolved");
     expect(screen.getByText(/Jane Doe/)).toBeInTheDocument();
@@ -424,6 +447,39 @@ describe("CaseActivitiesFeed", () => {
     );
 
     expect(screen.getByText("Case moved to In Progress")).toBeInTheDocument();
+  });
+
+  it("shows the configured logo as every lifecycle row's avatar", () => {
+    const previous = window.config.CSM_PORTAL_LOGO_LIGHT_MODE_URL;
+    window.config.CSM_PORTAL_LOGO_LIGHT_MODE_URL = "https://cdn.example.com/logo.svg";
+    try {
+      const audit: CaseAuditEntry[] = [
+        {
+          id: "lc-1",
+          kind: "state_change",
+          actor: "System",
+          description: "Case moved to In Progress",
+          createdAt: "2026-07-01T00:00:00Z",
+        },
+        {
+          id: "lc-2",
+          kind: "assignee_change",
+          actor: "System",
+          description: "Assigned to Jane Doe",
+          createdAt: "2026-07-01T01:00:00Z",
+        },
+      ];
+      const { container } = renderWithRouter(
+        <CaseActivitiesFeed comments={[]} audit={audit} attachments={[]} />,
+      );
+      const logos = Array.from(container.querySelectorAll("img.MuiAvatar-img"));
+      expect(logos).toHaveLength(2);
+      for (const img of logos) {
+        expect(img).toHaveAttribute("src", "https://cdn.example.com/logo.svg");
+      }
+    } finally {
+      window.config.CSM_PORTAL_LOGO_LIGHT_MODE_URL = previous;
+    }
   });
 });
 

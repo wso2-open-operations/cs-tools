@@ -314,6 +314,39 @@ func buildProjectSearchWhere(req domain.SearchProjectsRequest, scope SearchScope
 		argIdx++
 	}
 
+	// regions: the linked account's region, any of the given values, exact
+	// but case-insensitive like subRegion. A NULL region matches none.
+	if len(req.Regions) > 0 {
+		lower := make([]string, len(req.Regions))
+		for i, r := range req.Regions {
+			lower[i] = strings.ToLower(strings.TrimSpace(r))
+		}
+		where += fmt.Sprintf(" AND LOWER(TRIM(a.region)) = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, lower)
+		argIdx++
+	}
+
+	// onboardingOwnerIds: UUIDs (validated by the service). A project with no
+	// onboarding owner matches none.
+	if len(req.OnboardingOwnerIDs) > 0 {
+		where += fmt.Sprintf(" AND p.onboarding_owner_id = ANY($%d::uuid[])", argIdx)
+		filterArgs = append(filterArgs, req.OnboardingOwnerIDs)
+		argIdx++
+	}
+
+	// onboardingOwnerEmails: the owner's email, case-insensitive. A subquery
+	// rather than the data query's own "user" join, so the COUNT query (which
+	// has no such join) filters identically.
+	if len(req.OnboardingOwnerEmails) > 0 {
+		lower := make([]string, len(req.OnboardingOwnerEmails))
+		for i, e := range req.OnboardingOwnerEmails {
+			lower[i] = strings.ToLower(strings.TrimSpace(e))
+		}
+		where += fmt.Sprintf(` AND p.onboarding_owner_id IN (SELECT ou.id FROM "user" ou WHERE LOWER(ou.email) = ANY($%d::text[]))`, argIdx)
+		filterArgs = append(filterArgs, lower)
+		argIdx++
+	}
+
 	return where, filterArgs, argIdx, nil
 }
 

@@ -1,0 +1,54 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { describe, expect, it } from "vitest";
+import { initialsOf } from "./initials";
+import { joinStaffName, stripStaffNameMarker } from "./staffNameMarker";
+
+describe("stripStaffNameMarker", () => {
+  it("removes the trailing circled W, lowercase or uppercase", () => {
+    expect(stripStaffNameMarker("First Last ⓦ")).toBe("First Last");
+    expect(stripStaffNameMarker("First Last Ⓦ")).toBe("First Last");
+    expect(stripStaffNameMarker("First Last (Intern) Ⓦ")).toBe("First Last (Intern)");
+  });
+
+  it("leaves other names alone and tolerates nothing", () => {
+    expect(stripStaffNameMarker("First Last")).toBe("First Last");
+    expect(stripStaffNameMarker(undefined)).toBe("");
+    expect(stripStaffNameMarker(null)).toBe("");
+    expect(stripStaffNameMarker("ⓦ")).toBe("");
+  });
+});
+
+describe("joinStaffName", () => {
+  it("strips each part before joining, so a marker on the first name is caught too", () => {
+    expect(joinStaffName("First Ⓦ", "Last")).toBe("First Last");
+    expect(joinStaffName("First", "Last ⓦ")).toBe("First Last");
+    expect(joinStaffName(undefined, "Last")).toBe("Last");
+    expect(joinStaffName(null, null)).toBe("");
+  });
+});
+
+describe("initialsOf", () => {
+  it("reads only the first two words, without the marker", () => {
+    expect(initialsOf("First Last")).toBe("FL");
+    expect(initialsOf("First Last ⓦ")).toBe("FL");
+    expect(initialsOf("First Middle Last")).toBe("FM");
+    expect(initialsOf("Single")).toBe("S");
+    expect(initialsOf("ⓦ")).toBe("?");
+    expect(initialsOf("")).toBe("?");
+  });
+});

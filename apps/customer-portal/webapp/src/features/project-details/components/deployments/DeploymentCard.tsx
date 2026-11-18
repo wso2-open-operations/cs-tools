@@ -53,6 +53,7 @@ export default function DeploymentCard({
   deployment,
   selectedProduct,
   onToggleProductSelect,
+  serviceRequestSelection,
 }: DeploymentCardProps): JSX.Element {
   const { name, description, createdOn, updatedOn } = deployment;
   const projectId = deployment.project?.id ?? "";
@@ -171,6 +172,7 @@ export default function DeploymentCard({
             projectId={deployment.project?.id ?? ""}
             selectedProduct={selectedProduct}
             onToggleProductSelect={onToggleProductSelect}
+            serviceRequestSelection={serviceRequestSelection}
           />
 
           <Divider />

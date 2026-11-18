@@ -143,8 +143,10 @@ func buildReminderCopy(cfg Config, w *window, today time.Time) (shiftEmail, bool
 }
 
 // buildWeekendEmail writes the weekend's summary: to everybody on the windows
-// still to come, LK and Americas alike. It lists each day's team, then defines
-// each rotation once (its hours on its own clock and in UTC, and its role).
+// still to come, LK and Americas alike. Each day is one table with a row per
+// window (its hours, its team, the support people in it), then each window is
+// defined once (its hours on its own clock and in UTC, and its role); a shift
+// and its on-call variant share a row in both.
 // gaps, when any, are listed too (Friday's reminder goes out with them). ok is
 // false when nobody on them has an address.
 func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamschedule.Assignment, today time.Time, gaps []gap) (shiftEmail, bool) {
@@ -176,43 +178,16 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 		which = "this weekend"
 	}
 	data := notify.WeekendRotaData{
-		Intro: fmt.Sprintf("You have been allocated for weekend support %s (%s). Check your rotation window below and confirm "+
-			"your contact details are current. If you need to swap a rotation or cannot fulfil it, inform your team lead immediately.",
-			which, strings.Join(dates, " and ")),
+		Intro: fmt.Sprintf("You have been allocated for weekend support %s (%s).", which, strings.Join(dates, " and ")),
+		Checklist: []string{
+			"Find your name below and check your rotation's hours.",
+			"If you need to swap a rotation or cannot fulfil it, inform your team lead immediately.",
+		},
 		ScheduleURL: cfg.ScheduleURL,
 	}
 
-	// Each day's team, in rota order.
-	for _, d := range days {
-		day := notify.WeekendRotaDay{Title: d.Format("Monday") + " Team"}
-		for _, a := range rostered {
-			if a.RotaDate == d.Format(dateLayout) {
-				day.People = append(day.People, fmt.Sprintf("%s (%s)", a.Engineer.Name, cfg.Rotations[a.ShiftCode]))
-			}
-		}
-		data.Days = append(data.Days, day)
-	}
-	if len(support) > 0 {
-		data.SupportTitle = cfg.Support.Title
-		for _, d := range days {
-			day := notify.WeekendRotaDay{Title: d.Format("Monday")}
-			for _, a := range support {
-				if a.RotaDate != d.Format(dateLayout) {
-					continue
-				}
-				line := a.Engineer.Name + " (" + shortName(cfg.Support.Rotations[a.ShiftCode])
-				if a.Tier != "" {
-					line += ", " + a.Tier
-				}
-				day.People = append(day.People, line+")")
-			}
-			if len(day.People) > 0 {
-				data.SupportDays = append(data.SupportDays, day)
-			}
-		}
-	}
-
-	// Each rotation once, in rota order, described from its first turn.
+	// Each rotation once, in rota order: who is on it each day, and its
+	// first turn each day (the hours its definition is told in).
 	var codes []string
 	first := map[string]teamschedule.Assignment{}
 	perDay := map[string]map[string]map[string]bool{}          // code -> date -> person
@@ -232,36 +207,75 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 		}
 		perDay[a.ShiftCode][a.RotaDate][strings.ToLower(a.Engineer.UserID+"|"+a.Engineer.Email+"|"+a.Engineer.Name)] = true
 	}
+
+	// The windows (LK, Americas): a shift and its on-call variant.
+	var bases []string
+	for _, code := range codes {
+		if b := baseCode(code); !slices.Contains(bases, b) {
+			bases = append(bases, b)
+		}
+	}
+	// One table per day: a row per window in rota order (LK, Americas), the
+	// on-call person in their window's row, and each support turn in the row
+	// its hours overlap most.
+	for _, d := range days {
+		data.Days = append(data.Days, dayRows(cfg, d, rostered, support))
+	}
+	data.TeamTitle = cfg.Family + " Team"
+	if len(support) > 0 {
+		data.SupportTitle = cfg.Support.Family + " Team"
+	}
+
+	// One definition per window (LK, Americas): its shift and its on-call
+	// variant share hours, so they share a row. The role leaves out the zone,
+	// which the local time already names.
+	for _, base := range bases {
+		var general, onCall []string
+		for _, code := range []string{base, base + "_OC"} {
+			if a, ok := first[code]; ok {
+				if a.IsOnCall || strings.HasSuffix(code, "_OC") {
+					onCall = append(onCall, code)
+				} else {
+					general = append(general, code)
+				}
+			}
+		}
+		lead := append(append([]string{}, general...), onCall...)[0]
+		clock := clockOf(cfg, lead)
+		def := notify.RotationDefinition{
+			Rotation: cfg.Rotations[lead],
+			LocalTime: perDayText(dayTurn[lead], func(t teamschedule.Assignment) string {
+				return hoursOn(t, clock)
+			}),
+			UTCWindow: perDayText(dayTurn[lead], func(t teamschedule.Assignment) string {
+				return t.StartsAt.UTC().Format("15:04") + " – " + t.EndsAt.UTC().Format("15:04")
+			}),
+		}
+		var members, roles []string
+		if len(general) > 0 {
+			a := first[lead]
+			members = append(members, memberCount(days, perDay[lead], "member", "members"))
+			roles = append(roles, "General support")
+			def.RoleNote = splitNote(days, perDay[lead], a.EndsAt.Sub(a.StartsAt))
+		}
+		if len(onCall) > 0 {
+			members = append(members, memberCount(days, perDay[onCall[0]], "on-call", "on-call"))
+			roles = append(roles, "On-call")
+		}
+		def.Members, def.Role = strings.Join(members, " + "), strings.Join(roles, " + ")
+		data.Definitions = append(data.Definitions, def)
+	}
+
 	zones := map[string]*time.Location{}
 	var zoneOrder []string
 	for _, code := range codes {
-		a := first[code]
 		clock := clockOf(cfg, code)
-		s := a.StartsAt.In(clock)
-		role, note := zoneName(s)+" General support", splitNote(days, perDay[code], a.EndsAt.Sub(a.StartsAt))
-		if a.IsOnCall || strings.HasSuffix(code, "_OC") {
-			role, note = "On-call", ""
-		}
-		data.Definitions = append(data.Definitions, notify.RotationDefinition{
-			Rotation: cfg.Rotations[code],
-			Members:  memberCount(days, perDay[code]),
-			LocalTime: perDayText(dayTurn[code], func(t teamschedule.Assignment) string {
-				ls, le := t.StartsAt.In(clock), t.EndsAt.In(clock)
-				return ls.Format("03:04 PM") + " – " + le.Format("03:04 PM") + " " + zoneName(ls)
-			}),
-			UTCWindow: perDayText(dayTurn[code], func(t teamschedule.Assignment) string {
-				return t.StartsAt.UTC().Format("15:04") + " – " + t.EndsAt.UTC().Format("15:04")
-			}),
-			Role:     role,
-			RoleNote: note,
-		})
 		if _, ok := zones[clock.String()]; !ok {
 			zones[clock.String()] = clock
 			zoneOrder = append(zoneOrder, clock.String())
 		}
 	}
-	if defs := supportDefinitions(cfg, days, support); len(defs) > 0 {
-		data.Definitions = append(data.Definitions, defs...)
+	if len(support) > 0 {
 		if _, ok := zones[cfg.Zone.String()]; !ok {
 			zones[cfg.Zone.String()] = cfg.Zone
 			zoneOrder = append(zoneOrder, cfg.Zone.String())
@@ -275,24 +289,20 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 	if len(legend) > 0 {
 		data.ZoneNotes = append(data.ZoneNotes, strings.Join(legend, " • "))
 	}
-	for _, code := range codes {
-		if lw, ok := cfg.Windows[code]; ok {
-			if note := daylightNote(cfg, code, lw.Zone, days[0]); note != "" {
-				data.ZoneNotes = append(data.ZoneNotes, note)
+	// One daylight saving note per window, as the definitions have one row.
+	for _, base := range bases {
+		for _, code := range []string{base, base + "_OC"} {
+			if lw, ok := cfg.Windows[code]; ok {
+				if note := daylightNote(cfg, base, lw.Zone, days[0]); note != "" {
+					data.ZoneNotes = append(data.ZoneNotes, note)
+				}
+				break
 			}
 		}
 	}
 
 	if len(gaps) > 0 {
-		data.AfterTable = append(data.AfterTable, "Not yet fully marked: "+gapList(cfg, gaps)+".")
-	}
-	if slices.ContainsFunc(pending, func(w *window) bool { return cfg.invitesFor(w.base) }) {
-		data.AfterTable = append(data.AfterTable, "A calendar invitation for your team's rotation follows in a separate email, "+
-			"with everybody on that rotation as a guest.")
-	}
-	if len(support) > 0 {
-		data.AfterTable = append(data.AfterTable, "The "+cfg.Support.Family+" turns are listed for information; "+
-			"they get no calendar invitation from this email.")
+		data.Notes = append(data.Notes, "Not yet fully marked: "+gapList(cfg, gaps)+".")
 	}
 	// The summary is the one email the weekend-only copies get.
 	cc := without(append(append([]string{}, cfg.Copy...), cfg.WeekendCopy...), to)
@@ -304,48 +314,6 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 	return email, true
 }
 
-// supportDefinitions defines each support rotation once, in the order its
-// turns come: its hours on the rota's clock and in UTC, and its tiers ("SRE
-// support (L1 → L2)").
-func supportDefinitions(cfg Config, days []time.Time, support []teamschedule.Assignment) []notify.RotationDefinition {
-	var codes []string
-	first := map[string]teamschedule.Assignment{}
-	perDay := map[string]map[string]map[string]bool{} // code -> date -> person
-	tiers := map[string][]string{}
-	for _, a := range support {
-		if _, ok := first[a.ShiftCode]; !ok {
-			first[a.ShiftCode] = a
-			codes = append(codes, a.ShiftCode)
-			perDay[a.ShiftCode] = map[string]map[string]bool{}
-		}
-		if perDay[a.ShiftCode][a.RotaDate] == nil {
-			perDay[a.ShiftCode][a.RotaDate] = map[string]bool{}
-		}
-		perDay[a.ShiftCode][a.RotaDate][strings.ToLower(a.Engineer.UserID+"|"+a.Engineer.Email+"|"+a.Engineer.Name)] = true
-		if a.Tier != "" && !slices.Contains(tiers[a.ShiftCode], a.Tier) {
-			tiers[a.ShiftCode] = append(tiers[a.ShiftCode], a.Tier)
-		}
-	}
-	var defs []notify.RotationDefinition
-	for _, code := range codes {
-		a := first[code]
-		s, e := a.StartsAt.In(cfg.Zone), a.EndsAt.In(cfg.Zone)
-		role := cfg.Support.Family + " support"
-		if t := tiers[code]; len(t) > 0 {
-			slices.Sort(t)
-			role += " (" + strings.Join(t, " → ") + ")"
-		}
-		defs = append(defs, notify.RotationDefinition{
-			Rotation:  cfg.Support.Rotations[code],
-			Members:   memberCount(days, perDay[code]),
-			LocalTime: s.Format("03:04 PM") + " – " + e.Format("03:04 PM") + " " + zoneName(s),
-			UTCWindow: a.StartsAt.UTC().Format("15:04") + " – " + a.EndsAt.UTC().Format("15:04"),
-			Role:      role,
-		})
-	}
-	return defs
-}
-
 // shortName is a rotation's name up to its bracket: "SRE Night (TZ3)" ->
 // "SRE Night".
 func shortName(name string) string {
@@ -355,68 +323,162 @@ func shortName(name string) string {
 	return name
 }
 
-// memberCount says how many people a rotation has: "3 members", or, when the
-// days differ, "Saturday 3, Sunday 2".
-func memberCount(days []time.Time, byDay map[string]map[string]bool) string {
-	var counts []int
-	same := true
-	for i, d := range days {
-		counts = append(counts, len(byDay[d.Format(dateLayout)]))
-		if i > 0 && counts[i] != counts[0] {
-			same = false
+// dayRows is one day's table: a row per window (a shift and its on-call
+// variant), in rota order, named for the shift and told in its hours on its
+// own clock; an on-call person reads "Jay (on-call)". A turn on
+// other hours than its window's row gets a row of its own. Each support turn
+// goes in the row whose hours it overlaps most (the nearest start when none
+// overlaps), grouped there by its rotation.
+func dayRows(cfg Config, d time.Time, rostered, support []teamschedule.Assignment) notify.WeekendRotaDay {
+	day := notify.WeekendRotaDay{Title: d.Format("Monday, 2 January")}
+	date := d.Format(dateLayout)
+	type span struct{ start, end time.Time }
+	var spans []span
+	for _, a := range rostered {
+		if a.RotaDate != date {
+			continue
 		}
-	}
-	if same {
-		if counts[0] == 1 {
-			return "1 member"
+		rotation := cfg.Rotations[baseCode(a.ShiftCode)]
+		if rotation == "" {
+			rotation = cfg.Rotations[a.ShiftCode]
 		}
-		return fmt.Sprintf("%d members", counts[0])
+		hours := hoursOn(a, clockOf(cfg, a.ShiftCode))
+		name := a.Engineer.Name
+		if a.IsOnCall || strings.HasSuffix(a.ShiftCode, "_OC") {
+			name += " (on-call)"
+		}
+		i := slices.IndexFunc(day.Rows, func(r notify.WeekendRotaRow) bool { return r.Rotation == rotation && r.Hours == hours })
+		if i < 0 {
+			day.Rows = append(day.Rows, notify.WeekendRotaRow{Rotation: rotation, Hours: hours})
+			spans = append(spans, span{a.StartsAt, a.EndsAt})
+			i = len(day.Rows) - 1
+		}
+		day.Rows[i].Team = append(day.Rows[i].Team, name)
 	}
-	var parts []string
-	for i, d := range days {
-		parts = append(parts, fmt.Sprintf("%s %d", d.Format("Monday"), counts[i]))
+	for _, a := range support {
+		if a.RotaDate != date {
+			continue
+		}
+		if len(day.Rows) == 0 {
+			day.Rows = append(day.Rows, notify.WeekendRotaRow{})
+			spans = append(spans, span{a.StartsAt, a.EndsAt})
+		}
+		best, bestOverlap, bestGap := 0, time.Duration(-1), time.Duration(0)
+		for i, sp := range spans {
+			overlap := overlapOf(a.StartsAt, a.EndsAt, sp.start, sp.end)
+			gap := a.StartsAt.Sub(sp.start).Abs()
+			if overlap > bestOverlap || (overlap == bestOverlap && gap < bestGap) {
+				best, bestOverlap, bestGap = i, overlap, gap
+			}
+		}
+		name := a.Engineer.Name
+		if a.Tier != "" {
+			name += " (" + a.Tier + ")"
+		}
+		day.Rows[best].Support = addToGroup(day.Rows[best].Support, shortName(cfg.Support.Rotations[a.ShiftCode]), hoursOn(a, cfg.Zone), name)
 	}
-	return strings.Join(parts, ", ")
+	return day
 }
 
-// splitNote asks a general-support team to share a long window as morning
-// and evening shifts: only when it is longer than a working day and every
-// day has more than one person on it. Empty otherwise.
+// overlapOf is how long [s1, e1) and [s2, e2) have in common; 0 for none.
+func overlapOf(s1, e1, s2, e2 time.Time) time.Duration {
+	start, end := s1, e1
+	if s2.After(start) {
+		start = s2
+	}
+	if e2.Before(end) {
+		end = e2
+	}
+	return max(end.Sub(start), 0)
+}
+
+// addToGroup adds name to the group for rotation at hours, or starts that
+// group.
+func addToGroup(groups []notify.WeekendRotaGroup, rotation, hours, name string) []notify.WeekendRotaGroup {
+	for i := range groups {
+		if groups[i].Rotation == rotation && groups[i].Hours == hours {
+			groups[i].People = append(groups[i].People, name)
+			return groups
+		}
+	}
+	return append(groups, notify.WeekendRotaGroup{Rotation: rotation, Hours: hours, People: []string{name}})
+}
+
+// hoursOn is a turn's hours on clock: "06:00 AM – 09:00 PM IST".
+func hoursOn(a teamschedule.Assignment, clock *time.Location) string {
+	s, e := a.StartsAt.In(clock), a.EndsAt.In(clock)
+	return s.Format("03:04 PM") + " – " + e.Format("03:04 PM") + " " + zoneName(s)
+}
+
+// memberCount says how many people a rotation has on the days it is
+// rostered: "3 members", "1 on-call", or, when those days differ, "Saturday
+// 3, Sunday 2 members".
+func memberCount(days []time.Time, byDay map[string]map[string]bool, one, many string) string {
+	var counts []int
+	var parts []string
+	for _, d := range days {
+		n := len(byDay[d.Format(dateLayout)])
+		if n == 0 {
+			continue
+		}
+		counts = append(counts, n)
+		parts = append(parts, fmt.Sprintf("%s %d", d.Format("Monday"), n))
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	if slices.Min(counts) == slices.Max(counts) {
+		if counts[0] == 1 {
+			return "1 " + one
+		}
+		return fmt.Sprintf("%d %s", counts[0], many)
+	}
+	return strings.Join(parts, ", ") + " " + many
+}
+
+// perDayText is one rotation's hours over the days it is rostered: the text
+// once when every day reads the same, else each day's ("Saturday: …; Sunday:
+// …"). A window kept on one clock and told on another reads differently on
+// the two sides of a daylight saving change (31 Oct and 1 Nov 2026).
+func perDayText(byDay map[string]teamschedule.Assignment, text func(teamschedule.Assignment) string) string {
+	dates := make([]string, 0, len(byDay))
+	for d := range byDay {
+		dates = append(dates, d)
+	}
+	slices.Sort(dates)
+	parts := make([]string, 0, len(dates))
+	same := true
+	for i, d := range dates {
+		t := text(byDay[d])
+		if i > 0 && t != text(byDay[dates[0]]) {
+			same = false
+		}
+		day := d
+		if when, err := time.Parse(dateLayout, d); err == nil {
+			day = when.Format("Monday")
+		}
+		parts = append(parts, day+": "+t)
+	}
+	if same && len(dates) > 0 {
+		return text(byDay[dates[0]])
+	}
+	return strings.Join(parts, "; ")
+}
+
+// splitNote asks the people sharing a long general-support window to sync
+// among themselves so it is covered throughout: only when it is longer than
+// a working day and every day has more than one person on it. Empty
+// otherwise.
 func splitNote(days []time.Time, byDay map[string]map[string]bool, window time.Duration) string {
 	if window <= 10*time.Hour {
 		return ""
 	}
-	n := -1
 	for _, d := range days {
-		c := len(byDay[d.Format(dateLayout)])
-		if c < 2 {
+		if len(byDay[d.Format(dateLayout)]) < 2 {
 			return ""
 		}
-		if n == -1 || c == n {
-			n = c
-		} else {
-			n = 0 // differs by day
-		}
 	}
-	who := "the members"
-	if n > 0 {
-		who = fmt.Sprintf("the %d members", n)
-	}
-	return fmt.Sprintf("The %s window is shared: %s can divide the %s into morning and evening shifts, "+
-		"so support is covered from start to end.", hoursOf(window), who, hoursPlural(window))
-}
-
-// hoursPlural writes a window's length as a quantity: "15 hours", "7.5 hours".
-func hoursPlural(d time.Duration) string {
-	return strings.TrimSuffix(hoursOf(d), "-hour") + " hours"
-}
-
-// hoursOf writes a window's length: "15-hour", "7.5-hour".
-func hoursOf(d time.Duration) string {
-	if d%time.Hour == 0 {
-		return fmt.Sprintf("%d-hour", int(d.Hours()))
-	}
-	return fmt.Sprintf("%.1f-hour", d.Hours())
+	return "Please sync internally and ensure coverage throughout the window."
 }
 
 // utcOffset writes t's offset as "+5:30" or "−7".
@@ -677,35 +739,6 @@ func windowText(start, end time.Time, zone *time.Location) string {
 		return fmt.Sprintf("%s–%s %s", s.Format("15:04"), e.Format("15:04"), z)
 	}
 	return fmt.Sprintf("%s %s %s to %s %s %s", s.Format("Monday"), s.Format("15:04"), z, e.Format("Monday"), e.Format("15:04"), z)
-}
-
-// perDayText is one rotation's hours over the days it is rostered: the text
-// once when every day reads the same, else each day's ("Saturday: …; Sunday:
-// …"). A window kept on one clock and told on another reads differently on
-// the two sides of a daylight saving change (31 Oct and 1 Nov 2026).
-func perDayText(byDay map[string]teamschedule.Assignment, text func(teamschedule.Assignment) string) string {
-	dates := make([]string, 0, len(byDay))
-	for d := range byDay {
-		dates = append(dates, d)
-	}
-	slices.Sort(dates)
-	parts := make([]string, 0, len(dates))
-	same := true
-	for i, d := range dates {
-		t := text(byDay[d])
-		if i > 0 && t != text(byDay[dates[0]]) {
-			same = false
-		}
-		day := d
-		if when, err := time.Parse(dateLayout, d); err == nil {
-			day = when.Format("Monday")
-		}
-		parts = append(parts, day+": "+t)
-	}
-	if same && len(dates) > 0 {
-		return text(byDay[dates[0]])
-	}
-	return strings.Join(parts, "; ")
 }
 
 // dateOf is a rota day (YYYY-MM-DD) in zone.

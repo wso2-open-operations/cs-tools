@@ -47,7 +47,7 @@ const draft = { text: "", checked: false, name: "", email: "", map: {} as Record
 describe("caseAlertLadderKeys", () => {
   it("lists each key once, on the ladders the design gives it", () => {
     expect(new Set(LADDER_KEYS.map((k) => k.key)).size).toBe(LADDER_KEYS.length);
-    expect(ladderKeysFor("CRE")).toHaveLength(31);
+    expect(ladderKeysFor("CRE")).toHaveLength(32);
     expect(ladderKeysFor("SRE")).toHaveLength(19);
     expect(ladderKeysFor("SRE").map((k) => k.key)).not.toContain("heads.cre");
     expect(ladderKeysFor("CRE").map((k) => k.key)).not.toContain("timing.interval");
@@ -60,6 +60,7 @@ describe("caseAlertLadderKeys", () => {
     expect(formatLadderValue(spec("trigger.requireKnownTeam"), false)).toBe("No");
     expect(formatLadderValue(spec("alertDuty.perTeam"), 0)).toBe("0 (all of them)");
     expect(formatLadderValue(spec("teams.unassignedTeamLead"), "pool")).toBe("A lead from the pool");
+    expect(formatLadderValue(spec("teams.unassignedLeads"), "shift_leads")).toBe("The shift's leads, then the heads (default)");
     expect(formatLadderValue(spec("teams.rotaMembersToCall"), { LK_EVENING: 7 })).toBe("LK_EVENING=7");
     expect(formatLadderValue(spec("teams.rotaMembersToCall"), {})).toBe("no cap");
     expect(formatLadderValue(spec("heads.cre"), { name: "N", email: "n@x", phone: "+94770000000" })).toBe("N <n@x>");

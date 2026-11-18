@@ -47,11 +47,11 @@ const UserTypeInternal = "internal"
 
 // GetUserMeResponse is entity-service's response for GET /users/me.
 type GetUserMeResponse struct {
-	ID        string   `json:"id"`
-	Email     string   `json:"email"`
-	FirstName *string  `json:"firstName,omitempty"`
-	LastName  string   `json:"lastName"`
-	TimeZone  *string  `json:"timeZone,omitempty"`
+	ID        string  `json:"id"`
+	Email     string  `json:"email"`
+	FirstName *string `json:"firstName,omitempty"`
+	LastName  string  `json:"lastName"`
+	TimeZone  *string `json:"timeZone,omitempty"`
 	// UserType is entity-service's own internal/customer/external/system
 	// classification (see UserTypeInternal). Used by
 	// middleware.CachedRoleResolver.IsInternalWriteBlocked and by
@@ -645,6 +645,9 @@ type UserReference struct {
 	ID    *string `json:"id"`
 	Email string  `json:"email"`
 	Name  string  `json:"name"`
+	// IsInternal is true when entity-service resolved the person to an
+	// INTERNAL-type user (WSO2 staff). Absent means "not known to be internal".
+	IsInternal bool `json:"isInternal,omitempty"`
 }
 
 type UserRef struct {
@@ -708,21 +711,21 @@ type Variable struct {
 // serialized (json:"-") — entity-service derives the creator from its own
 // auth context, not the request body.
 type CreateCaseRequest struct {
-	CreatedBy         string           `json:"-"`
-	Type              string           `json:"type"`
-	ProjectID         string           `json:"projectId"`
-	DeploymentID      string           `json:"deploymentId"`
-	DeployedProductID string           `json:"deployedProductId,omitempty"`
-	Subject           string           `json:"subject"`
-	Description       string           `json:"description"`
-	Severity          string           `json:"severity"`
-	IssueType         string           `json:"issueType"`
-	CatalogID         string           `json:"catalogId,omitempty"`
-	CatalogItemID     string           `json:"catalogItemId,omitempty"`
-	Variables         []Variable       `json:"variables,omitempty"`
-	RelatedCaseID     string           `json:"relatedCaseId,omitempty"`
-	ConversationID    string           `json:"conversationId,omitempty"`
-	WatchList         []string         `json:"watchList,omitempty"`
+	CreatedBy         string     `json:"-"`
+	Type              string     `json:"type"`
+	ProjectID         string     `json:"projectId"`
+	DeploymentID      string     `json:"deploymentId"`
+	DeployedProductID string     `json:"deployedProductId,omitempty"`
+	Subject           string     `json:"subject"`
+	Description       string     `json:"description"`
+	Severity          string     `json:"severity"`
+	IssueType         string     `json:"issueType"`
+	CatalogID         string     `json:"catalogId,omitempty"`
+	CatalogItemID     string     `json:"catalogItemId,omitempty"`
+	Variables         []Variable `json:"variables,omitempty"`
+	RelatedCaseID     string     `json:"relatedCaseId,omitempty"`
+	ConversationID    string     `json:"conversationId,omitempty"`
+	WatchList         []string   `json:"watchList,omitempty"`
 	// AttachmentIDs: draft files uploaded to ProjectID before this request;
 	// entity-service validates and links them (required for a security report).
 	AttachmentIDs []string `json:"attachmentIds,omitempty"`

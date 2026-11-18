@@ -87,10 +87,11 @@ type ACPReopen struct {
 	// copies ACP's suspension: the same fields, the same dispatcher. nil in
 	// every other mode.
 	Mirror func(ctx context.Context, projectID string, req domain.ProjectUpdateRequest)
-	// InternalDomain is the address domain the notice may go to ("@wso2.com"
-	// when empty): it is an internal notice, and the technical owner
-	// recorded in Salesforce is sometimes a customer's person.
-	InternalDomain string
+	// InternalDomains are the address domains the notice may go to
+	// (ACP_INTERNAL_EMAIL_DOMAINS; "@wso2.com" when empty): it is an
+	// internal notice, and the technical owner recorded in Salesforce is
+	// sometimes a customer's person.
+	InternalDomains []string
 	// DryRun decides and logs what it would do, and writes nothing
 	// (CSM_ACP_REOPEN_DRY_RUN, default true).
 	DryRun bool
@@ -601,7 +602,7 @@ func (a *ACPReopen) notice(ctx context.Context, p domain.ACPReopenProject, sp sa
 		slog.InfoContext(ctx, "acp reopen: no event publisher, no reactivation email", "projectId", p.ID)
 		return nil, nil
 	}
-	payload := buildProjectReactivatedPayload(p, sp, c, w, now, a.internalDomain())
+	payload := buildProjectReactivatedPayload(p, sp, c, w, now, a.internalDomains())
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -609,11 +610,17 @@ func (a *ACPReopen) notice(ctx context.Context, p domain.ACPReopenProject, sp sa
 	return raw, nil
 }
 
-func (a *ACPReopen) internalDomain() string {
-	if d := strings.TrimSpace(a.InternalDomain); d != "" {
-		return strings.ToLower(d)
+func (a *ACPReopen) internalDomains() []string {
+	var out []string
+	for _, d := range a.InternalDomains {
+		if d = strings.ToLower(strings.TrimSpace(d)); d != "" {
+			out = append(out, d)
+		}
 	}
-	return wso2EmailDomain
+	if len(out) == 0 {
+		return []string{wso2EmailDomain}
+	}
+	return out
 }
 
 // acpCheckDefaultLimit and acpCheckMaxLimit bound one page of the daily
@@ -767,10 +774,10 @@ func acpParseInvoice(inv salesentity.Invoice, eula float64) (acpInvoice, bool) {
 // project and account as they were read before the reopen; the name falls
 // back to CSM's. The name is kept as it is, "[S]" included, as the legacy
 // email showed it: Salesforce removes the marker after the reopen. Only
-// well-formed addresses in internalDomain are kept as recipients: it is an
+// well-formed addresses in one of internalDomains are kept as recipients: it is an
 // internal notice, and the notification service rejects the whole event for
 // one bad address.
-func buildProjectReactivatedPayload(p domain.ACPReopenProject, sp salesentity.Project, c *salesentity.Customer, w domain.ACPReopenWrite, now time.Time, internalDomain string) events.ProjectReactivatedPayload {
+func buildProjectReactivatedPayload(p domain.ACPReopenProject, sp salesentity.Project, c *salesentity.Customer, w domain.ACPReopenWrite, now time.Time, internalDomains []string) events.ProjectReactivatedPayload {
 	name := strings.TrimSpace(derefString(sp.Name))
 	if name == "" {
 		name = p.Name
@@ -804,13 +811,13 @@ func buildProjectReactivatedPayload(p domain.ACPReopenProject, sp salesentity.Pr
 	}
 	if c.Owner != nil {
 		payload.AccountOwnerName = strings.TrimSpace(derefString(c.Owner.Name))
-		if e, ok := acpInternalAddress(derefString(c.Owner.Email), internalDomain); ok {
+		if e, ok := acpInternalAddress(derefString(c.Owner.Email), internalDomains); ok {
 			payload.AccountOwnerEmail = e
 		}
 	}
 	seen := map[string]bool{}
 	add := func(email *string) {
-		e, ok := acpInternalAddress(derefString(email), internalDomain)
+		e, ok := acpInternalAddress(derefString(email), internalDomains)
 		if !ok || seen[strings.ToLower(e)] {
 			return
 		}
@@ -837,8 +844,8 @@ func acpDateOnly(v *string) string {
 }
 
 // acpInternalAddress returns the address when it is a plain, well-formed
-// address in domain (case-insensitive), and false otherwise.
-func acpInternalAddress(raw, domain string) (string, bool) {
+// address in one of domains (case-insensitive), and false otherwise.
+func acpInternalAddress(raw string, domains []string) (string, bool) {
 	e := strings.TrimSpace(raw)
 	if e == "" {
 		return "", false
@@ -847,8 +854,11 @@ func acpInternalAddress(raw, domain string) (string, bool) {
 	if err != nil || addr.Name != "" || addr.Address != e {
 		return "", false
 	}
-	if domain == "" || !strings.HasSuffix(strings.ToLower(e), strings.ToLower(domain)) {
-		return "", false
+	lower := strings.ToLower(e)
+	for _, d := range domains {
+		if d != "" && strings.HasSuffix(lower, strings.ToLower(d)) {
+			return e, true
+		}
 	}
-	return e, true
+	return "", false
 }

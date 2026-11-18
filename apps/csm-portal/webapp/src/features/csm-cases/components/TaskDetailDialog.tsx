@@ -45,6 +45,7 @@ import {
 } from "@features/csm-users/types/csmUsers";
 import { taskStateColor, taskStateLabel } from "@features/csm-cases/utils/taskState";
 import { formatAbsoluteForUser } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 interface TaskDetailDialogProps {
   taskId: string;
@@ -61,7 +62,7 @@ interface TaskDetailDialogProps {
 const EDITABLE_TASK_STATES: Array<"OPEN" | "CLOSED"> = ["OPEN", "CLOSED"];
 
 function initialsOf(name: string): string {
-  return name
+  return stripStaffNameMarker(name)
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -70,7 +71,7 @@ function initialsOf(name: string): string {
 }
 
 function fullName(u: NormalizedUser): string {
-  return u.name.trim() || u.userName;
+  return stripStaffNameMarker(u.name.trim() || u.userName);
 }
 
 function DetailCell({

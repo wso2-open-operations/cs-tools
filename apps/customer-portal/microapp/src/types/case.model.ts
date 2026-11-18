@@ -46,6 +46,8 @@ export interface Comment {
   content: string;
   createdOn: Date;
   createdBy: string;
+  /** Written by a support engineer (an internal user), as the backend resolved the author. */
+  createdByIsInternal: boolean;
   attachments: Attachment[];
 }
 

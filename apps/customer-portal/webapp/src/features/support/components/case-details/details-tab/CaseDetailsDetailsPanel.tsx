@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { NESTED_LIST_SX } from "@components/rich-text-editor/nestedListSx";
 import type { CaseDetailsDetailsPanelProps } from "@features/support/types/supportComponents";
 import {
   Autocomplete,
@@ -59,6 +60,7 @@ import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDispl
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import CaseEscalationLevelsCard from "@case-details-details/CaseEscalationLevelsCard";
 import ApiErrorState from "@components/error/ApiErrorState";
+import { joinStaffName } from "@utils/staffNameMarker";
 import {
   formatValue,
   formatUtcToLocalNoTimezone,
@@ -109,7 +111,7 @@ export default function CaseDetailsDetailsPanel({
       (contactsData ?? [])
         .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
         .map((c) => ({
-          label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+          label: joinStaffName(c.firstName, c.lastName) || c.email,
           value: c.email,
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
@@ -469,8 +471,7 @@ export default function CaseDetailsDetailsPanel({
                 color: "text.primary",
                 "& p": { mb: 0.5 },
                 "& p:last-child": { mb: 0 },
-                // Lexical wrapper <li> that only holds a sub-list: no marker (else an empty bullet).
-                "& li.editor-list-item-nested": { listStyleType: "none" },
+                ...NESTED_LIST_SX,
                 "& code": {
                   display: "block",
                   p: 1,

@@ -74,6 +74,7 @@ type ProjectColumnId =
   | "endDate"
   | "onboardingStatus"
   | "onboardingOwner"
+  | "region"
   | "goLivePlanDate"
   | "goLiveDate"
   | "onboardingExpiryDate"
@@ -87,6 +88,7 @@ const PROJECT_COLUMNS: { id: ProjectColumnId; label: string }[] = [
   { id: "endDate", label: "End" },
   { id: "onboardingStatus", label: "Onboarding status" },
   { id: "onboardingOwner", label: "Onboarding owner" },
+  { id: "region", label: "Region" },
   { id: "goLivePlanDate", label: "Go-live plan date" },
   { id: "goLiveDate", label: "Go-live date" },
   { id: "onboardingExpiryDate", label: "Onboarding expiry date" },
@@ -136,6 +138,9 @@ function renderProjectCell(id: ProjectColumnId, p: Project): ReactNode {
       return formatOnboardingDate(p.onboardingExpiryDate);
     case "productionReadinessCompletionDate":
       return formatOnboardingDate(p.productionReadinessCompletionDate);
+    case "region":
+      // The project's account's region; not every account has one.
+      return p.account?.region || "—";
     case "onboardingStatus":
       return <ProjectOnboardingStatusChip onboardingStatus={p.onboardingStatus} emptyFallback="—" />;
     case "onboardingOwner":

@@ -17,16 +17,11 @@
 import { useEffect } from "react";
 import { STRING_OVERRIDES } from "../components/features/support/config";
 import { matchPath, useLocation } from "react-router-dom";
+import { nameInitials } from "./staffNameMarker";
 import { SCROLL_OVERRIDES } from "../components/layout/config";
 import { LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY } from "../config/constants";
 
-export const stringAvatar = (name: string) => {
-  if (!name) return "";
-  const parts = name.trim().split(/\s+/);
-
-  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-  return `${parts[0].charAt(0) + parts[parts.length - 1].charAt(0)}`.toUpperCase();
-};
+export const stringAvatar = nameInitials;
 
 export function capitalize(text: string): string {
   if (!text) return text;

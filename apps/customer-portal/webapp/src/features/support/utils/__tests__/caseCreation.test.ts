@@ -25,6 +25,7 @@ import {
   shouldAddClassificationProductToOptions,
   getBaseProductOptions,
   filterDeploymentProductsByCategory,
+  isServiceRequestProduct,
   isUnknownPlaceholderProductLabel,
   getBaseDeploymentOptions,
   formatChatHistoryForClassification,
@@ -481,6 +482,50 @@ describe("caseCreation utils", () => {
       expect(filterDeploymentProductsByCategory(products, ["ps"])).toEqual(
         [],
       );
+    });
+  });
+
+  describe("isServiceRequestProduct", () => {
+    const item = (
+      overrides: Partial<DeploymentProductItem>,
+    ): DeploymentProductItem => ({
+      id: "1",
+      createdOn: "",
+      updatedOn: "",
+      description: null,
+      product: { id: "p1", label: "WSO2 API Manager" },
+      deployment: { id: "d1", label: "Dev" },
+      category: "ms",
+      ...overrides,
+    });
+
+    it("accepts a named product in an allowed category", () => {
+      expect(isServiceRequestProduct(item({}), ["ms", "pc"])).toBe(true);
+    });
+
+    it("accepts any category, and none, when the project requires none", () => {
+      expect(isServiceRequestProduct(item({ category: "cl" }), undefined)).toBe(
+        true,
+      );
+      expect(isServiceRequestProduct(item({ category: null }), [])).toBe(true);
+    });
+
+    it("rejects a product outside the allowed categories, or with none", () => {
+      expect(isServiceRequestProduct(item({ category: "cl" }), ["ms"])).toBe(
+        false,
+      );
+      expect(isServiceRequestProduct(item({ category: null }), ["ms"])).toBe(
+        false,
+      );
+    });
+
+    it("rejects a product with no name to show", () => {
+      expect(
+        isServiceRequestProduct(
+          item({ product: { id: "p1", label: "Unknown" } }),
+          undefined,
+        ),
+      ).toBe(false);
     });
   });
 

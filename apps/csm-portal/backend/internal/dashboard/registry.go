@@ -775,6 +775,7 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	ResourceCaseFeedback:    true,
 	ResourcePlgOrganization: true,
 	ResourcePlgRegistration: true,
+	ResourceMTTR:            true,
 }
 
 var validWidgetShapes = map[Shape]bool{
@@ -962,6 +963,8 @@ var validGroupByBuckets = map[string]bool{
 	"day": true, "week": true, "month": true, "rating": true,
 	"reasons_very_dissatisfied": true, "reasons_dissatisfied": true, "reasons_neutral": true,
 	"reasons_satisfied": true, "reasons_very_satisfied": true,
+	// mttr's one fixed bucket -- see ResourceMTTR's own resourceRules entry.
+	"severity": true,
 }
 
 // validDistinctByFields is the legal values of DistinctByConfig.Field -- the
@@ -1009,6 +1012,40 @@ func validateWidgets(d Dashboard, source string) error {
 			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"shape\" %q; expected one of %q, %q, %q, %q, %q",
 				source, d.ID, w.ID, w.Shape, ShapeCount, ShapeList, ShapePie, ShapeBar, ShapeLine)
 		}
+		// mttr is bar-only, groupBy.bucket "severity" only, and never slices,
+		// in hand-authored dashboard definitions too -- not just the
+		// generated path's own ResourceMTTR rule (shapes/buckets/noSlices in
+		// generated_resources.go). Its six bands overlap (S1-S4/S1-S3 are
+		// sums of the individual ones), so they can never be a pie's
+		// wedges-of-one-whole or a per-slice filter's own isolated query, and
+		// the report is always grouped server-side by that one fixed bucket,
+		// never a field. This check is this file's own resourceType-agnostic
+		// validateWidgets, which generatedResourceRules is never consulted
+		// from.
+		if w.ResourceType == ResourceMTTR {
+			if w.Shape != ShapeBar && w.Shape != ShapeCount {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q only supports shapes %q and %q, not %q",
+					source, d.ID, w.ID, ResourceMTTR, ShapeBar, ShapeCount, w.Shape)
+			}
+			if len(w.Slices) > 0 {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q has no \"slices\"; group with \"groupBy.bucket\"",
+					source, d.ID, w.ID, ResourceMTTR)
+			}
+			if w.Shape == ShapeCount && w.GroupBy != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: an %q count shows one band and takes no \"groupBy\"",
+					source, d.ID, w.ID, ResourceMTTR)
+			}
+			if w.Shape == ShapeCount {
+				if b, ok := w.Query["bands"].([]any); !ok || len(b) != 1 {
+					return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: an %q count shows one band, so \"bands\" must name exactly one",
+						source, d.ID, w.ID, ResourceMTTR)
+				}
+			}
+			if w.Shape == ShapeBar && (w.GroupBy == nil || w.GroupBy.Bucket != "severity") {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q groups only by \"groupBy.bucket\" \"severity\"",
+					source, d.ID, w.ID, ResourceMTTR)
+			}
+		}
 		if w.GridWidth < 1 || w.GridWidth > 12 {
 			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"gridWidth\" is %d; it is a column count out of 12 and must be between 1 and 12",
 				source, d.ID, w.ID, w.GridWidth)
@@ -1032,7 +1069,7 @@ func validateWidgets(d Dashboard, source string) error {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"groupBy.field\" is empty",
 					source, d.ID, w.ID)
 			case hasBucket && !validGroupByBuckets[w.GroupBy.Bucket]:
-				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"groupBy.bucket\" %q; expected one of \"day\", \"week\", \"month\" (time buckets), \"rating\", \"reasons_very_dissatisfied\", \"reasons_dissatisfied\", \"reasons_neutral\", \"reasons_satisfied\", \"reasons_very_satisfied\" (categorical buckets)",
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"groupBy.bucket\" %q; expected one of \"day\", \"week\", \"month\" (time buckets), \"rating\", \"reasons_very_dissatisfied\", \"reasons_dissatisfied\", \"reasons_neutral\", \"reasons_satisfied\", \"reasons_very_satisfied\" (categorical buckets), \"severity\" (mttr)",
 					source, d.ID, w.ID, w.GroupBy.Bucket)
 			}
 			if w.GroupBy.LinkResourceType != "" {

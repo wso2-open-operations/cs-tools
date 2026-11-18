@@ -20,7 +20,7 @@ import {
   HighContrastTheme,
   ClassicTheme,
 } from "@wso2/oxygen-ui";
-import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 
 // Themes configuration.
 const themes: Record<string, OxygenTheme> = {

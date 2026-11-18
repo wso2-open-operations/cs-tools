@@ -15,6 +15,7 @@
 // under the License.
 
 import type { UserMeDto } from "./user.dto";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 export interface UserProfile {
   id: string | null;
@@ -31,7 +32,7 @@ export function toUserProfile(dto: UserMeDto): UserProfile {
   return {
     id: dto.id ?? null,
     email: dto.email,
-    fullName: [dto.firstName, dto.lastName].filter(Boolean).join(" ").trim() || dto.email,
+    fullName: joinStaffName(dto.firstName, dto.lastName) || dto.email,
     phoneNumber: dto.phoneNumber ?? null,
     timeZone: dto.timeZone ?? null,
     roles: dto.roles ?? [],

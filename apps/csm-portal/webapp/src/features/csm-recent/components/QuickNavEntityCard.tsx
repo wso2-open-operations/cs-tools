@@ -17,6 +17,7 @@
 import { Chip, Form, Stack, Typography } from "@wso2/oxygen-ui";
 import { User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 interface QuickNavEntityCardProps {
   /** Kind icon (incident/change-request/problem) — see `kindMeta.tsx`. */
@@ -108,7 +109,7 @@ export default function QuickNavEntityCard({
         <Stack direction="row" spacing={0.5} alignItems="center">
           <User size={13} />
           <Typography variant="caption" color="text.secondary">
-            Assigned to {assigneeName}
+            Assigned to {stripStaffNameMarker(assigneeName)}
           </Typography>
         </Stack>
       )}

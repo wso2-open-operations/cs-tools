@@ -337,6 +337,7 @@ func upsertAccountFromSalesforce(ctx context.Context, q querier, row domain.Sale
 		row.AccountVertical, row.LostReasonCategory, row.DeactivationDate,
 		row.PrimaryPartnerSfID,
 		row.KeepExistingPhone,
+		row.KeepCustomerSuccessManager, row.KeepSecondaryTechnicalOwner, row.KeepRenewalAccountManager,
 	}
 	_, n, err := updateOneBySfID(ctx, q, updateAccountBySfIDQuery, "account", row.SfID, args...)
 	if err != nil {
@@ -379,14 +380,16 @@ func lockAccountSfID(ctx context.Context, q querier, sfID string) error {
 
 // updateAccountFromSalesforceQuery is completed with a WHERE clause by
 // upsertAccountFromSalesforce; its parameters match
-// insertAccountFromSalesforceQuery plus $32 (keep the existing phone).
+// insertAccountFromSalesforceQuery plus $32 (keep the existing phone) and
+// $33-$35 (keep the stored customer success manager, secondary technical
+// owner, renewal manager).
 //
-// $25-$30 are the SE-1 columns (customer success manager, secondary
-// technical owner, renewal manager, account vertical, lost reason category,
-// deactivation date). Sales Entity does not send them yet, so they are
-// COALESCEd with the stored value rather than assigned: a NULL keeps what the
-// ServiceNow sync loaded. Switch them to plain assignment once SE-1 is
-// deployed, so a value cleared in Salesforce clears here too.
+// $25-$30 (customer success manager, secondary technical owner, renewal
+// manager, account vertical, lost reason category, deactivation date) are
+// plain assignments like the rest: Sales Entity sends them, so a value cleared
+// in Salesforce (NULL) clears the column. The exception is the three person
+// columns: an email CSM cannot resolve to a user also arrives as NULL, so the
+// service sets $33-$35 and the stored value is kept; only an empty email clears.
 //
 // number keeps its stored value: it is NOT NULL, so the COALESCE always
 // picks account.number (ServiceNow's "ACC" auto-number, or the Salesforce Id
@@ -418,12 +421,12 @@ const updateAccountFromSalesforceQuery = `
 		activation_date = $22,
 		lost_date = $23,
 		lost_reason = $24,
-		customer_success_manager_id = COALESCE($25, account.customer_success_manager_id),
-		secondary_technical_owner_id = COALESCE($26, account.secondary_technical_owner_id),
-		renewal_account_manager_id = COALESCE($27, account.renewal_account_manager_id),
-		account_vertical = COALESCE($28, account.account_vertical),
-		lost_reason_category = COALESCE($29, account.lost_reason_category),
-		deactivation_date = COALESCE($30, account.deactivation_date),
+		customer_success_manager_id = CASE WHEN $33::boolean THEN account.customer_success_manager_id ELSE $25 END,
+		secondary_technical_owner_id = CASE WHEN $34::boolean THEN account.secondary_technical_owner_id ELSE $26 END,
+		renewal_account_manager_id = CASE WHEN $35::boolean THEN account.renewal_account_manager_id ELSE $27 END,
+		account_vertical = $28,
+		lost_reason_category = $29,
+		deactivation_date = $30,
 		primary_partner_sf_id = $31,
 		deleted_on = NULL,
 		updated_on = now(),

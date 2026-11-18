@@ -96,9 +96,10 @@ type ScheduleRepository interface {
 	DeleteAbsence(ctx context.Context, id, actorEmail string, note *string) error
 	// DeleteAbsenceKind removes a kind a lead added. The catalogue's own kinds
 	// are refused, and so is one still in use. With allowedFamilies, only a
-	// kind of one of those families may go: a shared kind (no family) or
-	// another family's is refused.
-	DeleteAbsenceKind(ctx context.Context, code, actorEmail string, allowedFamilies []string) error
+	// kind of one of those families may go, plus a shared kind (no family)
+	// when allowShared; another family's is refused. Nil allowedFamilies
+	// allows any custom kind.
+	DeleteAbsenceKind(ctx context.Context, code, actorEmail string, allowedFamilies []string, allowShared bool) error
 	// CreateAbsenceKind adds a kind to the catalogue under the given code: for
 	// one family when family is set, else shared by all. A code already taken
 	// is a ConflictError.
@@ -2388,7 +2389,7 @@ func (r *scheduleRepository) DeleteAbsence(ctx context.Context, id, actorEmail s
 // many absences use it, rather than retired quietly: a retired kind drops out
 // of the catalogue, and the absences marked with it would lose their label
 // and colour on every page that draws them.
-func (r *scheduleRepository) DeleteAbsenceKind(ctx context.Context, code, actorEmail string, allowedFamilies []string) error {
+func (r *scheduleRepository) DeleteAbsenceKind(ctx context.Context, code, actorEmail string, allowedFamilies []string, allowShared bool) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin delete absence kind: %w", err)
@@ -2414,8 +2415,13 @@ func (r *scheduleRepository) DeleteAbsenceKind(ctx context.Context, code, actorE
 	if builtIn {
 		return &apierror.ForbiddenError{Msg: "a built-in tag cannot be deleted; only tags added from the portal can"}
 	}
-	if allowedFamilies != nil && (family == nil || !hasFold(allowedFamilies, *family)) {
-		return &apierror.ForbiddenError{Msg: "you can only delete your own family's tags; this tag is shared or another family's"}
+	if allowedFamilies != nil {
+		switch {
+		case family == nil && !allowShared:
+			return &apierror.ForbiddenError{Msg: "this tag is shared by every family; only a rota admin or a portal admin can delete it"}
+		case family != nil && !hasFold(allowedFamilies, *family):
+			return &apierror.ForbiddenError{Msg: fmt.Sprintf("this tag is %s's; you can only delete your own family's tags", *family)}
+		}
 	}
 	var inUse int
 	if err := tx.QueryRow(ctx,

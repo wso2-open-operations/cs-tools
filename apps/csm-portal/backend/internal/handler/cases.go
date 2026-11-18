@@ -265,41 +265,42 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 	return action, true
 }
 
-// callerIsCaseTeamLead reports whether the caller is one of the case's ABT
-// team leads (entity-service's teamLeads: team_member role 'lead' on the
-// account's CRE team) -- the only people authorized to de-escalate it. Being
-// the lead is sufficient: no escalation-capable portal role is needed, and
-// holding one (PermEscalate) does not substitute for it. Escalating is the
-// reverse: it needs PermEscalate and ignores team leadership.
+// deescalationStanding reports how the caller stands to de-escalate the case:
+// isLead is true when they are one of its ABT team leads (entity-service's
+// teamLeads: team_member role 'lead' on the account's CRE team), isNamed when
+// an admin named them as allowed to de-escalate any case (entity-service's
+// deescalators, set in Settings > User management > Escalation access).
 //
-// Fails closed (returns false) on any lookup/parse error or when the case's
-// team has no lead. Matches by the caller's platform user id first (GET
-// /users/me's own id against a lead's id, both platform UUIDs), falling back
-// to a case-insensitive email match when either id is empty.
-func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user *middleware.UserInfo) bool {
+// Fails closed (false, false) on any lookup/parse error or when neither list
+// holds anyone. Matches by the caller's platform user id first (GET
+// /users/me's own id against a listed person's id, both platform UUIDs),
+// falling back to a case-insensitive email match when either id is empty.
+func (h *CaseHandler) deescalationStanding(r *http.Request, caseID string, user *middleware.UserInfo) (isLead, isNamed bool) {
 	raw, err := h.entity.SearchCaseEscalations(r.Context(), caseID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
-		return false
+		return false, false
+	}
+	type person struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
 	}
 	var history struct {
-		TeamLeads []struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-		} `json:"teamLeads"`
+		TeamLeads    []person `json:"teamLeads"`
+		Deescalators []person `json:"deescalators"`
 	}
 	if err := json.Unmarshal(raw, &history); err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations: parse response failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
-		return false
+		return false, false
 	}
-	if len(history.TeamLeads) == 0 {
-		return false
+	if len(history.TeamLeads) == 0 && len(history.Deescalators) == 0 {
+		return false, false
 	}
 
 	callerRaw, err := h.entity.GetUserMe(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetUserMe failed while checking de-escalation authorization", "userID", user.UserID, "err", err)
-		return false
+		return false, false
 	}
 	var caller struct {
 		ID    string `json:"id"`
@@ -307,24 +308,34 @@ func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user 
 	}
 	if err := json.Unmarshal(callerRaw, &caller); err != nil {
 		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed while checking de-escalation authorization", "userID", user.UserID, "err", err)
-		return false
+		return false, false
 	}
 
-	for _, lead := range history.TeamLeads {
-		if caller.ID != "" && lead.ID != "" && caller.ID == lead.ID {
+	same := func(p person) bool {
+		if caller.ID != "" && p.ID != "" && caller.ID == p.ID {
 			return true
 		}
 		// Only fall back to email when an id is unavailable on either side --
 		// two different platform users must never be treated as the same
 		// person just because both ids happen to be missing and their emails
 		// happen to match by coincidence or staleness on one side.
-		if (caller.ID == "" || lead.ID == "") &&
-			caller.Email != "" && lead.Email != "" &&
-			strings.EqualFold(caller.Email, lead.Email) {
-			return true
+		return (caller.ID == "" || p.ID == "") &&
+			caller.Email != "" && p.Email != "" &&
+			strings.EqualFold(caller.Email, p.Email)
+	}
+	for _, p := range history.TeamLeads {
+		if same(p) {
+			isLead = true
+			break
 		}
 	}
-	return false
+	for _, p := range history.Deescalators {
+		if same(p) {
+			isNamed = true
+			break
+		}
+	}
+	return isLead, isNamed
 }
 
 // maxRequestBodyBytes caps incoming request bodies at 1 MiB to prevent memory DoS.
@@ -1320,13 +1331,23 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		MostLikelyFixEta   *string `json:"mostLikelyFixEta"`
 		WorstCaseFixEta    *string `json:"worstCaseFixEta"`
 	}
-	patchErr := json.Unmarshal(body, &patch)
+	// Fails closed, not just silently forwarded as-is: a body this handler's
+	// own narrow peek can't decode (e.g. a field present here with the wrong
+	// JSON type) must never reach sanitizeAdminReopenAttrs with adminReopen
+	// still trusted off whatever the client sent -- skipping validation
+	// here would also skip stripping it. json.Valid above only proves the
+	// body is syntactically valid JSON, not that it decodes into this shape.
+	if err := json.Unmarshal(body, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
 	// previousCaseState is the case's state immediately before this PATCH,
-	// read below purely for transition validation; recordPendingVerificationEntry
+	// read below for transition validation; recordPendingVerificationEntry
 	// (closing branch, below) reuses it so closing a case doesn't need a
 	// second GetCase round trip just to know what state it's leaving.
 	var previousCaseState string
-	if patchErr == nil && (patch.State != nil || patch.WorkState != nil) {
+	isAdminReopen := false
+	if patch.State != nil || patch.WorkState != nil {
 		current, err := h.entity.GetCase(r.Context(), caseID)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "entity GetCase failed during state validation", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -1342,7 +1363,19 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		previousCaseState = currentCase.State
-		if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
+		// Closed is terminal for the normal state machine (nextStates(closed)
+		// is empty) -- the one exception is a portal admin, who may move a
+		// closed case to any other state. Checked here, not left to
+		// entity-service's own AdminReopen bypass alone, since that bypass
+		// trusts whatever this handler decides and forwards.
+		if patch.State != nil && currentCase.State == caseStateClosed && *patch.State != caseStateClosed {
+			if !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
+				slog.WarnContext(r.Context(), "access denied: non-admin attempted to reopen a closed case", "userID", user.UserID, "caseID", caseID)
+				writeError(w, http.StatusForbidden, ErrMsgForbidden)
+				return
+			}
+			isAdminReopen = true
+		} else if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
 			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
 			return
 		}
@@ -1354,6 +1387,16 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		// holds PermWrite (route-level; cs_engineer or admin), and every such
 		// caller may close any case, assigned to them or not.
 	}
+
+	// adminReopen/reopenReason are never trusted verbatim from the client --
+	// see sanitizeAdminReopenAttrs's own doc comment.
+	sanitized, err := sanitizeAdminReopenAttrs(body, isAdminReopen)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to sanitize adminReopen attributes", "userID", user.UserID, "caseID", caseID, "err", err)
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+	body = sanitized
 
 	result, err := h.entity.PatchCase(r.Context(), caseID, body)
 	if err != nil {
@@ -1378,7 +1421,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	// cancellation, which fires as soon as the handler returns — a bare
 	// context.Background() would drop those values and the note would reach the
 	// entity service unattributed.
-	if patchErr == nil && patch.AutocloseHoldUntil != nil {
+	if patch.AutocloseHoldUntil != nil {
 		holdUntil := *patch.AutocloseHoldUntil
 		detached := context.WithoutCancel(r.Context())
 		go func() {
@@ -1400,7 +1443,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	// write must not delay the response or fail the request if it errors, and
 	// context.WithoutCancel keeps the request-scoped values the entity client
 	// needs while detaching from the request's own cancellation.
-	if patchErr == nil && (patch.BestCaseFixEta != nil || patch.MostLikelyFixEta != nil || patch.WorstCaseFixEta != nil) {
+	if patch.BestCaseFixEta != nil || patch.MostLikelyFixEta != nil || patch.WorstCaseFixEta != nil {
 		fieldsPatched := fixEtaFieldsPatched{
 			best:       patch.BestCaseFixEta != nil,
 			mostLikely: patch.MostLikelyFixEta != nil,
@@ -1432,7 +1475,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	// Pending Verification is simply disabled for this project (entity-service
 	// 403s) or the case already has an unverified entry from an earlier round
 	// (409).
-	if patchErr == nil && patch.State != nil && *patch.State == caseStateClosed {
+	if patch.State != nil && *patch.State == caseStateClosed {
 		detached := context.WithoutCancel(r.Context())
 		go func() {
 			ctx, cancel := context.WithTimeout(detached, 15*time.Second)
@@ -1695,19 +1738,22 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// The route only requires PermView; the rule that depends on the body's
-	// action is enforced here. ESCALATE needs PermEscalate (a nil guard
-	// denies). DEESCALATE needs the caller to be one of the case's team
-	// leads and nothing else: a lead with no escalation role passes, a
-	// non-lead holding PermEscalate does not.
-	if action == "DEESCALATE" {
-		if !h.callerIsCaseTeamLead(r, caseID, user) {
+	// This route is registered at the base viewing permission (PermView), not
+	// PermEscalate, because somebody an admin named as allowed to de-escalate
+	// needs no escalation role. Escalating, and a team lead's de-escalation,
+	// still need PermEscalate, checked here; a nil guard fails closed.
+	holdsEscalate := h.access != nil && h.access.Permits(PermEscalate, user.Roles)
+	if action != "DEESCALATE" {
+		if !holdsEscalate {
 			writeError(w, http.StatusForbidden, ErrMsgForbidden)
 			return
 		}
-	} else if h.access == nil || !h.access.Permits(PermEscalate, user.Roles) {
-		writeError(w, http.StatusForbidden, ErrMsgForbidden)
-		return
+	} else {
+		isLead, isNamed := h.deescalationStanding(r, caseID, user)
+		if !isNamed && !(isLead && holdsEscalate) {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
 	}
 
 	// A caller reaching this point may have no "user" row yet: a team lead

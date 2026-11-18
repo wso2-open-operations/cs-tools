@@ -225,6 +225,9 @@ export interface CaseCommentAuthorDto {
   id: string | null;
   email: string;
   name: string;
+  /** True when entity-service resolved the author to an internal (WSO2 staff) user. Absent means
+   * "not known to be internal", never "known external". */
+  isInternal?: boolean;
 }
 
 export interface CaseCommentDto {

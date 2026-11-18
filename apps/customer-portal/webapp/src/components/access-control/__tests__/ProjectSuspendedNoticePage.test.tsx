@@ -56,4 +56,44 @@ describe("ProjectSuspendedNoticePage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Payment overdue/)).toBeInTheDocument();
   });
+
+  it("names WSO2 and its billing address when nothing is configured", () => {
+    render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
+    expect(screen.getByText(/contact your WSO2 Account\s+Manager/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "billing@wso2.com" })).toHaveAttribute("href", "mailto:billing@wso2.com");
+  });
+
+  it("names the configured company and billing address", () => {
+    const originalConfig = window.config;
+    window.config = {
+      ...originalConfig,
+      CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp",
+      CUSTOMER_PORTAL_BILLING_EMAIL: "billing@acme.example",
+    };
+    try {
+      render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
+      expect(screen.getByText(/contact your Acme Corp Account\s+Manager/)).toBeInTheDocument();
+      expect(screen.queryByText(/WSO2 Account/)).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "billing@acme.example" })).toHaveAttribute(
+        "href",
+        "mailto:billing@acme.example",
+      );
+    } finally {
+      window.config = originalConfig;
+    }
+  });
+
+  it("encodes a # in the billing link but shows the address unchanged", () => {
+    const originalConfig = window.config;
+    window.config = { ...originalConfig, CUSTOMER_PORTAL_BILLING_EMAIL: "billing#accounts@acme.example" };
+    try {
+      render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
+      expect(screen.getByRole("link", { name: "billing#accounts@acme.example" })).toHaveAttribute(
+        "href",
+        "mailto:billing%23accounts@acme.example",
+      );
+    } finally {
+      window.config = originalConfig;
+    }
+  });
 });

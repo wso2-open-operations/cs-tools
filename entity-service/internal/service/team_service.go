@@ -48,6 +48,13 @@ type TeamService interface {
 	// legitimate use for -- same reasoning as NewSLAStatusService's own doc
 	// comment.
 	ListChatWebhooks(ctx context.Context) (domain.ListTeamChatWebhooksResponse, error)
+	// ListGroupEmails returns every team's own configured notification
+	// mailbox (team.group_email, migration 0117), keyed by team.key --
+	// internal-caller-only, same reasoning as ListChatWebhooks: reference
+	// data for a backend service (csm-notification-service's SLA breach
+	// engine, which looks up a specific team's email by key, e.g.
+	// "americas_cre_team"), not something a portal caller needs.
+	ListGroupEmails(ctx context.Context) (domain.ListTeamGroupEmailsResponse, error)
 	// GetTeam returns one team's own id/name/type plus its configured Chat
 	// webhook URL (nil when unset) -- internal-caller-only, same reasoning
 	// as ListChatWebhooks: the webhook URL is a bearer credential, so this
@@ -149,6 +156,17 @@ func (s *teamService) ListChatWebhooks(ctx context.Context) (domain.ListTeamChat
 		return domain.ListTeamChatWebhooksResponse{}, err
 	}
 	return domain.ListTeamChatWebhooksResponse{Teams: webhooks}, nil
+}
+
+func (s *teamService) ListGroupEmails(ctx context.Context) (domain.ListTeamGroupEmailsResponse, error) {
+	if err := RequireInternalCaller(ctx, s.access, "team group emails are only available to internal services"); err != nil {
+		return domain.ListTeamGroupEmailsResponse{}, err
+	}
+	emails, err := s.repo.ListGroupEmails(ctx)
+	if err != nil {
+		return domain.ListTeamGroupEmailsResponse{}, err
+	}
+	return domain.ListTeamGroupEmailsResponse{Teams: emails}, nil
 }
 
 func (s *teamService) GetTeam(ctx context.Context, teamID string) (domain.TeamDetail, error) {

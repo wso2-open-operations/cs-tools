@@ -867,7 +867,8 @@ type CRApprovalRequestedPayload struct {
 	// customer-portal link: that portal nests its change-request page under the
 	// project. Absent on an internal notice, which links into the CSM portal.
 	ProjectID string `json:"projectId,omitempty"`
-	// Subject is the fully rendered subject line. Used verbatim: the flow
+	// Subject is the fully rendered subject line. Used as sent, apart from its
+	// "[WSO2 Support]" prefix, which names the configured company: the flow
 	// reproduces ServiceNow's per-branch wording, and re-deriving it here would
 	// mean keeping two copies of that in step.
 	Subject string `json:"subject"`

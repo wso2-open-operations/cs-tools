@@ -17,6 +17,7 @@
 import {
   AlertOctagon,
   AlertTriangle,
+  ArrowUpRight,
   Award,
   BarChart3,
   BellOff,
@@ -536,6 +537,15 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
             label: "Teams",
             href: "/admin/user-management/teams",
             icon: Building2,
+          },
+          // Admin only (a real backend action, PermAdmin): who may de-escalate
+          // any case besides the leads of the case's own ABT team.
+          {
+            id: "admin.user-management.escalation-access",
+            label: "Escalation access",
+            href: "/admin/user-management/escalation-access",
+            icon: ArrowUpRight,
+            requires: "isAdmin",
           },
           // Routes to a placeholder that already names its backend blocker, so
           // it renders itself rather than the generic WIP page.

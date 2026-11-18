@@ -15,6 +15,7 @@
 // under the License.
 
 import type { BeTimeCardView } from "./timecard.dto";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 // Approval lifecycle of a time card, per the entity-service contract. A card is
 // created already `submitted` — there is no draft/pending step via the portal
@@ -120,11 +121,11 @@ export function toTimeCard(v: BeTimeCardView): CsmTimeCard {
     projectName: v.project?.name ?? "—",
     createdOn: v.createdOn,
     userId: v.user?.id ?? "",
-    userName: v.user?.name ?? "—",
+    userName: stripStaffNameMarker(v.user?.name) || "—",
     state: v.state,
     billable: v.hasBillable,
     totalMinutes: v.totalTime,
     approvedById: v.approvedBy?.id,
-    approvedByName: v.approvedBy?.name,
+    approvedByName: stripStaffNameMarker(v.approvedBy?.name) || undefined,
   };
 }

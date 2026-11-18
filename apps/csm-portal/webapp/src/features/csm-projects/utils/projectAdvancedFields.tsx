@@ -15,6 +15,8 @@
 // under the License.
 
 import MultiSelectField from "@components/MultiSelectField";
+import AsyncAssignedUserIdMultiSelect from "@features/csm-cases/components/AsyncAssignedUserIdMultiSelect";
+import ProjectRegionMultiSelect from "@features/csm-projects/components/ProjectRegionMultiSelect";
 import {
   dateAdvancedField,
   multiAdvancedField,
@@ -41,8 +43,9 @@ export const ONBOARDING_STATUS_OPTIONS: { value: string; label: string }[] = [
 
 const CLOSURE_STATE_OPTIONS = PROJECT_CLOSURE_STATES.map((s) => ({ value: s, label: s }));
 
-/** The Advanced builder's fields: project state, onboarding status, and one
- *  on-or-after / on-or-before row pair per date column. Each reads and writes
+/** The Advanced builder's fields: project state, onboarding status,
+ *  onboarding owner, account region, and one on-or-after / on-or-before row
+ *  pair per date column. Each reads and writes
  *  the same state the URL and the request use. Dates may be in the future (a
  *  planned go-live), so none is capped at today. */
 export function projectAdvancedFields(): OperationsAdvancedField<ProjectFilters>[] {
@@ -61,6 +64,22 @@ export function projectAdvancedFields(): OperationsAdvancedField<ProjectFilters>
       prop: "onboardingStatus",
       render: ({ id, values, onChange }) => (
         <MultiSelectField id={id} label="Value(s)" values={values} options={ONBOARDING_STATUS_OPTIONS} onChange={onChange} />
+      ),
+    }),
+    multiAdvancedField<ProjectFilters>({
+      key: "onboardingOwnerIds",
+      label: "Onboarding owner",
+      prop: "onboardingOwnerIds",
+      render: ({ id, values, onChange }) => (
+        <AsyncAssignedUserIdMultiSelect id={id} values={values} onChange={onChange} />
+      ),
+    }),
+    multiAdvancedField<ProjectFilters>({
+      key: "regions",
+      label: "Region",
+      prop: "regions",
+      render: ({ id, values, onChange }) => (
+        <ProjectRegionMultiSelect id={id} values={values} onChange={onChange} />
       ),
     }),
     ...PROJECT_DATE_FILTER_KEYS.map((k) =>

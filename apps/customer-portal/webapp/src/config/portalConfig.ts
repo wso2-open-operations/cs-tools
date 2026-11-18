@@ -129,11 +129,17 @@ export interface CustomerPortalWindowConfig {
    */
   CUSTOMER_PORTAL_LOGO_DARK_MODE_URL?: string;
   /**
-   * Optional. Company name in the PDF report footers ("<name> Support 24x7") and
-   * in labels that name the company ("<name> Products", "Add <name> Product",
-   * "<name> Resolution"). Defaults to "WSO2".
+   * Optional. Company name in the PDF report footers ("<name> Support 24x7"), the
+   * portal footer ("© <year> <name> LLC"), and labels that name the company
+   * ("<name> Products", "Add <name> Product", "<name> Resolution"). Defaults to
+   * "WSO2".
    */
   CUSTOMER_PORTAL_COMPANY_NAME?: string;
+  /**
+   * Billing team's email address, shown on the suspended-project notice.
+   * Defaults to "billing@wso2.com".
+   */
+  CUSTOMER_PORTAL_BILLING_EMAIL?: string;
 }
 
 declare global {

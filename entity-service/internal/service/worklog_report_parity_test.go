@@ -39,6 +39,10 @@ type fakeWorklogRepo struct {
 	times  []repository.WorklogTimeRow
 	leave  []repository.WorklogLeaveRow
 	moves  []repository.WorklogMoveRow
+	// crew is the weekend crew and turns the rotation-turn holders, both
+	// whatever the range.
+	crew  []string
+	turns []string
 }
 
 // MoveSpans returns the fake's move spans, whatever the range.
@@ -59,7 +63,10 @@ func (f *fakeWorklogRepo) RosteredUserIDs(context.Context, time.Time, time.Time)
 	return nil, nil
 }
 func (f *fakeWorklogRepo) WeekendCrewUserIDs(context.Context, time.Time, time.Time) ([]string, error) {
-	return nil, nil
+	return f.crew, nil
+}
+func (f *fakeWorklogRepo) RotationTurnUserIDs(context.Context, time.Time, time.Time) ([]string, error) {
+	return f.turns, nil
 }
 func (f *fakeWorklogRepo) TeamContacts(context.Context, []string, []string) ([]repository.WorklogTeamContacts, error) {
 	return nil, nil
@@ -110,23 +117,31 @@ func dev(r domain.WorklogReport, id string) (domain.WorklogDeveloper, bool) {
 	return domain.WorklogDeveloper{}, false
 }
 
-func TestWorklogWeeklyDropsWeekendCards(t *testing.T) {
+func TestWorklogWeeklyCountsWeekendCards(t *testing.T) {
+	// Weekend time counts on the weekly, whoever logged it: nobody here is
+	// on a weekend rota (the fake has no crew). Worked Days stays weekdays.
+	// u2 is on leave every weekday and logs only on the Sunday, and is
+	// still listed with that time.
 	repo := &fakeWorklogRepo{
-		roster: []repository.WorklogRosterRow{person("u1", "alpha")},
+		roster: []repository.WorklogRosterRow{person("u1", "alpha"), person("u2", "alpha")},
+		leave:  []repository.WorklogLeaveRow{absence("u2", "AL/CL", "LEAVE", "2026-10-26", "2026-10-30")},
 		times: []repository.WorklogTimeRow{
 			card("u1", "A-1", "2026-10-27", "SUBMITTED", "S4", 60),
 			card("u1", "A-2", "2026-10-31", "SUBMITTED", "S4", 120), // Saturday
 			card("u1", "A-3", "2026-11-01", "APPROVED", "S4", 180),  // Sunday
+			card("u2", "A-4", "2026-11-01", "SUBMITTED", "S4", 90),  // Sunday
 		},
 	}
 	r := build(t, repo, domain.WorklogReportCadenceWeekly, "2026-10-26", "2026-11-01")
 	d, _ := dev(r, "u1")
-	if d.TotalHours != 1 || d.PendingIssues != 1 || d.ApprovedIssues != 0 {
-		t.Errorf("hours=%v pendingIssues=%d approvedIssues=%d; want only the Tuesday card (1h, 1 issue)",
-			d.TotalHours, d.PendingIssues, d.ApprovedIssues)
+	if d.TotalHours != 6 || d.PendingIssues != 2 || d.ApprovedIssues != 1 || d.WorkedDays != 5 || d.AvgTimePerDay != 1.2 {
+		t.Errorf("u1 = %+v; want 6h (weekend included), 2 pending + 1 approved issues, 5 worked days, 1.2 h/day", d)
 	}
-	if r.Totals.TotalHours != 1 || r.Totals.Issues != 1 {
-		t.Errorf("totals hours=%v issues=%d, want 1 and 1", r.Totals.TotalHours, r.Totals.Issues)
+	if d, ok := dev(r, "u2"); !ok || d.TotalHours != 1.5 || d.WorkedDays != 0 || d.AvgTimePerDay != 0 {
+		t.Errorf("u2 = %+v ok=%v; want listed with 1.5h, 0 worked days, 0 h/day", d, ok)
+	}
+	if r.Totals.TotalHours != 7.5 || r.Totals.Issues != 4 {
+		t.Errorf("totals hours=%v issues=%d, want 7.5 and 4", r.Totals.TotalHours, r.Totals.Issues)
 	}
 }
 
@@ -302,8 +317,8 @@ func TestWorklogDailyHalfDayStillPresentAndAllocationExcludes(t *testing.T) {
 		},
 	}
 	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
-	if d, ok := dev(r, "u1"); !ok || d.TotalHours != 1 || d.Leave != "HD-AM" {
-		t.Errorf("u1 = %+v ok=%v, want listed with 1h and the half-day code", d, ok)
+	if d, ok := dev(r, "u1"); !ok || d.TotalHours != 1 || d.Leave != "HD" {
+		t.Errorf("u1 = %+v ok=%v, want listed with 1h and Leave HD", d, ok)
 	}
 	if _, ok := dev(r, "u2"); ok {
 		t.Error("u2 is on a confirmed allocation and must not appear on the daily")
@@ -577,5 +592,86 @@ func TestWorklogMoveNeverAddsSomebodyOffTheRoster(t *testing.T) {
 	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
 	if _, ok := dev(r, "u9"); ok {
 		t.Error("a move span added somebody who is not on the roster")
+	}
+}
+
+func TestWorklogDailyKeepsAllocatedPersonOnARotationTurn(t *testing.T) {
+	// An allocation drops a person from the daily, but not on a day they
+	// hold a rotation turn: the 6-9 morning or evening is rota work, and
+	// its time must show. An exclusion from the rota still drops them.
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{
+			person("u1", "alpha"), person("u2", "alpha"), person("u3", "alpha"), person("u4", "alpha"),
+		},
+		leave: []repository.WorklogLeaveRow{
+			absence("u1", "ALLO_EXT", "ALLOCATION", "2026-10-20", "2026-11-20"),
+			absence("u2", "ALLO_INT", "ALLOCATION", "2026-10-20", "2026-11-20"),
+			absence("u3", "EXCLUDED", "EXCLUDED", "2026-10-28", "2026-10-28"),
+		},
+		turns: []string{"u1", "u3"},
+		times: []repository.WorklogTimeRow{
+			card("u1", "D-1", "2026-10-28", "SUBMITTED", "S4", 180),
+			card("u2", "D-2", "2026-10-28", "SUBMITTED", "S4", 60),
+			card("u3", "D-3", "2026-10-28", "SUBMITTED", "S4", 60),
+		},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
+	if d, ok := dev(r, "u1"); !ok || d.TotalHours != 3 || d.Leave != "" {
+		t.Errorf("u1 = %+v ok=%v, want listed with 3h: allocated but on a rotation turn", d, ok)
+	}
+	if _, ok := dev(r, "u2"); ok {
+		t.Error("u2 is allocated with no turn that day and must not appear")
+	}
+	if _, ok := dev(r, "u3"); ok {
+		t.Error("u3 is excluded from the rota; a turn must not bring them back")
+	}
+	if r.Totals.Members != 2 || r.Totals.TotalHours != 3 || r.Totals.NonLeaveMembers != 2 {
+		t.Errorf("members=%d total=%v nonLeave=%v, want 2, 3 and 2 (u1 and u4)",
+			r.Totals.Members, r.Totals.TotalHours, r.Totals.NonLeaveMembers)
+	}
+}
+
+func TestWorklogWeekendDailyListsCrewNotLeaveAlone(t *testing.T) {
+	// Saturday 2026-10-31. The weekend daily lists the weekend crew
+	// (allocated crew included, on their turn), plus anyone who logged
+	// time. Somebody on leave who is not on the weekend rota is not listed.
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{
+			person("crewAlloc", "alpha"), person("crewIdle", "alpha"), person("crewLeave", "alpha"),
+			person("offLeave", "beta"), person("offLogged", "beta"), person("offIdle", "beta"),
+		},
+		leave: []repository.WorklogLeaveRow{
+			absence("crewAlloc", "ALLO_INT", "ALLOCATION", "2026-10-31", "2026-11-30"),
+			absence("crewLeave", "AL", "LEAVE", "2026-10-31", "2026-10-31"),
+			absence("offLeave", "ML", "LEAVE", "2026-10-01", "2026-12-31"),
+		},
+		crew:  []string{"crewAlloc", "crewIdle", "crewLeave"},
+		turns: []string{"crewAlloc", "crewIdle", "crewLeave"},
+		times: []repository.WorklogTimeRow{
+			card("crewAlloc", "W-1", "2026-10-31", "SUBMITTED", "S4", 540),
+			card("offLogged", "W-2", "2026-10-31", "APPROVED", "S4", 60),
+		},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-31", "2026-10-31")
+	if d, ok := dev(r, "crewAlloc"); !ok || d.TotalHours != 9 {
+		t.Errorf("crewAlloc = %+v ok=%v, want listed with 9h: allocated, but on the weekend turn", d, ok)
+	}
+	if _, ok := dev(r, "crewIdle"); !ok {
+		t.Error("crewIdle is on the weekend rota and must be listed, logged time or not")
+	}
+	if d, ok := dev(r, "crewLeave"); !ok || d.Leave != "FD" {
+		t.Errorf("crewLeave = %+v ok=%v, want listed and marked FD", d, ok)
+	}
+	if _, ok := dev(r, "offLeave"); ok {
+		t.Error("offLeave is on leave and not on the weekend rota; leave alone must not list them")
+	}
+	if _, ok := dev(r, "offLogged"); !ok {
+		t.Error("offLogged logged time on the Saturday and must be listed")
+	}
+	if _, ok := dev(r, "offIdle"); ok {
+		t.Error("offIdle is not on the weekend rota and logged nothing")
+	}
+	if r.Totals.Members != 4 || r.Totals.OnLeaveMembers != 1 {
+		t.Errorf("members=%d onLeave=%d, want 4 and 1", r.Totals.Members, r.Totals.OnLeaveMembers)
 	}
 }
