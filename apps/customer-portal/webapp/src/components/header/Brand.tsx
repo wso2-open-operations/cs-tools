@@ -27,6 +27,16 @@ const BRAND_LOGO_HEIGHT = {
   xl: 24,
 } as const;
 
+/**
+ * Widest the logo may grow, so a wide configured logo cannot push the header
+ * controls out of view. Well above the stock square logo at any height.
+ */
+const BRAND_LOGO_MAX_WIDTH = {
+  xs: 96,
+  sm: 120,
+  md: 160,
+} as const;
+
 const BRAND_TITLE_BASE_SX = {
   whiteSpace: "nowrap",
   lineHeight: 1.2,
@@ -101,6 +111,8 @@ export default function Brand({
           sx={{
             height: BRAND_LOGO_HEIGHT,
             width: "auto",
+            maxWidth: BRAND_LOGO_MAX_WIDTH,
+            objectFit: "contain",
             display: "block",
           }}
         />
