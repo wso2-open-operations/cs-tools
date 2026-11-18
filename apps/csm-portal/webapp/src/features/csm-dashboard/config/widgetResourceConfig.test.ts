@@ -735,6 +735,17 @@ describe("WIDGET_RESOURCE_CONFIG.project.buildHref", () => {
     );
   });
 
+  it("sends a scalar region, or a still-unresolved current user, to the preview page", () => {
+    for (const filters of [
+      { regions: "APAC" },
+      { onboardingOwnerIds: ["__current_user__"] },
+      { onboardingOwnerEmails: [42] },
+    ]) {
+      const href = buildHref(filters as Record<string, unknown>);
+      expect(href.startsWith("/customers/projects")).toBe(false);
+    }
+  });
+
   it("carries a single onboardingStatus value as a URL query param", () => {
     expect(buildHref({ onboardingStatus: ["In-Progress"] })).toBe(
       "/customers/projects?onboardingStatus=In-Progress",
