@@ -132,6 +132,8 @@ func TestAuditMigration_ExcludingARegisteredTableStopsAuditingIt(t *testing.T) {
 	schema := auditSchema(t, pool)
 	auditExec(t, pool, "SELECT register_audit('"+schema+"', '"+table+"')")
 	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a')")
+	// An insert is not audited (0304), so an update is what shows auditing is live.
+	auditExec(t, pool, "UPDATE "+table+" SET note = 'a2' WHERE id = 1")
 	audited := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table)
 	if audited == 0 {
 		t.Fatal("registered table wrote no audit rows")
@@ -298,6 +300,57 @@ func TestAuditMigration_SalesforceSlaAndNoteTablesAreAudited(t *testing.T) {
 		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
 			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
 		}
+	}
+}
+
+// Migration 0304: an INSERT is not audited, an UPDATE and a DELETE are. Counts
+// what each statement adds, since the append-only log keeps rows from earlier runs.
+func TestAuditMigration_InsertsAreNotAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	const table = "zz_audit_test_noinsert"
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY, note text, qty int)")
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"')")
+
+	const countSQL = `SELECT count(*) FROM csm_audit_log WHERE table_name = $1 AND action = $2`
+	count := func(action string) int { return auditCount(t, pool, countSQL, table, action) }
+
+	insertsBefore := count("INSERT")
+	updatesBefore := count("UPDATE")
+	deletesBefore := count("DELETE")
+
+	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a', 2)")
+	if n := count("INSERT") - insertsBefore; n != 0 {
+		t.Errorf("an insert wrote %d audit rows, want 0", n)
+	}
+	if n := count("UPDATE") - updatesBefore; n != 0 {
+		t.Errorf("an insert wrote %d UPDATE audit rows, want 0", n)
+	}
+
+	auditExec(t, pool, "UPDATE "+table+" SET note = 'b' WHERE id = 1")
+	if n := count("UPDATE") - updatesBefore; n != 1 {
+		t.Errorf("changing one column wrote %d audit rows, want 1", n)
+	}
+
+	auditExec(t, pool, "DELETE FROM "+table+" WHERE id = 1")
+	if n := count("DELETE") - deletesBefore; n != 3 {
+		t.Errorf("a delete wrote %d audit rows, want 3 (one per column)", n)
+	}
+}
+
+// Migration 0304 rebuilt every trigger: none fires on INSERT, all still fire on
+// UPDATE and DELETE and stay enabled when session_replication_role is replica.
+func TestAuditMigration_NoRegisteredTriggerFiresOnInsert(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	const triggers = `SELECT count(*) FROM pg_trigger WHERE tgname = 'csm_audit_row_change' AND `
+	if n := auditCount(t, pool, triggers+"tgtype & 4 > 0"); n != 0 {
+		t.Errorf("%d audit triggers still fire on INSERT, want 0", n)
+	}
+	if n := auditCount(t, pool, triggers+"(tgtype & 8 = 0 OR tgtype & 16 = 0 OR tgenabled <> 'A')"); n != 0 {
+		t.Errorf("%d audit triggers miss UPDATE or DELETE, or are not enabled-always, want 0", n)
+	}
+	if n := auditCount(t, pool, triggers+"true"); n == 0 {
+		t.Error("no audit triggers found; the migrations did not register any table")
 	}
 }
 
