@@ -27,6 +27,14 @@ import {
   type ReportLogo,
 } from "@utils/pdfBranding";
 
+const companyNameMock = vi.hoisted(() => vi.fn(() => "Choreo Labs"));
+
+// The company name is fixed in code; a long one is faked here to test shortening.
+vi.mock("@config/brandingConfig", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@config/brandingConfig")>()),
+  companyName: companyNameMock,
+}));
+
 /** A 1x1 PNG, enough for jsPDF to embed. */
 const PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -116,6 +124,7 @@ describe("loadReportLogo", () => {
 describe("drawReportSupportFooters", () => {
   afterEach(() => {
     window.config = originalConfig;
+    companyNameMock.mockReturnValue("Choreo Labs");
   });
 
   function footerPdf(logo: ReportLogo | null): string {
@@ -125,28 +134,26 @@ describe("drawReportSupportFooters", () => {
     return doc.output();
   }
 
-  it("prints the WSO2 support footer on every page when nothing is configured", () => {
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: undefined });
+  it("prints the company's support footer on every page, without a logo when none is set", () => {
     const pdf = footerPdf(null);
 
-    expect(pdf.match(/\(WSO2 Support 24x7\) Tj/g)).toHaveLength(2);
+    expect(pdf.match(/\(Choreo Labs Support 24x7\) Tj/g)).toHaveLength(2);
     expect(pdf).toContain("(Page 2 of 2) Tj");
     expect(pdf).toContain("(Oct 14, 2026) Tj");
     expect(pdf).not.toContain("/Subtype /Image");
   });
 
-  it("prints the configured company name and the logo", () => {
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" });
+  it("prints the company name and the logo", () => {
     const pdf = footerPdf({ dataUrl: PNG_DATA_URL, width: 384, height: 96 });
 
-    expect(pdf.match(/\(Acme Corp Support 24x7\) Tj/g)).toHaveLength(2);
+    expect(pdf.match(/\(Choreo Labs Support 24x7\) Tj/g)).toHaveLength(2);
     expect(pdf).not.toContain("WSO2 Support 24x7");
     expect(pdf).toContain("/Subtype /Image");
   });
 
   it("shortens a long company name so it ends before the page text, logo and long label included", () => {
     const longName = "Example International Technology and Business Services Corporation";
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: longName });
+    companyNameMock.mockReturnValue(longName);
     const doc = new jsPDF();
     const drawn: Array<{ text: string; x: number }> = [];
     const realText = doc.text.bind(doc);
@@ -177,6 +184,7 @@ describe("fitting footer text", () => {
 
   afterEach(() => {
     window.config = originalConfig;
+    companyNameMock.mockReturnValue("Choreo Labs");
   });
 
   it("leaves text that fits alone", () => {
@@ -189,13 +197,13 @@ describe("fitting footer text", () => {
   });
 
   it("shortens the company name and keeps ' Support 24x7' whole", () => {
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "Acme International" });
+    companyNameMock.mockReturnValue("Acme International");
     expect(fitSupportLine(doc, 31)).toBe("Acme International Support 24x7");
     expect(fitSupportLine(doc, 22)).toBe("Acme I... Support 24x7");
   });
 
   it("cuts the whole line when even ' Support 24x7' does not fit", () => {
-    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "Acme" });
+    companyNameMock.mockReturnValue("Acme");
     expect(fitSupportLine(doc, 10)).toBe("Acme Su...");
   });
 });
