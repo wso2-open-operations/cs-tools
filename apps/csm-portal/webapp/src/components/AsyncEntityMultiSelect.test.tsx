@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
@@ -93,5 +93,40 @@ describe("AsyncEntityMultiSelect — known labels", () => {
     rerender(withValues(["group-1", "group-2"], { "group-1": "Choreo SRE Team" }));
 
     expect(screen.getByText("Choreo SRE Team, CAB Approval")).toBeInTheDocument();
+  });
+});
+
+describe("AsyncEntityMultiSelect — typing", () => {
+  // Regression: every new search result (and every render, with inline
+  // getId/getLabel) rebuilt the selected-values array, and Autocomplete
+  // clears what is typed whenever its value changes identity — so the text
+  // vanished as soon as the results arrived.
+  it("keeps what is typed when the search results change", () => {
+    let results: Item[] = [];
+    const useSearchLive = () => ({ data: results, isFetching: false, isError: false });
+    const ui = () => (
+      <AsyncEntityMultiSelect<Item>
+        id="test-multi"
+        label="Groups"
+        values={[]}
+        onChange={() => {}}
+        useSearch={useSearchLive}
+        getId={(i) => i.id}
+        getLabel={(i) => i.name}
+      />
+    );
+    const { rerender } = render(ui());
+    const input = screen.getByRole("combobox", { name: "Groups" });
+
+    act(() => input.focus());
+    fireEvent.mouseDown(input);
+    fireEvent.change(input, { target: { value: "apim" } });
+    expect(input).toHaveValue("apim");
+
+    results = [{ id: "g1", name: "APIM1" }];
+    rerender(ui());
+
+    expect(screen.getByRole("option", { name: "APIM1" })).toBeInTheDocument();
+    expect(input).toHaveValue("apim");
   });
 });
