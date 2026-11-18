@@ -722,6 +722,19 @@ describe("WIDGET_RESOURCE_CONFIG.project.buildHref", () => {
   // unfiltered Projects page with no way to tell which status it meant.
   const buildHref = WIDGET_RESOURCE_CONFIG.project.buildHref;
 
+  it("opens the list (not the preview page) for a region and onboarding owner filter", () => {
+    expect(
+      buildHref({
+        onboardingStatus: ["In-Progress"],
+        regions: ["APAC"],
+        onboardingOwnerIds: ["11111111-1111-1111-1111-111111111111"],
+        onboardingOwnerEmails: ["owner@example.com"],
+      }),
+    ).toBe(
+      "/customers/projects?onboardingStatus=In-Progress&regions=APAC&onboardingOwnerIds=11111111-1111-1111-1111-111111111111&onboardingOwnerEmails=owner%40example.com",
+    );
+  });
+
   it("carries a single onboardingStatus value as a URL query param", () => {
     expect(buildHref({ onboardingStatus: ["In-Progress"] })).toBe(
       "/customers/projects?onboardingStatus=In-Progress",
