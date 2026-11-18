@@ -78,4 +78,11 @@ describe("reportBrandingConfig", () => {
     setConfig({ CUSTOMER_PORTAL_LOGO_DARK_MODE_URL: " /logo-white.svg " });
     expect(reportLogoUrl()).toBe("/logo-white.svg");
   });
+
+  it("reads a bare logo path from the site root, as the header does", () => {
+    setConfig({ CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: " logos/acme.svg " });
+    expect(reportLogoUrl()).toBe("/logos/acme.svg");
+    setConfig({ CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: "./logos/acme.svg" });
+    expect(reportLogoUrl()).toBe("/logos/acme.svg");
+  });
 });
