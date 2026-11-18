@@ -14,78 +14,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_BILLING_EMAIL, billingEmail, billingEmailHref } from "@config/brandingConfig";
-import type { CustomerPortalWindowConfig } from "@config/portalConfig";
+import { describe, expect, it } from "vitest";
+import {
+  BILLING_EMAIL,
+  BILLING_EMAIL_HREF,
+  COMPANY_NAME,
+  companyName,
+  configuredString,
+} from "@config/brandingConfig";
 
-const originalConfig = window.config;
-
-function setBillingEmail(value: string | undefined): void {
-  window.config = {
-    ...originalConfig,
-    CUSTOMER_PORTAL_BILLING_EMAIL: value,
-  } as CustomerPortalWindowConfig;
-}
-
-describe("billingEmail", () => {
-  afterEach(() => {
-    window.config = originalConfig;
+describe("brandingConfig", () => {
+  it("names Choreo Labs as the company", () => {
+    expect(COMPANY_NAME).toBe("Choreo Labs");
+    expect(companyName()).toBe("Choreo Labs");
   });
 
-  it("is the WSO2 billing address when none is set", () => {
-    setBillingEmail(undefined);
-    expect(billingEmail()).toBe(DEFAULT_BILLING_EMAIL);
-    expect(DEFAULT_BILLING_EMAIL).toBe("billing@wso2.com");
+  it("uses the Choreo Labs billing address, as text and as a mailto link", () => {
+    expect(BILLING_EMAIL).toBe("billing@choreolabs.com");
+    expect(BILLING_EMAIL_HREF).toBe("mailto:billing@choreolabs.com");
   });
 
-  it("uses the configured address, trimmed", () => {
-    setBillingEmail("  billing@acme.example ");
-    expect(billingEmail()).toBe("billing@acme.example");
-  });
-
-  it("falls back to the default for a blank or malformed value", () => {
-    for (const value of [
-      "   ",
-      "billing",
-      "billing@",
-      "two words@acme.example",
-      "a@b@c",
-      "mailto:billing@acme.example",
-      "billing@acme.example?subject=hi",
-      ".billing@acme.example",
-      "billing.@acme.example",
-      "billing..accounts@acme.example",
-    ]) {
-      setBillingEmail(value);
-      expect(billingEmail()).toBe(DEFAULT_BILLING_EMAIL);
-    }
-  });
-
-  it("accepts dots between non-empty parts of the local part", () => {
-    setBillingEmail("billing.accounts@acme.example");
-    expect(billingEmail()).toBe("billing.accounts@acme.example");
-  });
-
-  it("accepts a # in the local part, which RFC 5322 allows unquoted", () => {
-    setBillingEmail("billing#accounts@acme.example");
-    expect(billingEmail()).toBe("billing#accounts@acme.example");
-  });
-});
-
-describe("billingEmailHref", () => {
-  afterEach(() => {
-    window.config = originalConfig;
-  });
-
-  it("links the default address as is", () => {
-    setBillingEmail(undefined);
-    expect(billingEmailHref()).toBe("mailto:billing@wso2.com");
-  });
-
-  it("percent-encodes characters that would end the recipient", () => {
-    setBillingEmail("billing#accounts@acme.example");
-    expect(billingEmailHref()).toBe("mailto:billing%23accounts@acme.example");
-    setBillingEmail("bill?ing%x@acme.example");
-    expect(billingEmailHref()).toBe("mailto:bill%3Fing%25x@acme.example");
+  it("reads a config string trimmed, and treats a blank or non-string value as unset", () => {
+    expect(configuredString("  /logo.svg ")).toBe("/logo.svg");
+    expect(configuredString("   ")).toBeUndefined();
+    expect(configuredString(undefined)).toBeUndefined();
+    expect(configuredString(42)).toBeUndefined();
   });
 });
