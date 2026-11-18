@@ -249,6 +249,33 @@ func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
 	}
 }
 
+// Migration 0300 registers the product, deployment and project access
+// definition tables, every column recorded.
+func TestAuditMigration_ProductAndDeploymentTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{
+		"deployed_product", "deployment", "deployment_attachment", "product", "product_version",
+		"product_vulnerability", "project_group", "project_group_role", "project_role", "project_type",
+	} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if len(excluded) != 0 || len(masked) != 0 {
+			t.Errorf("%s excludes %v and masks %v, want every column recorded", table, excluded, masked)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
 // Migration 0299 registers the work item related tables that are wanted in the
 // audit log, every column recorded.
 func TestAuditMigration_WorkItemRelatedTablesAreAudited(t *testing.T) {
