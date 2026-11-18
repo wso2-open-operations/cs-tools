@@ -13237,3 +13237,26 @@ and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for
 `NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
 clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
 `/cases/search` only: aggregate, announcement-registry and every other search ignore it.
+
+## Product issues (internal GitHub issues raised from a case)
+
+Work item type `PRODUCT_ISSUE` (number series `PI`, migrations 0303-0305 and 100029): an
+issue in a product team's internal repository, raised from a support case. Tables:
+`product_issue` (extension), `github_issue_link` (the GitHub side, one row per GitHub-backed
+work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active per issue),
+`work_item_status_event` (status history, `dedupe_key` unique), `comment_github_ref`,
+`board_status_map` (one global map of board column → normalised status) and
+`work_item_creation_request` (idempotency of the create endpoint).
+
+- **Internal only.** Every new table is internal-only under RLS. Product issues copy the
+  case's `project_id`, so `work_item` has a RESTRICTIVE policy, `work_item_internal_only_types`,
+  that hides the types listed in `work_item_type_is_internal_only()` from non-internal
+  sessions; child tables follow through their own `work_item` subqueries. A later
+  internal-only type is added to that one function. `sla`, `work_item_feedback` and
+  `case_autoclosure_event` have no RLS at all: never write product-issue rows there without
+  checking every customer-facing reader.
+- **Never set `work_item.github_*`** on a product issue or its case: the comment trigger
+  (0206) would send the case's comments to that repository. The GitHub side lives in
+  `github_issue_link` only.
+- `product_repo_mapping.board_project_number` / `is_internal` say which board tracks a
+  product's issues and whether its repository is internal; rows are maintained by hand.

@@ -27321,6 +27321,12 @@ components:
         githubLabel:
           type: string
           description: Product label applied to issues filed in this repository.
+        boardProjectNumber:
+          type: integer
+          description: Number of the GitHub project board issues for this product are tracked on. Omitted when unset.
+        isInternal:
+          type: boolean
+          description: True when the repository is private to WSO2.
 
     SNProduct:
       description: Product returned by the ServiceNow data source. Timestamp fields are absent; class is a ServiceNow label (e.g. "Software Model").
