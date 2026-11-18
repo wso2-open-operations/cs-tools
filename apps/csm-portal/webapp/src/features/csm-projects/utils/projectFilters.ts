@@ -72,6 +72,12 @@ export interface ProjectFilters extends DateRangeFilters {
   closureStatus: string;
   /** Exclude list of overall closure states; only arrives from a widget click-through. */
   excludeClosureStates: string[];
+  /** The account's region, any of these. */
+  regions: string[];
+  /** The onboarding owner, any of these platform user ids. */
+  onboardingOwnerIds: string[];
+  /** The onboarding owner, any of these emails; only arrives from a widget click-through. */
+  onboardingOwnerEmails: string[];
 }
 
 export const EMPTY_PROJECT_FILTERS: ProjectFilters = {
@@ -79,6 +85,9 @@ export const EMPTY_PROJECT_FILTERS: ProjectFilters = {
   closureStates: [],
   closureStatus: "",
   excludeClosureStates: [],
+  regions: [],
+  onboardingOwnerIds: [],
+  onboardingOwnerEmails: [],
   endDateFrom: "",
   endDateTo: "",
   onboardingStartDateFrom: "",
@@ -104,8 +113,15 @@ export const PROJECT_FILTER_PARAM_KEYS: readonly string[] = [
   "closureStates",
   "closureStatus",
   "excludeClosureStates",
+  "regions",
+  "onboardingOwnerIds",
+  "onboardingOwnerEmails",
   ...DATE_BOUND_KEYS,
 ];
+
+/** The list keys whose values are free (no fixed vocabulary): read and
+ *  written as comma-separated lists, sent as they are. */
+const FREE_LIST_KEYS = ["regions", "onboardingOwnerIds", "onboardingOwnerEmails"] as const;
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -156,6 +172,7 @@ export function readProjectFilters(params: URLSearchParams): ProjectFilters {
     closureStates: parseClosureStates(params.get("closureStates")),
     excludeClosureStates: parseClosureStates(params.get("excludeClosureStates")),
   };
+  for (const k of FREE_LIST_KEYS) out[k] = parseCsv(params.get(k));
   const single = parseClosureStates(params.get("closureStatus"));
   out.closureStatus = single.length === 1 ? single[0] : "";
   for (const k of PROJECT_DATE_FILTER_KEYS) {
@@ -181,6 +198,9 @@ export function writeProjectFilters(
   if (filters.excludeClosureStates.length > 0) {
     next.set("excludeClosureStates", filters.excludeClosureStates.join(","));
   }
+  for (const k of FREE_LIST_KEYS) {
+    if (filters[k].length > 0) next.set(k, filters[k].join(","));
+  }
   for (const k of DATE_BOUND_KEYS) {
     if (filters[k]) next.set(k, filters[k]);
   }
@@ -196,6 +216,9 @@ export function projectFiltersToRequest(
   if (filters.closureStates.length > 0) out.closureStates = filters.closureStates;
   if (filters.closureStatus) out.closureStatus = filters.closureStatus;
   if (filters.excludeClosureStates.length > 0) out.excludeClosureStates = filters.excludeClosureStates;
+  for (const k of FREE_LIST_KEYS) {
+    if (filters[k].length > 0) out[k] = filters[k];
+  }
   for (const k of DATE_BOUND_KEYS) {
     if (filters[k]) out[k] = filters[k];
   }
@@ -210,6 +233,9 @@ export function countActiveProjectFilters(filters: ProjectFilters): number {
   if (filters.closureStates.length > 0) n++;
   if (filters.closureStatus) n++;
   if (filters.excludeClosureStates.length > 0) n++;
+  for (const k of FREE_LIST_KEYS) {
+    if (filters[k].length > 0) n++;
+  }
   for (const k of PROJECT_DATE_FILTER_KEYS) {
     if (filters[`${k}From`] || filters[`${k}To`]) n++;
   }
@@ -228,10 +254,22 @@ function dateRangeLabel(label: string, from: string, to: string): string {
 }
 
 /** One removable chip per active filter. `withBuilderRows` false
- *  limits it to the two filters the builder has no row for, since with the
- *  builder open a chip would duplicate its row. */
-export function buildProjectFilterChips(filters: ProjectFilters, withBuilderRows: boolean): ProjectFilterChip[] {
+ *  limits it to the filters the builder has no row for, since with the
+ *  builder open a chip would duplicate its row. `ownerName` names an
+ *  onboarding owner by id when it is known (else the chip counts them). */
+export function buildProjectFilterChips(
+  filters: ProjectFilters,
+  withBuilderRows: boolean,
+  ownerName?: (id: string) => string | undefined,
+): ProjectFilterChip[] {
   const chips: ProjectFilterChip[] = [];
+  if (filters.onboardingOwnerEmails.length > 0) {
+    chips.push({
+      key: "onboardingOwnerEmails",
+      label: `Onboarding owner: ${filters.onboardingOwnerEmails.join(", ")}`,
+      onRemove: (f) => ({ ...f, onboardingOwnerEmails: [] }),
+    });
+  }
   if (filters.closureStatus) {
     chips.push({
       key: "closureStatus",
@@ -252,6 +290,23 @@ export function buildProjectFilterChips(filters: ProjectFilters, withBuilderRows
       key: "onboardingStatus",
       label: `Onboarding status: ${filters.onboardingStatus.join(", ")}`,
       onRemove: (f) => ({ ...f, onboardingStatus: [] }),
+    });
+  }
+  if (filters.regions.length > 0) {
+    chips.push({
+      key: "regions",
+      label: `Region: ${filters.regions.join(", ")}`,
+      onRemove: (f) => ({ ...f, regions: [] }),
+    });
+  }
+  if (filters.onboardingOwnerIds.length > 0) {
+    const names = filters.onboardingOwnerIds.map((id) => ownerName?.(id));
+    chips.push({
+      key: "onboardingOwnerIds",
+      label: names.every(Boolean)
+        ? `Onboarding owner: ${names.join(", ")}`
+        : `Onboarding owner: ${filters.onboardingOwnerIds.length} selected`,
+      onRemove: (f) => ({ ...f, onboardingOwnerIds: [] }),
     });
   }
   if (filters.closureStates.length > 0) {
