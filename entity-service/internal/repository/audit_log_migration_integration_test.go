@@ -272,6 +272,35 @@ func TestAuditMigration_TeamTablesAreAudited(t *testing.T) {
 	}
 }
 
+// Migration 0303 registers the Salesforce opportunity and invoice tables,
+// sla_policy and plg_note_revision. Only sync_time_stamp on the four Salesforce
+// tables (rewritten by every ingest run) is left out.
+func TestAuditMigration_SalesforceSlaAndNoteTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for table, wantExcluded := range map[string]string{
+		"sf_invoice": "sync_time_stamp", "sf_opportunity": "sync_time_stamp",
+		"sf_opportunity_link": "sync_time_stamp", "sf_opportunity_product": "sync_time_stamp",
+		"sla_policy": "", "plg_note_revision": "",
+	} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if got := strings.Join(excluded, ","); got != wantExcluded || len(masked) != 0 {
+			t.Errorf("%s excludes %q and masks %v, want exclude %q and no mask", table, got, masked, wantExcluded)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
 // A column added to an audited table later is recorded with no change to the
 // registration: the trigger reads whatever columns the row has.
 func TestAuditMigration_AColumnAddedLaterIsAudited(t *testing.T) {
