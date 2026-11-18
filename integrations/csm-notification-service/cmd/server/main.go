@@ -101,9 +101,9 @@ func main() {
 	// dispatcher's incident card and the SRE ladder's replies under it; filled
 	// once the paging configuration is loaded (applyIncidentRoutes).
 	incidentRoutes := &notifications.IncidentRoutes{}
+	audienceSpaces := append(parseGoogleChatAudienceSpaces(os.Getenv("GOOGLE_CHAT_SPACES")), incidentChatSpaces...)
 	googleChatClient := notifications.NewGoogleChatClient(notifications.GoogleChatConfig{
-		AudienceSpaces: append(parseGoogleChatAudienceSpaces(os.Getenv("GOOGLE_CHAT_SPACES")),
-			incidentChatSpaces...),
+		AudienceSpaces: append(audienceSpaces, parseIncidentSLAChatSpaces(os.Getenv("INCIDENT_SLA_CHAT_SPACES"))...),
 	})
 
 	// Twilio (the call channel, used by incident.created) is likewise
@@ -680,7 +680,12 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients).
+			// An incident's SLA alert goes to the INCIDENT_SLA_CHAT_SPACES
+			// spaces of the groups its incident card goes to.
+			WithIncidentSLAAudiences(func(group string) []string {
+				return notifications.IncidentSLAAudiences(incidentRoutes, incidentChatFanout, group, googleChatClient.HasAudienceSpace)
+			})
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -1720,21 +1725,37 @@ func parseGoogleChatAudienceSpaces(raw string) []notifications.GoogleChatAudienc
 
 // parseIncidentChatSpaces decodes INCIDENT_CHAT_SPACES, {"<assignment group name>": "<webhook URL>"}, so onboarding a team is one .env entry.
 func parseIncidentChatSpaces(raw string) []notifications.GoogleChatAudienceSpace {
+	return parseGroupChatSpaces("INCIDENT_CHAT_SPACES", "incident Chat cards", raw, notifications.IncidentAudience)
+}
+
+// parseIncidentSLAChatSpaces decodes INCIDENT_SLA_CHAT_SPACES, the same
+// {"<assignment group name>": "<webhook URL>"} shape, for incident SLA alerts:
+// a space per SRE group apart from its incident card space. A default group
+// fans out through INCIDENT_CHAT_FANOUT (or the Alert Settings mapping) as
+// its card does, so the groups (or SRE team keys) that list names need an
+// entry here too.
+func parseIncidentSLAChatSpaces(raw string) []notifications.GoogleChatAudienceSpace {
+	return parseGroupChatSpaces("INCIDENT_SLA_CHAT_SPACES", "incident SLA Chat alerts", raw, notifications.IncidentSLAAudience)
+}
+
+// parseGroupChatSpaces decodes a {"<assignment group>": "<webhook URL>"} env
+// var into audience spaces keyed by audience(group). Logs names, never a URL.
+func parseGroupChatSpaces(envName, what, raw string, audience func(string) string) []notifications.GoogleChatAudienceSpace {
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	var byGroup map[string]string
 	if err := json.Unmarshal([]byte(raw), &byGroup); err != nil {
-		slog.Error("failed to parse INCIDENT_CHAT_SPACES; incident Chat cards will not be posted", "err", err)
+		slog.Error("failed to parse "+envName+"; "+what+" will not be posted", "err", err)
 		return nil
 	}
 	spaces := make([]notifications.GoogleChatAudienceSpace, 0, len(byGroup))
 	for group, webhookURL := range byGroup {
 		if strings.TrimSpace(group) == "" || strings.TrimSpace(webhookURL) == "" {
-			slog.Error("INCIDENT_CHAT_SPACES entry has an empty assignment group or webhook URL and will be skipped", "assignmentGroup", group)
+			slog.Error(envName+" entry has an empty assignment group or webhook URL and will be skipped", "assignmentGroup", group)
 			continue
 		}
-		spaces = append(spaces, notifications.GoogleChatAudienceSpace{Audience: notifications.IncidentAudience(group), WebhookURL: webhookURL})
+		spaces = append(spaces, notifications.GoogleChatAudienceSpace{Audience: audience(group), WebhookURL: webhookURL})
 	}
 	return spaces
 }

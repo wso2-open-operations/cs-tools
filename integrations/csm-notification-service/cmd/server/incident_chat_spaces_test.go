@@ -53,3 +53,23 @@ func TestParseIncidentChatFanout(t *testing.T) {
 		}
 	}
 }
+
+// INCIDENT_SLA_CHAT_SPACES has the same shape as INCIDENT_CHAT_SPACES but its
+// own audiences, so an SLA alert never lands in the incident card space.
+func TestParseIncidentSLAChatSpaces(t *testing.T) {
+	spaces := parseIncidentSLAChatSpaces(`{"Artemis SRE Group":"https://chat.example/sla","":"https://chat.example/x","Empty":""}`)
+	if len(spaces) != 1 {
+		t.Fatalf("got %d spaces, want only the complete entry: %+v", len(spaces), spaces)
+	}
+	if spaces[0].Audience != notifications.IncidentSLAAudience("Artemis SRE Group") || spaces[0].WebhookURL != "https://chat.example/sla" {
+		t.Errorf("space = %+v", spaces[0])
+	}
+	if spaces[0].Audience == notifications.IncidentAudience("Artemis SRE Group") {
+		t.Errorf("SLA audience %q equals the incident card audience", spaces[0].Audience)
+	}
+	for _, raw := range []string{"", "   ", "not json", `["a"]`} {
+		if got := parseIncidentSLAChatSpaces(raw); got != nil {
+			t.Errorf("parseIncidentSLAChatSpaces(%q) = %+v, want nil", raw, got)
+		}
+	}
+}

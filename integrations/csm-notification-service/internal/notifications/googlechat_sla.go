@@ -216,3 +216,102 @@ func (c *GoogleChatClient) SendSLABreachAlert(ctx context.Context, audience, clo
 	}
 	return c.sendCardToAudience(ctx, audience, caseNumber, "", msg)
 }
+
+// IncidentSLAAlert is SendIncidentSLAAlert's card content.
+type IncidentSLAAlert struct {
+	ClockType string
+	// Tier is "50", "75" or "100".
+	Tier            string
+	Number          string
+	Title           string
+	AssignmentGroup string
+	// GroupManagerName, when set, follows the group in parens, as a case
+	// card's team lead does.
+	GroupManagerName string
+	Priority         string
+	Service          string
+	OpenedAt         string
+	IncidentLink     string
+}
+
+// SendIncidentSLAAlert posts an incident SLA tier crossing to an incident
+// SLA space (IncidentSLAAudience): SendSLABreachAlert's card, worded for an
+// incident -- "Incident ID", the assignment group, the incident priority
+// (P1 - Critical ...) and its service, with an "Open in CSM Portal" button to
+// the incident. Header: "[<PRIORITY>] <Clock> SLA Violation - <number>" at
+// 100%, "<Clock> SLA at Risk - <number>" at 50/75%.
+func (c *GoogleChatClient) SendIncidentSLAAlert(ctx context.Context, audience string, a IncidentSLAAlert) error {
+	if a.Number == "" {
+		return fmt.Errorf("notifications: incident number is required")
+	}
+	if a.Tier == "" {
+		return fmt.Errorf("notifications: tier is required")
+	}
+
+	clockLabel := slaClockTypeLabel(a.ClockType)
+	priority := incidentPriorityLabels[strings.ToUpper(strings.TrimSpace(a.Priority))]
+
+	var title string
+	switch sev := strings.ToUpper(strings.TrimSpace(a.Priority)); {
+	case a.Tier == "100" && sev != "":
+		title = fmt.Sprintf("[%s] %s SLA Violation - %s", sev, clockLabel, a.Number)
+	case a.Tier == "100":
+		title = fmt.Sprintf("%s SLA Violation - %s", clockLabel, a.Number)
+	default:
+		title = fmt.Sprintf("%s SLA at Risk - %s", clockLabel, a.Number)
+	}
+
+	var lines []string
+	if a.Title != "" {
+		lines = append(lines, caseAlertLine(`<b>Title :</b> %s`, truncateSLACardTitle(a.Title)))
+	}
+	lines = append(lines, caseAlertLine(`<b>Incident ID :</b> %s`, a.Number))
+	if a.Service != "" {
+		lines = append(lines, caseAlertLine(`<b>Service :</b> %s`, a.Service))
+	}
+	if a.AssignmentGroup != "" {
+		group := a.AssignmentGroup
+		if a.GroupManagerName != "" {
+			group = a.AssignmentGroup + " (" + a.GroupManagerName + ")"
+		}
+		lines = append(lines, caseAlertLine(`<b>Assignment Group :</b> <font color="%s"><b>%s</b></font>`, slaBreachColor(a.Tier), group))
+	}
+	if label := priority.label; label != "" {
+		lines = append(lines, caseAlertLine(`<b>Priority :</b> %s`, label))
+	} else if p := strings.TrimSpace(a.Priority); p != "" {
+		lines = append(lines, caseAlertLine(`<b>Priority :</b> %s`, p))
+	}
+	if a.OpenedAt != "" {
+		lines = append(lines, caseAlertLine(`<b>Opened At :</b> %s`, a.OpenedAt))
+	}
+	lines = append(lines, caseAlertLine(`<b>SLA Percentage :</b> <font color="%s"><b>%s%%</b></font>`, slaBreachColor(a.Tier), a.Tier))
+
+	msg := chatCardMessage{
+		CardsV2: []chatCardWrapper{
+			{
+				CardID: "incident-sla-alert",
+				Card: chatCard{
+					Header: &chatCardHeader{Title: title},
+					Sections: []chatCardSection{
+						{Widgets: []chatCardWidget{{TextParagraph: &chatTextParagraph{Text: strings.Join(lines, "<br>")}}}},
+						{
+							Widgets: []chatCardWidget{
+								{
+									ButtonList: &chatButtonList{
+										Buttons: []chatButton{
+											{
+												Text:    "Open in CSM Portal",
+												OnClick: chatOnClick{OpenLink: chatOpenLink{URL: a.IncidentLink}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return c.sendCardToAudience(ctx, audience, a.Number, "", msg)
+}

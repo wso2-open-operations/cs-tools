@@ -263,6 +263,38 @@ The "Add Comment" CTA in all four templates changed from a solid-background butt
   - **`newEngagementType` (`events.CaseTypeChangedPayload.NewEngagementType`) is threaded through the identical way, for the identical reason, as a CodeRabbit follow-up on the fix just above.** NOT uppercased (unlike `newType`/`CaseType`) — `EngagementType` keeps the lowercase convention it has everywhere else in this engine. Closes a real, confirmed-live gap: a case created as a plain `"case"` (engagements are deliberately excluded from clock registration at creation, `slaClockEligibleCreateTypes`) can still end up with an active clock after transferring INTO a migration engagement, because entity-service's own clock re-evaluation has no `case_type` gate the way registration does — and without this, `ClockMeta.EngagementType` stayed `""` forever for such a clock, so `sendBreachAlert`'s `CaseType=="ENGAGEMENT" && EngagementType=="migration"` suppression check (meant to make frustration detection the only notification channel for a migration engagement) never actually caught it. `Engine.Reconcile`'s own startup rebuild (`activeSLAClock.EngagementType`, entity-service's `domain.SLAStatus.EngagementType`) closes the same gap for a Redis wipe/restart, not just the live event path — see entity-service's own `CLAUDE.md`, "SLA status", for that half.
 - **`internal/timecardengine`/`events.TypeCaseBillableStatusChanged` no longer exist, on either side.** This used to be a dedicated consumer group here reacting to a case's severity crossing the LOW/S4 boundary (bulk-flipping every time card's `isBillable` for the case), with entity-service's own `Publish` call for it left commented out pending a Postgres `time_cards` table there. By the time that table existed (`time_card`/`time_card_approver`, already fully wired up — see entity-service's own CLAUDE.md), it became clear the event hop itself was never justified: entity-service already owns this data directly (a single `UPDATE time_card SET is_billable = ... WHERE case_id = ...`), so the reaction now happens there, synchronously, in-process — no Kafka round trip, no separate consumer group, no cross-service failure mode for what both ends recognized was never actually a notification to an external system. Removed entirely rather than left wired-but-dormant.
 
+### Incident SLA alerts
+
+The same engine tracks an incident's SLA clocks (entity-service's incident
+SLA policies; today only "Cloud Incident - High Priority": Choreo/Asgardeo,
+Critical/High, service interruption, 4 h resolution) and alerts at the same
+50/75/100% tiers.
+
+- **Registration:** `dispatch.handleIncidentCreated` and
+  `incident.priority_elevated` call `Engine.RegisterIncidentClocks`
+  (`ClockMeta.CaseType = "INCIDENT"`, `Team` = assignment group, `Product` =
+  service). A clock entity-service already ended (a priority lowered first) is
+  skipped, so a cancelled-after-breach clock never alerts. A re-registration
+  of the same clock keeps its alerted tier (`setClockScript`).
+- **Lifecycle:** no incident state events feed the engine. A clock cancelled
+  by a priority drop, or achieved on resolve, is caught by
+  `verifyTierStillDue` before each tier, which asks entity-service.
+- **Chat:** `sendIncidentBreachAlert` posts `SendIncidentSLAAlert` to the
+  `INCIDENT_SLA_CHAT_SPACES` spaces (audience `incident-sla/<group>`) of the
+  groups the incident's card goes to (`notifications.IncidentSLAAudiences` over
+  `IncidentRoutes.Groups`, so a default group fans out like its card), never
+  `chataudience.Resolve`'s case audiences. No shared fallback room.
+- **Email:** the case emails, worded for an incident
+  (`SLABreachEmailData.Incident`): the assignee, and the assignment group's
+  `group_email` (entity-service's `GetClockState` returns the incident's
+  group as its team). No Americas copy, and no onboarding-team copy even
+  when the incident's project is onboarding.
+- **Known gap:** `Reconcile` rebuilds from `GET /sla-status`, which lists
+  case-like work items only, so a Redis wipe loses running incident clocks
+  until their incident is elevated again. `cleanupStaleClocks` re-checks each
+  clock with `GetClockState` before deleting, so a running incident clock is
+  never removed by a recalculation.
+
 ## Cases and incidents are different entities
 
 A **case** is entity-service's `POST /cases` and `domain.CaseView`, carried by

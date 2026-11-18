@@ -559,6 +559,15 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // AssigneeEmail, and the Stage/HasBreached/etc. clock state itself) is
 // completely unaffected by onboarding status.
 //
+// An incident has no account, so no CRE team: for an INCIDENT work item
+// TeamEmail/TeamLeadName are its assignment group's own group_email and
+// manager instead (the SRE group working it), which is where
+// csm-notification-service's incident SLA breach email goes. Every other
+// work item type keeps the CRE team exactly as before -- the assignment
+// group join is restricted to incidents, so a case whose account has no CRE
+// team still gets no team email rather than its assignment group's, and an
+// incident whose account does have a CRE team still gets its own group's.
+//
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
 // live_elapsed_percentage for every row: that view has no business-day
@@ -600,8 +609,10 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
-		       cre_team.group_email,
-		       COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       CASE WHEN wi.type = 'INCIDENT' THEN incident_group.group_email ELSE cre_team.group_email END,
+		       CASE WHEN wi.type = 'INCIDENT'
+		            THEN COALESCE(incident_manager.name, NULLIF(TRIM(CONCAT_WS(' ', incident_manager.first_name, incident_manager.last_name)), ''))
+		            ELSE COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')) END,
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
 		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
 		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
@@ -618,6 +629,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 			LIMIT 1
 		) lead_tm ON TRUE
 		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
+		LEFT JOIN "group" incident_group ON incident_group.id = wi.assignment_group_id AND wi.type = 'INCIDENT'
+		LEFT JOIN "user" incident_manager ON incident_manager.id = incident_group.manager_id
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		LEFT JOIN project p ON p.id = wi.project_id
 		LEFT JOIN project_type pt ON pt.id = p.project_type_id

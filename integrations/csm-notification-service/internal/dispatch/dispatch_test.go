@@ -991,6 +991,18 @@ type mockSLAEngine struct {
 	recalculateCalls   int
 	recalculateErr     error
 	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string }
+	incidentCalls      []mockIncidentClockCall
+}
+
+type mockIncidentClockCall struct {
+	incidentID, priority, number, title, assignmentGroup, service string
+	createdAt                                                     time.Time
+}
+
+func (m *mockSLAEngine) RegisterIncidentClocks(_ context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.incidentCalls = append(m.incidentCalls, mockIncidentClockCall{incidentID, priority, number, title, assignmentGroup, service, createdAt})
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _, _ string) {

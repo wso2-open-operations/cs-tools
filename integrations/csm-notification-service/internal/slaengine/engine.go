@@ -124,12 +124,14 @@ type eventPublisher interface {
 // see Engine.sendBreachAlert's own doc comment.
 type chatSender interface {
 	SendSLABreachAlert(ctx context.Context, audience, clockType, tier, caseNumber, wso2CaseID, caseTitle, caseType, productName, team, teamLeadName, severity, state, openedAt, caseLink string) error
+	SendIncidentSLAAlert(ctx context.Context, audience string, a notifications.IncidentSLAAlert) error
 	HasAudienceSpace(audience string) bool
 }
 
-// linkResolver abstracts recipientlinks.Resolver's CSMLink for testability.
+// linkResolver abstracts recipientlinks.Resolver's CSMLink/IncidentLink for testability.
 type linkResolver interface {
 	CSMLink(caseID string) string
+	IncidentLink(incidentID string) string
 }
 
 // emailSender abstracts notifications.EmailClient's SendEmail for
@@ -307,6 +309,18 @@ type Engine struct {
 	// concurrency shape as GoogleChatClient.teamAudienceSpaces.
 	teamGroupEmailsMu sync.RWMutex
 	teamGroupEmails   map[string]string
+	// incidentSLAAudiences maps an incident's assignment group to its
+	// incident SLA spaces (notifications.IncidentSLAAudiences, set by
+	// WithIncidentSLAAudiences). nil: an incident's SLA alert goes to no
+	// Chat space, only its emails.
+	incidentSLAAudiences func(assignmentGroup string) []string
+}
+
+// WithIncidentSLAAudiences sets how an incident's SLA alert finds its Chat
+// spaces; see Engine.incidentSLAAudiences.
+func (e *Engine) WithIncidentSLAAudiences(audiences func(assignmentGroup string) []string) *Engine {
+	e.incidentSLAAudiences = audiences
+	return e
 }
 
 // clock returns e.now(), or time.Now() when no clock is set.
@@ -517,6 +531,51 @@ func parseWakeMember(member string) (caseID, clockType string, tier int, ok bool
 // one-off script reading existing cases and calling this per case would
 // close that, not built here.
 func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, engagementType, product, team string) {
+	e.registerClocks(ctx, caseID, createdAt, ClockMeta{
+		CaseNumber:     caseNumber,
+		WSO2CaseID:     wso2CaseID,
+		CaseTitle:      caseTitle,
+		CaseType:       caseType,
+		EngagementType: engagementType,
+		Product:        product,
+		Team:           team,
+		Priority:       priority,
+	}, false)
+}
+
+// CaseTypeIncident is the ClockMeta.CaseType of an incident's clock. Its
+// Team is the incident's assignment group and its Product the incident's
+// service; sendBreachAlert routes it to the incident SLA spaces
+// (sendIncidentBreachAlert) instead of the case audiences.
+const CaseTypeIncident = "INCIDENT"
+
+// RegisterIncidentClocks schedules an incident's SLA clocks the way
+// RegisterClocks does a case's: called from dispatch on incident.created and
+// again on incident.priority_elevated, since raising an incident's priority
+// can start a clock (entity-service's incident policy starts on Critical/
+// High). Re-registering the same clock is a no-op (SetClock keeps the
+// alerted tier of the same incarnation). A clock entity-service already
+// ended (a priority lowered before this ran) is skipped rather than
+// scheduled, so a cancelled-after-breach clock never alerts.
+func (e *Engine) RegisterIncidentClocks(ctx context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string) {
+	e.registerClocks(ctx, incidentID, createdAt, ClockMeta{
+		CaseNumber: number,
+		CaseTitle:  title,
+		CaseType:   CaseTypeIncident,
+		Product:    service,
+		Team:       assignmentGroup,
+		Priority:   priority,
+	}, true)
+}
+
+// registerClocks is RegisterClocks' body: base carries every display field,
+// StartedAt/Schedule are filled from entity-service per clock type.
+// incident (RegisterIncidentClocks) leaves out a clock entity-service already
+// reports ended, and keeps the stored service and title when base has none --
+// incident.priority_elevated carries no service, so re-registering from it
+// must not blank what incident.created stored. A case's registration is
+// unaffected by either.
+func (e *Engine) registerClocks(ctx context.Context, caseID string, createdAt time.Time, base ClockMeta, incident bool) {
 	if e.entity == nil {
 		slog.WarnContext(ctx, "slaengine: no entity-service client configured, sla clocks not registered", "caseId", caseID)
 		return
@@ -531,27 +590,32 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 		if !state.Found || state.DurationSeconds <= 0 {
 			continue
 		}
+		if incident && isTerminalSLAStage(state.Stage) {
+			slog.InfoContext(ctx, "slaengine: clock already ended in entity-service, not registering it", "caseId", caseID, "clockType", clockType, "stage", state.Stage)
+			continue
+		}
 
 		startedAt := createdAt
 		if state.StartedOn != nil {
 			startedAt = *state.StartedOn
 		}
 		duration := time.Duration(state.DurationSeconds) * time.Second
-		resolutionAvoidWeekend := clockType == ClockResolution && strings.EqualFold(priority, "MEDIUM")
+		resolutionAvoidWeekend := clockType == ClockResolution && strings.EqualFold(base.Priority, "MEDIUM")
 		dueAt, tierDuration := dueAtAndTierDuration(startedAt, duration, state.Schedule, resolutionAvoidWeekend)
 
-		meta := ClockMeta{
-			CaseNumber:     caseNumber,
-			WSO2CaseID:     wso2CaseID,
-			CaseTitle:      caseTitle,
-			CaseType:       caseType,
-			EngagementType: engagementType,
-			Product:        product,
-			Team:           team,
-			Priority:       priority,
-			StartedAt:      startedAt,
-			Schedule:       state.Schedule,
-			SLAID:          state.ID,
+		meta := base
+		meta.StartedAt = startedAt
+		meta.Schedule = state.Schedule
+		meta.SLAID = state.ID
+		if incident && (meta.Product == "" || meta.CaseTitle == "") {
+			if stored, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+				if meta.Product == "" {
+					meta.Product = stored.Product
+				}
+				if meta.CaseTitle == "" {
+					meta.CaseTitle = stored.CaseTitle
+				}
+			}
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
@@ -1405,6 +1469,11 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		return
 	}
 
+	if meta.CaseType == CaseTypeIncident {
+		e.sendIncidentBreachAlert(ctx, meta, caseID, clockType, tier, state)
+		return
+	}
+
 	// Service requests breach their SLA against the account's default CRE
 	// team, not whichever team (often a different SRE group) is actually
 	// working the SR -- a real, reported false-signal problem. Rather than
@@ -1472,6 +1541,53 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 	e.sendBreachEmails(ctx, meta, caseID, clockType, tier, caseNumber, openedAt, caseLink, state, isAmericas)
 }
 
+// sendIncidentBreachAlert is sendBreachAlert for an incident's clock: the
+// card goes to the incident SLA spaces of its assignment group
+// (incidentSLAAudiences -- a default group fans out to the SRE teams, as its
+// incident card does), not chataudience.Resolve's case audiences, and the
+// same assignee and team emails a case gets follow. Its team email is the
+// assignment group's group_email (entity-service's GetClockState resolves it
+// for an incident); there is no Americas copy, which is CRE coverage. A
+// failed send to one space is logged and not retried, as for a case.
+func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, incidentID, clockType string, tier int, state clockState) {
+	number := meta.CaseNumber
+	if number == "" {
+		number = incidentID
+	}
+	var openedAt string
+	if !meta.StartedAt.IsZero() {
+		openedAt = meta.StartedAt.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
+	}
+	link := e.links.IncidentLink(incidentID)
+
+	var audiences []string
+	if e.incidentSLAAudiences != nil {
+		audiences = e.incidentSLAAudiences(meta.Team)
+	}
+	if len(audiences) == 0 {
+		slog.InfoContext(ctx, "slaengine: incident's assignment group has no incident SLA chat space, no chat alert", "incidentId", incidentID, "clockType", clockType, "tier", tier, "assignmentGroup", meta.Team)
+	}
+	alert := notifications.IncidentSLAAlert{
+		ClockType:        clockType,
+		Tier:             tierLabel(tier),
+		Number:           number,
+		Title:            meta.CaseTitle,
+		AssignmentGroup:  meta.Team,
+		GroupManagerName: state.TeamLeadName,
+		Priority:         meta.Priority,
+		Service:          meta.Product,
+		OpenedAt:         openedAt,
+		IncidentLink:     link,
+	}
+	for _, audience := range audiences {
+		if err := e.chat.SendIncidentSLAAlert(ctx, audience, alert); err != nil {
+			slog.ErrorContext(ctx, "slaengine: failed to send incident sla alert to chat space, not retrying", "incidentId", incidentID, "clockType", clockType, "tier", tier, "chatSpace", audience, "err", err)
+		}
+	}
+
+	e.sendBreachEmails(ctx, meta, incidentID, clockType, tier, number, openedAt, link, state, false)
+}
+
 // sendBreachEmails sends the same tier crossing sendBreachAlert just posted
 // to Chat as two or three separate emails — one to the case's assigned
 // engineer, one to the case's team email group(s), and, when isAmericas is
@@ -1529,6 +1645,11 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		State:        meta.State,
 		OpenedAt:     openedAt,
 		CaseLink:     caseLink,
+		Incident:     meta.CaseType == CaseTypeIncident,
+	}
+	if data.Incident {
+		// "Incident ID" already says what it is; a "Type : INCIDENT" row adds nothing.
+		data.CaseType = ""
 	}
 	subject := notifications.SLABreachEmailSubject(clockType, data.Tier, meta.Priority, caseNumber, meta.WSO2CaseID)
 
@@ -1598,7 +1719,15 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	// stay the CRE team's own throughout -- the email never claims the
 	// onboarding team's lead leads the team actually working the case (a
 	// CodeRabbit-caught gap in an earlier version of this fix).
-	teamEmails := nonEmptyUnique(state.TeamEmail, state.OnboardingTeamEmail)
+	//
+	// An incident's team is its assignment group alone: the onboarding team
+	// is a case concern, so an incident on an onboarding project does not
+	// copy it.
+	onboardingTeamEmail := state.OnboardingTeamEmail
+	if meta.CaseType == CaseTypeIncident {
+		onboardingTeamEmail = ""
+	}
+	teamEmails := nonEmptyUnique(state.TeamEmail, onboardingTeamEmail)
 	send("team", teamEmails, meta.Team, func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor

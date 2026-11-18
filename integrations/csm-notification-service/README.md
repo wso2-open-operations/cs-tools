@@ -73,9 +73,10 @@ validation boundary. Types and their reaction, from `dispatch.Dispatcher.Handle`
 | `case.acknowledged` | Chat alert only. |
 | `case.workaround_provided` | Completes the workaround SLA clock (no message). |
 | `case.escalated` | One email to the escalation's notification list. |
-| `incident.created` | Voice call to the payload's `callTo`, or `INCIDENT_DEFAULT_CALL_TO`; incident Chat card where `INCIDENT_CHAT_SPACES` has an entry. |
+| `incident.created` | Voice call to the payload's `callTo`, or `INCIDENT_DEFAULT_CALL_TO`; incident Chat card where `INCIDENT_CHAT_SPACES` has an entry; registers the incident's SLA clocks with the SLA engine. |
 | `incident.assigned` | "Incident Acknowledged." reply in the incident's Chat thread. |
-| `incident.acknowledged`, `incident.priority_elevated`, `incident.comment_added` | Ignored here; owned by the call-escalation ladder. |
+| `incident.priority_elevated` | Owned by the call-escalation ladder; here it only registers any SLA clock the raised priority started. |
+| `incident.acknowledged`, `incident.comment_added` | Ignored here; owned by the call-escalation ladder. |
 | `incident.special_ops_alert` | Pages the subject-matter expert through the SRE ladder engine, if enabled. |
 | `change_request.approval_requested`, `change_request.plan_date_notice` | One email; the payload's audience (internal or customer) picks the portal link. |
 | `outage.notification_due`, `outage.communication_due` | Outage email. |
@@ -329,6 +330,7 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `GOOGLE_CHAT_SPACES` | unset (Chat alerts unavailable) | JSON array of `{"audience","webhookUrl"}`, one per space. Audience matching ignores whitespace but is case-sensitive. Meant now only for the standing, non-team audiences: `Incident Monitor`, `Onboarding`, `Americas`, `Evaluation` — a real team's own space should come from entity-service's `team.chat_webhook_url` instead (see `TEAM_CHAT_SPACES_REFRESH_INTERVAL` below); a team still listed here during migration still works, and wins over a same-named entity-service entry. A malformed value (or unknown JSON keys, such as the legacy product-keyed shape) logs an error and disables Chat. An audience with no entry is skipped. | `[{"audience":"Incident Monitor","webhookUrl":"<webhook-url>"}]` |
 | `INCIDENT_CHAT_SPACES` | unset (no incident cards) | JSON object, assignment group (matched case-insensitively) to webhook URL. | `{"Example SRE Group":"<webhook-url>"}` |
 | `INCIDENT_CHAT_FANOUT` | unset | JSON object, assignment group to the list of groups whose `INCIDENT_CHAT_SPACES` spaces get its cards. Names only. The call is placed once; a card that fails in one space is not retried. | `{"Default Group":["Group A","Group B"]}` |
+| `INCIDENT_SLA_CHAT_SPACES` | unset (no incident SLA cards) | JSON object, assignment group (or SRE team key) to webhook URL: where an incident's SLA alerts (50%, 75%, 100%) go, apart from its incident card space. A default group fans out to the groups `INCIDENT_CHAT_FANOUT` (or the Alert Settings mapping) lists, so they need an entry here too. The assignee and assignment-group emails go out regardless. | `{"Example SRE Group":"<webhook-url>"}` |
 | `TEAM_CHAT_SPACES_REFRESH_INTERVAL` | `5m` | How often a team's own Chat webhook URL (entity-service's `GET /teams/chat-webhooks`) is re-fetched and merged into the routing table — the same tick also refreshes the SLA engine's team group-email lookup (`GET /teams/group-emails`) when Redis is configured, used for the fixed Americas overnight-coverage team email (see "SLA breach-alerting engine" in `CLAUDE.md`). Only read when `CUSTOMER_ENTITY_BASE_URL` is set; a failed refresh logs and keeps the previous set. | `1m` |
 | `GOOGLE_CHAT_AUDIENCE_SPACES` | n/a | Removed; if set, a warning is logged and it is ignored. Use `GOOGLE_CHAT_SPACES`. | |
 

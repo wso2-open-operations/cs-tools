@@ -172,6 +172,36 @@ func IncidentAudiences(routes *IncidentRoutes, env map[string][]string, group st
 	return audiences, false
 }
 
+// IncidentSLAAudiencePrefix namespaces INCIDENT_SLA_CHAT_SPACES entries: an
+// incident's SLA alerts go to a space of their own, apart from the space that
+// gets its "Incident Reported" card.
+const IncidentSLAAudiencePrefix = "incident-sla/"
+
+// IncidentSLAAudience is the Chat audience key of an assignment group's (or
+// SRE team key's) incident SLA space.
+func IncidentSLAAudience(group string) string {
+	return IncidentSLAAudiencePrefix + strings.ToLower(strings.TrimSpace(group))
+}
+
+// IncidentSLAAudiences is the SLA spaces an incident's SLA alerts go to: the
+// INCIDENT_SLA_CHAT_SPACES spaces of the same groups its incident card goes
+// to (routes.Groups -- so a default group fans out to the SRE teams exactly
+// as its card does), each kept only when has knows it. No shared fallback: a
+// group with no SLA space gets no SLA card.
+func IncidentSLAAudiences(routes *IncidentRoutes, env map[string][]string, group string, has func(string) bool) []string {
+	if strings.TrimSpace(group) == "" {
+		return nil
+	}
+	var audiences []string
+	for _, target := range routes.Groups(env, group) {
+		audience := IncidentSLAAudience(target)
+		if has(audience) && !slices.Contains(audiences, audience) {
+			audiences = append(audiences, audience)
+		}
+	}
+	return audiences
+}
+
 // IncidentGroups is the assignment groups whose INCIDENT_CHAT_SPACES spaces get a group's incident messages: its INCIDENT_CHAT_FANOUT list, else the group itself.
 func IncidentGroups(fanout map[string][]string, group string) []string {
 	key := strings.ToLower(strings.TrimSpace(group))

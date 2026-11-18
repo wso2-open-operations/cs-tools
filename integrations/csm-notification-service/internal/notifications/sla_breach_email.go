@@ -89,6 +89,18 @@ type SLABreachEmailData struct {
 	OpenedAt     string
 	CaseLink     string
 	IntendedFor  string
+	// Incident renders the email for an incident's SLA clock: "Incident ID"
+	// and "View Incident" in place of the case wording. CaseNumber/CaseLink
+	// then carry the incident's number and link.
+	Incident bool
+}
+
+// itemNoun is what the emails call the work item whose clock crossed a tier.
+func (d SLABreachEmailData) itemNoun() string {
+	if d.Incident {
+		return "Incident"
+	}
+	return "Case"
 }
 
 // RenderSLABreachAssigneeEmail fills in the short, personal "your case's
@@ -106,6 +118,7 @@ func RenderSLABreachAssigneeEmail(assigneeName string, d SLABreachEmailData) str
 		"<!-- [CLOCK_LABEL] -->", escapeHTML(slaClockTypeLabel(d.ClockType)),
 		"<!-- [CASE_NUMBER] -->", escapeHTML(d.CaseNumber),
 		"<!-- [CASE_LINK] -->", escapeHTML(d.CaseLink),
+		"<!-- [ITEM_NOUN] -->", d.itemNoun(),
 		"<!-- [SLA_COLOR] -->", slaBreachColor(d.Tier),
 		"<!-- [TIER] -->", escapeHTML(d.Tier),
 	)
@@ -145,6 +158,7 @@ func RenderSLABreachTeamEmail(teamLeadName string, d SLABreachEmailData) string 
 		"<!-- [HEADER_TITLE] -->", escapeHTML(slaBreachHeaderTitle(d.ClockType, d.Tier, d.Severity, d.CaseNumber, d.WSO2CaseID)),
 		"<!-- [CASE_TITLE] -->", escapeHTML(truncateSLACardTitle(d.CaseTitle)),
 		"<!-- [CASE_NUMBER] -->", escapeHTML(d.CaseNumber),
+		"<!-- [ITEM_NOUN] -->", d.itemNoun(),
 		"<!-- [CASE_TYPE] -->", escapeHTML(d.CaseType),
 		"<!-- [PRODUCT] -->", escapeHTML(d.Product),
 		"<!-- [TEAM_DISPLAY] -->", escapeHTML(teamDisplay),
