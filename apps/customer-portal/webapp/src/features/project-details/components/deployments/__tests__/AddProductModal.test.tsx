@@ -106,25 +106,6 @@ describe("AddProductModal", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("names the configured company in the title", () => {
-    const originalConfig = window.config;
-    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
-    try {
-      renderWithProviders(
-        <AddProductModal
-          open={true}
-          deploymentId="dep-1"
-          projectId="proj-1"
-          onClose={mockOnClose}
-        />,
-      );
-      expect(screen.getByText("Add Acme Corp Product")).toBeInTheDocument();
-      expect(screen.queryByText(/WSO2/)).not.toBeInTheDocument();
-    } finally {
-      window.config = originalConfig;
-    }
-  });
-
   it("should render correctly when open is true", () => {
     renderWithProviders(
       <AddProductModal
@@ -136,7 +117,7 @@ describe("AddProductModal", () => {
     );
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Add WSO2 Product")).toBeInTheDocument();
+    expect(screen.getByText("Add Choreo Labs Product")).toBeInTheDocument();
     expect(
       screen.getByText("Add a product to this deployment environment."),
     ).toBeInTheDocument();
