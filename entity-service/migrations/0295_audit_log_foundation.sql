@@ -17,6 +17,14 @@
 -- Field-level audit log, foundation. One row per changed field, written by an
 -- AFTER row trigger in the same transaction as the change, only for tables listed
 -- in audit_config. Registers no business table: each one calls register_audit().
+--
+-- Updates and deletes only: an INSERT is not audited. A row already says who
+-- created it and when (created_by, created_on), and inserts were most of the
+-- log's cost, one row for every non-NULL column of every new row. An update logs
+-- each changed field, a delete logs the whole row. The one exception is the
+-- registry itself, audit_config: low volume, and its inserts record who started
+-- auditing a table, which no column of the row says. The trigger function keeps
+-- its INSERT branch and the action check allows 'INSERT' for that.
 -- Requires PostgreSQL 18 (uuidv7()). Safe to re-run.
 --
 -- Everything is created in the schema this migration runs in (current_schema(),
@@ -270,9 +278,12 @@ BEGIN
 
     -- The settings live in the trigger, so a change rebuilds it.
     EXECUTE format('DROP TRIGGER IF EXISTS csm_audit_row_change ON %s', table_oid);
+    -- Updates and deletes only, except the registry: who registered a table is
+    -- recorded on the INSERT of its audit_config row.
     EXECUTE format(
-        'CREATE TRIGGER csm_audit_row_change AFTER INSERT OR UPDATE OR DELETE ON %s
+        'CREATE TRIGGER csm_audit_row_change AFTER %s ON %s
            FOR EACH ROW EXECUTE FUNCTION audit_log_row_change(%L, %L, %L)',
+        CASE WHEN table_oid = 'audit_config'::regclass THEN 'INSERT OR UPDATE OR DELETE' ELSE 'UPDATE OR DELETE' END,
         table_oid, array_to_string(keys, ','), array_to_string(excluded, ','), array_to_string(p_masked, ','));
     -- ALWAYS, so it still fires when session_replication_role = replica.
     EXECUTE format('ALTER TABLE %s ENABLE ALWAYS TRIGGER csm_audit_row_change', table_oid);
