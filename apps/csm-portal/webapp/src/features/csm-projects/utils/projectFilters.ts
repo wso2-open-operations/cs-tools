@@ -119,9 +119,21 @@ export const PROJECT_FILTER_PARAM_KEYS: readonly string[] = [
   ...DATE_BOUND_KEYS,
 ];
 
-/** The list keys whose values are free (no fixed vocabulary): read and
- *  written as comma-separated lists, sent as they are. */
+/** The list keys whose values are free (no fixed vocabulary): written as
+ *  comma-separated lists with each value's own `%` and `,` escaped (so a
+ *  region holding a comma stays one value), and sent as they are. */
 const FREE_LIST_KEYS = ["regions", "onboardingOwnerIds", "onboardingOwnerEmails"] as const;
+
+/** Escapes the list separator and the escape character inside one value. */
+const encodeListValue = (v: string): string => v.replace(/%/g, "%25").replace(/,/g, "%2C");
+
+/** Reverses {@link encodeListValue}; any other `%` sequence is left as typed. */
+const decodeListValue = (v: string): string => v.replace(/%2C/gi, ",").replace(/%25/g, "%");
+
+/** A free list from the URL: split on the separator, then unescaped. */
+function parseFreeList(raw: string | null): string[] {
+  return parseCsv(raw).map(decodeListValue).filter((s) => s.trim() !== "");
+}
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -172,7 +184,7 @@ export function readProjectFilters(params: URLSearchParams): ProjectFilters {
     closureStates: parseClosureStates(params.get("closureStates")),
     excludeClosureStates: parseClosureStates(params.get("excludeClosureStates")),
   };
-  for (const k of FREE_LIST_KEYS) out[k] = parseCsv(params.get(k));
+  for (const k of FREE_LIST_KEYS) out[k] = parseFreeList(params.get(k));
   const single = parseClosureStates(params.get("closureStatus"));
   out.closureStatus = single.length === 1 ? single[0] : "";
   for (const k of PROJECT_DATE_FILTER_KEYS) {
@@ -199,7 +211,7 @@ export function writeProjectFilters(
     next.set("excludeClosureStates", filters.excludeClosureStates.join(","));
   }
   for (const k of FREE_LIST_KEYS) {
-    if (filters[k].length > 0) next.set(k, filters[k].join(","));
+    if (filters[k].length > 0) next.set(k, filters[k].map(encodeListValue).join(","));
   }
   for (const k of DATE_BOUND_KEYS) {
     if (filters[k]) next.set(k, filters[k]);
