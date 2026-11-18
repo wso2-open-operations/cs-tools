@@ -200,7 +200,7 @@ func (r *storedAttachmentRepo) GetParent(ctx context.Context, kind domain.Stored
 			FROM work_item wi
 			LEFT JOIN project p ON p.id = wi.project_id
 			LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
-			WHERE wi.id = $1`, parentID).Scan(&p.ID, &p.Number, &p.ProjectNumber, &p.Closed)
+			WHERE wi.id = $1 AND wi.type <> ALL(`+internalOnlyWorkItemTypesSQL+`)`, parentID).Scan(&p.ID, &p.Number, &p.ProjectNumber, &p.Closed)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -9146,6 +9146,403 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/product-work-items:
+    get:
+      summary: List the product issues linked to a case (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        The Product Issue work items that have an active AFFECTS link to the case, newest first. The case
+        must be a case-like work item. Untracked patches (Type/Patch issues, which register no work item)
+        are not listed. Read from the database only; no GitHub call.
+      operationId: listCaseProductWorkItems
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      responses:
+        "200":
+          description: The linked product issues.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueListResponse'
+        "400":
+          description: Invalid case id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: File a case's GitHub issue through the engineering entity and register its internal counterpart (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        Creates the GitHub issue in the repository mapped to the case's product, writes a
+        "GitHub issue filed" work note on the case and, for every issue type but Type/Patch,
+        registers a Product Issue work item (PI number) linked to the case. A Type/Patch
+        request files the issue and adds the `patch` case tag but registers no work item
+        (kind UNTRACKED_PATCH). The request is idempotent on (case, idempotencyKey): repeating
+        it returns the stored result with 200; a different body under the same key is a 409
+        `idempotency_key_reused`. The case must be open, work in progress, waiting on WSO2 or
+        reopened. A GitHub or engineering entity failure is a 502 (or 503 with Retry-After
+        when rate limited) with a generic message.
+      operationId: createProductWorkItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductWorkItemRequest'
+      responses:
+        "200":
+          description: The request was already completed; the stored result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateProductWorkItemResponse'
+        "201":
+          description: GitHub issue created and registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateProductWorkItemResponse'
+        "400":
+          description: Bad request, no repository mapped for the case's product, or the caller has no user email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            The case is not in a state that allows filing a GitHub issue, the idempotency key was used for a
+            different request (`idempotency_key_reused`), or another attempt with the key is still running
+            (`request_in_progress`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "502":
+          description: GitHub or the engineering entity failed or refused; nothing is returned from it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Rate limited by GitHub (Retry-After is set), or the issue was created but not yet recorded (retry the same request).
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait, when rate limited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}/product-work-items/links:
+    post:
+      summary: Link a product issue to a case (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        Gives exactly one of `workItemId`, or `owner`, `repository` and `issueNumber`. A known product
+        issue is linked with source MANUAL; linking one that already has the active link to this case is
+        idempotent (200, the existing link). One already linked to another case is a 409 `already_linked`
+        naming that case. An issue given by repository that has no product issue yet is read from GitHub
+        and registered (201): its repository must be in the product repository mapping, it must not be
+        labelled Type/Patch or patch (patches are not tracked) and must not be a pull request. Its priority
+        and category come from its labels and its opener, ABT team and public issue URL from the footer
+        lines of its body. The case may be in any state except closed (409). No work note is written and
+        nothing is written to GitHub.
+      operationId: linkCaseProductWorkItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkProductWorkItemRequest'
+      responses:
+        "200":
+          description: The product issue already had this link; the existing link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueSummary'
+        "201":
+          description: Linked (and registered from GitHub when it was not known yet).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueSummary'
+        "400":
+          description: Bad request, the repository is not mapped to a product, or the issue is a patch or a pull request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case, product issue or GitHub issue not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The case is closed, the product issue is already linked to another case (`already_linked`), or the issue is being registered from a case right now (`request_in_progress`; retry shortly).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "502":
+          description: GitHub or the engineering entity failed; nothing is returned from it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Rate limited by GitHub (Retry-After is set).
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/{id}/product-work-items/{workItemId}/link:
+    delete:
+      summary: Unlink a product issue from a case (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        Deactivates the active AFFECTS link from the product issue to the case. The product issue then
+        appears among the unmatched issues of POST /product-work-items/search.
+      operationId: unlinkCaseProductWorkItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+        - name: workItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Product issue work item UUID.
+      responses:
+        "204":
+          description: Unlinked.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No active link between the product issue and the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-work-items/{id}:
+    get:
+      summary: Get one product issue (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        The product issue with its GitHub state, the affected case (when linked), the latest 200 comments of
+        its conversation (oldest first; `conversationTruncated` says older ones were left out) and its board
+        status history (oldest first). Read from the database only; no GitHub call. Any other work item
+        type is a 404.
+      operationId: getProductWorkItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Product issue work item UUID.
+      responses:
+        "200":
+          description: The product issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueDetail'
+        "400":
+          description: Invalid id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Product issue not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-work-items/search:
+    post:
+      summary: Search product issues (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        Newest first. `unmatched: true` selects product issues with no active AFFECTS link (it cannot be
+        combined with `caseId`). `query` matches the PI number or the title as a substring, and a query of
+        digits also matches the GitHub issue number. Owner and repository match case-insensitively. Limit
+        defaults to 20 and is at most 50.
+      operationId: searchProductWorkItems
+      requestBody:
+        required: false  # an empty body is the unfiltered first page
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProductWorkItemsRequest'
+      responses:
+        "200":
+          description: A page of product issues.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductWorkItemsResponse'
+        "400":
+          description: Unknown filter value, or an invalid filter combination.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/{id}/escalations:
     get:
       summary: Get a case's full escalation history, newest first.
@@ -33055,6 +33452,218 @@ components:
         issue:
           $ref: '#/components/schemas/CaseGithubIssueDetail'
 
+    CreateProductWorkItemRequest:
+      type: object
+      required: [idempotencyKey, title]
+      additionalProperties: false
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Names this request on the case; repeating the request with it never files a second issue.
+        title:
+          type: string
+          maxLength: 256
+          description: GitHub issue title (1 to 256 characters).
+        description:
+          type: string
+          maxLength: 65536
+          description: GitHub issue body. The product, update level, case ids, ABT team and opener are appended as a fixed footer.
+        reason:
+          type: string
+          description: Why the issue is filed; "migration" adds Affected/Migration.
+        repoOverride:
+          $ref: '#/components/schemas/CaseGithubIssueRepoOverride'
+        updateLevel:
+          type: string
+        publicIssueUrl:
+          type: string
+        regression:
+          type: boolean
+        hotFixRequired:
+          type: boolean
+        issueTypeLabel:
+          type: string
+          description: Type/Patch files an untracked patch; any other value files a product issue.
+        priorityLevel:
+          type: string
+          description: Priority for a Type/Discussion issue.
+        onboardingInProgress:
+          type: boolean
+          description: Adds Affected/Onboarding.
+
+    CreateProductWorkItemResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        issue:
+          $ref: '#/components/schemas/CaseGithubIssueDetail'
+        kind:
+          type: string
+          enum: [PRODUCT_ISSUE, UNTRACKED_PATCH]
+        workItem:
+          type: object
+          nullable: true
+          description: The registered Product Issue; null for an untracked patch.
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+              description: PI number, e.g. PI0000001.
+
+    ProductIssueGitHub:
+      type: object
+      properties:
+        owner: {type: string}
+        repository: {type: string}
+        issueNumber: {type: integer}
+        htmlUrl: {type: string, nullable: true}
+        state: {type: string, enum: [OPEN, CLOSED]}
+        stateReason: {type: string, nullable: true}
+        labels:
+          type: array
+          items: {type: string}
+
+    ProductIssueCaseRef:
+      type: object
+      nullable: true
+      description: The case the product issue affects; null when it has no active link.
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+
+    ProductIssueSummary:
+      type: object
+      description: >-
+        A product issue. `case`, `linkSource` and `linkedOn` are null for an unmatched issue.
+        `lastActivityOn` is the latest of the GitHub update time, the last comment and the last status event.
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "PI number, e.g. PI0000001."}
+        title: {type: string}
+        github:
+          $ref: '#/components/schemas/ProductIssueGitHub'
+        boardStatus:
+          type: string
+          nullable: true
+          enum: [OPEN, IN_PROGRESS, WAITING_ON_PRODUCT_TEAM, WAITING_ON_CS, REOPENED, RESOLVED, CLOSED, OTHER]
+        boardStatusRaw: {type: string, nullable: true}
+        priority: {type: string, nullable: true, description: "P1, P2 or P3 (an unrecognised priority label is kept as written)."}
+        category: {type: string, nullable: true, description: "The issue's Type/... label."}
+        case:
+          $ref: '#/components/schemas/ProductIssueCaseRef'
+        linkSource: {type: string, nullable: true, enum: [CREATION, MANUAL, BACKFILL]}
+        linkedOn: {type: string, format: date-time, nullable: true}
+        lastActivityOn: {type: string, format: date-time, nullable: true}
+        linkState:
+          type: string
+          description: State of the GitHub link itself.
+          enum: [ACTIVE, INACCESSIBLE, DELETED, TRANSFERRED]
+
+    ProductIssueListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductIssueSummary'
+
+    ProductIssueComment:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string, nullable: true}
+        author: {type: string, description: "The comment's created_by."}
+        body: {type: string}
+        createdOn: {type: string, format: date-time}
+        origin: {type: string, nullable: true, enum: [PORTAL, GITHUB], description: "Null for a comment with no GitHub reference."}
+        githubCommentId: {type: integer, format: int64, nullable: true}
+        authorLogin: {type: string, nullable: true}
+
+    ProductIssueStatusEvent:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        fromStatus: {type: string, nullable: true}
+        toStatus: {type: string}
+        waitsOn: {type: string, enum: [CS, PRODUCT_TEAM, CUSTOMER, NOBODY]}
+        occurredOn: {type: string, format: date-time}
+        actor: {type: string, nullable: true}
+        source: {type: string, enum: [WEBHOOK, RECONCILE, BACKFILL, PORTAL]}
+        rawStatus: {type: string, nullable: true}
+
+    ProductIssueDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProductIssueSummary'
+        - type: object
+          properties:
+            openedByEmail: {type: string, nullable: true}
+            abtTeam: {type: string, nullable: true}
+            publicIssueUrl: {type: string, nullable: true}
+            createdOn: {type: string, format: date-time}
+            lastSyncedOn: {type: string, format: date-time, nullable: true}
+            conversation:
+              type: array
+              description: The latest 200 comments, oldest first; deleted comments are left out.
+              items:
+                $ref: '#/components/schemas/ProductIssueComment'
+            conversationTruncated: {type: boolean}
+            statusHistory:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductIssueStatusEvent'
+
+    SearchProductWorkItemsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        filters:
+          type: object
+          additionalProperties: false
+          properties:
+            caseId: {type: string, format: uuid}
+            githubState: {type: string, enum: [OPEN, CLOSED]}
+            boardStatuses:
+              type: array
+              items:
+                type: string
+                enum: [OPEN, IN_PROGRESS, WAITING_ON_PRODUCT_TEAM, WAITING_ON_CS, REOPENED, RESOLVED, CLOSED, OTHER]
+            owner: {type: string}
+            repository: {type: string}
+            unmatched: {type: boolean, description: "Only product issues with no active case link."}
+            query: {type: string, maxLength: 200}
+        pagination:
+          type: object
+          additionalProperties: false
+          properties:
+            offset: {type: integer, minimum: 0, default: 0}
+            limit: {type: integer, minimum: 1, maximum: 50, default: 20}
+
+    SearchProductWorkItemsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductIssueSummary'
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+
+    LinkProductWorkItemRequest:
+      type: object
+      additionalProperties: false
+      description: Exactly one of `workItemId`, or `owner` with `repository` and `issueNumber`.
+      properties:
+        workItemId: {type: string, format: uuid}
+        owner: {type: string}
+        repository: {type: string}
+        issueNumber: {type: integer, minimum: 1}
+
     SearchCallRequestsRequest:
       type: object
       required: [caseId]
@@ -38067,7 +38676,13 @@ components:
             409), and
             `change_request_forbidden` (403: not a registered contact of the change
             request's project, its own creator, a user who may not decide an internal
-            stage, or a field a customer may not set), and, on POST /incidents,
+            stage, or a field a customer may not set), and, on
+            POST /cases/{id}/product-work-items, `idempotency_key_reused` (409: a key already used
+            for a different request) and `request_in_progress` (409: the same request while another
+            attempt with the key is still running; retry shortly), and, on
+            POST /cases/{id}/product-work-items/links, `already_linked` (409: the product issue is linked to
+            another case, named in the message; nothing changed) and `request_in_progress` (409: the issue is
+            being registered from a case right now; retry shortly), and, on POST /incidents,
             `incident_assignment_group_not_allowed` (400: an assignmentGroupId that is
             not an assignable active group; nothing created), and, on POST
             /incidents/{id}/specialist-handoffs, `incident_handoff_needs_assignee` (409:

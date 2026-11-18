@@ -29,6 +29,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/cache"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/engineeringentity"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
@@ -1326,6 +1327,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		service.WithStoredAttachmentCaseStates(storedAttachmentSvc, activeCaseSvc)
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
+	// guardCaseID refuses (404) an id-addressed /cases/{id}/... route whose id names
+	// an internal-only work item (a product issue); see refuseInternalOnlyWorkItem.
+	// It is the identity wrapper unless the git-internals feature is on: with the
+	// flag off these routes behave exactly as they did before it existed.
+	guardCaseID := newCaseIDGuard(cfg, db)
 	if db != nil {
 		announcementRequestHandler = handler.NewAnnouncementRequestHandler(
 			service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db), activeCaseSvc, accessSvc),
@@ -2265,7 +2271,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
 	if caseSLARecalcHandler != nil {
-		mux.HandleFunc("POST /cases/{id}/sla/recalculate", caseSLARecalcHandler.RecalculatePauseTotals)
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate", guardCaseID(caseSLARecalcHandler.RecalculatePauseTotals))
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
@@ -2748,7 +2754,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /deployed-products/{id}/metrics/search", deployedProductHandler.SearchDeployedProductMetrics)
 	mux.HandleFunc("POST /deployed-products/{id}/metrics/usage-counts/search", deployedProductHandler.SearchDeployedProductUsageCounts)
 	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
-	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
+	mux.HandleFunc("PATCH /cases/{id}", guardCaseID(caseHandler.PatchCase))
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	// One-shot read of every announcement case for the CSM announcement
@@ -2769,8 +2775,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /cases/volume-trend", caseHandler.CaseVolumeTrend)
 	mux.HandleFunc("POST /cases/feedback/search", feedbackHandler.SearchFeedback)
 	mux.HandleFunc("POST /cases/feedback/aggregate", feedbackHandler.AggregateFeedback)
-	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
-	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
+	mux.HandleFunc("POST /cases/{id}/comments", guardCaseID(caseHandler.CreateCaseComment))
+	mux.HandleFunc("POST /cases/{id}/comments/search", guardCaseID(caseHandler.SearchCaseComments))
 	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
 	// Attachment metadata is listed from PostgreSQL only. The files are in Azure
 	// Blob Storage and are read and written through the stored-attachment routes
@@ -2778,8 +2784,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /cases/{id}/feedback", caseHandler.GetCaseFeedback)
 	mux.HandleFunc("POST /cases/{id}/feedback", caseHandler.SubmitCaseFeedback)
-	mux.HandleFunc("POST /cases/{id}/tags", caseHandler.AddCaseTag)
-	mux.HandleFunc("DELETE /cases/{id}/tags/{tagId}", caseHandler.RemoveCaseTag)
+	mux.HandleFunc("POST /cases/{id}/tags", guardCaseID(caseHandler.AddCaseTag))
+	mux.HandleFunc("DELETE /cases/{id}/tags/{tagId}", guardCaseID(caseHandler.RemoveCaseTag))
 	mux.HandleFunc("POST /tags/search", caseHandler.SearchTags)
 	// Deprecated: the query-parameter form of tag search, kept for one release
 	// so callers can be rolled out independently of this service. Remove it
@@ -2819,7 +2825,40 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /cases/{id}/github-issues", caseGithubIssueHandler.CreateCaseGithubIssue)
 	}
 
-	mux.HandleFunc("GET /cases/{id}/escalations", caseEscalationHandler.SearchCaseEscalations)
+	// Git internals (GIT_INTERNALS_ENABLED): files a case's GitHub issue through the
+	// engineering entity and registers its internal counterpart, a product issue.
+	// Off by default; the route is not registered at all unless the gate, the
+	// engineering entity base URL and a Postgres-served case database are all there.
+	// internalOnly: a product issue is WSO2-internal. It is a sibling of the route
+	// above, which is untouched.
+	if cfg.GitInternalsActive() && db != nil && cfg.DataSource != config.DataSourceServiceNow {
+		engineeringClient := engineeringentity.New(cfg.EngineeringEntityBaseURL, engineeringentity.ClientCredentialsConfig{
+			TokenURL:     cfg.EngineeringEntityTokenURL,
+			ClientID:     cfg.EngineeringEntityClientID,
+			ClientSecret: cfg.EngineeringEntityClientSecret,
+			Scopes:       cfg.EngineeringEntityScopes,
+		})
+		if !engineeringClient.AuthEnabled() {
+			slog.Warn("git internals: ENGINEERING_ENTITY_TOKEN_URL, ENGINEERING_ENTITY_CLIENT_ID and ENGINEERING_ENTITY_CLIENT_SECRET are not set; calls to the engineering entity carry no Authorization header (fine for a local engineering entity, not for Choreo)")
+		}
+		productWorkItemHandler := handler.NewProductWorkItemHandler(service.NewProductWorkItemService(
+			engineeringClient,
+			repository.NewProductWorkItemRepository(repository.NewScoped(db)),
+			repository.NewProductRepoMappingRepository(db),
+			activeCaseSvc, // the service POST /cases/{id}/comments and /tags use (dual-write aware)
+			accessSvc))
+		mux.HandleFunc("POST /cases/{id}/product-work-items", internalOnly(accessSvc, productWorkItemHandler.CreateProductWorkItem))
+		// Reads, manual link and unlink of product issues (internal callers only).
+		productIssueHandler := handler.NewProductIssueHandler(service.NewProductIssueService(
+			engineeringClient, repository.NewProductIssueRepository(repository.NewScoped(db)), accessSvc))
+		mux.HandleFunc("GET /cases/{id}/product-work-items", internalOnly(accessSvc, productIssueHandler.ListCaseProductWorkItems))
+		mux.HandleFunc("POST /cases/{id}/product-work-items/links", internalOnly(accessSvc, productIssueHandler.LinkProductWorkItem))
+		mux.HandleFunc("DELETE /cases/{id}/product-work-items/{workItemId}/link", internalOnly(accessSvc, productIssueHandler.UnlinkProductWorkItem))
+		mux.HandleFunc("GET /product-work-items/{id}", internalOnly(accessSvc, productIssueHandler.GetProductWorkItem))
+		mux.HandleFunc("POST /product-work-items/search", internalOnly(accessSvc, productIssueHandler.SearchProductWorkItems))
+	}
+
+	mux.HandleFunc("GET /cases/{id}/escalations", guardCaseID(caseEscalationHandler.SearchCaseEscalations))
 	mux.HandleFunc("POST /cases/{id}/escalations", caseEscalationHandler.CreateCaseEscalation)
 
 	// internalOnly: migration 0145's change_request_write_internal_only RLS

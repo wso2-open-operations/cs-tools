@@ -3118,6 +3118,10 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, caseID, "case not found"); err != nil {
 		return nil, 0, err
 	}
+	// And one of an internal-only type (a product issue) does not exist here at all.
+	if err := rejectInternalOnlyWorkItem(WithSystemIdentity(ctx), r.db, caseID, "case not found"); err != nil {
+		return nil, 0, err
+	}
 
 	var total int
 	var attachments []domain.Attachment
