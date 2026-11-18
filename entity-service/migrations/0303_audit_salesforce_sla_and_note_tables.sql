@@ -16,10 +16,10 @@
 
 -- Start auditing the Salesforce opportunity and invoice tables, sla_policy and
 -- plg_note_revision (see 0295 to 0302). Each is registered with its primary key
--- as the record id and every column recorded, except sync_time_stamp on the four
--- Salesforce tables: the Salesforce ingest rewrites it on every run, so recording
--- it would add a row per record per run and no business change (the same rule as
--- account.sync_time_stamp in 0298).
+-- as the record id and every column recorded, except sync_time_stamp and
+-- updated_on on the four Salesforce tables: the Salesforce ingest rewrites both on
+-- every run, so recording them would add two rows per record per run and no
+-- business change (the same rule as account.sync_time_stamp in 0298).
 --
 -- The Salesforce tables are written by the Salesforce ingest, so a bulk run pays
 -- the audit cost for every row it changes; the actor on those rows is whoever the
@@ -33,12 +33,16 @@ DO $$
 DECLARE
     t RECORD;
 BEGIN
+    -- Re-creating a trigger locks its table: give up after 5s rather than queue
+    -- behind its writers. One transaction, so a timeout changes nothing and the
+    -- migration can be run again.
+    PERFORM set_config('lock_timeout', '5s', true);
     FOR t IN
         SELECT * FROM (VALUES
-            ('sf_invoice',             ARRAY['sync_time_stamp']),
-            ('sf_opportunity',         ARRAY['sync_time_stamp']),
-            ('sf_opportunity_link',    ARRAY['sync_time_stamp']),
-            ('sf_opportunity_product', ARRAY['sync_time_stamp']),
+            ('sf_invoice',             ARRAY['sync_time_stamp', 'updated_on']),
+            ('sf_opportunity',         ARRAY['sync_time_stamp', 'updated_on']),
+            ('sf_opportunity_link',    ARRAY['sync_time_stamp', 'updated_on']),
+            ('sf_opportunity_product', ARRAY['sync_time_stamp', 'updated_on']),
             ('sla_policy',             '{}'::text[]),
             ('plg_note_revision',      '{}'::text[])
         ) AS v(table_name, excluded)
