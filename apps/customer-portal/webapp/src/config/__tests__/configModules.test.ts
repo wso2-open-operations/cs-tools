@@ -86,7 +86,7 @@ describe("config modules", () => {
     const { appearanceConfig } = await import("@config/appearanceConfig");
     expect(appearanceConfig).toEqual({
       name: "Customer Portal",
-      companyName: "WSO2 LLC",
+      companyName: "Choreo Labs LLC",
       logoLightModeUrl: "/logo-dark.svg",
       logoDarkModeUrl: "/logo-white.svg",
     });
@@ -96,21 +96,17 @@ describe("config modules", () => {
     const config = (window as unknown as { config: Record<string, string> })
       .config;
     config.CUSTOMER_PORTAL_APP_NAME = "  Acme Support  ";
-    config.CUSTOMER_PORTAL_COMPANY_NAME = "Acme Inc";
     config.CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL = "https://cdn.test/logo.svg";
     const { appearanceConfig } = await import("@config/appearanceConfig");
     expect(appearanceConfig.name).toBe("Acme Support");
-    expect(appearanceConfig.companyName).toBe("Acme Inc LLC");
+    expect(appearanceConfig.companyName).toBe("Choreo Labs LLC");
     expect(appearanceConfig.logoLightModeUrl).toBe("https://cdn.test/logo.svg");
     expect(appearanceConfig.logoDarkModeUrl).toBe("https://cdn.test/logo.svg");
   });
 
-  it("appearanceConfig appends LLC to the configured footer company name", async () => {
-    const config = (window as unknown as { config: Record<string, string> })
-      .config;
-    config.CUSTOMER_PORTAL_COMPANY_NAME = " WSO2 ";
+  it("appearanceConfig appends LLC to the footer company name", async () => {
     const { appearanceConfig } = await import("@config/appearanceConfig");
-    expect(appearanceConfig.companyName).toBe("WSO2 LLC");
+    expect(appearanceConfig.companyName).toBe("Choreo Labs LLC");
   });
 
   it("appearanceConfig anchors bare logo paths to the site root and leaves URLs alone", async () => {
