@@ -178,3 +178,17 @@ func TestCORSExposesTheDownloadHeaders(t *testing.T) {
 		t.Errorf("a disallowed origin was sent Expose-Headers %q", got)
 	}
 }
+
+// The create-issue request carries Idempotency-Key; without it in the allow
+// list the browser's preflight fails.
+func TestCORSAllowsIdempotencyKeyHeader(t *testing.T) {
+	handler := CORS([]string{"https://frontend.example.com"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req := httptest.NewRequest(http.MethodOptions, "/cases/x/github-issues", nil)
+	req.Header.Set("Origin", "https://frontend.example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(got, "Idempotency-Key") {
+		t.Errorf("Access-Control-Allow-Headers = %q, missing Idempotency-Key", got)
+	}
+}

@@ -28,7 +28,7 @@ import "net/http"
 // defense-in-depth. Content-Type is required for JSON request bodies:
 // application/json is not a CORS-safelisted value, so a POST/PATCH preflight
 // fails without it.
-const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID, Range"
+const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID, Range, Idempotency-Key"
 
 // corsExposedHeaders lists response headers the browser's fetch API hides from
 // page JavaScript unless they are exposed. The attachment download reads the
