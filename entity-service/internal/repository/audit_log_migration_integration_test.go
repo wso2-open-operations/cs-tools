@@ -249,6 +249,48 @@ func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
 	}
 }
 
+// Migration 0302 registers the team tables, every column recorded.
+func TestAuditMigration_TeamTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{"team", "team_member"} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if len(excluded) != 0 || len(masked) != 0 {
+			t.Errorf("%s excludes %v and masks %v, want every column recorded", table, excluded, masked)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
+// A column added to an audited table later is recorded with no change to the
+// registration: the trigger reads whatever columns the row has.
+func TestAuditMigration_AColumnAddedLaterIsAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	const table = "zz_audit_test_newcol"
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY, note text)")
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"')")
+	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a')")
+
+	auditExec(t, pool, "ALTER TABLE "+table+" ADD COLUMN added_later text")
+	auditExec(t, pool, "UPDATE "+table+" SET added_later = 'x' WHERE id = 1")
+
+	if n := auditCount(t, pool, `SELECT count(*) FROM csm_audit_log
+	    WHERE table_name = $1 AND field_name = 'added_later' AND action = 'UPDATE'`, table); n != 1 {
+		t.Errorf("a column added after registration wrote %d audit rows, want 1", n)
+	}
+}
+
 // Migration 0301 registers case_escalation_notification_list, every column recorded.
 func TestAuditMigration_CaseEscalationNotificationListIsAudited(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
