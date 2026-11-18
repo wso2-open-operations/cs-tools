@@ -29,7 +29,8 @@ import (
 type AuditLogMaintenanceService interface {
 	// RunMaintenance creates the coming monthly partitions, checks the log's
 	// health, puts back audit triggers that went missing and deletes what is past
-	// the retention period (old partitions, and old rows in the catch-all). It always tries
+	// the retention period (old partitions, and old rows in the catch-all). A
+	// deletion that fails is reported as a step error. It always tries
 	// every step and returns what it found, including a step that could not run
 	// (StepErrors), so one failing step never hides the others' results. The
 	// error is set only when the request itself was cancelled.
@@ -95,9 +96,9 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 		slog.InfoContext(ctx, "audit log: deleted expired rows from the catch-all partition", "rows", purged, "retentionMonths", s.retentionMonths)
 	}
 
-	// Last: it also reports what the deletion steps above should have removed, so
-	// run before them it would flag every partition on the day it expires.
-	healthProblems, err := s.repo.PartitionHealth(ctx, s.monthsAhead, s.retentionMonths)
+	// Read-only, and last so it reports the state this run leaves: a partition
+	// created above counts, and so does one it failed to create.
+	healthProblems, err := s.repo.PartitionHealth(ctx, s.monthsAhead)
 	if err != nil {
 		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not check partition health", err))
 	}

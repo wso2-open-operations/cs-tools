@@ -520,28 +520,20 @@ END $install$;
 --   * fewer than p_months_ahead monthly partitions after the current month, so a
 --     partition that failed to be created is noticed the day it is missed, not
 --     months later (the daily run creates that many ahead; the monitoring call
---     with no arguments keeps the older minimum of 2);
---   * a monthly partition, or a catch-all row, past the retention period: the
---     daily run deletes them, so one still here means the deletion is not working.
--- Callers that delete expired data must run this after deleting, or every
--- partition would be reported on the day it expires.
+--     with no arguments keeps the older minimum of 2).
+-- Data past retention is not reported here: the daily run deletes it, and a
+-- deletion that fails is reported by the run itself.
 DROP FUNCTION IF EXISTS audit_partition_health();
+DROP FUNCTION IF EXISTS audit_partition_health(INT, INT);
 DO $install$
 BEGIN
     EXECUTE replace(replace($fn$
-CREATE OR REPLACE FUNCTION audit_partition_health(
-    p_months_ahead     INT DEFAULT 2,
-    p_retention_months INT DEFAULT 18
-) RETURNS TABLE (problem TEXT)
+CREATE OR REPLACE FUNCTION audit_partition_health(p_months_ahead INT DEFAULT 2) RETURNS TABLE (problem TEXT)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
-    this_month    DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
-    cutoff        TIMESTAMPTZ :=
-        (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
-    future_count  INT;
-    expired_count INT;
-    expired_rows  BIGINT;
+    this_month   DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
+    future_count INT;
 BEGIN
     IF EXISTS (SELECT 1 FROM csm_audit_log_default) THEN
         problem := 'rows landed in the catch-all partition csm_audit_log_default';
@@ -556,24 +548,6 @@ BEGIN
        AND to_date(substr(c.relname, 15), 'YYYY_MM') > this_month;
     IF future_count < p_months_ahead THEN
         problem := format('only %s future monthly partition(s); need %s', future_count, p_months_ahead);
-        RETURN NEXT;
-    END IF;
-
-    -- Same rule as audit_retire_partitions: read from the real range, not the name.
-    SELECT count(*) INTO expired_count
-      FROM pg_inherits i
-      JOIN pg_class c ON c.oid = i.inhrelid
-     WHERE i.inhparent = format('%I.csm_audit_log', __SCHEMA_LIT__)::regclass
-       AND pg_get_expr(c.relpartbound, c.oid) <> 'DEFAULT'
-       AND (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1]::timestamptz <= cutoff;
-    IF expired_count > 0 THEN
-        problem := format('%s monthly partition(s) are older than the %s-month retention and were not deleted', expired_count, p_retention_months);
-        RETURN NEXT;
-    END IF;
-
-    SELECT count(*) INTO expired_rows FROM csm_audit_log_default WHERE created_on < cutoff;
-    IF expired_rows > 0 THEN
-        problem := format('%s catch-all row(s) are older than the %s-month retention and were not deleted', expired_rows, p_retention_months);
         RETURN NEXT;
     END IF;
 END $$;
@@ -661,7 +635,7 @@ END $install$;
 REVOKE ALL ON FUNCTION register_audit(TEXT, TEXT, TEXT[], TEXT[], TEXT[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION unregister_audit(TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION exclude_from_audit(TEXT, TEXT, TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION audit_partition_health(INT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_partition_health(INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_create_partitions(INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_retire_partitions(INT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_purge_default_partition(INT, TEXT) FROM PUBLIC;
