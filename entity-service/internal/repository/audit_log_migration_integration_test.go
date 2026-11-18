@@ -249,6 +249,33 @@ func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
 	}
 }
 
+// Migration 0299 registers the work item related tables that are wanted in the
+// audit log, every column recorded.
+func TestAuditMigration_WorkItemRelatedTablesAreAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{
+		"case_attachment", "case_escalation", "comment", "comment_attachment", "customer_call",
+		"sla", "time_card", "work_item_attachment", "work_item_feedback", "work_item_watcher",
+	} {
+		var excluded, masked []string
+		err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table).Scan(&excluded, &masked)
+		if err != nil {
+			t.Errorf("%s is not registered with the audit log: %v", table, err)
+			continue
+		}
+		if len(excluded) != 0 || len(masked) != 0 {
+			t.Errorf("%s excludes %v and masks %v, want every column recorded", table, excluded, masked)
+		}
+		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass
+		      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`, schema, table); n != 1 {
+			t.Errorf("%s has %d enabled-always audit triggers, want 1", table, n)
+		}
+	}
+}
+
 // Migration 0298 registers the core people, access and customer tables. Only
 // account.sync_time_stamp (rewritten by every sync run) is left out.
 func TestAuditMigration_CoreTablesAreAudited(t *testing.T) {
