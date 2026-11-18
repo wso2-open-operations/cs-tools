@@ -777,3 +777,144 @@ func TestAuditMigration_RetirePartitionsRefusesAnUnsafeRetention(t *testing.T) {
 		}
 	}
 }
+
+// resetDefaultPartition swaps the catch-all partition for an empty one, the only
+// way to clear it (the log is append-only). The purge tests leave rows in it,
+// and a row there is a health problem for every other test.
+func resetDefaultPartition(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	reset := func() {
+		ctx := context.Background()
+		for _, sql := range []string{
+			"ALTER TABLE csm_audit_log DETACH PARTITION csm_audit_log_default",
+			"DROP TABLE csm_audit_log_default",
+			"CREATE TABLE csm_audit_log_default PARTITION OF csm_audit_log DEFAULT",
+			"CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_default FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()",
+		} {
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatalf("reset default partition: %s: %v", sql, err)
+			}
+		}
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+// defaultRow puts one row into the catch-all partition, created monthsAgo months
+// ago. 40 and 3 months back have no partition in a database built by the
+// migration, so both land in the catch-all.
+func defaultRow(t *testing.T, pool *pgxpool.Pool, recordID string, monthsAgo int) {
+	t.Helper()
+	auditExec(t, pool, `INSERT INTO csm_audit_log (created_on, schema_name, table_name, record_id, field_name, action, created_by, db_role, transaction_id)
+	    VALUES (now() - make_interval(months => $2), 'public', 'zz_default_purge', $1, 'f', 'UPDATE', 'tester', 'tester', 1)`, recordID, monthsAgo)
+}
+
+func TestAuditMigration_PurgeDefaultPartitionDeletesOnlyTheExpiredRows(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	resetDefaultPartition(t, pool)
+	defaultRow(t, pool, "old-1", 40)
+	defaultRow(t, pool, "old-2", 19)
+	defaultRow(t, pool, "young", 3)
+
+	deleted, err := repo.PurgeDefaultPartition(context.Background(), 18)
+	if err != nil {
+		t.Fatalf("PurgeDefaultPartition: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("deleted = %d, want 2 (the rows 40 and 19 months old)", deleted)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = 'zz_default_purge'"); n != 1 {
+		t.Errorf("zz_default_purge rows = %d, want 1", n)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = 'zz_default_purge' AND record_id = 'young'"); n != 1 {
+		t.Error("the row from 3 months ago must survive")
+	}
+}
+
+// The catch-all is replaced by a new table, so it must still be the attached
+// default partition, keep its TRUNCATE guard, and stay append-only.
+func TestAuditMigration_PurgeDefaultPartitionLeavesTheCatchAllIntact(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	resetDefaultPartition(t, pool)
+	defaultRow(t, pool, "old", 40)
+	defaultRow(t, pool, "young", 3)
+
+	if _, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil {
+		t.Fatalf("PurgeDefaultPartition: %v", err)
+	}
+
+	if n := auditCount(t, pool, `SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+	    WHERE i.inhparent = 'csm_audit_log'::regclass AND c.relname = 'csm_audit_log_default'
+	      AND pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'`); n != 1 {
+		t.Errorf("csm_audit_log_default is not the attached default partition (%d)", n)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM pg_class WHERE relname = 'csm_audit_log_default_purge'"); n != 0 {
+		t.Error("the table swapped out was not dropped")
+	}
+	if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+	    WHERE tgrelid = 'csm_audit_log_default'::regclass AND tgname = 'csm_audit_log_no_truncate'`); n != 1 {
+		t.Error("the new catch-all has lost its TRUNCATE guard")
+	}
+	if _, err := pool.Exec(context.Background(), "DELETE FROM csm_audit_log_default"); err == nil {
+		t.Error("a DELETE on the new catch-all succeeded: the log must stay append-only")
+	}
+}
+
+// With nothing past retention it changes nothing and swaps nothing.
+func TestAuditMigration_PurgeDefaultPartitionWithNothingExpiredChangesNothing(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	resetDefaultPartition(t, pool)
+	defaultRow(t, pool, "young", 3)
+	var before uint32
+	if err := pool.QueryRow(context.Background(), "SELECT 'csm_audit_log_default'::regclass::oid").Scan(&before); err != nil {
+		t.Fatalf("oid: %v", err)
+	}
+
+	deleted, err := repo.PurgeDefaultPartition(context.Background(), 18)
+	if err != nil {
+		t.Fatalf("PurgeDefaultPartition: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("deleted = %d, want 0", deleted)
+	}
+	var after uint32
+	if err := pool.QueryRow(context.Background(), "SELECT 'csm_audit_log_default'::regclass::oid").Scan(&after); err != nil {
+		t.Fatalf("oid: %v", err)
+	}
+	if before != after {
+		t.Error("the catch-all table was replaced although nothing was past retention")
+	}
+}
+
+func TestAuditMigration_PurgeDefaultPartitionIsRepeatable(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	resetDefaultPartition(t, pool)
+	defaultRow(t, pool, "old", 40)
+
+	if deleted, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil || deleted != 1 {
+		t.Fatalf("first run = (%d, %v), want (1, nil)", deleted, err)
+	}
+	if deleted, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil || deleted != 0 {
+		t.Errorf("second run = (%d, %v), want (0, nil)", deleted, err)
+	}
+}
+
+func TestAuditMigration_PurgeDefaultPartitionRefusesAnUnsafeRetention(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	resetDefaultPartition(t, pool)
+	defaultRow(t, pool, "young", 3)
+
+	for _, months := range []int{0, -1} {
+		if _, err := repo.PurgeDefaultPartition(context.Background(), months); err == nil {
+			t.Errorf("PurgeDefaultPartition(%d) succeeded, want an error", months)
+		}
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = 'zz_default_purge'"); n != 1 {
+		t.Errorf("rows = %d after refused calls, want 1", n)
+	}
+}

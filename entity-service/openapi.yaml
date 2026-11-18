@@ -20625,7 +20625,8 @@ paths:
         Called daily by csm-scheduled-tasks. Creates the coming monthly partitions of the audit log,
         checks the log's health, puts back audit triggers that are missing or disabled on registered
         tables, and deletes the monthly partitions that ended at least CSM_AUDIT_LOG_RETENTION_MONTHS
-        (default 18) ago, dropped for good and not archived. Safe to repeat. It tries every step even if one fails.
+        (default 18) ago, dropped for good and not archived, and deletes the rows that old from the catch-all
+        partition. Safe to repeat. It tries every step even if one fails.
 
         A 200 means the request was handled, not that everything is fine: read the lists. Health
         problems, unresolved triggers and step errors need a person. A repaired trigger was off for a while, so the history had a
@@ -37866,6 +37867,10 @@ components:
           description: Names of the monthly partitions this run deleted because they ended at least the retention period ago.
           items:
             type: string
+        defaultRowsDeleted:
+          type: integer
+          format: int64
+          description: Rows older than the retention period this run deleted from the catch-all partition.
         healthProblems:
           type: array
           description: Rows in the catch-all partition, or fewer than two future months.
