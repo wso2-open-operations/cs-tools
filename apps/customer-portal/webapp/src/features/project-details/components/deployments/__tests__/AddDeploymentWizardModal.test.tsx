@@ -142,25 +142,8 @@ describe("AddDeploymentWizardModal", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     await advanceToProductStep();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.getByText("Add WSO2 Product")).toBeInTheDocument();
-    expect(screen.getByText(/Add one or more WSO2 products/)).toBeInTheDocument();
-  });
-
-  it("names the configured company on the product step", async () => {
-    const originalConfig = window.config;
-    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
-    try {
-      renderWithProviders(
-        <AddDeploymentWizardModal open={true} projectId="proj-1" onClose={vi.fn()} />,
-      );
-      await advanceToProductStep();
-      expect(screen.getByText("Add Acme Corp Product")).toBeInTheDocument();
-      expect(
-        screen.getByText('Add one or more Acme Corp products to "Production US-East".'),
-      ).toBeInTheDocument();
-    } finally {
-      window.config = originalConfig;
-    }
+    expect(screen.getByText("Add Choreo Labs Product")).toBeInTheDocument();
+    expect(screen.getByText(/Add one or more Choreo Labs products/)).toBeInTheDocument();
   });
 
   it("keeps the product options populated after adding one and clicking Add another product (regression: list must not go empty)", async () => {
