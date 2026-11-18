@@ -54,6 +54,12 @@ func TestSearchProjects_ValidationMessagesNameTheValue(t *testing.T) {
 			`endDateTo: "31-12-2026" is not a valid date; use yyyy-MM-dd`},
 		{"excludeSubscriptionTypes", domain.SearchProjectsRequest{ExcludeSubscriptionTypes: []domain.SubscriptionType{"Cloud Support"}},
 			`excludeSubscriptionTypes: "Cloud Support" is not a valid subscription type; use one of cloud_evaluation_support, cloud_support, development_support, evaluation_subscription, internal, managed_cloud_subscription, platformer_subscription, professional_services, subscription`},
+		{"onboardingOwnerIds not a UUID", domain.SearchProjectsRequest{OnboardingOwnerIDs: []string{"someone"}},
+			`onboardingOwnerIds contains invalid UUID: "someone"`},
+		{"onboardingOwnerEmails blank", domain.SearchProjectsRequest{OnboardingOwnerEmails: []string{""}},
+			`onboardingOwnerEmails must not contain empty values`},
+		{"regions blank", domain.SearchProjectsRequest{Regions: []string{"APAC", " "}},
+			`regions must not contain empty values`},
 		{"arrTodayGte unsupported", domain.SearchProjectsRequest{ArrTodayGte: "100000"},
 			`arrTodayGte is not supported on this data source yet: account ARR is not stored; remove the filter`},
 	}
@@ -92,6 +98,9 @@ func TestSearchProjects_OnboardingFiltersReachRepository(t *testing.T) {
 	req := domain.SearchProjectsRequest{
 		SortBy: "productionReadinessCompletionDate", SortOrder: "desc",
 		ClosureStates:           []string{"Open", "Suspended"},
+		Regions:                 []string{"APAC"},
+		OnboardingOwnerIDs:      []string{"11111111-1111-1111-1111-111111111111"},
+		OnboardingOwnerEmails:   []string{"owner@example.com"},
 		OnboardingStartDateFrom: "2026-01-01", OnboardingStartDateTo: "2026-01-01",
 		GoLivePlanDateFrom: "2026-02-01", GoLiveDateTo: "2026-03-01",
 		OnboardingExpiryDateFrom: "2026-04-01", ProductionReadinessCompletionDateTo: "2026-05-01",
@@ -109,13 +118,16 @@ func TestSearchProjects_OnboardingFiltersReachRepository(t *testing.T) {
 // source must answer a 400, not silently ignore the option, before any upstream call.
 func TestSearchProjects_LegacySourceRejectsPostgresOnlyOptions(t *testing.T) {
 	cases := map[string]domain.SearchProjectsRequest{
-		"closureStates":        {ClosureStates: []string{"Open"}},
-		"onboardingStartDate":  {OnboardingStartDateFrom: "2026-01-01"},
-		"goLivePlanDate":       {GoLivePlanDateTo: "2026-01-01"},
-		"goLiveDate":           {GoLiveDateFrom: "2026-01-01"},
-		"onboardingExpiryDate": {OnboardingExpiryDateTo: "2026-01-01"},
-		"productionReadiness":  {ProductionReadinessCompletionDateFrom: "2026-01-01"},
-		"sortBy goLiveDate":    {SortBy: "goLiveDate"},
+		"closureStates":         {ClosureStates: []string{"Open"}},
+		"regions":               {Regions: []string{"APAC"}},
+		"onboardingOwnerIds":    {OnboardingOwnerIDs: []string{"11111111-1111-1111-1111-111111111111"}},
+		"onboardingOwnerEmails": {OnboardingOwnerEmails: []string{"owner@example.com"}},
+		"onboardingStartDate":   {OnboardingStartDateFrom: "2026-01-01"},
+		"goLivePlanDate":        {GoLivePlanDateTo: "2026-01-01"},
+		"goLiveDate":            {GoLiveDateFrom: "2026-01-01"},
+		"onboardingExpiryDate":  {OnboardingExpiryDateTo: "2026-01-01"},
+		"productionReadiness":   {ProductionReadinessCompletionDateFrom: "2026-01-01"},
+		"sortBy goLiveDate":     {SortBy: "goLiveDate"},
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
