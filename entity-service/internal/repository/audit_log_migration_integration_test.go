@@ -342,22 +342,17 @@ func TestAuditMigration_InsertsAreNotAudited(t *testing.T) {
 	}
 }
 
-// No business table's audit trigger fires on INSERT; all still fire on UPDATE and
-// DELETE and stay enabled when session_replication_role is replica. The registry
-// (audit_config) is the one exception: it keeps INSERT, so a new registration
-// records who made it. Scoped to this schema's audit_log_row_change(), so a
-// trigger of the same name in another schema cannot change the result.
-func TestAuditMigration_OnlyTheRegistryFiresOnInsert(t *testing.T) {
+// No audit trigger fires on INSERT, the registry's included; all still fire on
+// UPDATE and DELETE and stay enabled when session_replication_role is replica.
+// Scoped to this schema's audit_log_row_change(), so a trigger of the same name
+// in another schema cannot change the result.
+func TestAuditMigration_NoRegisteredTriggerFiresOnInsert(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	schema := auditSchema(t, pool)
 	const mine = `SELECT count(*) FROM pg_trigger WHERE tgname = 'csm_audit_row_change'
 	    AND tgfoid = to_regprocedure(format('%I.audit_log_row_change()', $1::text))::oid AND `
-	const registry = `tgrelid = format('%I.audit_config', $1::text)::regclass`
-	if n := auditCount(t, pool, mine+"NOT ("+registry+") AND tgtype & 4 > 0", schema); n != 0 {
-		t.Errorf("%d business-table audit triggers still fire on INSERT, want 0", n)
-	}
-	if n := auditCount(t, pool, mine+registry+" AND tgtype & 4 > 0", schema); n != 1 {
-		t.Errorf("the registry has %d INSERT-firing audit triggers, want 1", n)
+	if n := auditCount(t, pool, mine+"tgtype & 4 > 0", schema); n != 0 {
+		t.Errorf("%d audit triggers still fire on INSERT, want 0", n)
 	}
 	if n := auditCount(t, pool, mine+"(tgtype & 8 = 0 OR tgtype & 16 = 0 OR tgenabled <> 'A')", schema); n != 0 {
 		t.Errorf("%d audit triggers miss UPDATE or DELETE, or are not enabled-always, want 0", n)
@@ -367,39 +362,20 @@ func TestAuditMigration_OnlyTheRegistryFiresOnInsert(t *testing.T) {
 	}
 }
 
-// Registering a table is audited: the new audit_config row names who registered it.
-func TestAuditMigration_RegisteringATableNamesWhoDidIt(t *testing.T) {
+// Registering a table writes no audit row: the registry is not audited on insert
+// either, and its own columns (created_by, created_on) say who added the row.
+func TestAuditMigration_RegisteringATableWritesNoAuditRow(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	const table = "zz_audit_test_registrar"
 	auditTestTable(t, pool, table)
 	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY)")
 	schema := auditSchema(t, pool)
 
-	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	const countSQL = `SELECT count(*) FROM csm_audit_log
-	    WHERE table_name = 'audit_config' AND action = 'INSERT' AND created_by = 'registrar@wso2.com'
-	      AND record_id = audit_record_key(jsonb_build_object('schema_name', $1::text, 'table_name', $2::text),
-	                                       ARRAY['schema_name', 'table_name'])`
-	var before, after int
-	if err := tx.QueryRow(ctx, countSQL, schema, table).Scan(&before); err != nil {
-		t.Fatalf("count before: %v", err)
-	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.audit_actor', 'registrar@wso2.com', true)"); err != nil {
-		t.Fatalf("set_config: %v", err)
-	}
-	if _, err := tx.Exec(ctx, "SELECT register_audit($1, $2)", schema, table); err != nil {
-		t.Fatalf("register_audit: %v", err)
-	}
-	if err := tx.QueryRow(ctx, countSQL, schema, table).Scan(&after); err != nil {
-		t.Fatalf("count after: %v", err)
-	}
-	if after-before == 0 {
-		t.Error("registering a table wrote no audit_config INSERT rows naming the registrar")
+	const countSQL = `SELECT count(*) FROM csm_audit_log WHERE table_name = 'audit_config'`
+	before := auditCount(t, pool, countSQL)
+	auditExec(t, pool, "SELECT register_audit($1, $2)", schema, table)
+	if n := auditCount(t, pool, countSQL) - before; n != 0 {
+		t.Errorf("registering a table wrote %d audit_config rows, want 0", n)
 	}
 }
 
