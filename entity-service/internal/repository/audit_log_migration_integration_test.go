@@ -203,6 +203,30 @@ func TestAuditMigration_ATempTableCannotShadowTheRegistry(t *testing.T) {
 	}
 }
 
+// Migration 0296 registers work_item with every column recorded: nothing
+// excluded, nothing masked.
+func TestAuditMigration_WorkItemIsAuditedInFull(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	var excluded, masked []string
+	var enabled bool
+	err := pool.QueryRow(context.Background(),
+		`SELECT excluded_columns, masked_columns, enabled FROM audit_config
+		  WHERE schema_name = $1 AND table_name = 'work_item'`, auditSchema(t, pool)).Scan(&excluded, &masked, &enabled)
+	if err != nil {
+		t.Fatalf("work_item is not registered: %v", err)
+	}
+	if !enabled {
+		t.Error("work_item is registered but switched off")
+	}
+	if len(excluded) != 0 || len(masked) != 0 {
+		t.Errorf("work_item excludes %v and masks %v, want every column recorded", excluded, masked)
+	}
+	if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+	    WHERE tgrelid = 'work_item'::regclass AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`); n != 1 {
+		t.Errorf("work_item has %d enabled-always audit triggers, want 1", n)
+	}
+}
+
 func TestAuditMigration_PartitionCopiesOfTheTriggerAreNotReported(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	const table = "zz_audit_test_parent"
