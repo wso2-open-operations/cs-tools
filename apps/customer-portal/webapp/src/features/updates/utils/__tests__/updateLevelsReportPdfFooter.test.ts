@@ -22,6 +22,14 @@ import {
 
 const captured = vi.hoisted(() => ({ pdfs: [] as string[] }));
 
+const companyNameMock = vi.hoisted(() => vi.fn(() => "Choreo Labs"));
+
+// The company name is fixed in code; a long one is faked here to test shortening.
+vi.mock("@config/brandingConfig", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@config/brandingConfig")>()),
+  companyName: companyNameMock,
+}));
+
 vi.mock("jspdf", async (importOriginal) => {
   const actual = await importOriginal<typeof import("jspdf")>();
   const RealJsPdf = actual.jsPDF;
@@ -71,38 +79,26 @@ const reportData = getUpdateLevelsReportData({
 const pageText = /\(WSO2 API Manager 4\.4\.0 - Update Summary {2}\| {2}Page 1 of \d+\) Tj/;
 
 describe("generateUpdateLevelsReportPdf footer", () => {
-  const originalConfig = window.config;
-
   beforeEach(() => {
     captured.pdfs.length = 0;
   });
 
   afterEach(() => {
-    window.config = originalConfig;
+    companyNameMock.mockReturnValue("Choreo Labs");
   });
 
-  it("prints only the page text, as before, when no company name is configured", async () => {
-    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: undefined };
+  it("prints the company's support line next to the page text", async () => {
     await generateUpdateLevelsReportPdf(reportData);
 
     const pdf = captured.pdfs[0];
-    expect(pdf).toMatch(pageText);
-    expect(pdf).not.toContain("Support 24x7");
-  });
-
-  it("adds the configured company's support line next to the page text", async () => {
-    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
-    await generateUpdateLevelsReportPdf(reportData);
-
-    const pdf = captured.pdfs[0];
-    expect(pdf).toContain("(Acme Corp Support 24x7) Tj");
+    expect(pdf).toContain("(Choreo Labs Support 24x7) Tj");
     expect(pdf).toMatch(pageText);
   });
 
   it("shortens a company name too long to fit beside the page text", async () => {
     const longName =
       "Example International Technology and Business Services Corporation of the Americas";
-    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: longName };
+    companyNameMock.mockReturnValue(longName);
     await generateUpdateLevelsReportPdf(reportData);
 
     const pdf = captured.pdfs[0];
