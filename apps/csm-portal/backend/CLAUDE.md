@@ -464,6 +464,25 @@ caller holding `PermWrite` (the onboarding fields, including the four dates, are
 `PermManageOnboarding`). A nil `access` (no guard wired) fails closed, same as every other
 in-handler permission check in this codebase.
 
+## PATCH /cases/{id}: reopening a closed case requires PermAdmin
+
+Closed is terminal for every other caller — `state.go`'s `nextStates(caseStateClosed)` returns
+`[]string{}`, matching entity-service's own `case_state_transitions.go` (neither table has an entry
+for closed). `CaseHandler.PatchCase` carves out one exception: when the current state (fetched via
+`GetCase`, same lookup the existing transition check already does) is closed and the requested
+`state` is anything else, it requires `PermAdmin` via `h.access` instead of running the ordinary
+`isValidStateTransition` check, which would always reject it. A caller without `PermAdmin` (or no
+access guard wired) gets 403, same as `ProjectHandler.UpdateProject`'s admin-only fields above.
+
+On success, `sanitizeAdminReopenAttrs` (`state.go`) rewrites the forwarded body itself rather than
+passing the client's own JSON through: it strips whatever the client sent for `adminReopen`
+unconditionally and re-adds it as the literal `true` only for this one, already-permission-checked
+transition — entity-service's `UpdateCaseRequest.AdminReopen` never sees a client-supplied value,
+regardless of what a raw API caller sends. `reopenReason` (optional, free text) rides along only in
+that same case and is otherwise stripped too; entity-service stores it write-only (never returned
+by any response, never shown in the UI — see its own `CLAUDE.md`, "Case state-transition legality").
+Reopening this way also skips the usual SLA recompute and `case.status_changed` email, by design.
+
 ## Stored attachments in Azure Blob Storage (`internal/handler/stored_attachments.go`, `stored_attachments_blob.go`)
 
 Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no file bytes (a security report's files are uploaded first as drafts of the project, `type: "work_item"` with `projectId`, and `POST /cases` names them in `attachmentIds`; entity-service refuses a security report with none, and this service forwards the create body untouched, so the ids reach it as sent). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
@@ -551,6 +570,16 @@ bodies' `accountId` filter and a proposal's `accountId` pass through raw, and ra
 from a template for another customer's project (or none), or a PATCH moving it there, is entity-service's
 400 `standard_change_template_other_customer`, echoed with its message and code by `mapUpstreamError`
 (`standard_change_customer_test.go`).
+## A comment author's `isInternal` passes through untouched
+
+`POST /cases/{id}/comments/search` (and the incident / change-request comment
+searches) are raw `[]byte` passthroughs, so the `createdBy.isInternal` flag
+entity-service now sets on a comment author (true when the author's email
+resolves to an INTERNAL-type user; see that repo's own `CLAUDE.md`) reaches the
+webapp with no code change here — only `openapi.yaml`'s `UserReference` schema
+documents it. The webapp's comment bubble badges a staff author from it; it is
+deliberately not derived in this backend from the token or an extra user
+lookup.
 
 ## Change request tags go through the case tag routes
 
@@ -744,6 +773,57 @@ total}` untouched.
   `TestEveryRegisteredRouteIsInOpenAPI` does not list it. Tests: `TestGetGroup`,
   `TestGetChangeRequestApprovals_PassesAssignmentGroupThrough` (`groups_test.go`) and
   `TestGetGroupSendsGetToGroupsID` (`internal/entity/customer_client_test.go`).
+
+## De-escalation: team leads and the admin-named list
+
+`POST /cases/{id}/escalations` is registered at `PermView`, not `PermEscalate`, and `CaseHandler.CreateCaseEscalation`
+checks `PermEscalate` itself (through the access guard; a nil guard fails closed): escalating needs it. De-escalating
+(`DEESCALATE`) is allowed for somebody an admin named (`deescalators`), who needs **no** escalation role, or for one of
+the case's ABT team leads (`teamLeads`), who still needs `PermEscalate`. Both lists come from entity-service's
+`GET /cases/{id}/escalations` (`deescalationStanding`); matched by platform id, else case-insensitive email when an id
+is missing. It fails closed on any lookup error. The admin names them through `CaseEscalationAccessHandler`
+(`GET /case-escalation-access/deescalators`, `PUT`/`DELETE .../{userId}`), all `PermAdmin`, forwarded to
+entity-service, which does not re-check the admin role: it trusts this backend's client id (the one admin check is `PermAdmin` here), refuses any other caller, and keeps its own refusal reason.
+
+## MTTR report (`GET /reports/mttr`) backs the dashboard builder's `mttr` resourceType
+
+A thin `PermView` proxy of entity-service's own `GET /reports/mttr` (`MTTRReportHandler`,
+`internal/entity/customer.go`'s `GetMTTRReport`) — mean time to resolution by severity band
+(S1-S4, S1-S3, S1, S2, S3, S4), over a trailing `months` window (1/3/6/12 only), optionally
+restricted to one or more CRE teams via a repeated `creTeamId` (each validated as a UUID here
+before the upstream call, same convention as `GetGroup`'s `id`). Response is passed through
+untouched.
+
+**The dashboard builder's one `resourceType` with no raw record at all.** Every other
+`WidgetTemplate.resourceType` resolves to a real search endpoint, even one with no standalone
+list page (`task`, `case_feedback`); `mttr` has none — `GET /reports/mttr` only ever returns
+the one fixed six-band aggregate, never a page of individual records. `internal/dashboard`'s
+`ResourceMTTR` rules (`generated_resources.go`) reflect that: shape `bar` only, never `pie` (the
+six bands overlap — S1-S4 and S1-S3 are sums of the individual ones — so they can never be wedges
+of one whole, and `DashboardPieChart`'s percentage, `slice.value / total`, would divide hours by a
+case count anyway, which is meaningless even setting the overlap aside), `groupBy` only
+(`noSlices: true` — a severity band isn't something a query filter can isolate, so there's
+no per-band slice to hand-author), and its one bucket, `"severity"`, is fixed rather than
+chosen (`buckets: []string{"severity"}`, `requiredFlat: []string{"months"}` — there is no default
+window). `registry.go`'s `validGroupByBuckets` carries `"severity"` alongside `case_feedback`'s own
+bucket names. A generated widget's `creTeamIds`
+(team keys/names, same vocabulary as a case's `creTeam` filter) are resolved to real CRE group
+ids once, right after generation, by `dashboardTeams.resolveMTTRTeams` (`dashboard_teams.go`) —
+the `mttr`-specific sibling of `resolveTimeCardTeams`; CRE-only, since an MTTR widget has no SRE
+equivalent and no `"__current_team__"` concept.
+
+The window is exactly one of `months` (1/3/6/12) or `days` (7, the trailing seven days; `GET /reports/mttr?days=7`). `S0` is its own band (the combined S1-S4/S1-S3 bars never include it). `shape: "count"` shows one band's number (`query.bands` names exactly one, no `groupBy`; the webapp reads the same report call and shows hours). The optional flat `bands` key (S0, S1..S4) only chooses which bars the webapp draws
+(`useMttrReportData` filters the one response client-side); with none named the webapp draws S1 to S4, each its own
+bar, and the generator is told to always name them and never use the combined `S1-S4`/`S1-S3` values (still accepted
+only so a dashboard saved earlier loads). The optional flat `unit` (`hours`, the default, or `days`) is display only:
+the webapp divides the report's hours by 24 and formats ("7.1d" on a bar, "7.08 d" in the tooltip and count tile). The
+request to `GET /reports/mttr` is unchanged.
+
+Tests: `TestGetMTTRReport` (`mttr_report_test.go`), `TestParseGenerated_MTTRBands`, `TestParseGenerated_AcceptsMTTRWidgets` /
+`_RejectsInvalidMTTRWidgets` / `_TheCatalogueMTTRExamplesAreValid` (`internal/dashboard/generated_mttr_test.go`
+— the last one runs the AI integration service's own catalogue section 5f examples through
+`ParseGenerated`, same "catalogue can't teach a widget the save would refuse" contract as the
+time-card-totals test above).
 
 ## Health endpoints
 

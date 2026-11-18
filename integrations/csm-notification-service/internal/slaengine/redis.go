@@ -127,6 +127,27 @@ type ClockMeta struct {
 	// this to decide whether a resume needs flat wall-clock math or
 	// business-day-aware recomputation.
 	Schedule string
+	// SLAID is entity-service's own "sla" row id this clock's current
+	// incarnation is backed by (domain.SLAClockState.ID/SLAStatus.ID) —
+	// refreshed every time SetClock runs, same as the other display
+	// fields, since it changes exactly when StartedAt does (a new
+	// incarnation always means a different row). Threaded back into
+	// GetClockState's own slaID parameter wherever this engine re-checks
+	// an ALREADY-tracked clock's live state (verifyTierStillDue,
+	// resumeShift, entityPauseStatus, cleanupStaleClocks) so the answer is
+	// about THIS specific row, not "whichever sla row for this target
+	// happens to be most recently started" — the real fix for a clock
+	// type that can have more than one policy's own row genuinely open at
+	// once (confirmed live, not just a theoretical case: RESPONSE and
+	// RESOLUTION both routinely carry more than one policy per case in
+	// real data). "" for a clock this engine registered/reconciled before
+	// this field existed, or whenever e.entity has no answer to offer —
+	// GetClockState then falls back to its own original, still-ambiguous
+	// "most recently started" lookup, exactly as if this field had never
+	// been added, so nothing regresses for a clock this hasn't caught up
+	// with yet; a Recalculate pass (Engine.RecalculateFromEntity) or this
+	// clock's own next severity revision (ReviseClocks) fills it in.
+	SLAID string
 }
 
 // Store wraps every Redis operation this engine needs — first Redis
@@ -214,6 +235,14 @@ func (s *Store) DueMembers(ctx context.Context, now time.Time) ([]string, error)
 // check has no notion of "that was a different clock"). See ClaimTier's
 // own doc comment for the matching half of this fix -- a stale tier claim
 // from the old incarnation needs the same treatment.
+//
+// slaId (ARGV[13]) is written unconditionally on every call, alongside the
+// other one-time display fields -- see ClockMeta.SLAID's own doc comment
+// for what it's for and why it's safe to refresh every time rather than
+// HSETNX-protected like state/paused/alertedTier: it always changes in
+// lockstep with startedAt (a new incarnation is, by definition, backed by
+// a different "sla" row), so there is no stale-replay risk to guard
+// against the way there is for those three.
 var setClockScript = redis.NewScript(`
 local previousStartedAt = redis.call('HGET', KEYS[1], 'startedAt')
 if previousStartedAt and previousStartedAt ~= ARGV[8] then
@@ -222,7 +251,7 @@ end
 redis.call('HSET', KEYS[1],
 	'caseNumber', ARGV[1], 'wso2CaseId', ARGV[2], 'caseTitle', ARGV[3],
 	'caseType', ARGV[4], 'product', ARGV[5], 'team', ARGV[6], 'priority', ARGV[7],
-	'startedAt', ARGV[8], 'schedule', ARGV[11], 'engagementType', ARGV[12])
+	'startedAt', ARGV[8], 'schedule', ARGV[11], 'engagementType', ARGV[12], 'slaId', ARGV[13])
 redis.call('HSETNX', KEYS[1], 'state', ARGV[9])
 redis.call('HSETNX', KEYS[1], 'paused', '0')
 redis.call('HSETNX', KEYS[1], 'alertedTier', '0')
@@ -253,6 +282,7 @@ func (s *Store) SetClock(ctx context.Context, caseID, clockType string, meta Clo
 		meta.CaseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType,
 		meta.Product, meta.Team, meta.Priority, meta.StartedAt.UnixNano(),
 		meta.State, int(clockTTL.Seconds()), meta.Schedule, meta.EngagementType,
+		meta.SLAID,
 	).Err()
 }
 
@@ -281,6 +311,7 @@ func (s *Store) GetClock(ctx context.Context, caseID, clockType string) (meta Cl
 		State:          res["state"],
 		Paused:         res["paused"] == "1",
 		Schedule:       res["schedule"],
+		SLAID:          res["slaId"],
 	}
 	if v, err := strconv.ParseInt(res["startedAt"], 10, 64); err == nil {
 		meta.StartedAt = time.Unix(0, v)
@@ -294,17 +325,56 @@ func (s *Store) GetClock(ctx context.Context, caseID, clockType string) (meta Cl
 	return meta, true, nil
 }
 
+// setPausedIfMatchScript is SetPaused's own compare-and-write -- a
+// CodeRabbit-caught race: Engine.entityPauseStatus reads a specific clock's
+// live pause state (by its own SLAID, when known) over a real network round
+// trip to entity-service, and ApplyStateEffects then writes the verdict
+// with SetPaused; if ReviseClocks/refreshAndReconcileClock replaces this
+// exact (caseID, clockType) hash with a fresh incarnation in that window, a
+// plain, identity-blind HSET would stamp the OLD clock's pause verdict onto
+// the NEW one -- which could wrongly suppress the new clock's own genuine
+// alert until something else corrects it. Mirrors setClockScript's/
+// AdvanceAlertedTier's own established shape: compare the hash's current
+// slaId against the one the caller captured at read time, and skip the
+// write entirely (return 0, not applied) only when BOTH sides are non-empty
+// and they disagree -- a genuine, confirmed replacement. Either side empty
+// (no identity to check: a legacy clock never given a SLAID yet, or a
+// caller reacting to a live event rather than a stale snapshot, which
+// passes "") always applies, preserving this method's exact prior
+// (identity-blind) behavior for those callers -- nothing regresses for
+// them, it just isn't guarded yet.
+var setPausedIfMatchScript = redis.NewScript(`
+local currentSlaId = redis.call('HGET', KEYS[1], 'slaId')
+if currentSlaId and currentSlaId ~= '' and ARGV[2] ~= '' and currentSlaId ~= ARGV[2] then
+	return 0
+end
+redis.call('HSET', KEYS[1], 'paused', ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return 1
+`)
+
 // SetPaused toggles one clock's paused flag — ApplyStateEffects' only write
 // for the AWAITING_INFO/SOLUTION_PROPOSED/resume branches. A no-op (HSET
 // creates a near-empty hash) against a clock this engine never registered —
 // harmless, since without a RegisterClocks call there is also no wake entry
-// for Tick to ever examine against it.
-func (s *Store) SetPaused(ctx context.Context, caseID, clockType string, paused bool) error {
+// for Tick to ever examine against it (unaffected by slaID, which only ever
+// narrows an EXISTING hash's own write).
+//
+// slaID, when non-empty, is the exact clock the caller means (ClockMeta.SLAID,
+// as read alongside whatever live pause verdict is being applied) — see
+// setPausedIfMatchScript's own doc comment for why this must match the
+// hash's CURRENT slaId before writing. "" skips that check (every prior
+// caller's behavior, unmodified). applied reports whether the write actually
+// happened; false (identity mismatch) is not an error -- the caller's own
+// verdict was about a clock that's since been replaced, so simply doing
+// nothing is correct, not something to retry.
+func (s *Store) SetPaused(ctx context.Context, caseID, clockType string, paused bool, slaID string) (applied bool, err error) {
 	key := clockKey(caseID, clockType)
-	if err := s.rdb.HSet(ctx, key, "paused", boolString(paused)).Err(); err != nil {
-		return err
+	res, err := setPausedIfMatchScript.Run(ctx, s.rdb, []string{key}, boolString(paused), slaID, int(clockTTL.Seconds())).Int()
+	if err != nil {
+		return false, err
 	}
-	return s.rdb.Expire(ctx, key, clockTTL).Err()
+	return res == 1, nil
 }
 
 // SetShiftedPauseSeconds records the cumulative pause duration (seconds)
@@ -652,27 +722,63 @@ func (s *Store) ListClockKeys(ctx context.Context) ([]string, error) {
 	}
 }
 
-// DeleteClock removes one (caseID, clockType) clock entirely: its hash,
-// every tier's wake entry (RemoveWake on an absent member is a harmless
-// no-op, so this doesn't need to know which tiers, if any, are still
-// pending), and every tier-claim key under it (walked with SCAN, since a
-// claim key's own suffix embeds the clock's startedAt, which isn't known
-// here -- see tierClaimKey's own doc comment). Used by
+// deleteClockHashIfMatchScript is DeleteClockIfMatch's own compare-and-delete
+// over just the metadata hash -- same shape and same reasoning as
+// setPausedIfMatchScript: a CodeRabbit-caught race where
+// RecalculateFromEntity's cleanup pass verifies a clock is terminal (by its
+// own SLAID, when known), then deletes it; if a registration lands in that
+// window and replaces this exact (caseID, clockType) hash with a fresh,
+// genuinely live incarnation, an identity-blind delete would wipe that
+// live clock's tracking entirely -- its wake entries included, since
+// RemoveWake/the tier-claim scan that follow a successful hash delete key
+// off the same (caseID, clockType), with no way to tell which incarnation
+// they belong to. Gating the WHOLE cleanup (not just the hash) behind this
+// one atomic check is why it has to run first and the rest only proceeds
+// when it applied.
+var deleteClockHashIfMatchScript = redis.NewScript(`
+local currentSlaId = redis.call('HGET', KEYS[1], 'slaId')
+if currentSlaId and currentSlaId ~= '' and ARGV[1] ~= '' and currentSlaId ~= ARGV[1] then
+	return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+`)
+
+// DeleteClockIfMatch removes one (caseID, clockType) clock entirely: its
+// hash, every tier's wake entry (RemoveWake on an absent member is a
+// harmless no-op, so this doesn't need to know which tiers, if any, are
+// still pending), and every tier-claim key under it (walked with SCAN,
+// since a claim key's own suffix embeds the clock's startedAt, which isn't
+// known here -- see tierClaimKey's own doc comment). Used by
 // Engine.RecalculateFromEntity's own cleanup pass, once a fresh rebuild has
 // confirmed entity-service no longer reports this clock active at all.
-func (s *Store) DeleteClock(ctx context.Context, caseID, clockType string) error {
-	if err := s.rdb.Del(ctx, clockKey(caseID, clockType)).Err(); err != nil {
-		return fmt.Errorf("slaengine: delete clock %s|%s: delete hash: %w", caseID, clockType, err)
+//
+// slaID, when non-empty, is the exact clock the caller just verified as
+// terminal (ClockMeta.SLAID) -- see deleteClockHashIfMatchScript's own doc
+// comment for why the hash delete (and, transitively, everything after it)
+// must be skipped entirely rather than just the hash, when the hash's
+// current slaId no longer matches. "" skips that check (this method's
+// original, identity-blind behavior, unchanged for a legacy clock with no
+// SLAID yet). applied reports whether anything was actually deleted; false
+// (identity mismatch) is not an error -- the clock this call meant to clean
+// up has already been replaced by a live one, which must be left alone.
+func (s *Store) DeleteClockIfMatch(ctx context.Context, caseID, clockType, slaID string) (applied bool, err error) {
+	res, err := deleteClockHashIfMatchScript.Run(ctx, s.rdb, []string{clockKey(caseID, clockType)}, slaID).Int()
+	if err != nil {
+		return false, fmt.Errorf("slaengine: delete clock %s|%s: delete hash: %w", caseID, clockType, err)
+	}
+	if res != 1 {
+		return false, nil
 	}
 	for _, tier := range tierSequence {
 		if err := s.RemoveWake(ctx, wakeMember(caseID, clockType, tier)); err != nil {
-			return fmt.Errorf("slaengine: delete clock %s|%s: remove wake tier %d: %w", caseID, clockType, tier, err)
+			return true, fmt.Errorf("slaengine: delete clock %s|%s: remove wake tier %d: %w", caseID, clockType, tier, err)
 		}
 	}
 	if err := s.deleteByScan(ctx, tierClaimKeyPrefix+caseID+"|"+clockType+"|*"); err != nil {
-		return fmt.Errorf("slaengine: delete clock %s|%s: %w", caseID, clockType, err)
+		return true, fmt.Errorf("slaengine: delete clock %s|%s: %w", caseID, clockType, err)
 	}
-	return nil
+	return true, nil
 }
 
 func boolString(b bool) string {

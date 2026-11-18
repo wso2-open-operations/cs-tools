@@ -122,10 +122,11 @@ func parseSLAStatusPaginationQuery(w http.ResponseWriter, r *http.Request) (doma
 }
 
 // GetClockState handles GET /sla-status/clock-state. A plain GET with
-// workItemId/target query params, both required; see
-// SLAStatusService.GetClockState's own doc comment for target's accepted
-// values. There used to be a source query param too (dropped along with
-// sla.source itself); a caller that still sends one is simply ignored.
+// workItemId/target query params, both required, and an optional slaId;
+// see SLAStatusService.GetClockState's own doc comment for target's
+// accepted values and what slaId narrows the lookup to. There used to be a
+// source query param too (dropped along with sla.source itself); a caller
+// that still sends one is simply ignored.
 func (h *SLAStatusHandler) GetClockState(w http.ResponseWriter, r *http.Request) {
 	workItemID := r.URL.Query().Get("workItemId")
 	if workItemID == "" {
@@ -137,8 +138,9 @@ func (h *SLAStatusHandler) GetClockState(w http.ResponseWriter, r *http.Request)
 		writeServiceError(w, r, &apierror.ValidationError{Msg: "target is required"})
 		return
 	}
+	slaID := r.URL.Query().Get("slaId")
 
-	resp, err := h.svc.GetClockState(r.Context(), workItemID, target)
+	resp, err := h.svc.GetClockState(r.Context(), workItemID, target, slaID)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

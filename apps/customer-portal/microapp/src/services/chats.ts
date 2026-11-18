@@ -34,6 +34,7 @@ import {
 } from "@config/endpoints";
 import type { Comment, CommentsDto, PaginatedArray } from "../types";
 import { toComment } from "./cases";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const initiate = async (id: string, data: Omit<MessageDispatchDto, "region" | "tier">): Promise<Message> => {
   const response = (
@@ -102,7 +103,7 @@ function toChat(dto: ChatDto): Chat {
     description: dto.initialMessage,
     count: dto.messageCount,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     statusId: dto.state?.id,
   };
 }

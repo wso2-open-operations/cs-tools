@@ -22,9 +22,10 @@ import { Children, cloneElement, isValidElement, type ReactElement, type ReactNo
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 
 const postMock = vi.fn();
+const getResponseMock = vi.fn();
 
 vi.mock("@api/backend/client", () => ({
-  useBackendApi: () => ({ post: postMock }),
+  useBackendApi: () => ({ post: postMock, getResponse: getResponseMock }),
 }));
 // A `shape: "list"` tile now renders through widgetListConfig.tsx, which
 // pulls in useTimeSheets.ts (time_card's mapper) — that module reads
@@ -209,6 +210,7 @@ function renderWithRoutes(ui: ReactNode, destinationPath: string) {
 describe("DashboardWidgetTile", () => {
   beforeEach(() => {
     postMock.mockReset();
+    getResponseMock.mockReset();
     mockCurrentUserId = SIGNED_IN_USER_ID;
     // The concurrency semaphore (widgetFetchConcurrency.ts) is a
     // module-level singleton shared across this whole file — a test below
@@ -3267,5 +3269,68 @@ describe("DashboardWidgetTile: PLG data the user may not read", () => {
       await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+  });
+
+  describe("mttr", () => {
+    const mttrReport = {
+      generatedOn: "2026-11-16T00:00:00Z",
+      windowMonths: 1,
+      windowStart: "2026-10-16T00:00:00Z",
+      windowEnd: "2026-11-16T00:00:00Z",
+      creTeamIds: [],
+      bands: [
+        { band: "S1-S4", caseCount: 5, avgResolutionHours: 736.4483339020555 },
+        { band: "S1", caseCount: 2, avgResolutionHours: 3435.8522618300003 },
+      ],
+    };
+
+    it("shape count: shows one band's average as hours, from the report and not a search", async () => {
+      getResponseMock.mockResolvedValue({ json: async () => mttrReport });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="mttr_s1_4"
+          displayName="MTTR S1-S4"
+          resourceType="mttr"
+          shape="count"
+          filters={{ months: "1", bands: ["S1-S4"] }}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText("736.45 h")).toBeInTheDocument());
+      expect(postMock).not.toHaveBeenCalled();
+      expect(getResponseMock).toHaveBeenCalledWith("/reports/mttr?months=1", {
+        signal: expect.any(AbortSignal),
+      });
+    });
+
+    it("shape count: shows the band in days when the widget's unit is days", async () => {
+      getResponseMock.mockResolvedValue({ json: async () => mttrReport });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="mttr_days"
+          displayName="MTTR S1 days"
+          resourceType="mttr"
+          shape="count"
+          filters={{ months: "1", unit: "days", bands: ["S1"] }}
+        />,
+      );
+      // 3435.85 h is about 143.16 days.
+      await waitFor(() => expect(screen.getByText("143.16 d")).toBeInTheDocument());
+    });
+
+    it("shape bar: puts a short label on each bar, and says how many cases the shown bars cover", async () => {
+      getResponseMock.mockResolvedValue({ json: async () => mttrReport });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="mttr_bars"
+          displayName="MTTR by Severity"
+          resourceType="mttr"
+          shape="bar"
+          filters={{ months: "1" }}
+          groupBy={{ bucket: "severity" }}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText("2 cases")).toBeInTheDocument());
+      expect(screen.getByText(/bar:S1:3435.85/)).toHaveTextContent("label:3436h");
+    });
   });
 });

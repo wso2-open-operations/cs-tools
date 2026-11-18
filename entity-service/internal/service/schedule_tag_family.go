@@ -70,6 +70,34 @@ func (s *scheduleService) tagFamilies(ctx context.Context) (families []string, p
 	return led, false, nil
 }
 
+// tagDeleteScope is which custom tags the caller may delete (nothing still
+// using it, in every case):
+//   - a portal admin: any, even one who is also a rota admin or leads a team
+//     (nil families);
+//   - a rota admin: their own families' tags and the shared ones (no family),
+//     which a rota admin of any family looks after -- a shared tag is offered
+//     to every family, and one added before tags had families stays shared;
+//   - a lead who is neither: the families of the rota teams they lead;
+//   - anybody else: refused (errNoTagFamily).
+func (s *scheduleService) tagDeleteScope(ctx context.Context) (families []string, allowShared bool, err error) {
+	portalAdmin, err := s.isPortalAdmin(ctx)
+	if err != nil || portalAdmin {
+		return nil, false, err
+	}
+	admin, err := s.rotaAdminFamilies(ctx)
+	if err != nil || len(admin) > 0 {
+		return admin, true, err
+	}
+	families, _, err = s.tagFamilies(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(families) == 0 {
+		return nil, false, errNoTagFamily
+	}
+	return families, false, nil
+}
+
 // kindFamilyFor is the family a new absence kind is stored under: none (shared)
 // for a caller who is no rota admin, else the admin's family -- the requested
 // one, which must be theirs, or their only one.

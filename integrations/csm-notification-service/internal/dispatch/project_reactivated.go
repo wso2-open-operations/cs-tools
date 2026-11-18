@@ -202,10 +202,10 @@ func (d *Dispatcher) reserveReactivation(ctx context.Context, ledger Reactivatio
 }
 
 // reactivationRecipients keeps the payload's recipients that are well-formed
-// addresses in the internal domain, each once. A dropped one is counted in a
-// WARN, never logged by address.
+// addresses in one of the internal domains, each once. A dropped one is
+// counted in a WARN, never logged by address.
 func (d *Dispatcher) reactivationRecipients(ctx context.Context, recipients []string, logAttrs []any) []string {
-	domain := internalDomainSuffix(d.acpInternalDomain)
+	domains := internalDomainSuffixes(d.acpInternalDomains)
 	var out []string
 	invalid, external := 0, 0
 	seen := map[string]bool{}
@@ -214,7 +214,7 @@ func (d *Dispatcher) reactivationRecipients(ctx context.Context, recipients []st
 		switch {
 		case !events.LooksLikeEmail(a):
 			invalid++
-		case !strings.HasSuffix(strings.ToLower(a), domain):
+		case !hasAnySuffix(strings.ToLower(a), domains):
 			external++
 		case !seen[strings.ToLower(a)]:
 			seen[strings.ToLower(a)] = true
@@ -228,19 +228,36 @@ func (d *Dispatcher) reactivationRecipients(ctx context.Context, recipients []st
 	return out
 }
 
-// internalDomainSuffix is the address suffix an internal address must end
-// with: the configured domain trimmed, lower-cased and starting with "@"
+// internalDomainSuffixes are the address suffixes an internal address must
+// end with: each configured domain trimmed, lower-cased and starting with "@"
 // (added when missing), so "wso2.com" cannot admit "user@notwso2.com".
-// acpDefaultInternalDomain when none is configured.
-func internalDomainSuffix(configured string) string {
-	domain := strings.ToLower(strings.TrimSpace(configured))
-	if domain == "" {
-		return acpDefaultInternalDomain
+// acpDefaultInternalDomain alone when none is configured.
+func internalDomainSuffixes(configured []string) []string {
+	var out []string
+	for _, c := range configured {
+		domain := strings.ToLower(strings.TrimSpace(c))
+		if domain == "" {
+			continue
+		}
+		if !strings.HasPrefix(domain, "@") {
+			domain = "@" + domain
+		}
+		out = append(out, domain)
 	}
-	if !strings.HasPrefix(domain, "@") {
-		domain = "@" + domain
+	if len(out) == 0 {
+		return []string{acpDefaultInternalDomain}
 	}
-	return domain
+	return out
+}
+
+// hasAnySuffix reports whether s ends with one of suffixes.
+func hasAnySuffix(s string, suffixes []string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // reactivatedReasonLine picks the sentence for why the project reopened.

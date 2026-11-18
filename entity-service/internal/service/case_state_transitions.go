@@ -53,7 +53,11 @@ var caseStateTransitionsInternal = map[domain.CaseState][]domain.CaseState{
 // from "from" to "to" is legal for the given caller tier. A state with no
 // entry in the chosen table (closed, or an unrecognized value) has no legal
 // next states -- closed is terminal for every caller, matching how it
-// already behaves everywhere else in this codebase.
+// already behaves everywhere else in this codebase. The one caller that may
+// still move a case out of closed is a portal admin, via
+// UpdateCaseRequest.AdminReopen -- handled as a separate bypass in
+// CaseService.UpdateCase, not as an addition to either table below, since it
+// is not a generally-available transition.
 //
 // internal selects which table applies: true for WSO2 staff (Unrestricted
 // or HasInternalAccess, the same two-flag test UpdateCase's own

@@ -133,11 +133,14 @@ func member(team, email, role, tier string) teamMember {
 		UserID: email, Role: role, AlertTier: tier}
 }
 
-// The seven ABTs plus Americas, as deployed.
+// The seven ABTs plus Americas, as deployed. On the rule table for a case on
+// no ABT (R3, R4b, ...), which these tests pin; the default, the shift's
+// leads, is unassigned_leads_test.go's.
 var testTeams = TeamKeys{
-	ABTs:       []string{"apollo", "artemis", "atlas", "castor", "draco", "phoenix", "vega"},
-	Americas:   "americas",
-	Leadership: "cre-leadership",
+	ABTs:            []string{"apollo", "artemis", "atlas", "castor", "draco", "phoenix", "vega"},
+	Americas:        "americas",
+	Leadership:      "cre-leadership",
+	UnassignedLeads: "rules",
 }
 
 func testResolver(stub *stubScheduleReader) TeamScheduleResolver {
@@ -825,7 +828,7 @@ func TestResolve_ABTResolvesFromTeamType(t *testing.T) {
 			Name: "apollo.lead@example.com", UserID: "apollo.lead", Role: roleLead},
 		member("americas", "am.lead@example.com", roleLead, ""))
 
-	byType := TeamKeys{ABTType: "cre-abt", Americas: "americas"}
+	byType := TeamKeys{ABTType: "cre-abt", Americas: "americas", UnassignedLeads: "rules"}
 	r := NewTeamScheduleResolver(&stubScheduleReader{members: members}, byType, nil)
 	rc := RoutingContext{Shift: ShiftLK, AssignedCRETeam: "vega", At: time.Now()}
 

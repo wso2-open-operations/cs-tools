@@ -16,6 +16,7 @@
 
 import type { CaseActivityEntryDto } from "./activity.dto";
 import { parseBackendTimestamp } from "@utils/dateTime";
+import { joinStaffName, stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export interface CaseAuditFieldChange {
   field: string;
@@ -40,14 +41,11 @@ export interface CaseAuditEntry {
  * object throws, which would have crashed this entry's render whenever createdByFullName and
  * createdByFirstName/createdByLastName were all empty. */
 function activityAuthorLabel(entry: CaseActivityEntryDto): string {
-  const full = entry.createdByFullName?.trim();
+  const full = stripStaffNameMarker(entry.createdByFullName);
   if (full) return full;
-  const composed = [entry.createdByFirstName, entry.createdByLastName]
-    .filter((p) => p && p.trim())
-    .join(" ")
-    .trim();
+  const composed = joinStaffName(entry.createdByFirstName, entry.createdByLastName);
   if (composed) return composed;
-  return entry.createdBy?.name?.trim() || entry.createdBy?.email?.trim() || "Unknown";
+  return stripStaffNameMarker(entry.createdBy?.name) || entry.createdBy?.email?.trim() || "Unknown";
 }
 
 export function toCaseAuditEntry(dto: CaseActivityEntryDto): CaseAuditEntry {

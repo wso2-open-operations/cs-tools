@@ -393,6 +393,30 @@ export function filterDeploymentProductsByCategory(
 }
 
 /**
+ * Whether a deployment product can be chosen for a new service request: it has
+ * a product name to show, and its category is one the project's service-request
+ * entitlement allows. The service request form and the Deployments tab's product
+ * selection both decide with this, so the tab never offers a product the form
+ * cannot list.
+ *
+ * @param {DeploymentProductItem} item - The deployment product.
+ * @param {string[] | undefined} srProductCategories - The project's allowed
+ *   service-request product categories, or undefined/empty when any is allowed.
+ * @returns {boolean} True when the product can be chosen.
+ */
+export function isServiceRequestProduct(
+  item: DeploymentProductItem,
+  srProductCategories: string[] | undefined,
+): boolean {
+  const label = getDeploymentProductDisplayLabel(item);
+  return (
+    Boolean(label.trim()) &&
+    !isUnknownPlaceholderProductLabel(label) &&
+    filterDeploymentProductsByCategory([item], srProductCategories).length > 0
+  );
+}
+
+/**
  * Formats chat messages for the case classification API.
  *
  * @param {Array<{ text: string; sender: string }>} messages - Chat messages with text and sender.

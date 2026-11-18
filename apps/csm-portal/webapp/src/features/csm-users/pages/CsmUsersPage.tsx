@@ -62,6 +62,7 @@ import {
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import type { BeGroup } from "@api/backend/types";
 import { displayUserTimezone, displayUserType } from "@utils/userDirectoryDisplay";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
@@ -370,7 +371,7 @@ export default function CsmUsersPage(): JSX.Element {
                       goToProfile();
                     }
                   };
-                  const displayName = u.name?.trim();
+                  const displayName = stripStaffNameMarker(u.name);
                   const primaryIdentity = displayName || u.userName;
                   const secondaryIdentity = [
                     u.userName !== primaryIdentity ? u.userName : undefined,
@@ -384,7 +385,7 @@ export default function CsmUsersPage(): JSX.Element {
                       onClick={goToProfile}
                       onKeyDown={handleRowKeyDown}
                       tabIndex={0}
-                      aria-label={`View profile for ${u.name || u.userName}`}
+                      aria-label={`View profile for ${primaryIdentity}`}
                       sx={{
                         cursor: "pointer",
                         "&:focus-visible": {

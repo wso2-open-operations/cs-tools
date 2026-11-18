@@ -54,14 +54,14 @@ const (
 // reformat it.
 var requestUpdateTemplates = map[requestUpdateCategory]map[requestUpdateStage]string{
 	requestUpdateCategoryGeneric: {
-		requestUpdateStageFirst:  `<p>Hi Team,</p><p>Please let us know if you need further assistance regarding this.</p><p>Thanks and Regards,<br>WSO2 Team.</p>`,
-		requestUpdateStageSecond: `<p>Hi Team,</p><p>Please let us know if you need further assistance regarding this or if this case is good to close.</p><p>Thanks and Regards,<br>WSO2 Team.</p>`,
-		requestUpdateStageFinal:  `<p>Hi Team,</p><p>As we haven't received a response to our previous follow-ups, we will proceed with placing this case on hold.</p><p>The Technical Owner and Account Manager have been informed.</p><p>Thanks &amp; Regards,<br>WSO2 Team.</p>`,
+		requestUpdateStageFirst:  `<p>Hi Team,</p><p>Please let us know if you need further assistance regarding this.</p><p>Thanks and Regards,<br>Choreo Labs Team.</p>`,
+		requestUpdateStageSecond: `<p>Hi Team,</p><p>Please let us know if you need further assistance regarding this or if this case is good to close.</p><p>Thanks and Regards,<br>Choreo Labs Team.</p>`,
+		requestUpdateStageFinal:  `<p>Hi Team,</p><p>As we haven't received a response to our previous follow-ups, we will proceed with placing this case on hold.</p><p>The Technical Owner and Account Manager have been informed.</p><p>Thanks &amp; Regards,<br>Choreo Labs Team.</p>`,
 	},
 	requestUpdateCategoryMigration: {
-		requestUpdateStageFirst:  `<p>Hi Team,</p><p>Kindly share a progress update on the migration process.</p><p>Thanks &amp; Regards,<br>WSO2 Team</p>`,
-		requestUpdateStageSecond: `<p>Hi Team,</p><p>Kindly share a progress update on the migration process.</p><p>If you are currently facing any blockers, delays, or technical issues please do not hesitate to contact us.</p><p>Thanks &amp; Regards,<br>WSO2 Team</p>`,
-		requestUpdateStageFinal:  `<p>Hi Team,</p><p>As we haven't received a response to our previous follow-ups, we will proceed with placing this migration ticket on hold.</p><p>If you plan to resume the migration, please open a related case and reference this ticket so we can continue from there.</p><p>The Technical Owner and Account Manager have been informed.</p><p>Thanks &amp; Regards,<br>WSO2 Team</p>`,
+		requestUpdateStageFirst:  `<p>Hi Team,</p><p>Kindly share a progress update on the migration process.</p><p>Thanks &amp; Regards,<br>Choreo Labs Team</p>`,
+		requestUpdateStageSecond: `<p>Hi Team,</p><p>Kindly share a progress update on the migration process.</p><p>If you are currently facing any blockers, delays, or technical issues please do not hesitate to contact us.</p><p>Thanks &amp; Regards,<br>Choreo Labs Team</p>`,
+		requestUpdateStageFinal:  `<p>Hi Team,</p><p>As we haven't received a response to our previous follow-ups, we will proceed with placing this migration ticket on hold.</p><p>If you plan to resume the migration, please open a related case and reference this ticket so we can continue from there.</p><p>The Technical Owner and Account Manager have been informed.</p><p>Thanks &amp; Regards,<br>Choreo Labs Team</p>`,
 	},
 }
 

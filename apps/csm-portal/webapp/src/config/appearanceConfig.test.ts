@@ -17,9 +17,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_APP_NAME,
+  DEFAULT_COMPANY_NAME,
   DEFAULT_LOGO_DARK_MODE_URL,
   DEFAULT_LOGO_LIGHT_MODE_URL,
   appName,
+  companyName,
   logoDarkModeUrl,
   logoLightModeUrl,
 } from "@config/appearanceConfig";
@@ -47,6 +49,25 @@ describe("appName", () => {
     for (const raw of ["", "   ", null, undefined, 42]) {
       setConfig({ CSM_PORTAL_APP_NAME: raw });
       expect(appName()).toBe(DEFAULT_APP_NAME);
+    }
+  });
+});
+
+describe("companyName", () => {
+  it("defaults to WSO2 LLC when unset", () => {
+    setConfig({});
+    expect(companyName()).toBe(DEFAULT_COMPANY_NAME);
+  });
+
+  it("reads and trims the configured name", () => {
+    setConfig({ CSM_PORTAL_COMPANY_NAME: "  Acme Inc.  " });
+    expect(companyName()).toBe("Acme Inc.");
+  });
+
+  it("treats a blank or non-string value as unset", () => {
+    for (const raw of ["", "   ", null, undefined, 42]) {
+      setConfig({ CSM_PORTAL_COMPANY_NAME: raw });
+      expect(companyName()).toBe(DEFAULT_COMPANY_NAME);
     }
   });
 });

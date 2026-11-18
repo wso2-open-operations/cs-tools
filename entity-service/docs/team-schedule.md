@@ -161,7 +161,10 @@ A lead edits their own team's rows in the Month roster's cell picker:
   zone column on an SRE day, and stacked in the cell otherwise. Leave still
   takes the whole day, because someone on leave is not on the rota. In a cell
   holding both, **Clear** clears the turn, and the allocation has its own
-  **Remove**.
+  **Remove**. The daily CS Worklogs report follows the same rule: a
+  remove-from-timesheet allocation takes a person off the daily, except on a
+  day they hold a rotation turn (`is_rotation`), so time logged on the turn
+  shows. An exclusion from the rota still takes them off.
 - **Remove a whole span in one click.** Clicking any day of a leave or
   allocation shows the whole span with a **Remove** button, which deletes
   every day of it, including a span with no end date. The write is
@@ -177,8 +180,9 @@ A lead edits their own team's rows in the Month roster's cell picker:
   deleting takes two clicks because the tag is shared by every team. A
   built-in tag cannot be deleted. A tag still used by any leave or allocation
   is refused, with how many entries use it, rather than retired quietly, which
-  would leave those entries with no label or colour. The write is
-  `DELETE /team-schedule/absence-kinds/{code}`.
+  would leave those entries with no label or colour. Who may delete which tag
+  is under "Absence kinds" below; the portal shows the refusal's own words. The
+  write is `DELETE /team-schedule/absence-kinds/{code}`.
 
 Every write above is gated on the caller leading the team, or being a rota
 admin for its group (for a removal, the team recorded on the absence row), and
@@ -478,10 +482,16 @@ and `sme_rota_admin`. No schema change: the family of a team is read from
   admin the teams of their family, a rota manager their own team.
 - **A rota manager is not a lead.** The tags, Generate month, Case Paging and
   paging numbers keep their own rules, which do not include a rota manager.
-- **Absence kinds** (`schedule_tag_family.go`): a kind a rota admin adds is
-  stored for their family (`team_schedule_absence_kind.family`), and they may
-  delete only their own family's custom kinds. A team lead who is no rota admin
-  adds shared kinds, as before.
+- **Absence kinds** (`schedule_tag_family.go`): a kind is stored for its
+  creator's family (`team_schedule_absence_kind.family`): a rota admin's, or the
+  family of the rota teams a lead leads. A portal admin may add one for any
+  family or shared (no family). Kinds added before families were, and not
+  backfilled by migration 0282, stay shared. Deleting (`tagDeleteScope`), only a
+  custom kind nothing uses:
+  - a portal admin: any kind, even one who is also a rota admin or a lead;
+  - a rota admin: their own family's kinds and the shared ones;
+  - a lead who is neither: their teams' families' kinds, never a shared one;
+  - a lead of a team that works no rota: none (`errNoTagFamily`).
 
 ## Rota access (0225)
 

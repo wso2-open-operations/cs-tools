@@ -60,6 +60,7 @@ export interface Account {
   technicalOwnerId?: string | null;
   accountManager?: PersonRef | null;
   renewalAccountManager?: PersonRef | null;
+  customerSuccessManager?: PersonRef | null;
   technicalOwner?: PersonRef | null;
   // The account's assigned CRE/SRE team, when the backing data source has
   // one on record — surfaced as a clickable link to the team directory page

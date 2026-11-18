@@ -232,13 +232,25 @@ schedules assume `TZ=UTC` like every other here.
   a shift and its on-call variant (`<CODE>_OC`), which share hours: Morning (with its on-call
   person) and Evening. The email lists its window's people.
 - **Weekend: one summary email plus one invitation email per team per day.** The summary goes
-  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike, in the layout the
-  CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
-  ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
-  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
-  window longer than 10 hours that has 2+ people every day asking them to split it into morning
-  and evening shifts), the zone
-  legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
+  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike: "Hello Team,",
+  one sentence with the dates and two short points (check your hours, tell your team lead about a
+  swap; no "confirm your contact details": the email shows none), then **one plain table per day** ("Saturday, 14 November"):
+  Rotation | CRE Team | SRE Team, **a row per window** in rota order, so two rows, LK and Americas
+  (`dayRows`): the rotation with that day's hours on its own clock under it ("06:00 AM – 09:00 PM
+  IST"; the Americas rotations in PDT/PST), the CRE people one per line (the on-call person in
+  their window's row as "Jay (on-call)"), and the SRE people whose turns fall in it.
+  A turn on other hours than its window's row gets a row of its own; the SRE column is left out
+  when there are no SRE turns. Then a **Rotation Definitions** table, one row per CRE window
+  (a shift and its on-call variant share it): Rotation with its member count ("2 members + 1
+  on-call") | Local time | UTC window | Role ("General support", "General support + On-call";
+  no zone prefix, the local time names it). A general-support window longer than 10 hours with
+  2+ people every day gets "Please sync internally and ensure coverage throughout the window."
+  under its role. SRE rotations are not defined there. (Folding the definitions into the day
+  rows was tried and rejected: the separate table read better.) The email is up to 900px wide.
+  Under the definitions, the zone legend (with each
+  zone's UTC offset) and one daylight saving note per window; then a Notes list only when something
+  is not yet marked (the invitation line was dropped by request); then the Handover paragraphs,
+  the schedule link and "Regards, CSM Team Schedule" (`notify.RenderWeekendRota`).
   The Americas Weekend's hours, and the Americas On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
   invitations use the same hours. Then each window (LK
@@ -249,12 +261,14 @@ schedules assume `TZ=UTC` like every other here.
   `rotareminder.SREWeekendSupport`, set in `main.go` when `ROTA_REMINDER_FAMILY` is CRE): a
   second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
   ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days. They
-  appear in an "SRE Weekend Support" block after the day teams ("Name (SRE Weekend, L1)", the
-  turn's `tier`), get one Rotation Definitions row per rotation (IST hours, "SRE support (L1 →
-  L2)" from the tiers seen), and are added to the summary's To. That is all: they never count
+  are in each day's SRE Team column, each turn in the CRE window whose hours it overlaps most
+  (SRE Weekend with LK, SRE Night with Americas; the nearest start when none overlaps): "Kim (L1)"
+  (name and the turn's `tier`), one per line, with the rotation's name up to its bracket and its
+  IST hours under them ("SRE Night, 09:00 PM – 06:00 AM IST"). No disclaimer (dropped as noise,
+  by request). They are added to the summary's To. That is all: they never count
   toward the weekend minimums, get no invitation or cancellation, and are not in the weekend
   record; IaaS and PaaS turns are not listed. The SRE read happens only when the summary is
-  being sent, and a failed read is logged and the summary goes without the block.
+  being sent, and a failed read is logged and the summary goes without the SRE column.
 - **Settings saved on the Rota Access tab win.** Every run first reads
   `GET /team-schedule/reminder-settings/{family}` (entity-service, migration 0242; the
   "CRE rota reminders" card, editable by a CSM admin or the CRE rota admin). When something
@@ -347,8 +361,8 @@ schedules assume `TZ=UTC` like every other here.
   window -- its date and hours on the rotation's own clock (`clockOf`: IST, except a rotation in
   `ROTA_REMINDER_WINDOWS`, e.g. the Americas Weekend in PDT/PST) -- a Name | Rotation table, the
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
-  (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
-  Definitions table, the zone note and the handover paragraphs. Rotation names come from config
+  (`notify.RenderWeekendRota`, described above): "Hello Team,", the two points, a table per day (LK and Americas rows),
+  the rotation definitions, the zone note, the notes and the handover paragraphs. Still plain: greys only, no logo or branding. Rotation names come from config
   (`CODE=Name`). Names are escaped. Every subject starts `[<family>]`
   (`[CRE] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
@@ -692,8 +706,10 @@ both places.
   its date or invoice moved the event. An Open track whose saved `event_type` is `suspend` (and whose
   `actionSuspendProject`, if present, is `SUCCESSFUL`) does nothing when the decision is to suspend: no notice,
   no suspension, no record, and it does not mark the project closed for the other track
-  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
-  still resets the event to `open`, which clears this.
+  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date that has moved out past the
+  recorded window (`movedOut`: more days remain than the recorded window's day count, 0 for a recorded
+  suspend) resets the event to `open`, which clears this; the reset applies to any distance, not only
+  beyond 90 days (a date extended from +7 to +45 starts the next term's reminders over).
 - **Hybrid evaluation (screening, `ACP_SCREENING`, default ON).** Today every open project costs about six
   sequential Salesforce-backed calls, so a run takes tens of minutes. With screening on, a run first decides
   from **CSM's own copy** of the Salesforce data (entity-service's `/invoices/search` and
@@ -707,7 +723,7 @@ both places.
   - *Superset rule.* A project is a candidate if any of: (date) its CSM end date is missing or on or before
     today + 91 days (the widest window plus a day of margin; past dates included); (state) its
     `suspensionProcessState` records anything but "open" for either track, or cannot be parsed
-    (`suspensionstate.HasRecordedEvent`; the renewal reset still runs for a project far from its end date);
+    (`suspensionstate.HasRecordedEvent`; the reset still runs for a project whose date moved out past its recorded window);
     (invoice) it owns, through a link, an unpaid invoice with a due date on or before today + 91 days. The
     invoice test is safe because the suspend date is the due date, or invoice date + 60 days when the grace
     period applies and the credit period is at most 60 days, which is never earlier than the due date: a
@@ -1175,15 +1191,50 @@ that's too noisy for a given task in practice, the fix is a notification-frequen
 on top later, not a retry cap.
 
 The email itself (`internal/notify/templates/alert.html`, rendered by `notify.RenderAlertEmail`) is
-a plain HTML template in the same table-based, WSO2-branded style
-`integrations/csm-notification-service`'s own templates use (`escapeHTML`/`escapeMultiline` mirror
-that service's own functions of the same name) — task name, period, attempt count, next retry time,
-and the failure's error message.
+a plain HTML template in the same table-based, configurable-branding style (see "Logo and company
+name" below) `integrations/csm-notification-service`'s own templates use (`escapeHTML`/
+`escapeMultiline` mirror that service's own functions of the same name) — task name, period,
+attempt count, next retry time, and the failure's error message.
 
 The engine itself still never sends a success email on any task's behalf — `stale_cases_report`'s
 and `open_cases_report`'s own reports (see "Stale cases report"/"Open cases report" above) are each
 sent from inside that task's own handler, not through this alerting path at all. See "Per-task
 report emails" below for why that's not a generic engine feature.
+
+## Logo and company name
+
+Every email this component sends — `internal/notify`'s eight report/alert templates and
+`internal/acp/notify`'s five ACP closure templates alike — carries a configurable logo and company
+name, mirroring `integrations/csm-notification-service`'s own equivalent config.
+`EMAIL_LOGO_DARK_URL`/`EMAIL_TEMPLATE_COMPANY_NAME` are the same env var names that service uses,
+reusable verbatim across a deployment; `EMAIL_LOGO_LIGHT_URL` is this component's own name for its
+equivalent of that service's `EMAIL_LOGO_WHITE_URL`. Unset keeps every built-in default (`WSO2`,
+the existing logo URLs) exactly as it was before this config existed.
+
+- **`EMAIL_LOGO_LIGHT_URL`** overrides `internal/notify.SetLogoURL` — all eight of that package's
+  templates share one orange header, so they all need the same light-colored logo.
+  **`EMAIL_LOGO_DARK_URL`** overrides `internal/acp/notify.SetLogoURL` — all five of that package's
+  templates share one light background, so they need a dark-colored logo instead. The two are
+  deliberately separate env vars, not one shared value, since the two packages' templates need
+  opposite logo colors.
+- **`EMAIL_TEMPLATE_COMPANY_NAME`** overrides both packages' `SetCompanyName` with the same value —
+  it is the same real-world company name regardless of which package sends the email. Replaces the
+  literal word "WSO2" in: the copyright line and the "WSO2 Case Id"/"WSO2 Case ID"/"WSO2 ID"/"WSO2
+  Product" report column headers (`internal/notify`); the footer disclaimer ("sent by WSO2's
+  support system") and logo alt text, across all five ACP templates (`internal/acp/notify`); and
+  the plain-text ACP suspension/invoice notice bodies' own "WSO2 Team" signoffs and "WSO2
+  subscription"/"WSO2 Account Manager"/"WSO2 services" body copy (`internal/acp/sweep`'s
+  `sweep.go`/`invoice.go`, which call `notify.CompanyName()` — note this is `internal/acp/notify`'s
+  `CompanyName`, not `internal/notify`'s own same-named function; the two packages are independent
+  and only share the config value, never package state).
+- **Deliberately NOT routed through this config**: `internal/notify.humanizeState`'s own "wso2" ->
+  "WSO2" case-state mapping (e.g. "Waiting On WSO2") stays hardcoded — see that function's own doc
+  comment for why (an internal-only report audience, no branding reason to vary it).
+  `time_card_report.html` (the one genuinely customer-facing email in this component) and the rota
+  reminder emails carry no logo or company name at all, by design — see "Monthly time card report"
+  and "Rota reminders" above.
+- Wired once, unconditionally, in `cmd/server/main.go`, right after `loadDotEnv`/the logger setup —
+  before anything else in `main` constructs an email client or renders a template.
 
 ## Environment variables
 
@@ -1497,3 +1548,5 @@ no server to leave running.
 go vet ./...              # vet
 go test -race ./...       # race-detector tests
 ```
+
+**Logo size is set by height, not width.** Every logo `<img>` in `internal/notify/templates` has a `height` attribute and `style="height:30px; width:auto"` (30 is the old 120px width divided by the built-in logo's 1277 x 317 ratio), so a configured logo shows at the same height the built-in one has and keeps its own proportions. The built-in logo looks as before. `TestEveryLogoIsSizedByHeight` enforces it for a new template.

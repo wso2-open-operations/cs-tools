@@ -68,8 +68,8 @@ func renderRegressionRows(groups []regressionreport.Group, caseLinkBase string) 
 	const idCell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; white-space:nowrap;">%s</td>`
 	var b strings.Builder
 	for _, g := range groups {
-		fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">WSO2 Product: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
-			regressionRowColumns, escapeHTML(g.Product), len(g.Cases))
+		fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">%s Product: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
+			regressionRowColumns, escapeHTML(CompanyName()), escapeHTML(g.Product), len(g.Cases))
 		for _, row := range g.Cases {
 			b.WriteString("<tr>")
 			fmt.Fprintf(&b, idCell, regressionCaseLink(caseLinkBase, row))

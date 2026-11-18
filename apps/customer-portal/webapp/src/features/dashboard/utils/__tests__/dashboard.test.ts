@@ -33,8 +33,15 @@ describe("isS0SeverityLabel", () => {
     expect(isS0SeverityLabel("0 - catastrophic")).toBe(true);
   });
 
+  it("returns true for the bare S0 code", () => {
+    expect(isS0SeverityLabel("S0")).toBe(true);
+    expect(isS0SeverityLabel(" s0 ")).toBe(true);
+  });
+
   it("returns false for other severities", () => {
     expect(isS0SeverityLabel("1 - Critical")).toBe(false);
+    expect(isS0SeverityLabel("S1")).toBe(false);
+    expect(isS0SeverityLabel("S4(Query)")).toBe(false);
     expect(isS0SeverityLabel("")).toBe(false);
   });
 });
@@ -52,6 +59,13 @@ describe("getSeverityFriendlyLabel", () => {
 describe("getSeverityLegendColor", () => {
   it("returns a hex color for known severity", () => {
     expect(getSeverityLegendColor("2 - High")).toMatch(/^#/);
+  });
+
+  it("colours bare severity codes like the labels they stand for", () => {
+    expect(getSeverityLegendColor("S2")).toBe(getSeverityLegendColor("High (P2)"));
+    expect(getSeverityLegendColor("S0")).toBe(getSeverityLegendColor("Catastrophic (P0)"));
+    expect(getSeverityLegendColor("S4(Query)")).toBe(getSeverityLegendColor("Low (P4)"));
+    expect(getSeverityLegendColor("S2")).not.toBe(getSeverityLegendColor("unknown"));
   });
 });
 

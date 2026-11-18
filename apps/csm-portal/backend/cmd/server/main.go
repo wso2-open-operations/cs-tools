@@ -169,6 +169,7 @@ func main() {
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
 	salesforceResyncHandler := handler.NewSalesforceResyncHandler(customerEntityClient)
+	caseEscalationAccessHandler := handler.NewCaseEscalationAccessHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -183,6 +184,7 @@ func main() {
 	itServiceHandler := handler.NewITServiceHandler(customerEntityClient)
 	serviceOfferingHandler := handler.NewServiceOfferingHandler(customerEntityClient)
 	groupHandler := handler.NewGroupHandler(customerEntityClient)
+	mttrReportHandler := handler.NewMTTRReportHandler(customerEntityClient)
 	referenceHandler := handler.NewReferenceHandler(dir)
 	// entity-service registers POST /teams/search only on the PostgreSQL data
 	// source, so a ServiceNow deployment keeps serving the registry alone.
@@ -499,10 +501,9 @@ func main() {
 	route("DELETE /comments/{id}", handler.PermUpdateDeleteComment, commentHandler.DeleteComment)
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
-	// PermView is only the floor here: the action-dependent rule lives in
-	// CreateCaseEscalation (ESCALATE needs PermEscalate; DEESCALATE needs
-	// being one of the case's team leads, with no escalation role), which a
-	// route permission cannot express because it depends on the body and the case.
+	// PermView, not PermEscalate: somebody an admin named as allowed to
+	// de-escalate needs no escalation role. The handler checks PermEscalate
+	// itself for escalating and for a team lead's de-escalation.
 	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	// Stored attachments, forwarded to the entity service, which owns every
@@ -631,6 +632,12 @@ func main() {
 	// incident call-escalation ladder pages for this team -- see that repo's
 	// own CLAUDE.md.
 	route("POST /teams/{id}/lead", handler.PermAdmin, teamHandler.AssignLead)
+	// Admin-only: who may de-escalate any case besides the leads of the case's
+	// own ABT team (Admin > Escalation access). entity-service checks the
+	// caller's admin role again from their token.
+	route("GET /case-escalation-access/deescalators", handler.PermAdmin, caseEscalationAccessHandler.ListDeescalators)
+	route("PUT /case-escalation-access/deescalators/{userId}", handler.PermAdmin, caseEscalationAccessHandler.PutDeescalator)
+	route("DELETE /case-escalation-access/deescalators/{userId}", handler.PermAdmin, caseEscalationAccessHandler.DeleteDeescalator)
 	route("GET /accounts/{id}", handler.PermViewSharedEntity, accountHandler.GetAccount)
 	// Admin-only: CRE/SRE team is a temporary override of ServiceNow's own
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
@@ -750,6 +757,9 @@ func main() {
 	// stage's assignment group. A "group" id (from the approvals response), not a
 	// team id; internal staff only (entity-service refuses anyone else).
 	route("GET /groups/{id}", handler.PermView, groupHandler.GetGroup)
+	// MTTR report: the dashboard builder's "mttr" resourceType, same read
+	// audience as the other aggregate widgets (e.g. /cases/feedback/aggregate).
+	route("GET /reports/mttr", handler.PermView, mttrReportHandler.GetMTTRReport)
 
 	// Customer engagement allocations: the list, one allocation, and the status
 	// updates written against it. Pure pass-through; entity-service restricts all

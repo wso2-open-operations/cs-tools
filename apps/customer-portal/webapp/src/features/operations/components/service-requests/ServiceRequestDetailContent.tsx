@@ -50,6 +50,7 @@ import {
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseCommentsInfinite";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import { useCustomerPermissions } from "@hooks/useCustomerPermissions";
 import { usePostComment } from "@features/support/api/usePostComment";
 import type { CaseDetails } from "@features/support/types/cases";
 import type { CaseComment } from "@features/support/types/cases";
@@ -86,6 +87,7 @@ import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUpl
 import DOMPurify from "dompurify";
 import { CASE_STATUS } from "@features/project-details/constants/projectDetailsConstants";
 import { parseBackendTimestamp } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export interface ServiceRequestDetailContentProps {
   data: CaseDetails | undefined;
@@ -116,6 +118,7 @@ export default function ServiceRequestDetailContent({
 }: ServiceRequestDetailContentProps): JSX.Element {
   const theme = useTheme();
   const { data: userDetails } = useGetUserDetails();
+  const { isInternalUser } = useCustomerPermissions();
   const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
   const [commentText, setCommentText] = useState("");
   const [commentResetTrigger, setCommentResetTrigger] = useState(0);
@@ -223,14 +226,15 @@ export default function ServiceRequestDetailContent({
         type: "comment",
         label: "Comment Added",
         date: c.createdOn ?? "",
-        actor: c.createdBy?.trim() || SYSTEM_AUTHOR_LABEL,
+        actor: stripStaffNameMarker(c.createdBy) || SYSTEM_AUTHOR_LABEL,
         desc: "",
       });
     });
 
     if (data?.closedOn) {
-      const closedByLabel =
-        data?.closedBy?.label ?? data?.closedBy?.name ?? "System";
+      const closedByLabel = stripStaffNameMarker(
+        data?.closedBy?.label ?? data?.closedBy?.name,
+      ) || "System";
       entries.push({
         type: "status_changed",
         label: "Status Changed",
@@ -546,7 +550,7 @@ export default function ServiceRequestDetailContent({
                 <>
                 {commentsToShow.map((comment: CaseComment) => {
                   const authorLabel =
-                    comment.createdBy?.trim() || SYSTEM_AUTHOR_LABEL;
+                    stripStaffNameMarker(comment.createdBy) || SYSTEM_AUTHOR_LABEL;
                   const isCurrentUser =
                     !!comment.createdBy?.trim() &&
                     comment.createdBy.toLowerCase() === currentUserEmail;
@@ -795,7 +799,9 @@ export default function ServiceRequestDetailContent({
 
           {(() => {
             const displayableActions = CASE_STATUS_ACTIONS.filter((action) =>
-              getAvailableCaseActions(statusLabel).includes(action.label),
+              getAvailableCaseActions(statusLabel, isInternalUser).includes(
+                action.label,
+              ),
             ).filter((action) => action.label !== "Open Related Case");
             const isClosed = statusLabel?.toLowerCase() === CASE_STATUS.CLOSED;
             if (isClosed || displayableActions.length === 0) return null;

@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -54,9 +55,12 @@ func main() {
 	middleware.ConfigureLogger()
 
 	// Optional logo overrides for every email; unset keeps the built-in URLs.
-	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_WHITE_URL"))
-	// Optional footer-icon override for the onboarding emails; unset keeps the built-in icon.
-	notifications.SetFooterIconURL(os.Getenv("EMAIL_FOOTER_ICON_URL"))
+	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_LIGHT_URL"))
+	// Optional support address for the onboarding emails' "contact us" line (and
+	// their default Reply-To); unset keeps the built-in address.
+	if err := notifications.SetSupportAddress(os.Getenv("EMAIL_SUPPORT_ADDRESS")); err != nil {
+		slog.Warn("EMAIL_SUPPORT_ADDRESS ignored; keeping the built-in address", "err", err)
+	}
 	// Optional company-name override for the templates' footer disclaimer/signoff
 	// and the dispatch package's email subjects; unset keeps "WSO2".
 	notifications.SetTemplateCompanyName(os.Getenv("EMAIL_TEMPLATE_COMPANY_NAME"))
@@ -394,8 +398,9 @@ func main() {
 		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
 		// (project.reactivated), e.g. the customer lifecycle and billing lists;
 		// checked by acpReactivationCC, which stops startup on a bad entry.
-		// The email goes only to @wso2.com addresses: it is an internal notice.
-		WithACPReactivation(acpReactivationCC(), "@wso2.com")
+		// The email goes only to the internal domains (ACP_INTERNAL_EMAIL_DOMAINS,
+		// default @wso2.com): it is an internal notice.
+		WithACPReactivation(acpReactivationCC(), acpInternalEmailDomains())
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to
@@ -581,6 +586,12 @@ func main() {
 	// Case Alerts rung email's "response SLA remaining time"; nil when the
 	// fetch failed (the email then uses the published defaults).
 	var slaDurations map[string]map[string]time.Duration
+	// slaEngine is constructed below (only when Redis is configured) and read
+	// again further down to refresh its team-group-email lookup table on the
+	// same ticker as the Chat team-webhook one -- hoisted to this scope
+	// (rather than a block-local :=) so it's reachable from there; nil when
+	// Redis isn't configured, same as slaProducer above.
+	var slaEngine *slaengine.Engine
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -669,7 +680,7 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -723,19 +734,46 @@ func main() {
 	// still listed in GOOGLE_CHAT_SPACES.
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") != "" {
 		refreshTeamAudienceSpaces := func(ctx context.Context) error {
-			fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			webhooks, err := customerEntityClient.GetTeamChatWebhooks(fetchCtx)
-			if err != nil {
+			webhookCtx, cancelWebhooks := context.WithTimeout(ctx, 30*time.Second)
+			webhooks, webhooksErr := customerEntityClient.GetTeamChatWebhooks(webhookCtx)
+			cancelWebhooks()
+			if webhooksErr != nil {
 				// Logged, not fatal: this client keeps whatever it already
 				// had (nil on the very first failed fetch, same as a team
 				// simply having no configured space yet) rather than
 				// crash-looping the whole service over a reachability blip.
-				slog.Error("notifications: failed to refresh team chat webhooks from entity-service; keeping the previous set", "err", err)
-				return err
+				slog.Error("notifications: failed to refresh team chat webhooks from entity-service; keeping the previous set", "err", webhooksErr)
+			} else {
+				googleChatClient.SetTeamAudienceSpaces(webhooks)
 			}
-			googleChatClient.SetTeamAudienceSpaces(webhooks)
-			return nil
+
+			// Piggybacks on this same ticker (rather than a second one) to
+			// also refresh slaEngine's team.key -> group_email lookup table
+			// (see Engine.SetTeamGroupEmails's own doc comment) -- a genuinely
+			// independent fetch, on its own context (not shared with the
+			// webhook one above, so a slow webhook call can't starve this
+			// one's own budget) and always attempted regardless of whether
+			// the webhook fetch above succeeded (a CodeRabbit-caught gap: an
+			// early return on a webhook failure used to skip this fetch
+			// entirely, silently going stale until the next scheduled tick).
+			// Only when Redis (and so the SLA engine) is configured at all.
+			if slaEngine != nil {
+				emailCtx, cancelEmails := context.WithTimeout(ctx, 30*time.Second)
+				groupEmails, emailsErr := customerEntityClient.GetTeamGroupEmails(emailCtx)
+				cancelEmails()
+				if emailsErr != nil {
+					slog.Error("slaengine: failed to refresh team group emails from entity-service; keeping the previous set", "err", emailsErr)
+				} else {
+					slaEngine.SetTeamGroupEmails(groupEmails)
+				}
+			}
+
+			// The startup retry loop below only cares about the webhook
+			// fetch's own success (same contract as before this change) --
+			// team-routed Chat is the one dependency that gates it; a
+			// group-email hiccup is logged above and simply retried on the
+			// next ordinary ticker interval, same as any other refresh here.
+			return webhooksErr
 		}
 		// Retry the initial fetch, with backoff, before consumers start --
 		// not just one attempt. googlechat.go's own sendCardToAudience
@@ -1528,13 +1566,13 @@ func envBool(key string, def bool) bool {
 	}
 }
 
-// emailReplyTo reads EMAIL_REPLY_TO: unset means support@wso2.com, set but
+// emailReplyTo reads EMAIL_REPLY_TO: unset means the support address, set but
 // empty means no Reply-To.
 func emailReplyTo() string {
 	if v, ok := os.LookupEnv("EMAIL_REPLY_TO"); ok {
 		return v
 	}
-	return "support@wso2.com"
+	return notifications.SupportAddress()
 }
 
 func envOrDefault(key, def string) string {
@@ -1903,6 +1941,37 @@ func acpReactivationCC() []string {
 		os.Exit(1)
 	}
 	return cc
+}
+
+// acpInternalEmailDomains reads ACP_INTERNAL_EMAIL_DOMAINS, the domains the
+// "Back to Open state" email may go to, and stops startup on an entry that
+// is not a domain: matched as a suffix, it could admit the wrong people.
+// Empty keeps the dispatcher's default (@wso2.com).
+func acpInternalEmailDomains() []string {
+	domains, err := parseACPInternalEmailDomains(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
+	if err != nil {
+		slog.Error("invalid ACP_INTERNAL_EMAIL_DOMAINS", "err", err)
+		os.Exit(1)
+	}
+	return domains
+}
+
+// emailDomainPattern is a bare domain name: dot-separated labels of letters,
+// digits and inner hyphens, at least two of them. A URL ("https://...") or a
+// port fails it, so it cannot become a suffix that matches nobody.
+var emailDomainPattern = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// parseACPInternalEmailDomains splits ACP_INTERNAL_EMAIL_DOMAINS on commas
+// (entries trimmed, empty ones dropped; the leading "@" is optional) and
+// refuses an entry that is not a domain name.
+func parseACPInternalEmailDomains(raw string) ([]string, error) {
+	domains := splitComma(raw)
+	for i, d := range domains {
+		if !emailDomainPattern.MatchString(strings.TrimPrefix(d, "@")) {
+			return nil, fmt.Errorf("entry %d is not a domain like @example.com", i+1)
+		}
+	}
+	return domains, nil
 }
 
 // parseACPReactivationCC splits ACP_REACTIVATION_CC on commas (entries

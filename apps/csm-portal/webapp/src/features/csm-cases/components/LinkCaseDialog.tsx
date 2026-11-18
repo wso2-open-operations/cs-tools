@@ -38,6 +38,7 @@ import {
 } from "@features/csm-cases/api/useQuickCaseSearch";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export type CaseLinkType = "parent" | "related";
 
@@ -233,7 +234,7 @@ export default function LinkCaseDialog({
                   <StateChip state={selected.state} />
                   {selected.assigneeName && (
                     <Typography variant="caption" color="text.secondary" noWrap>
-                      {selected.assigneeName}
+                      {stripStaffNameMarker(selected.assigneeName)}
                     </Typography>
                   )}
                 </Box>

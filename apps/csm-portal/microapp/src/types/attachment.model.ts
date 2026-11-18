@@ -16,6 +16,7 @@
 
 import type { AttachmentViewDto } from "./attachment.dto";
 import { parseBackendTimestamp } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export interface CaseAttachment {
   id: string;
@@ -36,8 +37,8 @@ export interface CaseAttachment {
 // case.model.ts (same fallback chain the webapp's authorDisplayName uses).
 function attachmentAuthorLabel(createdBy: AttachmentViewDto["createdBy"] | null | undefined): string {
   if (!createdBy) return "Unknown";
-  if (typeof createdBy === "string") return createdBy.trim() || "Unknown";
-  return createdBy.name?.trim() || createdBy.email?.trim() || "Unknown";
+  if (typeof createdBy === "string") return stripStaffNameMarker(createdBy) || "Unknown";
+  return stripStaffNameMarker(createdBy.name) || createdBy.email?.trim() || "Unknown";
 }
 
 export function toCaseAttachment(dto: AttachmentViewDto): CaseAttachment {

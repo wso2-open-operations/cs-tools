@@ -27,7 +27,9 @@ its name.
 
 The Projects tab lists every project across all accounts, searchable by project name, project
 key, or subscription type. A project is tied to a subscription, and its row shows its closure
-state and start/end dates.
+state and start/end dates. **Filters** narrow it by project state, onboarding status, onboarding
+owner, the account's region, and the onboarding dates; the onboarding owner and region can also
+be shown as columns.
 
 Opening a project takes you to its detail page, with these tabs:
 

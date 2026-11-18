@@ -24,6 +24,7 @@ import RelativeTime from "@components/RelativeTime";
 import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import type { QuickCaseHit } from "@features/csm-cases/api/useQuickCaseSearch";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 interface QuickNavCaseCardProps {
   hit: QuickCaseHit;
@@ -107,7 +108,7 @@ export default function QuickNavCaseCard({
           <Stack direction="row" spacing={0.5} alignItems="center">
             <User size={13} />
             <Typography variant="caption" color="text.secondary">
-              Assigned to {hit.assigneeName}
+              Assigned to {stripStaffNameMarker(hit.assigneeName)}
             </Typography>
           </Stack>
         )}

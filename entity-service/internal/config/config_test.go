@@ -1387,6 +1387,41 @@ func TestConfig_Validate_QueryHourInternalEmailDomain(t *testing.T) {
 	}
 }
 
+// ACP_INTERNAL_EMAIL_DOMAINS is matched with strings.HasSuffix like the
+// setting above, so every entry needs its "@"; unset keeps @wso2.com.
+func TestConfig_Validate_ACPInternalEmailDomains(t *testing.T) {
+	tests := []struct {
+		name    string
+		domains []string
+		wantErr bool
+	}{
+		{name: "unset is valid, the service defaults", domains: nil},
+		{name: "two domains with the @", domains: []string{"@example.com", "@example.org"}},
+		{name: "one without the @ is rejected", domains: []string{"@example.com", "example.org"}, wantErr: true},
+		{name: "no dot is rejected", domains: []string{"@localhost"}, wantErr: true},
+		{name: "a bare suffix is rejected", domains: []string{"@.com"}, wantErr: true},
+		{name: "a full address is rejected", domains: []string{"@me@example.com"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.ACPInternalEmailDomains = tt.domains
+			err := c.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ACPInternalEmailDomains=%q: err = %v, want error %v", tt.domains, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_ACPInternalEmailDomains(t *testing.T) {
+	t.Setenv("ACP_INTERNAL_EMAIL_DOMAINS", " @example.com , ,@example.org")
+	cfg := Load()
+	if want := []string{"@example.com", "@example.org"}; !reflect.DeepEqual(cfg.ACPInternalEmailDomains, want) {
+		t.Errorf("ACPInternalEmailDomains = %q, want %q", cfg.ACPInternalEmailDomains, want)
+	}
+}
+
 // INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS is optional: comma-separated UUIDs,
 // trimmed, empty entries dropped; a non-UUID entry refuses
 // to start.

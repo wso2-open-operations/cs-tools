@@ -20,8 +20,10 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
+	"net/mail"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -85,14 +87,13 @@ var projectReactivatedTemplateRaw string
 // isn't reachable from outside WSO2's network.
 const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
 
-// wso2LogoWhiteURL is the same logo for the dark header band of the
-// onboarding emails, written straight into those templates' HTML.
-const wso2LogoWhiteURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
-
-// wso2FooterIconURL is the small decorative icon next to the copyright line
-// in the onboarding emails' footer, written straight into those templates'
-// HTML the same way wso2LogoWhiteURL is.
-const wso2FooterIconURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/WSO2-Pulse-Orange.png"
+// wso2LogoLightURL is the same logo for the dark header band of the
+// onboarding emails, written straight into those templates' HTML. The
+// identifier says "Light" (the logo's own color, for the EMAIL_LOGO_LIGHT_URL
+// override below) even though the actual CDN asset's own filename says
+// "White" — that's WSO2's own naming for the file, not a convention this
+// service controls.
+const wso2LogoLightURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
 
 // bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder.
 // Done once per template at package init rather than on every Render* call,
@@ -133,43 +134,96 @@ func logoTemplates() []*string {
 }
 
 // SetLogoURLs replaces the logo every email carries: logo for the emails with
-// a light header (the default above), logoWhite for the dark header band of
+// a light header (the default above), logoLight for the dark header band of
 // the onboarding emails. An empty value keeps the default. It rewrites the
 // already-baked templates, so call it once at startup, before any email is
 // rendered.
-func SetLogoURLs(logo, logoWhite string) {
-	logo, logoWhite = strings.TrimSpace(logo), strings.TrimSpace(logoWhite)
+func SetLogoURLs(logo, logoLight string) {
+	logo, logoLight = strings.TrimSpace(logo), strings.TrimSpace(logoLight)
 	for _, t := range logoTemplates() {
 		if logo != "" {
 			*t = strings.ReplaceAll(*t, wso2LogoURL, html.EscapeString(logo))
 		}
-		if logoWhite != "" {
-			*t = strings.ReplaceAll(*t, wso2LogoWhiteURL, html.EscapeString(logoWhite))
+		if logoLight != "" {
+			*t = strings.ReplaceAll(*t, wso2LogoLightURL, html.EscapeString(logoLight))
 		}
 	}
 }
 
-// footerIconTemplates lists every template that carries the onboarding
-// emails' footer icon.
-func footerIconTemplates() []*string {
+// onboardingTemplates lists the four onboarding email templates.
+func onboardingTemplates() []*string {
 	return []*string{
 		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
 		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
 	}
 }
 
-// SetFooterIconURL replaces the small decorative icon next to the copyright
-// line in the onboarding emails' footer. An empty value keeps the default.
-// It rewrites the already-baked templates, so call it once at startup,
-// before any email is rendered.
-func SetFooterIconURL(icon string) {
-	icon = strings.TrimSpace(icon)
-	if icon == "" {
-		return
+// defaultSupportAddress is the support email address baked into the onboarding
+// emails' "contact us" line, and the Reply-To those emails default to.
+const defaultSupportAddress = "support@wso2.com"
+
+// supportAddress is the address the onboarding emails currently carry as text;
+// supportMailto is the same address as it sits in their mailto: link (see
+// mailtoDestination). Both start as the baked default.
+var (
+	supportAddress = defaultSupportAddress
+	supportMailto  = defaultSupportAddress
+)
+
+// SupportAddress is the support email address the onboarding emails carry: the
+// built-in default unless SetSupportAddress replaced it.
+func SupportAddress() string { return supportAddress }
+
+// errInvalidSupportAddress deliberately names no value: it ends up in a log line.
+var errInvalidSupportAddress = errors.New("the support address is not a single valid plain email address")
+
+// validSupportAddress reports whether addr is exactly one plain email address:
+// it parses as an address, has no display name, and is returned unchanged by
+// the parser (so no quotes, angle brackets, comments, lists or stray spaces).
+func validSupportAddress(addr string) bool {
+	if strings.ContainsAny(addr, " \t\r\n\"'<>,;()[]\\") || strings.Count(addr, "@") != 1 {
+		return false
 	}
-	for _, t := range footerIconTemplates() {
-		*t = strings.ReplaceAll(*t, wso2FooterIconURL, html.EscapeString(icon))
+	parsed, err := mail.ParseAddress(addr)
+	return err == nil && parsed.Name == "" && parsed.Address == addr
+}
+
+// mailtoDestination is addr as it goes after "mailto:": the part before the "@"
+// percent-encoded (a "?" or "#" there would otherwise start the URI's query or
+// fragment, RFC 6068), then HTML-escaped for the attribute it sits in.
+func mailtoDestination(addr string) string {
+	local, domain, _ := strings.Cut(addr, "@")
+	return html.EscapeString(url.PathEscape(local) + "@" + domain)
+}
+
+// SetSupportAddress replaces the support email address in the onboarding emails'
+// "contact us" line: the visible text, and the mailto link, which is encoded for
+// a URI separately from the text. An empty value keeps the default; anything
+// that is not one valid plain address is refused with an error (naming no
+// value) and the default is kept. It rewrites the already-baked templates, so
+// call it once at startup, before any email is rendered.
+func SetSupportAddress(addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return nil
 	}
+	if !validSupportAddress(addr) {
+		return errInvalidSupportAddress
+	}
+	mailto := mailtoDestination(addr)
+	// The link's destination and the visible text are two encodings of the same
+	// address, so they are replaced separately. The link goes through a marker
+	// first, so the text replacement can never touch it (the new address may
+	// contain the old one).
+	const marker = "mailto:\x00support-address\x00"
+	text, newText := html.EscapeString(supportAddress), html.EscapeString(addr)
+	for _, t := range onboardingTemplates() {
+		*t = strings.ReplaceAll(*t, "mailto:"+supportMailto, marker)
+		*t = strings.ReplaceAll(*t, text, newText)
+		*t = strings.ReplaceAll(*t, marker, "mailto:"+mailto)
+	}
+	supportAddress, supportMailto = addr, mailto
+	return nil
 }
 
 // defaultCompanyName is the name baked into every template by default.
@@ -1360,6 +1414,10 @@ type CRPlanDateEmailData struct {
 	IntendedFor string
 }
 
+// crPlanDateCompanySlot marks where a crPlanDateWording closing line names the
+// company; RenderCRPlanDateNoticeEmail fills it with CompanyName().
+const crPlanDateCompanySlot = "{company}"
+
 // crPlanDateWording is the per-kind text, reproduced from the ServiceNow
 // templates verbatim — including "Reject the proposed plan start date" as a
 // past-tense sentence and "<name> customer has updated…", both of which read
@@ -1371,11 +1429,11 @@ var crPlanDateWording = map[string]struct{ headlineSuffix, closing string }{
 	},
 	"accepted": {
 		"accepted the plan start date",
-		"The proposed plan start date accepted by the WSO2 Team.",
+		"The proposed plan start date accepted by the " + crPlanDateCompanySlot + " Team.",
 	},
 	"rejected": {
 		"Reject the proposed plan start date",
-		"WSO2 Team request to change the plan start date.",
+		crPlanDateCompanySlot + " Team request to change the plan start date.",
 	},
 }
 
@@ -1415,7 +1473,7 @@ func RenderCRPlanDateNoticeEmail(d CRPlanDateEmailData) (string, []InlineImage) 
 		"<!-- [PROJECT_AND_NUMBER] -->", projectAndNumber,
 		"<!-- [SHORT_DESCRIPTION] -->", shortDescription,
 		"<!-- [DESCRIPTION] -->", description,
-		"<!-- [CLOSING_LINE] -->", escapeHTML(w.closing),
+		"<!-- [CLOSING_LINE] -->", escapeHTML(strings.ReplaceAll(w.closing, crPlanDateCompanySlot, CompanyName())),
 		"<!-- [CR_LINK] -->", escapeHTML(d.Link),
 	)
 	return replacer.Replace(tmpl), append(shortDescImages, descImages...)

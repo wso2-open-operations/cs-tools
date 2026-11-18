@@ -1839,12 +1839,12 @@ paths:
   /sla-status/clock-state:
     get:
       summary: >-
-        Return the full, current state of one (work item, clock target) "sla"
-        row, regardless of whether it is currently active — unlike
-        GET /sla-status, which only ever lists active rows. Lets a caller
-        tell a genuinely resolved clock (a real row, in a terminal stage)
-        apart from one that was never registered at all (no row found),
-        which the active-only list can never distinguish between. Used by
+        Return the current state of one (work item, clock target) "sla" row,
+        regardless of whether it is currently active — unlike GET
+        /sla-status, which only ever lists active rows. Lets a caller tell a
+        genuinely resolved clock (a real row, in a terminal stage) apart from
+        one that was never registered at all (no row found), which the
+        active-only list can never distinguish between. Used by
         integrations/csm-notification-service as a final check against this
         service's own durable record immediately before sending a breach
         alert for a clock whose Redis-held completion state may have fallen
@@ -1865,20 +1865,25 @@ paths:
           schema:
             type: string
             enum: [response, workaround, resolution]
-        - name: source
+        - name: slaId
           in: query
           description: >-
-            Optional, same accepted values as GET /sla-status's own "source".
-            Omitted matches a row of either source.
+            Optional. The exact "sla" row's own id (as previously returned
+            on this same field by this endpoint or by GET /sla-status) —
+            narrows the lookup to that specific row instead of the
+            ambiguous "whichever row is most recently started" default,
+            which cannot tell two policies that both have a genuinely open
+            clock on the same (work item, target) apart. Omitting it keeps
+            that original, ambiguous lookup.
           schema:
             type: string
-            enum: [csm, servicenow]
+            format: uuid
       responses:
         "200":
           description: >-
             The clock's current state, or an all-zero/false body with
-            found=false when no row exists for this (work item, target,
-            source) at all.
+            found=false when no row exists for this (work item, target)
+            at all, or (slaId given) no row with that exact id exists.
           content:
             application/json:
               schema:
@@ -5142,6 +5147,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListTeamChatWebhooksResponse'
+        "403":
+          description: Caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /teams/group-emails:
+    get:
+      summary: >-
+        List every team's own configured notification mailbox
+        (team.group_email, migration 0117), keyed by team.key (migration
+        0152) rather than name. Internal callers only — reference data for a
+        backend service (integrations/csm-notification-service's SLA breach
+        engine, which looks up a specific team's email by its stable key,
+        e.g. "americas_cre_team"), not something any portal caller has a
+        legitimate use for. A team with no configured email is left out
+        entirely.
+      operationId: listTeamGroupEmails
+      responses:
+        "200":
+          description: Every team with a configured group_email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTeamGroupEmailsResponse'
         "403":
           description: Caller is not an internal service.
           content:
@@ -11356,10 +11393,13 @@ paths:
     delete:
       summary: Delete a tag a lead added.
       description: >
-        Any team lead may. Only a tag added from the portal can be deleted, never
-        one of the catalogue's own, and only once no leave or allocation uses it
-        -- a tag still in use is refused with how many entries use it, since
-        retiring it quietly would leave those entries with no label or colour.
+        Only a tag added from the portal can be deleted, never one of the
+        catalogue's own, and only once no leave or allocation uses it -- a tag
+        still in use is refused with how many entries use it, since retiring it
+        quietly would leave those entries with no label or colour. Who may: a
+        portal admin, any custom tag; a rota admin, their own family's tags and
+        the shared ones (no family); a lead who is neither, the families of the
+        rota teams they lead. A refusal names which case applies.
       operationId: deleteScheduleAbsenceKind
       parameters:
         - name: code
@@ -11377,7 +11417,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: The caller leads no team, or the tag is a built-in one.
+          description: >
+            The caller leads no rota team and is no rota or portal admin, the tag
+            is a built-in one, the tag is another family's, or the tag is shared
+            and the caller is no rota or portal admin.
           content:
             application/json:
               schema:
@@ -12496,6 +12539,143 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      description: >
+        Everyone holding the `case_deescalator` role, one entry per person, with who granted
+        it and when. They may de-escalate any case besides the leads of the case's own ABT
+        team. Only through the CSM portal backend, which checks the caller is a CSM admin
+        (a user token; any other caller is refused). Postgres only.
+      operationId: listCaseDeescalators
+      responses:
+        "200":
+          description: The grants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseDeescalators'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal backend, or the caller is deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      description: >
+        Grants the `case_deescalator` role. Only through the CSM portal backend, which checks the
+        caller is a CSM admin. The person must be active internal
+        staff. Granting what is already held changes nothing. Audited.
+      operationId: grantCaseDeescalator
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The person ("user" id).
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: The user id is not a UUID, or the person is not active internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal backend, or the caller is deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      description: >
+        Removes the `case_deescalator` role. Only through the CSM portal backend, which checks the
+        caller is a CSM admin. Removing what is not held is not an
+        error. A team lead keeps the ability to de-escalate their own team's cases. Audited.
+      operationId: revokeCaseDeescalator
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The person ("user" id).
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: The user id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal backend, or the caller is deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/rota-access/admins/{family}/{userId}:
     put:
       summary: Make somebody a rota admin for one family.
@@ -14210,6 +14390,79 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: The report's project types (for the requested variant) are not configured on this deployment, or the caller's identity could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/mttr:
+    get:
+      summary: >-
+        Mean time to resolution (MTTR), by severity band and trailing
+        window. Read-only. Internal callers only.
+      description: >-
+        For each severity band (S1-S4, S1-S3, S0, S1, S2, S3, S4 -- the two
+        combined bands never include S0), the average time in hours from a case's creation to the
+        LAST time it entered Solution Proposed (a rejected proposal bounces
+        a case back for more work before a later one sticks, so the last
+        entry, not the first, is when the case was actually resolved), over
+        cases whose last such entry falls within the trailing window.
+        `creTeamId` may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Not offered when this deployment's cases are
+        served from the other data source.
+      operationId: getMTTRReport
+      parameters:
+        - name: months
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months. Exactly one of `months` and `days` is required.
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [7]
+          description: The trailing window, in days. Exactly one of `months` and `days` is required.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: exactly one of months (1, 3, 6 or 12) or days (7) is required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
           content:
             application/json:
               schema:
@@ -26082,6 +26335,11 @@ components:
           description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          description: The account's customer success manager. null when not set.
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         activationDate:
           type: string
           nullable: true
@@ -26170,6 +26428,11 @@ components:
         renewalAccountManager:
           nullable: true
           description: ServiceNow data source only.
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          description: The account's customer success manager. null when not set.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         activationDate:
@@ -26299,6 +26562,31 @@ components:
         subRegion:
           type: string
           description: Only projects whose account has this sub-region (case-insensitive).
+        regions:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose account's region is any of these, e.g. "APAC"
+            (exact, case-insensitive); a project with no account region matches
+            none. Postgres only; a 400 on any other data source.
+        onboardingOwnerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only projects whose onboarding owner is any of these user ids; a
+            project with no owner matches none. A non-UUID returns 400. Postgres
+            only; a 400 on any other data source.
+        onboardingOwnerEmails:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose onboarding owner's email is any of these
+            (case-insensitive); ANDed with onboardingOwnerIds. Postgres only; a
+            400 on any other data source.
         arrTodayGte:
           type: string
           description: >-
@@ -28274,6 +28562,25 @@ components:
         closeNotes:
           type: string
           description: Close notes. Only allowed when state is closed or solution_proposed.
+        adminReopen:
+          type: boolean
+          enum: [true]
+          description: >-
+            Moves a closed case to any other state, bypassing the normal state-transition
+            rule (closed is otherwise terminal for every caller). Only honored for an
+            internal (WSO2 staff) caller calling through the CSM portal backend, and only
+            when the case's current state is actually closed and the case's own type is
+            `case` — rejected with a 400 for every other case-like type (engagement,
+            service_request, security_report_analysis, announcement), since the reopen
+            reason has nowhere to be stored for those. Only `true` is meaningful; omit
+            rather than sending `false`. Only allowed alongside `state`.
+        reopenReason:
+          type: string
+          description: >-
+            Optional free-text note on why the case was reopened. Only allowed alongside
+            `adminReopen: true` (and, like `adminReopen`, only for a case of type `case`).
+            Write-only — never returned by this or any other endpoint, and not shown in
+            any UI.
         bestCaseFixEta:
           type: string
           format: date
@@ -29174,6 +29481,13 @@ components:
             non-user identifier such as an automation account.
         name:
           type: string
+        isInternal:
+          type: boolean
+          description: >-
+            True when the person resolved to an INTERNAL-type user (WSO2
+            staff). Set on comment authors and on case/incident activity-feed
+            actors; omitted elsewhere, so absent means "not known to be
+            internal", never "known external".
     AssignedEngineerRef:
       type: object
       nullable: true
@@ -35014,7 +35328,8 @@ components:
             teams.leadership, teams.teamLeadsToCall, teams.teamLeads,
             teams.rotaMembersToCall, teams.americasWeekendRotaShifts,
             teams.rotaTeams, teams.unassignedTeamLead,
-            teams.unassignedTeamLeadCount, heads.cre, heads.cs (name and email
+            teams.unassignedTeamLeadCount, teams.unassignedLeads (rules or
+            shift_leads), heads.cre, heads.cs (name and email
             only), alertDuty.tiers, alertDuty.perTeam,
             acknowledgement.requireBoth, email.enabled, email.teamLists (CRE
             team key to one mailing list address), email.creTeamList,
@@ -35388,6 +35703,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamChatWebhook'
+
+    TeamGroupEmail:
+      type: object
+      properties:
+        key:
+          type: string
+        groupEmail:
+          type: string
+
+    ListTeamGroupEmailsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGroupEmail'
 
     TeamDetail:
       type: object
@@ -37197,6 +37528,55 @@ components:
           description: >-
             The row's type. Present only in the open-before-yesterday variant,
             which lists all three.
+    MTTRReport:
+      type: object
+      description: The MTTR report.
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [0, 1, 3, 6, 12]
+          description: 0 when the report was asked for a day window.
+        windowDays:
+          type: integer
+          enum: [7]
+          description: Present only for a day window.
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+    MTTRReportBand:
+      type: object
+      description: One severity band's MTTR over the requested window.
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
     WorklogReport:
       type: object
       description: >-
@@ -37286,7 +37666,7 @@ components:
                     email: { type: string }
                     name: { type: string }
                     workedDays: { type: number, format: double }
-                    leave: { type: string }
+                    leave: { type: string, enum: [FD, HD], description: "Daily only: FD for a full-day leave, HD for a half day; omitted when not on leave." }
                     approvedIssues: { type: integer }
                     approvedHours: { type: number, format: double }
                     pendingIssues: { type: integer }
@@ -42138,9 +42518,28 @@ components:
         but callers should send the upper-case form.
       enum: [ESCALATE, DEESCALATE]
 
+    CaseDeescalators:
+      type: object
+      required: [deescalators]
+      properties:
+        deescalators:
+          type: array
+          items:
+            type: object
+            required: [userId, name, email, grantedBy, grantedOn, active]
+            properties:
+              userId: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: string }
+              grantedBy: { type: string }
+              grantedOn: { type: string, format: date-time }
+              active:
+                type: boolean
+                description: False when the holder is not active internal staff; the grant is listed so it can be removed but lets nobody de-escalate.
+
     CaseEscalationHistory:
       type: object
-      required: [escalations, total, currentNotifiedUsers, teamLeads]
+      required: [escalations, total, currentNotifiedUsers, teamLeads, deescalators]
       properties:
         escalations:
           type: array
@@ -42162,8 +42561,15 @@ components:
             $ref: '#/components/schemas/EscalationNotifiedUser'
           description: >-
             The leads of the case's account's CRE (ABT) team. Only these users may de-escalate
-            the case from the CSM portal. Empty when the account has no CRE team or the team
-            has no lead.
+            the case from the CSM portal, besides `deescalators`. Empty when the account has no
+            CRE team or the team has no lead.
+        deescalators:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationNotifiedUser'
+          description: >-
+            Active internal users an admin named as allowed to de-escalate any case (role
+            `case_deescalator`), besides the case's team leads. Empty when none is named.
 
     CaseEscalationCreateRequest:
       description: >
@@ -43341,6 +43747,14 @@ components:
       properties:
         caseId:
           type: string
+        id:
+          type: string
+          format: uuid
+          description: >-
+            This exact "sla" row's own id — pass it as GET
+            /sla-status/clock-state's slaId query parameter to re-check this
+            specific row later instead of its ambiguous "most recently
+            started" default.
         clockType:
           type: string
           description: One of response, workaround, resolution.
@@ -43425,6 +43839,13 @@ components:
       properties:
         found:
           type: boolean
+        id:
+          type: string
+          format: uuid
+          description: >-
+            This exact "sla" row's own id — pass it back as this endpoint's
+            slaId query parameter to re-check this specific row again,
+            instead of the ambiguous "most recently started" default.
         isActive:
           type: boolean
         stage:

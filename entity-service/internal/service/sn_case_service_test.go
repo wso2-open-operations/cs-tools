@@ -1127,6 +1127,32 @@ func TestSNCaseService_UpdateCase_RejectsMarkFixIssued(t *testing.T) {
 	}
 }
 
+// TestSNCaseService_UpdateCase_RejectsAdminReopen is the regression guard for
+// a CodeRabbit-caught gap: under plain DATA_SOURCE=servicenow this method is
+// the active CaseService, so without this rejection a caller's AdminReopen
+// would silently reach ServiceNow as an ordinary state update and the
+// admin's reopenReason would be discarded with no error at all -- see
+// UpdateCaseRequest.AdminReopen's own doc comment.
+func TestSNCaseService_UpdateCase_RejectsAdminReopen(t *testing.T) {
+	svc := NewServiceNowCaseService(nil, nil, nil, nil, nil, "", nil)
+	state := domain.CaseStateWorkInProgress
+	adminReopen := true
+	reason := "customer reported the same issue recurring"
+
+	t.Run("adminReopen", func(t *testing.T) {
+		_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, State: &state, AdminReopen: &adminReopen})
+		if _, ok := err.(*apierror.ValidationError); !ok {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
+	t.Run("reopenReason alone", func(t *testing.T) {
+		_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: testCaseUUID, State: &state, ReopenReason: &reason})
+		if _, ok := err.(*apierror.ValidationError); !ok {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
+}
+
 // --- UpdateCase: close no longer gated on open visible tasks ---
 //
 // The open-visible-task close-gate previously enforced here has been removed:

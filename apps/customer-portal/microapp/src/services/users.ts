@@ -37,6 +37,7 @@ import {
   USER_ACTIONS_ENDPOINT,
   USERS_ME_ENDPOINT,
 } from "@config/endpoints";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const getMe = async (): Promise<Me> => {
   const response = (await apiClient.get<MeDto>(USERS_ME_ENDPOINT)).data;
@@ -94,8 +95,8 @@ function toMe(dto: MeDto): Me {
   return {
     id: dto.id,
     email: dto.email,
-    firstName: dto.firstName,
-    lastName: dto.lastName,
+    firstName: stripStaffNameMarker(dto.firstName),
+    lastName: stripStaffNameMarker(dto.lastName),
     phoneNumber: dto.phoneNumber ?? undefined,
     timezone: dto.timeZone ?? undefined,
     roles: dto.roles,
@@ -112,8 +113,8 @@ function toUser(dto: UserDto): User {
   return {
     id: dto.id,
     email: dto.email,
-    firstName: dto.firstName,
-    lastName: dto.lastName,
+    firstName: stripStaffNameMarker(dto.firstName),
+    lastName: stripStaffNameMarker(dto.lastName),
     // System/integration users never go through the human registration flow, so
     // membershipStatus stays INVITED indefinitely even though the account is fully active.
     status: dto.isCsIntegrationUser || dto.membershipStatus === "REGISTERED" ? "registered" : "invited",

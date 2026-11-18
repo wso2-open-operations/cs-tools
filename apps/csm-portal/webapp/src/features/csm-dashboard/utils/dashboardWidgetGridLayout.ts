@@ -104,7 +104,9 @@ export function denseWidgetLabelSx(dense: boolean) {
     overflow: "hidden",
     textOverflow: { xs: "ellipsis", xl: "clip" },
     fontSize: { xl: "0.7rem" },
-    display: { xl: "-webkit-box" },
+    // `block` below `xl`: an inline caption ignores text-overflow, so a long
+    // label would be clipped at the tile edge with no ellipsis.
+    display: { xs: "block", xl: "-webkit-box" },
     WebkitLineClamp: { xl: 2 },
     WebkitBoxOrient: { xl: "vertical" },
     lineHeight: { xl: 1.2 },
