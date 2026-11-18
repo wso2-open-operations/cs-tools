@@ -49,8 +49,9 @@ export interface ProjectOnboardingOwnerRef {
 
 export interface Project {
   id: string;
-  /** Null/absent when the project has no linked account. */
-  account?: { id: string; name: string } | null;
+  /** Null/absent when the project has no linked account. `region` is the
+   *  account's region (e.g. "APAC"), null when none is recorded. */
+  account?: { id: string; name: string; region?: string | null } | null;
   name: string;
   // The search endpoint returns this as `key` (not `projectKey`).
   key: string;
@@ -199,6 +200,13 @@ export interface SearchProjectsRequest {
   /** Single closure state (`Open` | `Suspended` | `Restricted`). */
   closureStatus?: string;
   excludeClosureStates?: string[];
+  /** Account regions to keep (exact, case-insensitive). Postgres data sources only. */
+  regions?: string[];
+  /** Onboarding owners' platform user ids to keep. Postgres data sources only. */
+  onboardingOwnerIds?: string[];
+  /** Onboarding owners' emails to keep (case-insensitive); only arrives from a
+   *  dashboard widget's click-through. Postgres data sources only. */
+  onboardingOwnerEmails?: string[];
   /** Inclusive `yyyy-MM-dd` bounds, one From/To pair per date column. */
   onboardingStartDateFrom?: string;
   onboardingStartDateTo?: string;
