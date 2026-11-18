@@ -21,9 +21,13 @@ import Brand from "@components/header/Brand";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children, component: Component = "div", ...props }: any) => {
+  Box: ({ children, component: Component = "div", sx, ...props }: any) => {
     const Tag = Component;
-    return <Tag {...props}>{children}</Tag>;
+    return (
+      <Tag data-sx={JSON.stringify(sx ?? {})} {...props}>
+        {children}
+      </Tag>
+    );
   },
   useTheme: () => ({
     breakpoints: {
@@ -50,5 +54,17 @@ describe("Brand", () => {
 
     expect(screen.getByRole("img", { name: "Company Logo" })).toBeInTheDocument();
     expect(screen.getByText("Customer Portal")).toBeInTheDocument();
+  });
+
+  it("caps the logo's width so a wide logo cannot crowd the header", () => {
+    render(
+      <MemoryRouter>
+        <Brand />
+      </MemoryRouter>,
+    );
+
+    const sx = JSON.parse(screen.getByRole("img", { name: "Company Logo" }).getAttribute("data-sx") ?? "{}");
+    expect(sx.maxWidth).toEqual({ xs: 96, sm: 120, md: 160 });
+    expect(sx.objectFit).toBe("contain");
   });
 });
