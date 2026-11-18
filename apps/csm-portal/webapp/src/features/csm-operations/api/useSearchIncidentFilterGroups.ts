@@ -51,53 +51,104 @@ export function useSearchIncidentFilterGroups(
   query: string,
   enabled: boolean,
 ): IncidentFilterGroupsResult {
-  const { data: teams } = useTeams(true, "sre-abt");
-  const { data: extraGroups } = useSearchIncidentExtraGroups("", true);
+  const pinned = usePinnedIncidentFilterGroups();
   const search = useSearchGroups(query, enabled);
+  // While a new query is in flight the search keeps the previous query's
+  // results as placeholder data; listing them would offer groups that do not
+  // match what is now typed, so only the pinned part shows until it returns.
+  const searchData = search.isPlaceholderData ? undefined : search.data;
   const q = query.trim().toLowerCase();
 
   const data = useMemo(() => {
     const groups: IncidentFilterGroup[] = [];
     const seen = new Set<string>();
-    const add = (id: string | undefined, name: string, matchName: boolean): void => {
-      if (!id || seen.has(id)) return;
-      if (matchName && q && !name.toLowerCase().includes(q)) return;
-      seen.add(id);
-      groups.push({ id, name });
-    };
-    for (const t of teams ?? []) {
-      if (t.family === "sre-abt") add(t.sreGroupId, t.name, true);
+    for (const g of pinned) {
+      seen.add(g.id);
+      if (!q || g.name.toLowerCase().includes(q)) groups.push(g);
     }
-    for (const g of extraGroups ?? []) add(g.id, g.name, true);
-    for (const g of search.data ?? []) add(g.id, g.name, false);
+    for (const g of searchData ?? []) {
+      if (!g.id || seen.has(g.id)) continue;
+      seen.add(g.id);
+      groups.push({ id: g.id, name: g.name });
+    }
     return groups;
-  }, [teams, extraGroups, search.data, q]);
+  }, [pinned, searchData, q]);
 
   return { data, isFetching: search.isFetching, isError: search.isError };
 }
 
 /**
+ * The groups the filter always lists first: the `sre-abt` teams (by their SRE
+ * group id) and the incident extra groups, deduped by id, the team's name
+ * winning. Shared by the options and the labels so a pinned group is named the
+ * same way in both.
+ */
+function usePinnedIncidentFilterGroups(): IncidentFilterGroup[] {
+  const { data: teams } = useTeams(true, "sre-abt");
+  const { data: extraGroups } = useSearchIncidentExtraGroups("", true);
+  return useMemo(() => {
+    const groups: IncidentFilterGroup[] = [];
+    const seen = new Set<string>();
+    const add = (id: string | undefined, name: string): void => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      groups.push({ id, name });
+    };
+    for (const t of teams ?? []) {
+      if (t.family === "sre-abt") add(t.sreGroupId, t.name);
+    }
+    for (const g of extraGroups ?? []) add(g.id, g.name);
+    return groups;
+  }, [teams, extraGroups]);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Builds the id → name map from the lookups; a stable module-level function
+ * so `useQueries` re-runs it only when a lookup's result changes. */
+function combineGroupNames(
+  results: { data?: BeGroupDetail | null }[],
+): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const r of results) if (r.data?.id && r.data.name) names[r.data.id] = r.data.name;
+  return names;
+}
+
+/**
  * Names of the selected assignment groups, by id, for a filter restored from
  * the URL or a saved view: a group the picker has not searched for this session
- * would otherwise show as its raw id. One `GET /groups/{id}` per id, under the
- * same query key as `useGroupDetail`, so a group looked up elsewhere is not
- * fetched again. An id still loading or not found is just missing from the map.
+ * would otherwise show as its raw id. A pinned group (SRE team or extra group)
+ * is named from the list the filter already loads; only the rest are looked up,
+ * one `GET /groups/{id}` each, under the same query key as `useGroupDetail` so
+ * a group looked up elsewhere is not fetched again. An id that is not a UUID
+ * (e.g. a hand-edited URL) is never looked up, and a failed lookup is not
+ * retried. An id still loading or not found is just missing from the map. The
+ * map keeps its identity until a name in it changes.
  */
 export function useIncidentFilterGroupLabels(ids: string[]): Record<string, string> {
   const api = useBackendApi();
-  const results = useQueries({
-    queries: ids.map((id) => ({
+  const pinned = usePinnedIncidentFilterGroups();
+  const pinnedNames = useMemo(() => new Map(pinned.map((g) => [g.id, g.name])), [pinned]);
+  const lookupIds = ids.filter((id) => !pinnedNames.has(id) && UUID_RE.test(id));
+
+  const looked = useQueries({
+    queries: lookupIds.map((id) => ({
       queryKey: [ApiQueryKeys.GROUP_DETAILS, id],
       queryFn: (): Promise<BeGroupDetail | null> =>
         api.get<BeGroupDetail>(`/groups/${encodeURIComponent(id)}`),
       staleTime: 60_000,
+      retry: false,
     })),
+    combine: combineGroupNames,
   });
 
-  const labels: Record<string, string> = {};
-  ids.forEach((id, i) => {
-    const name = results[i]?.data?.name;
-    if (name) labels[id] = name;
-  });
-  return labels;
+  const idsKey = ids.join("\u0000");
+  return useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const id of idsKey ? idsKey.split("\u0000") : []) {
+      const name = pinnedNames.get(id) ?? looked[id];
+      if (name) labels[id] = name;
+    }
+    return labels;
+  }, [idsKey, pinnedNames, looked]);
 }

@@ -18,6 +18,7 @@ import {
   Autocomplete,
   Box,
   Checkbox,
+  CircularProgress,
   ListItemText,
   TextField,
   Tooltip,
@@ -200,6 +201,21 @@ export default function AsyncEntityMultiSelect<T>({
           label={label}
           slotProps={shrinkLabel ? { inputLabel: { ...params.InputLabelProps, shrink: true } } : undefined}
           placeholder={values.length ? undefined : placeholder}
+          // `loading` only shows while there are no options; a search that
+          // always lists some (e.g. pinned groups) still shows it is working.
+          InputProps={
+            open && isFetching && items.length > 0
+              ? {
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      <CircularProgress size={16} aria-label="Searching" />
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }
+              : params.InputProps
+          }
           error={isError}
           helperText={isError ? "Search failed." : helperText}
         />
