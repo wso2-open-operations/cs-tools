@@ -249,6 +249,26 @@ func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
 	}
 }
 
+// Migration 0301 registers case_escalation_notification_list, every column recorded.
+func TestAuditMigration_CaseEscalationNotificationListIsAudited(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	var excluded, masked []string
+	err := pool.QueryRow(context.Background(), `SELECT excluded_columns, masked_columns FROM audit_config
+	    WHERE schema_name = $1 AND table_name = 'case_escalation_notification_list' AND enabled`,
+		auditSchema(t, pool)).Scan(&excluded, &masked)
+	if err != nil {
+		t.Fatalf("case_escalation_notification_list is not registered with the audit log: %v", err)
+	}
+	if len(excluded) != 0 || len(masked) != 0 {
+		t.Errorf("excludes %v and masks %v, want every column recorded", excluded, masked)
+	}
+	if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
+	    WHERE tgrelid = 'case_escalation_notification_list'::regclass
+	      AND tgname = 'csm_audit_row_change' AND tgenabled = 'A'`); n != 1 {
+		t.Errorf("%d enabled-always audit triggers, want 1", n)
+	}
+}
+
 // Migration 0300 registers the product, deployment and project access
 // definition tables, every column recorded.
 func TestAuditMigration_ProductAndDeploymentTablesAreAudited(t *testing.T) {
