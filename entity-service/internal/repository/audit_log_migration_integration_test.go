@@ -132,11 +132,13 @@ func TestAuditMigration_ExcludingARegisteredTableStopsAuditingIt(t *testing.T) {
 	schema := auditSchema(t, pool)
 	auditExec(t, pool, "SELECT register_audit('"+schema+"', '"+table+"')")
 	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a')")
-	// An insert is not audited (0304), so an update is what shows auditing is live.
+	// An insert is not audited, so an update is what shows auditing is live. The log
+	// is append-only and keeps rows from earlier runs, so count what this update adds.
+	beforeUpdate := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table)
 	auditExec(t, pool, "UPDATE "+table+" SET note = 'a2' WHERE id = 1")
 	audited := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table)
-	if audited == 0 {
-		t.Fatal("registered table wrote no audit rows")
+	if n := audited - beforeUpdate; n != 1 {
+		t.Fatalf("changing one column of a registered table wrote %d audit rows, want 1", n)
 	}
 
 	auditExec(t, pool, "SELECT exclude_from_audit('"+schema+"', '"+table+"', 'not needed')")
@@ -338,19 +340,64 @@ func TestAuditMigration_InsertsAreNotAudited(t *testing.T) {
 	}
 }
 
-// Migration 0304 rebuilt every trigger: none fires on INSERT, all still fire on
-// UPDATE and DELETE and stay enabled when session_replication_role is replica.
-func TestAuditMigration_NoRegisteredTriggerFiresOnInsert(t *testing.T) {
+// No business table's audit trigger fires on INSERT; all still fire on UPDATE and
+// DELETE and stay enabled when session_replication_role is replica. The registry
+// (audit_config) is the one exception: it keeps INSERT, so a new registration
+// records who made it. Scoped to this schema's audit_log_row_change(), so a
+// trigger of the same name in another schema cannot change the result.
+func TestAuditMigration_OnlyTheRegistryFiresOnInsert(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
-	const triggers = `SELECT count(*) FROM pg_trigger WHERE tgname = 'csm_audit_row_change' AND `
-	if n := auditCount(t, pool, triggers+"tgtype & 4 > 0"); n != 0 {
-		t.Errorf("%d audit triggers still fire on INSERT, want 0", n)
+	schema := auditSchema(t, pool)
+	const mine = `SELECT count(*) FROM pg_trigger WHERE tgname = 'csm_audit_row_change'
+	    AND tgfoid = to_regprocedure(format('%I.audit_log_row_change()', $1::text))::oid AND `
+	const registry = `tgrelid = format('%I.audit_config', $1::text)::regclass`
+	if n := auditCount(t, pool, mine+"NOT ("+registry+") AND tgtype & 4 > 0", schema); n != 0 {
+		t.Errorf("%d business-table audit triggers still fire on INSERT, want 0", n)
 	}
-	if n := auditCount(t, pool, triggers+"(tgtype & 8 = 0 OR tgtype & 16 = 0 OR tgenabled <> 'A')"); n != 0 {
+	if n := auditCount(t, pool, mine+registry+" AND tgtype & 4 > 0", schema); n != 1 {
+		t.Errorf("the registry has %d INSERT-firing audit triggers, want 1", n)
+	}
+	if n := auditCount(t, pool, mine+"(tgtype & 8 = 0 OR tgtype & 16 = 0 OR tgenabled <> 'A')", schema); n != 0 {
 		t.Errorf("%d audit triggers miss UPDATE or DELETE, or are not enabled-always, want 0", n)
 	}
-	if n := auditCount(t, pool, triggers+"true"); n == 0 {
+	if n := auditCount(t, pool, mine+"true", schema); n == 0 {
 		t.Error("no audit triggers found; the migrations did not register any table")
+	}
+}
+
+// Registering a table is audited: the new audit_config row names who registered it.
+func TestAuditMigration_RegisteringATableNamesWhoDidIt(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	const table = "zz_audit_test_registrar"
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY)")
+	schema := auditSchema(t, pool)
+
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	const countSQL = `SELECT count(*) FROM csm_audit_log
+	    WHERE table_name = 'audit_config' AND action = 'INSERT' AND created_by = 'registrar@wso2.com'
+	      AND record_id = audit_record_key(jsonb_build_object('schema_name', $1::text, 'table_name', $2::text),
+	                                       ARRAY['schema_name', 'table_name'])`
+	var before, after int
+	if err := tx.QueryRow(ctx, countSQL, schema, table).Scan(&before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.audit_actor', 'registrar@wso2.com', true)"); err != nil {
+		t.Fatalf("set_config: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT register_audit($1, $2)", schema, table); err != nil {
+		t.Fatalf("register_audit: %v", err)
+	}
+	if err := tx.QueryRow(ctx, countSQL, schema, table).Scan(&after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after-before == 0 {
+		t.Error("registering a table wrote no audit_config INSERT rows naming the registrar")
 	}
 }
 
@@ -428,7 +475,7 @@ func TestAuditMigration_RowsRecordWhoCreatedAndChangedThem(t *testing.T) {
 		}
 		if n := auditCount(t, pool, `SELECT count(*) FROM pg_trigger
 		    WHERE tgrelid = format('%I.%I', $1::text, $2::text)::regclass AND tgname = 'csm_stamp_update'
-		      AND tgenabled <> 'D'`, schema, c.table); n != 1 {
+		      AND tgenabled = 'O'`, schema, c.table); n != 1 {
 			t.Errorf("%s has %d update-stamp triggers, want 1", c.table, n)
 		}
 	}
