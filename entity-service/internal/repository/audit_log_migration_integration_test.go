@@ -1061,3 +1061,27 @@ func TestAuditMigration_UpdatedOnAndUpdatedByAreNeverLogged(t *testing.T) {
 		t.Errorf("delete logged %q, want id,note", got)
 	}
 }
+
+// Inserts are not in the audit log, so created_by is the only record of who added
+// a row: it is mandatory on the access tables, and defaults to the actor so an
+// insert that leaves it out is stamped, not rejected.
+func TestAuditMigration_CreatedByIsMandatoryOnTheAccessTables(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for _, table := range []string{"role", "team", "team_member", "user", "user_role"} {
+		var nullable, columnDefault string
+		err := pool.QueryRow(context.Background(), `SELECT is_nullable, COALESCE(column_default, '')
+		    FROM information_schema.columns
+		    WHERE table_schema = $1 AND table_name = $2 AND column_name = 'created_by'`, schema, table).Scan(&nullable, &columnDefault)
+		if err != nil {
+			t.Errorf("%s.created_by: %v", table, err)
+			continue
+		}
+		if nullable != "NO" {
+			t.Errorf("%s.created_by is nullable, want NOT NULL", table)
+		}
+		if !strings.Contains(columnDefault, "audit_actor()") {
+			t.Errorf("%s.created_by default = %q, want audit_actor()", table, columnDefault)
+		}
+	}
+}
