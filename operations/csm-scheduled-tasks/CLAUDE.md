@@ -849,6 +849,35 @@ both places.
   refusal every project would get stops the run before the first notice. The cost is one extra CSM
   write per notice.
 
+## Product issue reports
+
+`productissuescan.Send`, registered as **`product_issue_weekly_report`** (`30 3 * * 1`, Monday 09:00 IST)
+and **`product_issue_monthly_report`** (`30 3 1 * *`, the 1st 09:00 IST) by `productIssueReportTasks`
+(cmd/server/product_issue_reports.go), **only when `PRODUCT_ISSUE_REPORTS_ENABLED=true`**. Data comes from
+entity-service (`internal/productissuereport`): `GET /reports/product-issues?period=week|month&date=YYYY-MM-DD&products=a,b`
+and `GET /reports/product-issues/recipients` (`{"leads":[{"email","productNames"}]}`); all metrics are
+computed there, this component only renders (`notify.RenderProductIssueReport`).
+
+- The period is derived from the engine's period key (`schedule.PeriodFromContext`; `Options.Anchor` is the
+  fallback outside the engine), in Asia/Kolkata: weekly sends `date` = the Monday of the week before the
+  anchor's week, monthly the 1st of the previous month. A retry passes the same date.
+- Audiences: the task's `SUB_CRON_RECIPIENTS` `to`/`cc` get the all-products report (skipped when `to` is
+  empty, the leads are still mailed); each lead gets a report filtered to their products, `to` = the lead
+  only (a lead who is also in `to` gets both). Everything goes through `notify.ForReport(..., debugFor(task))`
+  and `ALERTS_ENABLED`. One audience failing does not stop the others. Only transient failures (network,
+  timeout, 408, 429, 5xx, a failed send) are joined and returned, so the engine retries; permanent ones (any
+  other 4xx, a product name with a comma, a lead with no product names, a response whose `products` echo is
+  not the requested filter) are logged without addresses and not returned, so a retry never re-sends for them.
+  A 404 from entity-service (git internals off) is logged and the run returns nil.
+- `MaxAttempts` is 2, and a retry re-sends the audiences that had already succeeded (no memory).
+- The `products` filter is comma-separated, so a product name containing a comma is refused for that lead
+  (logged and skipped, never a different filter). The recipients are in `regressionTasksWithRecipients` for the
+  EMAIL_BASE_URL startup check; `registry.Task.To/Cc` stay empty so failures alert `ALERT_RECIPIENTS` only.
+- `PRODUCT_ISSUE_REPORT_LINK_BASE_URL` (optional, https): dashboard `{base}/dashboard/product-issues`, case
+  `{base}/cases/{caseId}`; unset means plain text.
+- Both tasks are in `reportTaskNames()` (run-now `--recipients`/`--cc`); the startup check expects them only
+  when the flag is on (`reportTaskNamesFor`).
+
 ## Product issue reconcile
 
 `productissues.RunReconcile`, registered as **`product_issue_reconcile`** (default `0 1 * * *`, 06:30
@@ -1245,6 +1274,8 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `PRODUCT_ISSUE_RECONCILE_ENABLED` | No (default `false`) | Registers `product_issue_reconcile`, entity-service's daily reconciliation of linked product issues with GitHub; needs entity-service with `GIT_INTERNALS_ENABLED=true` — see "Product issue reconcile" above |
+| `PRODUCT_ISSUE_REPORTS_ENABLED` | No (default `false`) | Registers `product_issue_weekly_report` and `product_issue_monthly_report`; needs entity-service with `GIT_INTERNALS_ENABLED=true` — see "Product issue reports" |
+| `PRODUCT_ISSUE_REPORT_LINK_BASE_URL` | No | https base of the portal; links the dashboard and cases in those reports, plain text when unset |
 | `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |

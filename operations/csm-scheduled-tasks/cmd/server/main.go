@@ -65,6 +65,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgvalidation"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/productissuereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/productissues"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
@@ -951,6 +952,38 @@ func main() {
 		})
 	}
 
+	productIssueReportsEnabled := envBool("PRODUCT_ISSUE_REPORTS_ENABLED", false)
+	// The weekly and monthly product issue reports (git internals): one
+	// all-products mail to this task's SUB_CRON_RECIPIENTS plus one per product
+	// lead, from entity-service's GET /reports/product-issues. OFF unless
+	// PRODUCT_ISSUE_REPORTS_ENABLED=true; it needs entity-service with
+	// GIT_INTERNALS_ENABLED=true (else the routes are a 404 and a run logs and
+	// does nothing). See this component's CLAUDE.md, "Product issue reports".
+	if productIssueReportsEnabled {
+		linkBase := strings.TrimRight(os.Getenv("PRODUCT_ISSUE_REPORT_LINK_BASE_URL"), "/")
+		if linkBase != "" {
+			if err := httpsec.RequireSecureURL(linkBase); err != nil {
+				slog.Error("invalid PRODUCT_ISSUE_REPORT_LINK_BASE_URL", "err", err)
+				os.Exit(1)
+			}
+		}
+		productIssueReportClient, err := productissuereport.NewClient(productissuereport.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service product-issue-report client", "err", err)
+			os.Exit(1)
+		}
+		piTasks, piWithRecipients := productIssueReportTasks(productIssueReportClient, emailClient, linkBase, alertsEnabled,
+			scheduleOverrides, recipientOverrides)
+		regressionTasks = append(regressionTasks, piTasks...)
+		regressionTasksWithRecipients = append(regressionTasksWithRecipients, piWithRecipients...)
+	}
+
 	// The monthly time card report: each project in TIME_CARD_REPORT_PROJECT_KEYS
 	// gets last calendar month's approved effort per case, mailed to the
 	// project's contacts (one mail each, so customers never see one another's
@@ -1814,7 +1847,7 @@ func main() {
 	// Every report task takes --recipients/--cc on --run-now. A report task
 	// added to reportTaskNames without the hook is a code error: stop rather
 	// than leave it out quietly.
-	if missing := tasksMissingReportRunNow(tasks, reportTaskNames()); len(missing) > 0 {
+	if missing := tasksMissingReportRunNow(tasks, reportTaskNamesFor(productIssueReportsEnabled)); len(missing) > 0 {
 		slog.Error("report tasks without the run-now recipient override", "tasks", missing)
 		os.Exit(1)
 	}

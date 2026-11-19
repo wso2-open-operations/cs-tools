@@ -32,6 +32,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/productissuescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
@@ -455,7 +456,21 @@ func reportTaskNames() []string {
 		names = append(names, regressionscan.TaskName(v))
 	}
 	names = append(names, deprecatedusagescan.TaskName)
+	names = append(names, productissuescan.WeeklyTaskName, productissuescan.MonthlyTaskName)
 	return names
+}
+
+// reportTaskNamesFor is reportTaskNames for the startup check: the two product
+// issue report tasks exist only when PRODUCT_ISSUE_REPORTS_ENABLED is true, so
+// they are expected only then.
+func reportTaskNamesFor(productIssueReports bool) []string {
+	names := reportTaskNames()
+	if productIssueReports {
+		return names
+	}
+	return slices.DeleteFunc(names, func(n string) bool {
+		return n == productissuescan.WeeklyTaskName || n == productissuescan.MonthlyTaskName
+	})
 }
 
 // tasksMissingReportRunNow names the tasks among want that are not registered

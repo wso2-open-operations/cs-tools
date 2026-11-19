@@ -38,7 +38,7 @@ What every task inherits from the engine:
 |---|---|
 | Period key | The task's most recent cron firing. Every tick between two firings derives the same key, so retries land on one ledger row |
 | Retry | A failed attempt is retried on the first tick after its retry time, which defaults to `DRIVER_INTERVAL` after the failure. There is no cap by default |
-| Attempt cap | `MaxAttempts` is set on four tasks only: `time_card_report`, `acp_reopen_check`, `product_issue_reconcile` and `acp_closure` (2 each: one retry, because a retry can repeat something outward, or a lasting failure would alert every tick). The cap is checked only after a handler returns an error: a crash, or a failure to record the result, leaves a stale claim that can run again beyond the cap and repeat emails |
+| Attempt cap | `MaxAttempts` is set on six tasks only: `time_card_report`, `product_issue_weekly_report`, `product_issue_monthly_report`, `acp_reopen_check`, `product_issue_reconcile` and `acp_closure` (2 each: one retry, because a retry can repeat something outward, or a lasting failure would alert every tick). The cap is checked only after a handler returns an error: a crash, or a failure to record the result, leaves a stale claim that can run again beyond the cap and repeat emails |
 | Abandonment | When the next period comes due while the old one is still unresolved, entity-service marks the old row superseded and only the new period is chased |
 | Stale claims | The engine passes entity-service a stale-claim threshold of twice `DRIVER_INTERVAL`, after which a claimed attempt that never reported can be claimed again |
 | Failure alerts | Every failed attempt emails the task's own `to` plus `ALERT_RECIPIENTS`, with the task's `cc`. `ALERTS_ENABLED=false` silences it |
@@ -80,6 +80,8 @@ Colombo is UTC+5:30 with no daylight saving.
 | `case_autoclosure` | `30 2 * * *` | `AUTOCLOSURE_ENABLED=true` | Remind and close cases idle in Awaiting Info or Solution Proposed |
 | `acp_reopen_check` | `30 3 * * *` | `ACP_REOPEN_CHECK_ENABLED=true` | Drive entity-service's daily ACP reopen check |
 | `product_issue_reconcile` | `0 1 * * *` | `PRODUCT_ISSUE_RECONCILE_ENABLED=true` | Drive entity-service's daily reconciliation of linked product issues with GitHub |
+| `product_issue_weekly_report` | `30 3 * * 1` | `PRODUCT_ISSUE_REPORTS_ENABLED=true` | Weekly product issue report: all-products mail plus one per product lead |
+| `product_issue_monthly_report` | `30 3 1 * *` | `PRODUCT_ISSUE_REPORTS_ENABLED=true` | The same report for the previous month |
 | `acp_closure` | `0 4 * * 1-5` | `ACP_ENABLED=true` | Account Closure Process: notices and suspension |
 
 That is 27 registered names. Task names are API contracts: a rename orphans the
@@ -332,6 +334,21 @@ One task, off unless `PRODUCT_ISSUE_RECONCILE_ENABLED=true`.
 - **Rate limit:** an answer with `retryAfterSeconds` of at most 900 s is waited out and the run continues from the returned cursor (at most 3 waits a run); a longer wait, or a fourth, fails the run with the position reached.
 - **Fails when:** boards or issues failed (entity-service's log names them), a call errors or makes no progress, or more than 5,000 calls are needed. Retried after 4 hours, at most once a day.
 - **Detail:** `CLAUDE.md` "Product issue reconcile", `internal/productissues/`.
+
+## 13b. Product issue reports
+
+Two tasks, off unless `PRODUCT_ISSUE_REPORTS_ENABLED=true`.
+
+### `product_issue_weekly_report` and `product_issue_monthly_report`
+
+- **Registered when:** `PRODUCT_ISSUE_REPORTS_ENABLED=true`. They need entity-service with `GIT_INTERNALS_ENABLED=true`; with it off the routes answer 404, which is logged and the run succeeds without sending.
+- **Triggers:** weekly Monday 03:30 UTC (09:00 IST); monthly the 1st at 03:30 UTC. Override with `SUB_CRON_SCHEDULES`.
+- **Period:** from the run's period key, never the clock: weekly reports the Monday to Monday week before the anchor's week, monthly the calendar month before the anchor's month, both in Asia/Kolkata. The date is passed to `GET /reports/product-issues?period=week|month&date=...`, so a retry reports the same period.
+- **Audiences:** (1) `SUB_CRON_RECIPIENTS[task].to/cc` get one all-products report (skipped when `to` is empty); (2) each lead from `GET /reports/product-issues/recipients` gets one report filtered to their products, to the lead only, even if the lead is also in `to`. All mails go through the task's `debug` redirect and `ALERTS_ENABLED`. An audience that fails does not stop the others; the errors are joined and returned.
+- **Retries re-send:** the handler has no memory of what it mailed; `MaxAttempts` is 2.
+- **Product names with a comma** cannot be sent in the comma-separated `products` filter; such a lead is logged and skipped (a permanent failure, not retried) rather than mailed a different product set.
+- **Links:** `PRODUCT_ISSUE_REPORT_LINK_BASE_URL` (https, optional) links the dashboard and cases.
+- **Detail:** `CLAUDE.md` "Product issue reports", `internal/productissuescan/`, `internal/productissuereport/`, `internal/notify/product_issue_report.go`.
 
 ## 14. Running a task outside the schedule
 
