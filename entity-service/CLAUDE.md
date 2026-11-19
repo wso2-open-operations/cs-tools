@@ -13412,6 +13412,9 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
   policy's duration) and `nonStandardColumn`; search takes `mine`, `boardStatuses` and `sort` (`created`, `pausedSince`,
   `slaPercentage`; the percentage sorts on the stored column, as of the last engine write). `POST /slas/search` and
   `GET /slas/{id}` never return a clock of an internal-only work item (a product issue).
+- **A new product issue's SLA clock is registered at creation** (`WithProductWorkItemSLA`, after the request is
+  COMPLETED and before the s_dip rule; best effort, logged), back-dated to the issue's GitHub creation, so a board
+  that does not auto-add new issues still has a clock before the first status event or reconciliation.
 - **`s_dip` is maintained by entity-service** (`service/product_issue_case_tags.go`,
   `repository/product_issue_case_tag_repo.go`; wired only with git internals active). A case that has at least one
   AFFECTS link from a product issue carries `s_dip` exactly while one of its actively linked product issues is open

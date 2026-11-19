@@ -199,6 +199,16 @@ func WithProductCaseTagRule(svc ProductWorkItemService, rule ProductIssueCaseTag
 	return svc
 }
 
+// WithProductWorkItemSLA attaches the SLA engine to a product work item service
+// (the create flow) so a new product issue's clock is registered at creation.
+// A nil engine leaves the service as it is.
+func WithProductWorkItemSLA(svc ProductWorkItemService, sla WorkItemSLAEngine) ProductWorkItemService {
+	if s, ok := svc.(*productWorkItemService); ok {
+		s.sla = sla
+	}
+	return svc
+}
+
 // WithProductIssueCaseTagRule attaches the case tag rule to a product issue service
 // (manual link and unlink) and returns it.
 func WithProductIssueCaseTagRule(svc ProductIssueService, rule ProductIssueCaseTagRule) ProductIssueService {

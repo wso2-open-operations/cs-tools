@@ -2865,12 +2865,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// s_dip ("waiting on a product team") follows the case's linked product issues;
 		// it adds and removes the tag through the same case service.
 		productCaseTagRule := gitInternalsTagRule
-		productWorkItemHandler := handler.NewProductWorkItemHandler(service.WithProductCaseTagRule(service.NewProductWorkItemService(
+		productWorkItemHandler := handler.NewProductWorkItemHandler(service.WithProductWorkItemSLA(service.WithProductCaseTagRule(service.NewProductWorkItemService(
 			engineeringClient,
 			repository.NewProductWorkItemRepository(repository.NewScoped(db)),
 			repository.NewProductRepoMappingRepository(db),
 			activeCaseSvc, // the service POST /cases/{id}/comments and /tags use (dual-write aware)
-			accessSvc), productCaseTagRule))
+			accessSvc), productCaseTagRule), gitInternalsSLA))
 		mux.HandleFunc("POST /cases/{id}/product-work-items", internalOnly(accessSvc, productWorkItemHandler.CreateProductWorkItem))
 		// Reads, manual link and unlink of product issues (internal callers only).
 		productIssueHandler := handler.NewProductIssueHandler(service.WithProductIssueCaseTagRule(service.NewProductIssueService(

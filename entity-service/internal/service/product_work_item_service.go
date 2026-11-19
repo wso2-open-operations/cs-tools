@@ -125,6 +125,7 @@ type productWorkItemService struct {
 	cases    productWorkItemCases
 	access   AccessService
 	tagRule  ProductIssueCaseTagRule // nil: s_dip is not maintained (WithProductCaseTagRule)
+	sla      WorkItemSLAEngine       // nil: no SLA clock at creation (WithProductWorkItemSLA)
 }
 
 // NewProductWorkItemService constructs a ProductWorkItemService.
@@ -378,10 +379,22 @@ func (s *productWorkItemService) CreateProductWorkItem(ctx context.Context, req 
 	//    a slow rule cannot use up regCtx and fail a request whose issue was
 	//    filed; best effort (logged, never returned). A request that dies before
 	//    this point is converged by its retry or by the next rule run.
-	if kind == domain.ProductWorkItemKindProductIssue {
+	//    The SLA clock is registered here too (back-dated to the issue's GitHub
+	//    creation), so a board that does not auto-add new issues still gets a
+	//    clock before the first status event or the daily reconciliation.
+	resp, created, err := s.storedResponse(out, !out.Replayed, cr.ID)
+	if err == nil && kind == domain.ProductWorkItemKindProductIssue {
+		if s.sla != nil && resp.WorkItem != nil && resp.WorkItem.ID != "" {
+			slaCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), productCaseTagRuleTimeout)
+			if regErr := s.sla.RegisterWorkItemClocks(slaCtx, resp.WorkItem.ID); regErr != nil {
+				slog.ErrorContext(ctx, "product issue: SLA clock not registered at creation; the next status event or reconciliation registers it",
+					"workItemId", resp.WorkItem.ID, "err", regErr)
+			}
+			cancel()
+		}
 		applyCaseTagRule(ctx, s.tagRule, req.CaseID)
 	}
-	return s.storedResponse(out, !out.Replayed, cr.ID)
+	return resp, created, err
 }
 
 func (s *productWorkItemService) storedResponse(out repository.RegisterOutcome, created bool, requestID string) (domain.CreateProductWorkItemResponse, bool, error) {
