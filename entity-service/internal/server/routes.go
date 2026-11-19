@@ -3060,7 +3060,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		closeRedis()
 	}
 
-	// The audit log's upkeep (migration 0295), called daily by csm-scheduled-tasks.
+	// The audit log's upkeep (migration 0295), called weekly by csm-scheduled-tasks.
 	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
 	// EXECUTE on the audit_* functions for the application's database role.
 	if db != nil && cfg.AuditLogEnabled {
