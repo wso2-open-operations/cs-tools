@@ -523,3 +523,21 @@ describe("Customer Health under Customers for a viewer", () => {
     expect(visibleShortcutTo("customer-health", access)).toBeUndefined();
   });
 });
+
+describe("Product issues lead dashboard route", () => {
+  beforeEach(() => {
+    resetFeatureStatesForTests();
+  });
+
+  it("is enabled for cs_lead and admin and hidden for everyone else", () => {
+    expect(featureStateForPath("/dashboard/product-issues", getPortalAccess(["cs_lead"]))).toBe("enabled");
+    expect(featureStateForPath("/dashboard/product-issues", getPortalAccess(["admin"]))).toBe("enabled");
+    expect(featureStateForPath("/dashboard/product-issues", csEngineer)).toBe("hidden");
+    expect(featureStateForPath("/dashboard/product-issues", viewer)).toBe("hidden");
+  });
+
+  it("leaves the system dashboards alone for a CS engineer", () => {
+    expect(featureStateForPath("/dashboard", csEngineer)).toBe("enabled");
+    expect(featureStateForPath("/dashboard/cs-overview", csEngineer)).toBe("enabled");
+  });
+});

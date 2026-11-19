@@ -66,6 +66,7 @@ import { useAppMountedSignal } from "@utils/appMountedEvent";
  */
 import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
 import CsmDashboardsLayout from "@features/csm-dashboard/pages/CsmDashboardsLayout";
+import ProductIssueDashboardPage from "@features/csm-dashboard/pages/ProductIssueDashboardPage";
 import MyDashboardsPage from "@features/csm-custom-dashboards/pages/MyDashboardsPage";
 import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDashboardsPage";
 import OpenDashboardLinkPage from "@features/csm-custom-dashboards/pages/OpenDashboardLinkPage";
@@ -515,6 +516,9 @@ export default function App(): JSX.Element {
                     />
                     <Route path="dashboard/my" element={<MyDashboardsPage />} />
                     <Route path="dashboard/my/:dashboardId" element={<MyDashboardsPage />} />
+                    {/* Lead-only (canViewProductIssueDashboard, its nav node's
+                        `requires`); the static segment outranks :dashboardId. */}
+                    <Route path="dashboard/product-issues" element={<ProductIssueDashboardPage />} />
                     <Route path="dashboard/shared" element={<SharedDashboardsPage />} />
                     <Route path="dashboard/shared/:dashboardId" element={<SharedDashboardsPage />} />
                     {/* A dashboard's link (DASHBOARD_LINK_PATH): opens it and

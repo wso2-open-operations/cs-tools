@@ -202,6 +202,17 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/dashboard/shared",
         icon: UsersRound,
       },
+      {
+        // Lead-only: hidden unless cs_lead or admin (canViewProductIssueDashboard),
+        // and, like every git internals page, absent when the flag is off (the
+        // page then shows "Not available"). The static path outranks
+        // /dashboard/:dashboardId.
+        id: "dashboard.product-issues",
+        label: "Product issues",
+        href: "/dashboard/product-issues",
+        requires: "canViewProductIssueDashboard",
+        icon: GitPullRequest,
+      },
     ],
   },
   {

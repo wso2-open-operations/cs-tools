@@ -78,6 +78,9 @@ import { StatusChip } from "@features/plg/components/common";
 import { CompanyName, MaskedEmail } from "@features/plg/components/CompanyIdentity";
 import type { OrganizationSummary, RegistrationItem } from "@features/plg/api/types";
 import type { Project } from "@features/csm-projects/types/csmProjects";
+import type { ProductIssueSummary } from "@features/csm-cases/types/productWorkItems";
+import { productIssueStatusColor, productIssueStatusLabel } from "@features/csm-cases/utils/productWorkItems";
+import { ProductIssueSlaChip } from "@features/csm-cases/components/ProductIssueSlaStanding";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import ProjectPreviewDrawer from "@features/csm-projects/components/ProjectPreviewDrawer";
 import { normalizeUser, type User, type SnUser } from "@features/csm-users/types/csmUsers";
@@ -861,6 +864,60 @@ function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps
   );
 }
 
+/** Renderer for `product_issue` -- internal GitHub issues raised from cases:
+ * issue, status, SLA, linked case and when it was last active. A row opens the
+ * linked case with the dashboard's return state; an issue with no case
+ * (unmatched) is not clickable. */
+function ProductIssueWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
+  const issues = items as unknown as ProductIssueSummary[];
+  const dashboardReturnState = useDashboardReturnState();
+  const navigate = useNavTransition();
+  return (
+    <DashboardMiniTable
+      isLoading={isLoading}
+      emptyMessage="No product issues match this widget's filters."
+      columns={[
+        { label: "Issue", width: "minmax(160px, 3fr)" },
+        { label: "Status", width: "minmax(110px, 1.2fr)" },
+        { label: "SLA", width: "minmax(90px, 1fr)" },
+        { label: "Case", width: "minmax(100px, 1fr)" },
+        { label: "Last activity", width: "minmax(90px, 1fr)" },
+      ]}
+      rows={issues.map((issue) => {
+        const href = issue.case?.id ? `/cases/${issue.case.id}` : undefined;
+        return {
+          key: issue.id,
+          onClick: href ? () => navigate(href, { state: dashboardReturnState }) : undefined,
+          cells: [
+            <Box key="issue" sx={{ minWidth: 0 }}>
+              <Typography variant="body2" noWrap title={issue.title} sx={{ fontWeight: 600 }}>
+                {issue.title}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
+                {`${issue.number} · ${issue.github.owner}/${issue.github.repository}#${issue.github.issueNumber}`}
+              </Typography>
+            </Box>,
+            <Chip
+              key="status"
+              size="small"
+              variant="outlined"
+              color={productIssueStatusColor(issue)}
+              label={productIssueStatusLabel(issue)}
+            />,
+            <ProductIssueSlaChip key="sla" sla={issue.sla} />,
+            <Typography key="case" variant="body2" noWrap>
+              {issue.case?.number ?? "Unmatched"}
+            </Typography>,
+            <Typography key="activity" variant="caption" color="text.secondary" noWrap>
+              {formatDate(issue.lastActivityOn)}
+            </Typography>,
+          ],
+        };
+      })}
+    />
+  );
+}
+
 function ProductVulnerabilityWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const vulnerabilities = items as unknown as BeProductVulnerabilityView[];
   const dashboardReturnState = useDashboardReturnState();
@@ -1140,4 +1197,5 @@ export const WIDGET_LIST_RENDERERS: Record<
   case_feedback: CaseFeedbackWidgetList,
   plg_organization: PlgOrganizationWidgetList,
   plg_registration: PlgRegistrationWidgetList,
+  product_issue: ProductIssueWidgetList,
 };

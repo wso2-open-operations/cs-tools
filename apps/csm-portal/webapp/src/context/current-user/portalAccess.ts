@@ -61,6 +61,11 @@ export const PORTAL_ROLE = {
   // else. It grants no read access. See
   // canManageProductCatalog.
   productCatalogManager: "product_catalog_manager",
+  // Grants PermViewProductIssueDashboard on the backend
+  // (internal/handler/access.go) -- the Product issues lead dashboard, and
+  // nothing else: it does not imply view access. See
+  // canViewProductIssueDashboard.
+  csLead: "cs_lead",
 } as const;
 
 // Roles that, held alone, let someone use the portal at all. announcement_creator
@@ -80,7 +85,9 @@ const ROLES_THAT_GRANT_ACCESS: readonly string[] = Object.values(PORTAL_ROLE).fi
   (role) => role !== PORTAL_ROLE.announcementCreator &&
     role !== PORTAL_ROLE.commentUpdater &&
     role !== PORTAL_ROLE.onboardingLead &&
-    role !== PORTAL_ROLE.productCatalogManager,
+    role !== PORTAL_ROLE.productCatalogManager &&
+    // cs_lead only opens the lead dashboard route; it grants no read access.
+    role !== PORTAL_ROLE.csLead,
 );
 
 export interface PortalAccess {
@@ -355,6 +362,12 @@ export interface PortalAccess {
    * does not see this tab at all.
    */
   canViewSlaTab: boolean;
+  /**
+   * The Product issues lead dashboard (`/dashboard/product-issues`): `admin`
+   * or `cs_lead`, mirroring the backend's `PermViewProductIssueDashboard`.
+   * `cs_engineer` does not see it.
+   */
+  canViewProductIssueDashboard: boolean;
 }
 
 /**
@@ -414,6 +427,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canViewWorkItemsStaffView: true,
       isAdmin: true,
       canViewSlaTab: true,
+      canViewProductIssueDashboard: true,
     };
   }
   const held = new Set((roles ?? []).map((r) => r.toLowerCase()));
@@ -457,5 +471,6 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canViewWorkItemsStaffView: full || has(PORTAL_ROLE.timecardApprover),
     isAdmin,
     canViewSlaTab: full || has(PORTAL_ROLE.securityTeam),
+    canViewProductIssueDashboard: isAdmin || has(PORTAL_ROLE.csLead),
   };
 }

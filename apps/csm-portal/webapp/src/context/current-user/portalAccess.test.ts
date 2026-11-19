@@ -55,6 +55,7 @@ const NONE = {
   canViewWorkItemsStaffView: false,
   isAdmin: false,
   canViewSlaTab: false,
+  canViewProductIssueDashboard: false,
 };
 
 describe("getPortalAccess", () => {
@@ -177,6 +178,8 @@ describe("getPortalAccess", () => {
       canViewSettingsSection: true,
       canViewWorkItemsStaffView: true,
       canViewSlaTab: true,
+      // Admin only; cs_engineer overrides it below.
+      canViewProductIssueDashboard: false,
     };
     // Both hold canEscalate (any internal engineer may escalate, as in
     // ServiceNow). canManagePlaybooks is the further exception beyond
@@ -211,6 +214,7 @@ describe("getPortalAccess", () => {
       canCreateAnnouncement: true,
       canUpdateDeleteAnyComment: true,
       isAdmin: true,
+      canViewProductIssueDashboard: true,
     });
   });
 
@@ -328,6 +332,22 @@ describe("getPortalAccess", () => {
       expect(getPortalAccess([role]).canManageProductCatalog).toBe(false);
     }
     expect(getPortalAccess(undefined).canManageProductCatalog).toBe(false);
+  });
+
+  describe("cs_lead (Product issues dashboard)", () => {
+    it("alone grants the dashboard capability and no portal access", () => {
+      expect(getPortalAccess(["cs_lead"])).toEqual({ ...NONE, canViewProductIssueDashboard: true });
+      expect(getPortalAccess(["cs_lead"]).hasAnyRole).toBe(false);
+    });
+
+    it("admin holds it, cs_engineer and other roles do not", () => {
+      expect(getPortalAccess(["admin"]).canViewProductIssueDashboard).toBe(true);
+      expect(getPortalAccess(["CS_Lead"]).canViewProductIssueDashboard).toBe(true);
+      for (const role of ["cs_engineer", "viewer", "escalator", "dashboard_designer", "security_team"]) {
+        expect(getPortalAccess([role]).canViewProductIssueDashboard).toBe(false);
+      }
+      expect(getPortalAccess(undefined).canViewProductIssueDashboard).toBe(false);
+    });
   });
 
   it("product_catalog_manager alone grants no portal access, only the catalogue edit", () => {

@@ -1470,7 +1470,88 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     previewSlug: "plg-registrations",
     detailHref: plgRegistrationHref,
   },
+  product_issue: {
+    // Internal GitHub issues raised from cases. The search is PermView on the
+    // backend and exists only when git internals is on: with the flag off the
+    // tile gets a 404 and shows its error state, like any unavailable source.
+    // No group-by: the search has no aggregate route.
+    searchEndpoint: "/product-work-items/search",
+    buildSearchRequestBody: productIssueSearchBody,
+    itemsKey: "items",
+    primaryLabel: (item) => {
+      const title = asString(item.title);
+      const number = asString(item.number);
+      return title && number ? `${number} ${title}` : (title ?? number ?? "—");
+    },
+    secondaryLabel: (item) => {
+      const github = item.github;
+      if (!github || typeof github !== "object") return undefined;
+      const { owner, repository, issueNumber } = github as Record<string, unknown>;
+      return typeof owner === "string" && typeof repository === "string"
+        ? `${owner}/${repository}#${String(issueNumber ?? "")}`
+        : undefined;
+    },
+    // There is no product issue list page; the preview page lists exactly
+    // what the tile counted.
+    buildHref: (filters, ctx) =>
+      widgetPreviewFallbackHref("product-issues", "product_issue", filters, ctx),
+    icon: GitPullRequest,
+    iconColor: "warning",
+    previewSlug: "product-issues",
+    // A row opens the case the issue is linked to; an unmatched issue has none.
+    detailHref: (item) => {
+      const caseId = nestedID(item.case);
+      return caseId ? `/cases/${caseId}` : undefined;
+    },
+  },
 };
+
+/** The string filters of `POST /product-work-items/search`. */
+const PRODUCT_ISSUE_STRING_FILTERS = ["caseId", "githubState", "owner", "repository", "query", "sort"] as const;
+/** Its boolean filters. */
+const PRODUCT_ISSUE_BOOLEAN_FILTERS = ["unmatched", "mine"] as const;
+
+/**
+ * `POST /product-work-items/search`'s body: `{filters, pagination}` with every
+ * filter that search accepts (`caseId`, `githubState`, `boardStatuses`,
+ * `owner`, `repository`, `unmatched`, `query`, `mine`, `sort`) and nothing
+ * else. The preview page's URL round trip decodes every value as a
+ * comma-split array, so the string filters are unwrapped (`query` is re-joined,
+ * a comma may be part of it), the booleans read back as JSON booleans and
+ * `boardStatuses` stays a list. The preview page's search box adds
+ * `searchQuery`, which this search calls `query`. The search sorts through
+ * `filters.sort`, so a widget's `sortBy` is not sent.
+ */
+function productIssueSearchBody({
+  filters,
+  offset,
+  limit,
+}: {
+  filters: Record<string, unknown>;
+  offset: number;
+  limit: number;
+}): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const source: Record<string, unknown> = { ...filters };
+  if (typeof source.searchQuery === "string" && source.searchQuery.trim()) {
+    source.query = source.searchQuery.trim();
+  }
+  for (const key of PRODUCT_ISSUE_STRING_FILTERS) {
+    const v = source[key];
+    const value = Array.isArray(v) ? (key === "query" ? v.join(",") : v[0]) : v;
+    if (typeof value === "string" && value.trim()) out[key] = key === "query" ? value.trim() : value;
+  }
+  const statuses = source.boardStatuses;
+  const list = (Array.isArray(statuses) ? statuses : statuses === undefined ? [] : [statuses]).filter(
+    (x): x is string => typeof x === "string" && x.length > 0,
+  );
+  if (list.length > 0) out.boardStatuses = list;
+  for (const key of PRODUCT_ISSUE_BOOLEAN_FILTERS) {
+    const value = plgBoolean(source[key]);
+    if (value !== undefined) out[key] = value;
+  }
+  return { filters: out, pagination: { limit, offset } };
+}
 
 /** A registration's own product tab on its organisation's PLG page. */
 function plgRegistrationHref(item: WidgetItem): string | undefined {

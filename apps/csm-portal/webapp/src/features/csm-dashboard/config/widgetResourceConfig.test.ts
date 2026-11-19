@@ -1112,3 +1112,105 @@ describe("WIDGET_RESOURCE_CONFIG.plg_registration", () => {
     expect(config.detailHref?.({})).toBeUndefined();
   });
 });
+
+describe("WIDGET_RESOURCE_CONFIG.product_issue", () => {
+  const config = WIDGET_RESOURCE_CONFIG.product_issue;
+  const build = config.buildSearchRequestBody!;
+
+  it("searches the product issue list, which has no aggregate route", () => {
+    expect(config.searchEndpoint).toBe("/product-work-items/search");
+    expect(config.itemsKey).toBe("items");
+    expect(config.groupByEndpoint).toBeUndefined();
+    expect(config.previewSlug).toBe("product-issues");
+  });
+
+  it("sends {filters, pagination} with only the filters the search knows", () => {
+    expect(
+      build({
+        filters: { boardStatuses: ["WAITING_ON_CS"], mine: true, sort: "pausedSince", states: ["open"] },
+        offset: 10,
+        limit: 5,
+      }),
+    ).toEqual({
+      filters: { boardStatuses: ["WAITING_ON_CS"], mine: true, sort: "pausedSince" },
+      pagination: { limit: 5, offset: 10 },
+    });
+  });
+
+  it("reads filters back from View more's URL round trip, and sends no sortBy", () => {
+    const href = config.buildHref(
+      { boardStatuses: ["WAITING_ON_CS", "REOPENED"], sort: "slaPercentage" },
+      { widgetId: "w", displayName: "W" },
+    );
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
+    expect(
+      build({ filters, offset: 0, limit: 5, sortBy: { field: "name", order: "asc" } }),
+    ).toEqual({
+      filters: { boardStatuses: ["WAITING_ON_CS", "REOPENED"], sort: "slaPercentage" },
+      pagination: { limit: 5, offset: 0 },
+    });
+    expect(build({ filters: { mine: ["true"] }, offset: 0, limit: 5 }).filters).toEqual({ mine: true });
+    expect(build({ filters: {}, offset: 0, limit: 5 })).toEqual({
+      filters: {},
+      pagination: { limit: 5, offset: 0 },
+    });
+  });
+
+  it("forwards every filter the search accepts and drops the rest", () => {
+    const all = {
+      caseId: "c-1",
+      githubState: "OPEN",
+      boardStatuses: ["OPEN", "REOPENED"],
+      owner: "wso2",
+      repository: "product-is",
+      unmatched: true,
+      query: "login",
+      mine: false,
+      sort: "created",
+    };
+    expect(build({ filters: { ...all, states: ["x"], bogus: 1 }, offset: 0, limit: 5 }).filters).toEqual(all);
+  });
+
+  it.each([
+    ["caseId", ["c-1"], "c-1"],
+    ["githubState", ["CLOSED"], "CLOSED"],
+    ["owner", ["wso2"], "wso2"],
+    ["repository", ["product-is"], "product-is"],
+    ["sort", ["pausedSince"], "pausedSince"],
+    ["query", ["a", " b"], "a, b"],
+  ])("unwraps %s from the URL round trip", (key, wire, expected) => {
+    expect(build({ filters: { [key]: wire }, offset: 0, limit: 5 }).filters).toEqual({ [key]: expected });
+  });
+
+  it("reads unmatched and mine back as booleans, and ignores junk", () => {
+    expect(build({ filters: { unmatched: ["true"], mine: "false" }, offset: 0, limit: 5 }).filters).toEqual({
+      unmatched: true,
+      mine: false,
+    });
+    expect(build({ filters: { unmatched: "maybe", owner: "", boardStatuses: [] }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
+  it("turns the preview page's searchQuery into query", () => {
+    expect(build({ filters: { searchQuery: " token " }, offset: 0, limit: 5 }).filters).toEqual({ query: "token" });
+  });
+
+  it("opens the preview page, there being no product issue list page", () => {
+    expect(config.buildHref({ boardStatuses: ["OPEN"] }, { widgetId: "w", displayName: "W" })).toContain(
+      "/dashboard/preview/product-issues",
+    );
+  });
+
+  it("labels a row and links it to its case when it has one", () => {
+    const item = {
+      id: "wi-1",
+      number: "PI0000001",
+      title: "Login fails",
+      github: { owner: "wso2", repository: "product-is", issueNumber: 12 },
+      case: { id: "case-9", number: "CS0001" },
+    };
+    expect(config.primaryLabel(item)).toBe("PI0000001 Login fails");
+    expect(config.secondaryLabel?.(item)).toBe("wso2/product-is#12");
+    expect(config.detailHref?.(item)).toBe("/cases/case-9");
+    expect(config.detailHref?.({ ...item, case: null })).toBeUndefined();
+  });
+});

@@ -354,3 +354,37 @@ describe("rendersOwnWipPage", () => {
     expect(flagged).toEqual(["admin.user-management.permissions"]);
   });
 });
+
+describe("Product issues lead dashboard", () => {
+  it("is a Dashboards tab at /dashboard/product-issues, for the lead capability only", () => {
+    const node = navNodeById("dashboard.product-issues");
+    expect(node).toMatchObject({
+      label: "Product issues",
+      href: "/dashboard/product-issues",
+      requires: "canViewProductIssueDashboard",
+    });
+    expect(navNodeById("dashboard")?.children?.map((tab) => tab.id)).toEqual([
+      "dashboard.system",
+      "dashboard.my",
+      "dashboard.shared",
+      "dashboard.product-issues",
+    ]);
+  });
+
+  it("resolves its own path to the tab, not to a system dashboard", () => {
+    expect(navNodeMatchForPath("/dashboard/product-issues")).toMatchObject({
+      node: { id: "dashboard.product-issues" },
+    });
+  });
+
+  it("is visible to cs_lead and admin, not to cs_engineer or viewer", () => {
+    const sees = (roles: string[]): boolean =>
+      isFeatureVisible("dashboard.product-issues", getPortalAccess(roles));
+    expect(sees(["cs_lead"])).toBe(true);
+    expect(sees(["cs_engineer", "cs_lead"])).toBe(true);
+    expect(sees(["admin"])).toBe(true);
+    expect(sees(["cs_engineer"])).toBe(false);
+    expect(sees(["viewer"])).toBe(false);
+    expect(sees([])).toBe(false);
+  });
+});

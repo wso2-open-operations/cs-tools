@@ -667,3 +667,64 @@ describe("plg_registration list", () => {
     expect(screen.getByText("No registrations match this widget's filters.")).toBeInTheDocument();
   });
 });
+
+describe("product_issue list", () => {
+  function StateProbe() {
+    const location = useLocation();
+    return <div data-testid="state-probe">{location.pathname}</div>;
+  }
+
+  const issue = {
+    id: "wi-1",
+    number: "PI0000001",
+    title: "Login fails",
+    github: { owner: "wso2", repository: "product-is", issueNumber: 12, state: "OPEN" },
+    boardStatus: "WAITING_ON_PRODUCT_TEAM",
+    linkState: "ACTIVE",
+    case: { id: "case-9", number: "CS0001" },
+    sla: { state: "BREACHED", budgetSeconds: 1, consumedSeconds: 2, remainingSeconds: 0, percentage: 200, running: true },
+    lastActivityOn: "2026-02-03T10:00:00Z",
+  };
+
+  function renderAt(items: Record<string, unknown>[]) {
+    const Renderer = WIDGET_LIST_RENDERERS.product_issue;
+    return render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Routes>
+          <Route
+            path="/dashboard"
+            element={<Renderer resourceType="product_issue" items={items} isLoading={false} />}
+          />
+          <Route path="/cases/:id" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the issue, status, SLA and case", () => {
+    renderAt([issue]);
+    expect(screen.getByText("Login fails")).toBeInTheDocument();
+    expect(screen.getByText("PI0000001 · wso2/product-is#12")).toBeInTheDocument();
+    expect(screen.getByText("Waiting on product team")).toBeInTheDocument();
+    expect(screen.getByText("Breached")).toBeInTheDocument();
+    expect(screen.getByText("CS0001")).toBeInTheDocument();
+  });
+
+  it("opens the linked case on a row click", () => {
+    renderAt([issue]);
+    fireEvent.click(screen.getByText("Login fails"));
+    expect(screen.getByTestId("state-probe")).toHaveTextContent("/cases/case-9");
+  });
+
+  it("does nothing for an unmatched issue", () => {
+    renderAt([{ ...issue, case: null }]);
+    expect(screen.getByText("Unmatched")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Login fails"));
+    expect(screen.queryByTestId("state-probe")).not.toBeInTheDocument();
+  });
+
+  it("says so when no issue matches", () => {
+    renderAt([]);
+    expect(screen.getByText("No product issues match this widget's filters.")).toBeInTheDocument();
+  });
+});

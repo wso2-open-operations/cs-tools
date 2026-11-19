@@ -41,6 +41,13 @@ gating on top of a real server-side gate, by explicit choice rather than by the 
 default. If a future admin-only action is added, default to the show-and-reject norm unless there's a
 specific reason (as here) to also hide it.
 
+**The Product issues lead dashboard** (`/dashboard/product-issues`, `ProductIssueDashboardPage.tsx`, nav node
+`dashboard.product-issues`) is another such exception: hidden (nav tab and route, via the node's
+`requires: "canViewProductIssueDashboard"`) unless the caller holds `cs_lead` or `admin`. The backend
+enforces the same (`PermViewProductIssueDashboard`, 403 otherwise), so this is client-side hiding on top
+of a real server-side gate. `cs_lead` is deliberately not in `ROLES_THAT_GRANT_ACCESS`: it opens only
+this page and grants no view access of its own.
+
 **Editing a project's closure state** (`CsmProjectDetailPage.tsx`'s pencil icon next to the "State"
 chip, `EditProjectClosureStateDialog.tsx`) is a third such exception, gated on
 `usePortalAccess().canUpdateProjectClosureState` — `admin` only, same shape as `canCreateUser`. The
@@ -412,6 +419,14 @@ Every attachment (case, incident, change request, deployment, comment image) is 
 - **Comment images**: `useResolvedInlineImageHtml` reads `GET /attachments/inline/{id}/content` (a 410 shows the "removed" placeholder, a 404/400 leaves the image unresolved). A pasted image is kept in the editor as a local `blob:` preview and uploaded only when the comment is sent (`inlineImageUploads.ts`).
 - **Inline image limits (comments and descriptions)**: at most 5 images (`MAX_COMMENT_IMAGES`) and `inlineImageMaxBytes()` in total (`CSM_PORTAL_INLINE_IMAGE_MAX_MB`, default 1; also the largest single image). `components/rich-text-editor/inlineImageLimits.ts` totals the sizes of the images already in the draft (`rememberInlineImageSize` is called when the editor hands a file to its uploader) plus the new one and refuses the one that goes over, on both paste and the toolbar button, before anything is uploaded; the refusal reasons are `size`, `type`, `count`, `total` and `disabled`. An editor with no `onImageUpload` shows no image button and refuses a pasted image (`disabled`); **nothing is ever embedded as base64 any more**. Without an `onPasteError` handler the editor says why in a line under itself.
 - **Create forms upload description images before the record exists**: images stay local `blob:` previews while the person writes (`queueInlineImage`); on submit `usePreCreateInlineImages(projectId)` (`uploadImagesBeforeCreate` in `inlineImageUploads.ts`) first uploads them all in parallel as draft images of the project (`uploadEntityAttachment` with `projectId` in place of `parentId`, `type: "comment"`), rewrites each src to `/<attachment id>`, and only then is the single create request sent, followed by the separate attachments (`uploadAttachmentsToCase`). Entity-service links the referenced images to the new record and answers 400 with a message for a bad reference. If an image upload fails nothing is created, the message is shown and the form is kept; a retry re-sends only the images that failed (stored ones are remembered per blob URL and project). The hook returns `onImageUpload: undefined` until a project is chosen, which switches image insertion off. Wired on the case, security report and engagement create pages. Every other rich-text field (problem and change request forms, service request catalog variables, announcements, KB articles, time cards, edit dialogs such as `EditCaseDetailsDialog`, comment editing) has no project to scope to or no description-link support, so it passes no uploader and has image insertion disabled; turn one on by passing `usePreCreateInlineImages(projectId).onImageUpload` and calling `uploadImages` before the create call.
+
+## The React Compiler memoises reads of the clock
+
+`vite.config.ts` runs `babel-plugin-react-compiler`, which caches any call whose arguments never change. A
+component that reads "today" or "now" in render (`new Date()` behind a helper) keeps the first value forever:
+the product issue dashboard's date window stayed on yesterday after midnight until "now" became state
+(`ProductIssueDashboardPage.tsx`, refreshed on a timer and on Refresh). Keep the current time in state; an
+`eslint-disable` comment above the code also makes the compiler skip the component, which hid the bug once.
 
 ## Data fetching
 
