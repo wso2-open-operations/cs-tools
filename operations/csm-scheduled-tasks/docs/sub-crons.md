@@ -70,7 +70,7 @@ Colombo is UTC+5:30 with no daylight saving.
 | `publish_scheduled_announcements` | `*/15 * * * *` | Always | Publish scheduled announcements that have come due |
 | `cloud_status_webhooks` | `*/5 * * * *` | `CLOUD_STATUS_ENABLED=true` | Post service-status transitions to the public status dashboards |
 | `availability_recalculation` | `0 3 * * *` | `AVAILABILITY_RECALC_ENABLED=true` | Trigger the service availability recompute |
-| `audit_log_maintenance` | `0 1 * * *` | `AUDIT_LOG_MAINTENANCE_ENABLED=true` | Trigger the audit log upkeep: coming partitions, health, missing triggers |
+| `audit_log_maintenance` | `0 1 * * 1` | `AUDIT_LOG_MAINTENANCE_ENABLED=true` | Trigger the audit log upkeep: coming partitions, health, missing triggers |
 | `usage_rollup_daily` | `30 0 * * *` | `USAGE_ROLLUP_ENABLED=true` | Rebuild recent daily usage rows |
 | `usage_rollup_monthly` | `30 1 * * *` | `USAGE_ROLLUP_ENABLED=true` | Rebuild last and current month usage rows |
 | `rota_weekday_reminder` | `30 3 * * 0-4` | `EMAIL_BASE_URL` set (scheduled sends also need the Rota Access switch) | Remind the next working day's rota people, the day before (Sunday for Monday) |

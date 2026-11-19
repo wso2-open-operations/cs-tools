@@ -1281,15 +1281,15 @@ func main() {
 		})
 	}
 
-	// The audit log's daily upkeep: creates the coming monthly partitions, checks
+	// The audit log's weekly upkeep: creates the coming monthly partitions, checks
 	// the log's health and puts back missing audit triggers, all inside entity-service.
-	// Daily at 01:00 UTC. It is safe to repeat, so a failed run is simply tried again.
+	// Mondays at 01:00 UTC. It is safe to repeat, so a failed run is simply tried again.
 	// It fails, and so is mailed, when it found a health problem, repaired a trigger
 	// (its history had a gap) or could not repair one.
 	if auditLogMaintenanceEnabled {
 		tasks = append(tasks, registry.Task{
 			Name:     auditLogMaintenanceTaskName,
-			Schedule: scheduleFor(scheduleOverrides, auditLogMaintenanceTaskName, "0 1 * * *"),
+			Schedule: scheduleFor(scheduleOverrides, auditLogMaintenanceTaskName, "0 1 * * 1"),
 			Handler:  auditlog.Maintenance(auditLogClient),
 			To:       auditLogMaintenanceTo,
 			Cc:       auditLogMaintenanceCc,
