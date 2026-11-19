@@ -150,3 +150,29 @@ func TestSafeBaseURL(t *testing.T) {
 		t.Fatal("NewClient accepted a plain-http, non-loopback base URL")
 	}
 }
+
+// TestClient_TokenRequestDoesNotFollowRedirects: a redirect from the token
+// endpoint fails the fetch, and the client secret (Basic auth, or the form body
+// the library retries with) never reaches the redirect target, even on the same host.
+func TestClient_TokenRequestDoesNotFollowRedirects(t *testing.T) {
+	leaked := false
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/leak" {
+			// The secret arrives as Basic auth, or in the body when the library retries without it.
+			if r.Header.Get("Authorization") != "" || (r.ParseForm() == nil && r.PostForm.Get("client_secret") != "") {
+				leaked = true
+			}
+			return
+		}
+		http.Redirect(w, r, "/leak", http.StatusTemporaryRedirect)
+	}))
+	defer tokenSrv.Close()
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer srv.Close()
+	_, err := NewClient(Config{BaseURL: srv.URL, TokenURL: tokenSrv.URL + "/token", ClientID: "a", ClientSecret: "b"}).
+		MutedCounts(context.Background(), nil)
+	if err == nil || leaked || called {
+		t.Fatalf("err=%v leaked=%v called=%v, want a failed token fetch, no secret at the redirect target, no API call", err, leaked, called)
+	}
+}
