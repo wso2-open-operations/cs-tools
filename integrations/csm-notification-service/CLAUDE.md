@@ -291,8 +291,10 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   mapping was applied); the ticker starts first. Cases never wait.
 - **Routing, the same way as a case:** a case's alert reaches its account
   CRE team; an incident's reaches its **SRE team(s)**. The incident's current
-  assignment group (`GetClockState`'s `assignmentGroupName`, else the
-  registration-time group) resolves to team keys through the SRE ladder's own
+  assignment group (`GetClockState`'s `assignmentGroupName`; empty -- an
+  older entity-service, or no group right now -- keeps the registration-time
+  group on purpose, so the last owning team is still alerted) resolves to
+  team keys through the SRE ladder's own
   mapping (`paging.SRETeamsForGroup` over the merged Alert Settings + file
   config: `teams.aliases` such as "Apollo SRE Group" -> `apollo`; a default
   group -> every `teamlessChats` team; any other group -> none), set on

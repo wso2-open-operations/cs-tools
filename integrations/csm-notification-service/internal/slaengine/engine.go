@@ -1595,8 +1595,10 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 	link := e.links.IncidentLink(incidentID)
 
 	// The group as it is now, so a reassigned incident alerts its new
-	// group's team(s). An entity-service without the field leaves the
-	// registration-time group.
+	// group's team(s). An empty name keeps the registration-time group on
+	// purpose, whichever of the two it means: an entity-service that
+	// predates the field, or an incident with no group right now. Either
+	// way the last owning SRE team is still alerted, rather than nobody.
 	if state.AssignmentGroupName != "" {
 		meta.Team = state.AssignmentGroupName
 	}
