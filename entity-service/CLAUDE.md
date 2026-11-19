@@ -214,7 +214,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
 
 ### The weekly upkeep
 
-`POST /audit-log/maintenance` (`serviceOnly`; `service.AuditLogMaintenanceService`) is called weekly (Mondays) by `operations/csm-scheduled-tasks` (its `audit_log_maintenance` sub-cron, which retries a failed run and mails the failure). This service has no scheduler for it, and one must not be added.
+`POST /audit-log/maintenance` (`serviceOnly`; `service.AuditLogMaintenanceService`) is called by `operations/csm-scheduled-tasks`, weekly (Mondays) by default, (its `audit_log_maintenance` sub-cron, which retries a failed run and mails the failure). This service has no scheduler for it, and one must not be added.
 
 - **Off unless `CSM_AUDIT_LOG_ENABLED=true`** (default false): the route is not registered and answers 404. Turning it on does not audit any table.
 - **Steps, in order:** create the coming partitions (`CSM_AUDIT_LOG_MONTHS_AHEAD`, default 3), reconcile triggers, delete expired partitions, delete expired catch-all rows, check health. Every step runs even if an earlier one fails. The SQL functions take an advisory lock, so a repeated or concurrent call is harmless.
