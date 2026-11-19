@@ -17,6 +17,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"net/url"
 	"os"
 	"reflect"
@@ -1623,6 +1625,8 @@ func TestEnvIntInRange(t *testing.T) {
 		{"above the range uses the default", "25", 3},
 		{"not a number uses the default", "many", 3},
 		{"zero uses the default", "0", 3},
+		{"negative uses the default", "-4", 3},
+		{"surrounding spaces are ignored", " 6 ", 6},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1631,6 +1635,55 @@ func TestEnvIntInRange(t *testing.T) {
 				t.Errorf("envIntInRange(%q) = %d, want %d", tc.value, got, tc.want)
 			}
 		})
+	}
+}
+
+// captureWarnings returns what slog logs while the test runs.
+func captureWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buf
+}
+
+// A value that is wrong in any way is reported, naming the setting and the value
+// as written, before the default is used. Unset and valid values log nothing.
+func TestEnvIntInRange_WarnsOnEveryKindOfBadValue(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		warn  bool
+	}{
+		{"", false}, {"12", false}, {"120", false},
+		{"many", true}, {"0", true}, {"-3", true}, {"11", true}, {"121", true}, {"1.5", true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			logs := captureWarnings(t)
+			t.Setenv("CSM_TEST_RETENTION", tc.value)
+			envIntInRange("CSM_TEST_RETENTION", 18, 12, 120)
+			got := logs.String()
+			if tc.warn != (got != "") {
+				t.Fatalf("value %q: warning logged = %v, want %v (%q)", tc.value, got != "", tc.warn, got)
+			}
+			if tc.warn && (!strings.Contains(got, "CSM_TEST_RETENTION") || !strings.Contains(got, tc.value)) {
+				t.Errorf("warning %q does not name the setting and the value %q", got, tc.value)
+			}
+		})
+	}
+}
+
+// The retention setting: 18 by default, 12 to 120 accepted, anything else falls
+// back to 18, so a typo can never shorten how long audit history is kept.
+func TestLoad_AuditLogRetentionMonths(t *testing.T) {
+	for value, want := range map[string]int{
+		"": 18, "12": 12, "24": 24, "120": 120,
+		"11": 18, "121": 18, "0": 18, "-6": 18, "eighteen": 18,
+	} {
+		t.Setenv("CSM_AUDIT_LOG_RETENTION_MONTHS", value)
+		if got := Load().AuditLogRetentionMonths; got != want {
+			t.Errorf("CSM_AUDIT_LOG_RETENTION_MONTHS=%q: AuditLogRetentionMonths = %d, want %d", value, got, want)
+		}
 	}
 }
 
