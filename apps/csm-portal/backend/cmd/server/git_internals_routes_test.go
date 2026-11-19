@@ -63,11 +63,15 @@ func TestProductWorkItemRoutePermissions(t *testing.T) {
 		inBlock[m[1]+" "+m[2]] = m[3]
 	}
 	want := map[string]string{
-		"GET /cases/{id}/product-work-items":                      "handler.PermView",
-		"GET /product-work-items/{id}":                            "handler.PermView",
-		"POST /product-work-items/search":                         "handler.PermView",
-		"POST /cases/{id}/product-work-items/links":               "handler.PermWrite",
-		"DELETE /cases/{id}/product-work-items/{workItemId}/link": "handler.PermWrite",
+		"GET /cases/{id}/product-work-items":                       "handler.PermView",
+		"GET /product-work-items/{id}":                             "handler.PermView",
+		"POST /product-work-items/search":                          "handler.PermView",
+		"POST /product-work-items/{id}/comments":                   "handler.PermWrite",
+		"POST /product-work-items/{id}/board-status":               "handler.PermWrite",
+		"POST /product-work-items/{id}/close":                      "handler.PermWrite",
+		"POST /product-work-items/{id}/commands/{commandId}/retry": "handler.PermWrite",
+		"POST /cases/{id}/product-work-items/links":                "handler.PermWrite",
+		"DELETE /cases/{id}/product-work-items/{workItemId}/link":  "handler.PermWrite",
 	}
 	for name, perm := range want {
 		if got, ok := inBlock[name]; !ok {
@@ -114,11 +118,15 @@ func TestProductWorkItemRoutesDoNotConflictInTheRealMux(t *testing.T) {
 	}
 	id1, id2 := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
 	for method, want := range map[string][2]string{
-		"GET /cases/" + id1 + "/product-work-items":                     {"GET", "GET /cases/{id}/product-work-items"},
-		"POST /cases/" + id1 + "/product-work-items/links":              {"POST", "POST /cases/{id}/product-work-items/links"},
-		"DELETE /cases/" + id1 + "/product-work-items/" + id2 + "/link": {"DELETE", "DELETE /cases/{id}/product-work-items/{workItemId}/link"},
-		"GET /product-work-items/" + id2:                                {"GET", "GET /product-work-items/{id}"},
-		"POST /product-work-items/search":                               {"POST", "POST /product-work-items/search"},
+		"GET /cases/" + id1 + "/product-work-items":                       {"GET", "GET /cases/{id}/product-work-items"},
+		"POST /cases/" + id1 + "/product-work-items/links":                {"POST", "POST /cases/{id}/product-work-items/links"},
+		"DELETE /cases/" + id1 + "/product-work-items/" + id2 + "/link":   {"DELETE", "DELETE /cases/{id}/product-work-items/{workItemId}/link"},
+		"GET /product-work-items/" + id2:                                  {"GET", "GET /product-work-items/{id}"},
+		"POST /product-work-items/search":                                 {"POST", "POST /product-work-items/search"},
+		"POST /product-work-items/" + id2 + "/comments":                   {"POST", "POST /product-work-items/{id}/comments"},
+		"POST /product-work-items/" + id2 + "/board-status":               {"POST", "POST /product-work-items/{id}/board-status"},
+		"POST /product-work-items/" + id2 + "/close":                      {"POST", "POST /product-work-items/{id}/close"},
+		"POST /product-work-items/" + id2 + "/commands/" + id1 + "/retry": {"POST", "POST /product-work-items/{id}/commands/{commandId}/retry"},
 	} {
 		path := strings.SplitN(method, " ", 2)[1]
 		_, pattern := mux.Handler(httptest.NewRequest(want[0], path, nil))

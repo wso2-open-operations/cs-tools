@@ -540,6 +540,10 @@ func main() {
 		route("DELETE /cases/{id}/product-work-items/{workItemId}/link", handler.PermWrite, productWorkItemHandler.UnlinkCaseProductWorkItem)
 		route("GET /product-work-items/{id}", handler.PermView, productWorkItemHandler.GetProductWorkItem)
 		route("POST /product-work-items/search", handler.PermView, productWorkItemHandler.SearchProductWorkItems)
+		route("POST /product-work-items/{id}/comments", handler.PermWrite, productWorkItemHandler.CommentProductWorkItem)
+		route("POST /product-work-items/{id}/board-status", handler.PermWrite, productWorkItemHandler.SetProductWorkItemBoardStatus)
+		route("POST /product-work-items/{id}/close", handler.PermWrite, productWorkItemHandler.CloseProductWorkItem)
+		route("POST /product-work-items/{id}/commands/{commandId}/retry", handler.PermWrite, productWorkItemHandler.RetryProductWorkItemCommand)
 	}
 	route("POST /cases/{id}/tags", handler.PermWrite, caseHandler.AddCaseTag)
 	route("DELETE /cases/{id}/tags/{tagId}", handler.PermWrite, caseHandler.RemoveCaseTag)

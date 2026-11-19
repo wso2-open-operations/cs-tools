@@ -127,3 +127,64 @@ func TestProductWorkItemClientMethods(t *testing.T) {
 		}
 	})
 }
+
+func TestProductWorkItemWriteBackClientMethods(t *testing.T) {
+	const (
+		itemID = "22222222-2222-2222-2222-222222222222"
+		cmdID  = "33333333-3333-3333-3333-333333333333"
+	)
+	var method, rawPath, key, token, body string
+	status := http.StatusAccepted
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		method, rawPath, key, token, body = r.Method, r.URL.EscapedPath(), r.Header.Get("Idempotency-Key"), r.Header.Get("x-user-id-token"), string(b)
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"command":{}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := NewCustomerEntityClient(CustomerEntityConfig{BaseURL: srv.URL, TokenURL: srv.URL + "/token", ClientID: "a", ClientSecret: "b"})
+	ctx := WithUserIDToken(context.Background(), "user-token")
+
+	calls := map[string]func(k string) (int, []byte, error){
+		"/product-work-items/" + itemID + "/comments": func(k string) (int, []byte, error) {
+			return c.CommentProductWorkItem(ctx, itemID, []byte(`{"body":"x"}`), k)
+		},
+		"/product-work-items/" + itemID + "/board-status": func(k string) (int, []byte, error) {
+			return c.SetProductWorkItemBoardStatus(ctx, itemID, []byte(`{"body":"x"}`), k)
+		},
+		"/product-work-items/" + itemID + "/close": func(k string) (int, []byte, error) {
+			return c.CloseProductWorkItem(ctx, itemID, []byte(`{"body":"x"}`), k)
+		},
+		"/product-work-items/" + itemID + "/commands/" + cmdID + "/retry": func(k string) (int, []byte, error) {
+			return c.RetryProductWorkItemCommand(ctx, itemID, cmdID, []byte(`{"body":"x"}`), k)
+		},
+	}
+	for path, call := range calls {
+		for _, st := range []int{202, 200} {
+			status = st
+			code, out, err := call("k-1")
+			if err != nil || code != st || string(out) != `{"command":{}}` {
+				t.Fatalf("%s: %d %q %v", path, code, out, err)
+			}
+			if method != "POST" || rawPath != path || key != "k-1" || token != "user-token" || body != `{"body":"x"}` {
+				t.Errorf("%s: sent %s %s key=%q token=%q body=%q", path, method, rawPath, key, token, body)
+			}
+		}
+		status = 202
+		if _, _, err := call(""); err != nil || key != "" {
+			t.Errorf("%s: empty key sent %q (%v)", path, key, err)
+		}
+		status = http.StatusConflict
+		_, _, err := call("")
+		var apiErr *apierror.Error
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 409 {
+			t.Errorf("%s: 409 err = %v", path, err)
+		}
+	}
+}

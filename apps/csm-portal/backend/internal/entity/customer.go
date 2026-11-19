@@ -865,6 +865,35 @@ func (c *CustomerEntityClient) UnlinkCaseProductWorkItem(ctx context.Context, ca
 	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/cases/%s/product-work-items/%s/link", url.PathEscape(caseID), url.PathEscape(workItemID)), nil)
 }
 
+// postProductWorkItemAction posts a write-back action to the entity service and
+// returns its success status (202 for a new command, 200 for an Idempotency-Key
+// replay) with the raw JSON body. idempotencyKey is sent as the Idempotency-Key
+// header when non-empty.
+func (c *CustomerEntityClient) postProductWorkItemAction(ctx context.Context, path string, body []byte, idempotencyKey string) (int, []byte, error) {
+	return c.doStatus(ctx, http.MethodPost, path, body, idempotencyKey)
+}
+
+// CommentProductWorkItem calls POST /product-work-items/{id}/comments on the
+// entity service (registered there only when its GIT_INTERNALS_ENABLED is on).
+func (c *CustomerEntityClient) CommentProductWorkItem(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error) {
+	return c.postProductWorkItemAction(ctx, fmt.Sprintf("/product-work-items/%s/comments", url.PathEscape(id)), body, idempotencyKey)
+}
+
+// SetProductWorkItemBoardStatus calls POST /product-work-items/{id}/board-status.
+func (c *CustomerEntityClient) SetProductWorkItemBoardStatus(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error) {
+	return c.postProductWorkItemAction(ctx, fmt.Sprintf("/product-work-items/%s/board-status", url.PathEscape(id)), body, idempotencyKey)
+}
+
+// CloseProductWorkItem calls POST /product-work-items/{id}/close.
+func (c *CustomerEntityClient) CloseProductWorkItem(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error) {
+	return c.postProductWorkItemAction(ctx, fmt.Sprintf("/product-work-items/%s/close", url.PathEscape(id)), body, idempotencyKey)
+}
+
+// RetryProductWorkItemCommand calls POST /product-work-items/{id}/commands/{commandId}/retry.
+func (c *CustomerEntityClient) RetryProductWorkItemCommand(ctx context.Context, id, commandID string, body []byte, idempotencyKey string) (int, []byte, error) {
+	return c.postProductWorkItemAction(ctx, fmt.Sprintf("/product-work-items/%s/commands/%s/retry", url.PathEscape(id), url.PathEscape(commandID)), body, idempotencyKey)
+}
+
 // SearchComments calls POST /comments/search on the entity service.
 // The body must be a JSON-encoded SearchCommentsRequest (referenceId, referenceType, pagination).
 func (c *CustomerEntityClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {

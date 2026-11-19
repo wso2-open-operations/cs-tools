@@ -233,9 +233,10 @@ func TestCreateCaseGithubIssue_GitInternalsForward(t *testing.T) {
 }
 
 type mockProductWorkItemClient struct {
-	calls []string
-	resp  []byte
-	err   error
+	status int
+	calls  []string
+	resp   []byte
+	err    error
 }
 
 func (m *mockProductWorkItemClient) rec(s string) ([]byte, error) {
@@ -253,6 +254,29 @@ func (m *mockProductWorkItemClient) SearchProductWorkItems(_ context.Context, b 
 }
 func (m *mockProductWorkItemClient) LinkCaseProductWorkItem(_ context.Context, c string, b []byte) ([]byte, error) {
 	return m.rec("link " + c + " " + string(b))
+}
+func (m *mockProductWorkItemClient) act(kind, id, extra string, b []byte, key string) (int, []byte, error) {
+	m.calls = append(m.calls, kind+" "+id+extra+" "+string(b)+" key="+key)
+	if m.err != nil {
+		return 0, nil, m.err
+	}
+	st := m.status
+	if st == 0 {
+		st = http.StatusAccepted
+	}
+	return st, m.resp, nil
+}
+func (m *mockProductWorkItemClient) CommentProductWorkItem(_ context.Context, id string, b []byte, k string) (int, []byte, error) {
+	return m.act("comment", id, "", b, k)
+}
+func (m *mockProductWorkItemClient) SetProductWorkItemBoardStatus(_ context.Context, id string, b []byte, k string) (int, []byte, error) {
+	return m.act("board", id, "", b, k)
+}
+func (m *mockProductWorkItemClient) CloseProductWorkItem(_ context.Context, id string, b []byte, k string) (int, []byte, error) {
+	return m.act("close", id, "", b, k)
+}
+func (m *mockProductWorkItemClient) RetryProductWorkItemCommand(_ context.Context, id, cmd string, b []byte, k string) (int, []byte, error) {
+	return m.act("retry", id, " "+cmd, b, k)
 }
 func (m *mockProductWorkItemClient) UnlinkCaseProductWorkItem(_ context.Context, c, w string) ([]byte, error) {
 	return m.rec("unlink " + c + " " + w)
@@ -409,4 +433,140 @@ func withUserPath(path, id string) *http.Request {
 	r := withUser(httptest.NewRequest("GET", path, nil))
 	r.SetPathValue("id", id)
 	return r
+}
+
+func TestProductWorkItemWriteBack(t *testing.T) {
+	const cmdID = "33333333-3333-3333-3333-333333333333"
+	type route struct {
+		name    string
+		paths   map[string]string
+		body    string
+		emptyOK bool
+		call    func(h *ProductWorkItemHandler) http.HandlerFunc
+		want    string // call record for body, key "k1"
+	}
+	routes := []route{
+		{"comments", map[string]string{"id": pwiItemID}, `{"body":"hi"}`, false, func(h *ProductWorkItemHandler) http.HandlerFunc { return h.CommentProductWorkItem }, "comment " + pwiItemID + ` {"body":"hi"} key=k1`},
+		{"board-status", map[string]string{"id": pwiItemID}, `{"status":"WAITING_ON_PRODUCT_TEAM"}`, false, func(h *ProductWorkItemHandler) http.HandlerFunc { return h.SetProductWorkItemBoardStatus }, "board " + pwiItemID + ` {"status":"WAITING_ON_PRODUCT_TEAM"} key=k1`},
+		{"close", map[string]string{"id": pwiItemID}, `{}`, true, func(h *ProductWorkItemHandler) http.HandlerFunc { return h.CloseProductWorkItem }, "close " + pwiItemID + ` {} key=k1`},
+		{"retry", map[string]string{"id": pwiItemID, "commandId": cmdID}, `{}`, true, func(h *ProductWorkItemHandler) http.HandlerFunc { return h.RetryProductWorkItemCommand }, "retry " + pwiItemID + " " + cmdID + ` {} key=k1`},
+	}
+	do := func(rt route, m *mockProductWorkItemClient, user bool, paths map[string]string, body, key string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+		if user {
+			r = withUser(r)
+		}
+		if key != "" {
+			r.Header.Set("Idempotency-Key", key)
+		}
+		for k, v := range paths {
+			r.SetPathValue(k, v)
+		}
+		w := httptest.NewRecorder()
+		rt.call(NewProductWorkItemHandler(m))(w, r)
+		return w
+	}
+	for _, rt := range routes {
+		t.Run(rt.name+" forwards body and key and passes 202 and 200", func(t *testing.T) {
+			for _, st := range []int{202, 200} {
+				m := &mockProductWorkItemClient{status: st, resp: []byte(`{"command":{"id":"c"}}`)}
+				w := do(rt, m, true, rt.paths, rt.body, "k1")
+				assertStatus(t, w, st)
+				if w.Body.String() != `{"command":{"id":"c"}}` {
+					t.Errorf("body = %q", w.Body.String())
+				}
+				if len(m.calls) != 1 || m.calls[0] != rt.want {
+					t.Errorf("calls = %v, want %q", m.calls, rt.want)
+				}
+			}
+		})
+		t.Run(rt.name+" requires a user and valid ids and key", func(t *testing.T) {
+			m := &mockProductWorkItemClient{}
+			assertStatus(t, do(rt, m, false, rt.paths, rt.body, ""), http.StatusUnauthorized)
+			for k := range rt.paths {
+				bad := map[string]string{}
+				for k2, v := range rt.paths {
+					bad[k2] = v
+				}
+				bad[k] = "nope"
+				w := do(rt, m, true, bad, rt.body, "")
+				assertStatus(t, w, http.StatusBadRequest)
+				assertErrorMessage(t, w, ErrMsgInvalidUUID)
+			}
+			assertStatus(t, do(rt, m, true, rt.paths, rt.body, "bad\nkey"), http.StatusBadRequest)
+			assertStatus(t, do(rt, m, true, rt.paths, `[1]`, ""), http.StatusBadRequest)
+			assertStatus(t, do(rt, m, true, rt.paths, strings.Repeat("x", maxRequestBodyBytes+1), ""), http.StatusRequestEntityTooLarge)
+			if len(m.calls) != 0 {
+				t.Errorf("upstream called: %v", m.calls)
+			}
+		})
+		t.Run(rt.name+" maps upstream errors with the reason", func(t *testing.T) {
+			for _, env := range []string{
+				`{"message":"The issue is not waiting on CS.","errorCode":"not_waiting_on_cs"}`,
+			} {
+				m := &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 409, Body: env}}
+				w := do(rt, m, true, rt.paths, rt.body, "")
+				assertStatus(t, w, 409)
+				if b := decodeJSON[map[string]string](t, w); b["message"] != "The issue is not waiting on CS." || b["errorCode"] != "not_waiting_on_cs" {
+					t.Errorf("409 body = %v", b)
+				}
+			}
+			m := &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 409, Body: "<html>gateway</html>"}}
+			w := do(rt, m, true, rt.paths, rt.body, "")
+			assertStatus(t, w, 409)
+			if strings.Contains(w.Body.String(), "gateway") {
+				t.Errorf("echoed a non-envelope body: %s", w.Body.String())
+			}
+			m = &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 400, Body: `{"message":"status unsupported","errorCode":"unsupported_status"}`}}
+			w = do(rt, m, true, rt.paths, rt.body, "")
+			assertStatus(t, w, 400)
+			if b := decodeJSON[map[string]string](t, w); b["message"] != "status unsupported" || b["errorCode"] != "unsupported_status" {
+				t.Errorf("400 body = %v", b)
+			}
+			assertStatus(t, do(rt, &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 404}}, true, rt.paths, rt.body, ""), http.StatusNotFound)
+			w = do(rt, &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 500, Body: "secret"}}, true, rt.paths, rt.body, "")
+			assertStatus(t, w, 500)
+			if strings.Contains(w.Body.String(), "secret") {
+				t.Error("500 echoed upstream body")
+			}
+			assertStatus(t, do(rt, &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 502}}, true, rt.paths, rt.body, ""), http.StatusServiceUnavailable)
+		})
+		if rt.emptyOK {
+			t.Run(rt.name+" treats an empty body as {}", func(t *testing.T) {
+				m := &mockProductWorkItemClient{}
+				assertStatus(t, do(rt, m, true, rt.paths, "", ""), http.StatusAccepted)
+				if len(m.calls) != 1 || !strings.Contains(m.calls[0], " {} key=") {
+					t.Errorf("calls = %v", m.calls)
+				}
+			})
+		} else {
+			t.Run(rt.name+" rejects an empty body", func(t *testing.T) {
+				m := &mockProductWorkItemClient{}
+				assertStatus(t, do(rt, m, true, rt.paths, "", ""), http.StatusBadRequest)
+			})
+		}
+		t.Run(rt.name+" is refused for a view-only caller by PermWrite", func(t *testing.T) {
+			m := &mockProductWorkItemClient{}
+			g := NewAccessGuard(testAccessConfig())
+			wrapped := g.Require(PermWrite, rt.call(NewProductWorkItemHandler(m)))
+			for roles, want := range map[string]int{"test-viewer": http.StatusForbidden, "test-cs-engineer": 0} {
+				r := httptest.NewRequest("POST", "/x", strings.NewReader(rt.body))
+				for k, v := range rt.paths {
+					r.SetPathValue(k, v)
+				}
+				u := &middleware.UserInfo{Email: "a@example.com", UserID: "u", Roles: []string{roles}}
+				w := httptest.NewRecorder()
+				wrapped(w, r.WithContext(middleware.WithUserInfo(r.Context(), u)))
+				if want != 0 && w.Code != want {
+					t.Errorf("%s: status %d, want %d", roles, w.Code, want)
+				}
+				if want == 0 && w.Code == http.StatusForbidden {
+					t.Errorf("%s refused", roles)
+				}
+			}
+			if len(m.calls) != 1 {
+				t.Errorf("upstream calls = %v, want exactly the engineer's", m.calls)
+			}
+		})
+	}
 }

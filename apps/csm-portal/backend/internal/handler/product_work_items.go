@@ -201,6 +201,10 @@ type productWorkItemClient interface {
 	SearchProductWorkItems(ctx context.Context, body []byte) ([]byte, error)
 	LinkCaseProductWorkItem(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	UnlinkCaseProductWorkItem(ctx context.Context, caseID, workItemID string) ([]byte, error)
+	CommentProductWorkItem(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error)
+	SetProductWorkItemBoardStatus(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error)
+	CloseProductWorkItem(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error)
+	RetryProductWorkItemCommand(ctx context.Context, id, commandID string, body []byte, idempotencyKey string) (int, []byte, error)
 }
 
 // ProductWorkItemHandler proxies the entity service's product work item read
@@ -361,4 +365,93 @@ func (h *ProductWorkItemHandler) UnlinkCaseProductWorkItem(w http.ResponseWriter
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeBackAction is the shared body of the four write-back routes: validate the
+// path ids, read the body (one JSON object; an empty body counts as {} when
+// emptyOK), validate the optional Idempotency-Key, call the entity service and
+// answer with its success status (202, or 200 for a replay) and body. Refusals
+// reach the caller with their reason (mapUpstreamErrorEnvelope).
+func (h *ProductWorkItemHandler) writeBackAction(w http.ResponseWriter, r *http.Request, op string, emptyOK bool, ids []string, call func(ctx context.Context, body []byte, key string) (int, []byte, error), fallbackMsg string) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	for _, id := range ids {
+		if !uuidRe.MatchString(id) {
+			writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+			return
+		}
+	}
+	var body []byte
+	if emptyOK {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+				return
+			}
+			writeError(w, http.StatusBadRequest, errMsgReadBody)
+			return
+		}
+		if len(strings.TrimSpace(string(raw))) == 0 {
+			r.Body = io.NopCloser(strings.NewReader("{}"))
+		} else {
+			r.Body = io.NopCloser(strings.NewReader(string(raw)))
+		}
+	}
+	body, ok := readJSONObjectBody(w, r)
+	if !ok {
+		return
+	}
+	key := r.Header.Get(idempotencyKeyHeader)
+	if key != "" && !validIdempotencyKey(key) {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key must be 1 to 200 printable characters.")
+		return
+	}
+	status, result, err := call(r.Context(), body, key)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity "+op+" failed", "userID", user.UserID, "ids", ids, "err", err)
+		mapUpstreamErrorEnvelope(w, err, fallbackMsg)
+		return
+	}
+	if status != http.StatusOK && status != http.StatusAccepted {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, result)
+}
+
+// CommentProductWorkItem handles POST /product-work-items/{id}/comments.
+func (h *ProductWorkItemHandler) CommentProductWorkItem(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	h.writeBackAction(w, r, "CommentProductWorkItem", false, []string{id}, func(ctx context.Context, b []byte, k string) (int, []byte, error) {
+		return h.entity.CommentProductWorkItem(ctx, id, b, k)
+	}, "Failed to add comment.")
+}
+
+// SetProductWorkItemBoardStatus handles POST /product-work-items/{id}/board-status.
+func (h *ProductWorkItemHandler) SetProductWorkItemBoardStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	h.writeBackAction(w, r, "SetProductWorkItemBoardStatus", false, []string{id}, func(ctx context.Context, b []byte, k string) (int, []byte, error) {
+		return h.entity.SetProductWorkItemBoardStatus(ctx, id, b, k)
+	}, "Failed to move product issue.")
+}
+
+// CloseProductWorkItem handles POST /product-work-items/{id}/close.
+func (h *ProductWorkItemHandler) CloseProductWorkItem(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	h.writeBackAction(w, r, "CloseProductWorkItem", true, []string{id}, func(ctx context.Context, b []byte, k string) (int, []byte, error) {
+		return h.entity.CloseProductWorkItem(ctx, id, b, k)
+	}, "Failed to close product issue.")
+}
+
+// RetryProductWorkItemCommand handles POST /product-work-items/{id}/commands/{commandId}/retry.
+func (h *ProductWorkItemHandler) RetryProductWorkItemCommand(w http.ResponseWriter, r *http.Request) {
+	id, commandID := r.PathValue("id"), r.PathValue("commandId")
+	h.writeBackAction(w, r, "RetryProductWorkItemCommand", true, []string{id, commandID}, func(ctx context.Context, b []byte, k string) (int, []byte, error) {
+		return h.entity.RetryProductWorkItemCommand(ctx, id, commandID, b, k)
+	}, "Failed to retry command.")
 }

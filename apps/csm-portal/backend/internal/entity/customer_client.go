@@ -135,6 +135,13 @@ const maxEntityErrBody = 4096
 // do executes an authenticated HTTP request against the entity service and
 // returns the raw JSON response body. The caller owns the returned slice.
 func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	_, respBody, err := c.doStatus(ctx, method, path, body, "")
+	return respBody, err
+}
+
+// doStatus is do for a caller that needs the upstream success status (200 vs
+// 202) and may send an Idempotency-Key header (sent when non-empty).
+func (c *CustomerEntityClient) doStatus(ctx context.Context, method, path string, body []byte, idempotencyKey string) (int, []byte, error) {
 	var reqBody io.Reader
 	if len(body) > 0 {
 		reqBody = bytes.NewReader(body)
@@ -142,10 +149,13 @@ func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body
 
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("entity: build request %s %s: %w", method, path, err)
+		return 0, nil, fmt.Errorf("entity: build request %s %s: %w", method, path, err)
 	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	if token := UserIDTokenFromContext(ctx); token != "" {
 		req.Header.Set("x-user-id-token", token)
@@ -156,13 +166,13 @@ func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("entity: %s %s: %w", method, path, err)
+		return 0, nil, fmt.Errorf("entity: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("entity: read response body: %w", err)
+		return 0, nil, fmt.Errorf("entity: read response body: %w", err)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -170,8 +180,8 @@ func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body
 		if len(excerpt) > maxEntityErrBody {
 			excerpt = excerpt[:maxEntityErrBody]
 		}
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
+		return resp.StatusCode, nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 	}
 
-	return respBody, nil
+	return resp.StatusCode, respBody, nil
 }
