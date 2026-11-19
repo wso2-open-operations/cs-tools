@@ -388,7 +388,14 @@ func (r *slaPolicyResolver) resolve(ctx context.Context, target string, facts re
 // condition text with subj.ConditionText and evaluates start conditions against
 // subj.Facts(). The log messages name subj.Kind() ("case"/"incident").
 func (r *slaPolicyResolver) resolveSubject(ctx context.Context, target string, subj slaSubject) ([]repository.SLAPolicyRef, error) {
-	candidates, err := r.repo.ListCandidatePolicies(ctx, target)
+	family := subj.Family()
+	var candidates []repository.SLAPolicyRef
+	var err error
+	if family == "" {
+		candidates, err = r.repo.ListCandidatePolicies(ctx, target)
+	} else {
+		candidates, err = r.repo.ListFamilyCandidatePolicies(ctx, target, family)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "sla policy resolver: list candidate policies failed", "target", target, "err", err)
 		return nil, err
@@ -399,7 +406,7 @@ func (r *slaPolicyResolver) resolveSubject(ctx context.Context, target string, s
 	var matches []repository.SLAPolicyRef
 	var skipped []string
 	for _, candidate := range candidates {
-		if !subj.IsPolicy(candidate.StartCondition, candidate.StopCondition, candidate.PauseCondition, candidate.ResumeCondition, candidate.CancelCondition) {
+		if family == "" && !subj.IsPolicy(candidate.StartCondition, candidate.StopCondition, candidate.PauseCondition, candidate.ResumeCondition, candidate.CancelCondition) {
 			skipped = append(skipped, candidate.Name)
 			continue
 		}

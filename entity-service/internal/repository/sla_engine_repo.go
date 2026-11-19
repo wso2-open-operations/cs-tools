@@ -239,6 +239,11 @@ type SLAPolicyRef struct {
 	// assumed to already be in this engine's own neutral predicate
 	// vocabulary and is parsed as-is.
 	Source string
+	// AppliesTo is sla_policy.applies_to verbatim: "" for NULL (every row
+	// that exists today, classified by condition markers in the service
+	// layer), or the policy family a row is explicitly tagged with
+	// ("PRODUCT_ISSUE"). See ListCandidatePolicies/ListFamilyCandidatePolicies.
+	AppliesTo string
 	// StartCondition/StopCondition/PauseCondition/ResumeCondition/
 	// CancelCondition are the raw sla_policy condition columns, exactly as
 	// the external sync job writes them -- translated by
@@ -470,6 +475,14 @@ type SLAEngineRepository interface {
 	// breach alert. A policy with a zero duration is exactly as unusable as
 	// one with no duration at all, so both are excluded the same way.
 	ListCandidatePolicies(ctx context.Context, target string) ([]SLAPolicyRef, error)
+
+	// ListFamilyCandidatePolicies is ListCandidatePolicies for a policy
+	// family named by sla_policy.applies_to (e.g. "PRODUCT_ISSUE"): the same
+	// active/duration filters and id order, but selecting rows by
+	// applies_to = family and ignoring source. ListCandidatePolicies, for its
+	// part, returns only rows whose applies_to is NULL, so a family row is
+	// never offered to a case or incident.
+	ListFamilyCandidatePolicies(ctx context.Context, target, family string) ([]SLAPolicyRef, error)
 
 	// GetCaseFacts reads the current field values of workItemID needed to
 	// evaluate an sla_policy condition against it (internal/slacondition).
@@ -741,14 +754,14 @@ const slaPolicyRefColumns = `
 	COALESCE(start_condition, ''), COALESCE(stop_condition, ''),
 	COALESCE(pause_condition, ''), COALESCE(resume_condition, ''), COALESCE(cancel_condition, ''),
 	COALESCE(retroactive, FALSE), COALESCE(when_to_cancel::TEXT, 'CANCEL_CONDITIONS_ARE_MET'),
-	COALESCE(when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET')`
+	COALESCE(when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET'), COALESCE(applies_to, '')`
 
 func scanSLAPolicyRef(row interface{ Scan(...any) error }) (SLAPolicyRef, error) {
 	var ref SLAPolicyRef
 	var durationSeconds float64
 	if err := row.Scan(&ref.ID, &ref.Name, &ref.Target, &durationSeconds, &ref.Schedule, &ref.Source,
 		&ref.StartCondition, &ref.StopCondition, &ref.PauseCondition, &ref.ResumeCondition, &ref.CancelCondition,
-		&ref.Retroactive, &ref.WhenToCancel, &ref.WhenToResume); err != nil {
+		&ref.Retroactive, &ref.WhenToCancel, &ref.WhenToResume, &ref.AppliesTo); err != nil {
 		return SLAPolicyRef{}, err
 	}
 	ref.Duration = time.Duration(durationSeconds * float64(time.Second))
@@ -762,14 +775,32 @@ func (r *slaEngineRepo) ListCandidatePolicies(ctx context.Context, target string
 		FROM sla_policy
 		WHERE target = $1::sla_policy_target_enum
 		  AND source = 'SERVICENOW'
+		  AND applies_to IS NULL
 		  AND (is_active IS NULL OR is_active)
 		  AND duration IS NOT NULL
 		  AND duration > INTERVAL '0'
 		ORDER BY id`
+	return r.queryCandidatePolicies(ctx, "list candidate sla policies", query, target)
+}
 
-	rows, err := r.db.Query(ctx, query, target)
+// ListFamilyCandidatePolicies implements SLAEngineRepository.
+func (r *slaEngineRepo) ListFamilyCandidatePolicies(ctx context.Context, target, family string) ([]SLAPolicyRef, error) {
+	query := `
+		SELECT ` + slaPolicyRefColumns + `
+		FROM sla_policy
+		WHERE target = $1::sla_policy_target_enum
+		  AND applies_to = $2
+		  AND (is_active IS NULL OR is_active)
+		  AND duration IS NOT NULL
+		  AND duration > INTERVAL '0'
+		ORDER BY id`
+	return r.queryCandidatePolicies(ctx, "list family candidate sla policies", query, target, family)
+}
+
+func (r *slaEngineRepo) queryCandidatePolicies(ctx context.Context, what, query string, args ...any) ([]SLAPolicyRef, error) {
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list candidate sla policies: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer rows.Close()
 
@@ -777,12 +808,12 @@ func (r *slaEngineRepo) ListCandidatePolicies(ctx context.Context, target string
 	for rows.Next() {
 		ref, err := scanSLAPolicyRef(rows)
 		if err != nil {
-			return nil, fmt.Errorf("list candidate sla policies: scan: %w", err)
+			return nil, fmt.Errorf("%s: scan: %w", what, err)
 		}
 		refs = append(refs, ref)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list candidate sla policies: rows: %w", err)
+		return nil, fmt.Errorf("%s: rows: %w", what, err)
 	}
 	return refs, nil
 }
@@ -1183,7 +1214,7 @@ func slaPolicyRefColumnsPrefixed(alias string) string {
 		"COALESCE(" + alias + "start_condition, '')", "COALESCE(" + alias + "stop_condition, '')",
 		"COALESCE(" + alias + "pause_condition, '')", "COALESCE(" + alias + "resume_condition, '')", "COALESCE(" + alias + "cancel_condition, '')",
 		"COALESCE(" + alias + "retroactive, FALSE)", "COALESCE(" + alias + "when_to_cancel::TEXT, 'CANCEL_CONDITIONS_ARE_MET')",
-		"COALESCE(" + alias + "when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET')",
+		"COALESCE(" + alias + "when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET')", "COALESCE(" + alias + "applies_to, '')",
 	}
 	return strings.Join(cols, ", ")
 }

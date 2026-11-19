@@ -9,7 +9,9 @@ How entity-service stores and drives SLA clocks. Breach *alerting* (Chat/email) 
   `RESOLUTION`), `duration`, `schedule` (a calendar name; `WSO2 Business days` skips weekends, anything else is
   wall-clock), and five condition columns: `start_condition`, `stop_condition`, `pause_condition`,
   `resume_condition`, `cancel_condition`. `when_to_cancel` / `when_to_resume` say how cancel/resume are decided
-  (see below).
+  (see below). `applies_to` (migration `0306`, nullable, only `PRODUCT_ISSUE` allowed) names an explicit policy
+  family: NULL rows (all today's) are classified by condition markers and are the only rows case and incident
+  resolution list; a tagged row is listed only by its family's resolver and never reaches a case or incident.
 - **`sla`** (migration `0048`) — one row per clock instance: `work_item_id`, `sla_policy_id`, `stage`
   (`IN_PROGRESS`, `PAUSED`, `ACHIEVED`, `BREACHED`, `CANCELLED`, `COMPLETED`), `is_active`, `start_on`, `duration`,
   `paused_on`, `pause_duration` (completed pause segments), `has_breached`, elapsed/remaining columns.

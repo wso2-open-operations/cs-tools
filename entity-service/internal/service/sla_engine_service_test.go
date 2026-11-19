@@ -79,6 +79,10 @@ func newFakeFullSLAEngineRepo() *fakeFullSLAEngineRepo {
 	}
 }
 
+func (r *fakeFullSLAEngineRepo) ListFamilyCandidatePolicies(context.Context, string, string) ([]repository.SLAPolicyRef, error) {
+	panic("not implemented")
+}
+
 func (r *fakeFullSLAEngineRepo) FindPolicyByName(context.Context, string, string) (repository.SLAPolicyRef, error) {
 	panic("not implemented")
 }

@@ -45,6 +45,10 @@ func (f *fakeCandidatePolicyRepo) ListCandidatePolicies(_ context.Context, targe
 	return f.byTarget[target], nil
 }
 
+func (f *fakeCandidatePolicyRepo) ListFamilyCandidatePolicies(context.Context, string, string) ([]repository.SLAPolicyRef, error) {
+	panic("not implemented")
+}
+
 func (f *fakeCandidatePolicyRepo) FindPolicyByName(context.Context, string, string) (repository.SLAPolicyRef, error) {
 	panic("not implemented")
 }

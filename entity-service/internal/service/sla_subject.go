@@ -50,6 +50,12 @@ type slaSubject interface {
 	// IsPolicy is the policy-family filter: whether a candidate whose
 	// conditions are given describes this kind of subject at all.
 	IsPolicy(conditions ...string) bool
+	// Family names the sla_policy.applies_to family this subject resolves
+	// against. "" means the legacy path: candidates come from
+	// ListCandidatePolicies (rows with applies_to NULL) and are classified by
+	// IsPolicy's condition markers. A non-empty family lists candidates by
+	// applies_to = Family() and skips IsPolicy entirely.
+	Family() string
 
 	logs() *slaSubjectLogs
 }
@@ -122,6 +128,7 @@ func (c caseSLASubject) CreatedOn() time.Time       { return c.facts.CreatedOn }
 func (c caseSLASubject) TerminalNow() bool          { return c.terminal }
 func (c caseSLASubject) logs() *slaSubjectLogs      { return caseSLALogs }
 func (c caseSLASubject) IsPolicy(cs ...string) bool { return isCasePolicy(cs...) }
+func (c caseSLASubject) Family() string             { return "" }
 func (c caseSLASubject) ConditionText(p repository.SLAPolicyRef, raw string) string {
 	return slaPolicyConditionText(p, raw)
 }
@@ -141,6 +148,7 @@ func (i incidentSLASubject) CreatedOn() time.Time       { return i.facts.Created
 func (i incidentSLASubject) TerminalNow() bool          { return i.facts.State == "CLOSED" }
 func (i incidentSLASubject) logs() *slaSubjectLogs      { return incidentSLALogs }
 func (i incidentSLASubject) IsPolicy(cs ...string) bool { return isIncidentPolicy(cs...) }
+func (i incidentSLASubject) Family() string             { return "" }
 func (i incidentSLASubject) ConditionText(p repository.SLAPolicyRef, raw string) string {
 	return slaIncidentPolicyConditionText(p, raw)
 }
