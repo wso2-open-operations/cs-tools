@@ -35,6 +35,10 @@ import RefreshButton from "@components/RefreshButton";
 import RelativeTime from "@components/RelativeTime";
 import { isHttpUrl } from "@utils/isHttpUrl";
 import { useCaseProductWorkItems } from "@features/csm-cases/api/useCaseProductWorkItems";
+import {
+  NonStandardColumnHint,
+  ProductIssueSlaStanding,
+} from "@features/csm-cases/components/ProductIssueSlaStanding";
 import { ProductIssueDetailDialog } from "@features/csm-cases/components/ProductIssueDetailDialog";
 import {
   productIssueStatusColor,
@@ -42,7 +46,7 @@ import {
   productLinkStateLabel,
 } from "@features/csm-cases/utils/productWorkItems";
 
-const PRODUCT_ISSUES_COLUMNS = ["Issue", "Title", "Status", "Last activity"];
+const PRODUCT_ISSUES_COLUMNS = ["Issue", "Title", "Status", "SLA", "Last activity"];
 
 interface ProductIssuesWidgetProps {
   /** UUID of the case whose linked product issues are listed. */
@@ -122,6 +126,7 @@ export function ProductIssuesWidget({ caseId }: ProductIssuesWidgetProps): JSX.E
                   <TableCell sx={{ whiteSpace: "nowrap" }}>Issue</TableCell>
                   <TableCell>Title</TableCell>
                   <TableCell sx={{ whiteSpace: "nowrap" }}>Status</TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>SLA</TableCell>
                   <TableCell sx={{ whiteSpace: "nowrap" }}>Last activity</TableCell>
                 </TableRow>
               </TableHead>
@@ -196,7 +201,11 @@ export function ProductIssuesWidget({ caseId }: ProductIssuesWidgetProps): JSX.E
                                 {linkNote}
                               </Typography>
                             )}
+                            <NonStandardColumnHint item={item} />
                           </Box>
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
+                          <ProductIssueSlaStanding sla={item.sla} />
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>
                           {item.lastActivityOn ? <RelativeTime iso={item.lastActivityOn} /> : "—"}

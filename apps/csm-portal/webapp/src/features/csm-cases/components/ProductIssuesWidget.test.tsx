@@ -187,4 +187,96 @@ describe("ProductIssuesWidget", () => {
     fireEvent.click(await screen.findByLabelText("View product issue PI0000001"));
     expect(await screen.findByText("This product issue was not found.")).toBeInTheDocument();
   });
+
+  describe("SLA standing", () => {
+    const sla = (over: Record<string, unknown> = {}) => ({
+      state: "OK",
+      budgetSeconds: 86400,
+      consumedSeconds: 36000,
+      remainingSeconds: 50400,
+      percentage: 41.67,
+      running: true,
+      pausedSince: null,
+      priority: "P1",
+      policyName: "Product Issue P1",
+      schedule: "CS 24x7",
+      ...over,
+    });
+
+    it.each([
+      ["OK", "OK"],
+      ["AT_RISK", "At risk"],
+      ["PAUSED", "Paused (waiting on CS)"],
+      ["MET", "Met"],
+      ["BREACHED", "Breached"],
+    ])("shows a %s chip", async (state, label) => {
+      getMock.mockResolvedValue({ items: [row({ sla: sla({ state }) })] });
+      renderWithProviders(<ProductIssuesWidget caseId="case-1" />);
+      expect(await screen.findByText(label)).toBeInTheDocument();
+      expect(screen.getByText("10h of 24h")).toBeInTheDocument();
+    });
+
+    it("shows when a paused issue started waiting on CS", async () => {
+      getMock.mockResolvedValue({
+        items: [row({ sla: sla({ state: "PAUSED", running: false, pausedSince: "2026-11-18T08:00:00Z" }) })],
+      });
+      renderWithProviders(<ProductIssuesWidget caseId="case-1" />);
+      expect(await screen.findByText(/Waiting on CS since \S/)).toBeInTheDocument();
+    });
+
+    it("notes business hours for the 12x5 schedule", async () => {
+      getMock.mockResolvedValue({ items: [row({ sla: sla({ schedule: "CS 12x5 IST" }) })] });
+      renderWithProviders(<ProductIssuesWidget caseId="case-1" />);
+      expect(await screen.findByText("10h of 24h (business hours, IST)")).toBeInTheDocument();
+    });
+
+    it("shows no numbers for state NONE", async () => {
+      getMock.mockResolvedValue({
+        items: [
+          row({
+            sla: sla({
+              state: "NONE",
+              budgetSeconds: 0,
+              consumedSeconds: 0,
+              remainingSeconds: 0,
+              percentage: 0,
+              running: false,
+              priority: null,
+              policyName: null,
+              schedule: null,
+            }),
+          }),
+        ],
+      });
+      renderWithProviders(<ProductIssuesWidget caseId="case-1" />);
+      expect(await screen.findByText("No SLA")).toBeInTheDocument();
+      expect(screen.queryByText(/ of /)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Waiting on CS since/)).not.toBeInTheDocument();
+    });
+
+    it("hints at a non-standard board column", async () => {
+      getMock.mockResolvedValue({
+        items: [row({ boardStatus: "OTHER", boardStatusRaw: "Needs triage", nonStandardColumn: true })],
+      });
+      renderWithProviders(<ProductIssuesWidget caseId="case-1" />);
+      expect(await screen.findByText("Non-standard board column: Needs triage")).toBeInTheDocument();
+    });
+
+    it("shows the SLA standing in the detail dialog", async () => {
+      getMock.mockImplementation((path: string) =>
+        path === "/product-work-items/wi-1"
+          ? Promise.resolve({
+              ...row({ sla: sla({ state: "BREACHED", consumedSeconds: 90000 }), nonStandardColumn: true, boardStatus: "OTHER", boardStatusRaw: "Needs triage" }),
+              conversation: [],
+              statusHistory: [],
+            })
+          : Promise.resolve({ items: [row()] }),
+      );
+      renderWithProviders(<ProductIssuesWidget caseId="case-1" />);
+      fireEvent.click(await screen.findByLabelText("View product issue PI0000001"));
+      expect(await screen.findByText("Breached")).toBeInTheDocument();
+      expect(screen.getByText("25h of 24h")).toBeInTheDocument();
+      expect(screen.getByText("Non-standard board column: Needs triage")).toBeInTheDocument();
+    });
+  });
 });

@@ -29,6 +29,10 @@ import {
 } from "@wso2/oxygen-ui";
 import { RefreshCw, X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import {
+  NonStandardColumnHint,
+  ProductIssueSlaStanding,
+} from "@features/csm-cases/components/ProductIssueSlaStanding";
 import { useProductWorkItem } from "@features/csm-cases/api/useProductWorkItem";
 import {
   productHistorySourceLabel,
@@ -133,6 +137,13 @@ export function ProductIssueDetailDialog({
                 )}
                 {item.priority && <Chip size="small" variant="outlined" label={item.priority} />}
                 {item.category && <Chip size="small" variant="outlined" label={item.category} />}
+              </Box>
+              <NonStandardColumnHint item={item} />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  SLA
+                </Typography>
+                <ProductIssueSlaStanding sla={item.sla} />
               </Box>
             </Box>
 

@@ -14,12 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Button } from "@wso2/oxygen-ui";
+import { Box, Button } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { useSearchParams } from "react-router";
 
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
+import MyWocGitIssuesPanel from "@features/csm-cases/components/MyWocGitIssuesPanel";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import { readWidgetTitleParam } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -49,41 +50,44 @@ export default function CsmCasesPage(): JSX.Element {
   const lockToCases = !(canUseOperations && canUseSecurityCenter);
 
   return (
-    <CsmIssuesView
-      title={title}
-      entityNoun="cases"
-      // Cases list defaults to support cases (`caseTypes: ["case"]`) on a
-      // fresh visit, but, unlike the other issue-type pages (Operations/
-      // Security Center/Engagements, which exist purely to be locked to one
-      // type and hide the control), is the one unlocked, multi-type
-      // `CsmIssuesView`: the type control is left visible and fully
-      // changeable — `defaultCaseTypes` only seeds the initial selection
-      // when the URL carries no `types` param at all; picking a different
-      // type (or clearing back to no selection, which falls through to
-      // every type this caller can see, via `CsmIssuesView`'s own
-      // `visibleCaseTypes` fallback) genuinely narrows/broadens the results.
-      // `lockedFilters.caseTypes` is kept in lockstep purely so the severity
-      // filter/column stay visible (that hint is keyed off `lockedFilters`,
-      // not the live selection or `defaultCaseTypes` — see
-      // `CsmIssuesView`'s own `showSeverityFilter`).
-      defaultCaseTypes={["case"]}
-      lockedFilters={{ caseTypes: ["case"] }}
-      hideTypeFilter={lockToCases ? true : undefined}
-      enableColumnCustomization
-      columnsViewId="cases"
-      actions={
-        canWrite ? (
-          <Button
-            variant="contained"
-            color="primary"
-            size="small"
-            startIcon={<Plus size={16} />}
-            onClick={() => navigate("/cases/new")}
-          >
-            Create case
-          </Button>
-        ) : undefined
-      }
-    />
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <MyWocGitIssuesPanel />
+      <CsmIssuesView
+        title={title}
+        entityNoun="cases"
+        // Cases list defaults to support cases (`caseTypes: ["case"]`) on a
+        // fresh visit, but, unlike the other issue-type pages (Operations/
+        // Security Center/Engagements, which exist purely to be locked to one
+        // type and hide the control), is the one unlocked, multi-type
+        // `CsmIssuesView`: the type control is left visible and fully
+        // changeable — `defaultCaseTypes` only seeds the initial selection
+        // when the URL carries no `types` param at all; picking a different
+        // type (or clearing back to no selection, which falls through to
+        // every type this caller can see, via `CsmIssuesView`'s own
+        // `visibleCaseTypes` fallback) genuinely narrows/broadens the results.
+        // `lockedFilters.caseTypes` is kept in lockstep purely so the severity
+        // filter/column stay visible (that hint is keyed off `lockedFilters`,
+        // not the live selection or `defaultCaseTypes` — see
+        // `CsmIssuesView`'s own `showSeverityFilter`).
+        defaultCaseTypes={["case"]}
+        lockedFilters={{ caseTypes: ["case"] }}
+        hideTypeFilter={lockToCases ? true : undefined}
+        enableColumnCustomization
+        columnsViewId="cases"
+        actions={
+          canWrite ? (
+            <Button
+              variant="contained"
+              color="primary"
+              size="small"
+              startIcon={<Plus size={16} />}
+              onClick={() => navigate("/cases/new")}
+            >
+              Create case
+            </Button>
+          ) : undefined
+        }
+      />
+    </Box>
   );
 }

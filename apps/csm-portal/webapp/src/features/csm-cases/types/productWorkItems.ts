@@ -40,6 +40,24 @@ export interface ProductIssueGitHub {
   labels?: string[];
 }
 
+export type ProductIssueSlaState = "NONE" | "OK" | "AT_RISK" | "PAUSED" | "MET" | "BREACHED";
+
+/** Resolution-clock standing of a product issue, computed by entity-service at
+ * read time. Always present; `state` NONE means no clock (numbers are 0 and
+ * `pausedSince` / `policyName` / `schedule` are null). */
+export interface ProductIssueSla {
+  state: ProductIssueSlaState;
+  budgetSeconds: number;
+  consumedSeconds: number;
+  remainingSeconds: number;
+  percentage: number;
+  running: boolean;
+  pausedSince?: string | null;
+  priority?: string | null;
+  policyName?: string | null;
+  schedule?: string | null;
+}
+
 export interface ProductIssueSummary {
   id: string;
   number: string;
@@ -54,10 +72,33 @@ export interface ProductIssueSummary {
   linkedOn?: string | null;
   lastActivityOn?: string | null;
   linkState: ProductLinkState;
+  sla?: ProductIssueSla | null;
+  /** True when the issue sits in a board column outside the standard set
+   * (`boardStatus` OTHER; `boardStatusRaw` is the column name). */
+  nonStandardColumn?: boolean;
 }
 
 export interface ProductIssueListResponse {
   items?: ProductIssueSummary[];
+}
+
+export type ProductIssueSearchSort = "created" | "pausedSince" | "slaPercentage";
+
+/** Body of `POST /product-work-items/search`. */
+export interface ProductIssueSearchRequest {
+  filters: {
+    boardStatuses?: ProductBoardStatus[];
+    mine?: boolean;
+    sort?: ProductIssueSearchSort;
+  };
+  pagination?: { limit: number; offset: number };
+}
+
+export interface ProductIssueSearchResponse {
+  items?: ProductIssueSummary[];
+  total?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface ProductIssueComment {

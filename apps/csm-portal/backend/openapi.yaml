@@ -7258,6 +7258,7 @@ paths:
       summary: List the product issues linked to a case.
       description: |
         Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. Untracked patches (Type/Patch issues) are not listed.
+        Every issue carries `sla` (always present) and `nonStandardColumn`. `sla` has `state` (`NONE` no clock: no priority or not measured, numbers 0 and `pausedSince`, `policyName`, `schedule` null; `OK`; `AT_RISK` at 75% or more consumed; `PAUSED` waiting on CS, the clock is paused; `MET`; `BREACHED`), `budgetSeconds`, `consumedSeconds`, `remainingSeconds`, `percentage`, `running`, `pausedSince`, `priority`, `policyName` and `schedule`. `nonStandardColumn` is true when the issue sits in a board column outside the standard set (`boardStatus` OTHER, the column name in `boardStatusRaw`).
       operationId: listCaseProductWorkItems
       security:
         - bearerAuth: []
@@ -7469,6 +7470,7 @@ paths:
       description: |
         Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. Raw base64 inline images in the conversation are redacted for a caller
         without the attachment download permission.
+        The issue carries `sla` and `nonStandardColumn` as in `GET /cases/{id}/product-work-items`.
       operationId: getProductWorkItem
       security:
         - bearerAuth: []
@@ -7530,6 +7532,8 @@ paths:
       description: |
         Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is one JSON object of filters (it may be empty); the entity
         service validates them.
+
+        Filters (under `filters`, with `pagination` `limit` and `offset`): `boardStatuses` (array of normalised board statuses, for example `["WAITING_ON_CS"]`); `mine` (boolean: issues the signed-in user opened, or whose case is assigned to them; `true` without a resolvable user is a 400); `sort` (`created`, the default and newest first; `pausedSince`, oldest pause first and the default when `mine` is true; `slaPercentage`, highest first). Each returned issue carries `sla` and `nonStandardColumn` as in `GET /cases/{id}/product-work-items`.
       operationId: searchProductWorkItems
       security:
         - bearerAuth: []

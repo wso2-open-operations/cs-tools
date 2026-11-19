@@ -14,7 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ProductIssueSummary, ProductLinkState } from "@features/csm-cases/types/productWorkItems";
+import type {
+  ProductIssueSla,
+  ProductIssueSlaState,
+  ProductIssueSummary,
+  ProductLinkState,
+} from "@features/csm-cases/types/productWorkItems";
 
 export type ProductStatusColor = "default" | "info" | "warning" | "success" | "error";
 
@@ -87,4 +92,49 @@ const SOURCE_LABELS: Record<string, string> = {
 
 export function productHistorySourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
+}
+
+const SLA_STATE_LABELS: Record<ProductIssueSlaState, string> = {
+  NONE: "No SLA",
+  OK: "OK",
+  AT_RISK: "At risk",
+  PAUSED: "Paused (waiting on CS)",
+  MET: "Met",
+  BREACHED: "Breached",
+};
+
+// Same colours the case page's SLA table uses: running info, paused warning,
+// completed success, breached error; at risk (>= 75% consumed) is warning there too.
+const SLA_STATE_ROLES: Record<ProductIssueSlaState, ProductStatusColor> = {
+  NONE: "default",
+  OK: "info",
+  AT_RISK: "warning",
+  PAUSED: "warning",
+  MET: "success",
+  BREACHED: "error",
+};
+
+export function productSlaLabel(state: ProductIssueSlaState | undefined): string {
+  return (state && SLA_STATE_LABELS[state]) || SLA_STATE_LABELS.NONE;
+}
+
+export function productSlaRole(state: ProductIssueSlaState | undefined): ProductStatusColor {
+  return (state && SLA_STATE_ROLES[state]) || "default";
+}
+
+/** Whole seconds as "10h", "1h 30m", "45m"; under a minute is "0m". */
+export function formatSlaDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+/** "10h of 24h", plus ", business hours, IST" for the 12x5 schedule. Null for NONE. */
+export function productSlaConsumedText(sla: ProductIssueSla | null | undefined): string | null {
+  if (!sla || sla.state === "NONE") return null;
+  const base = `${formatSlaDuration(sla.consumedSeconds)} of ${formatSlaDuration(sla.budgetSeconds)}`;
+  return sla.schedule === "CS 12x5 IST" ? `${base} (business hours, IST)` : base;
 }

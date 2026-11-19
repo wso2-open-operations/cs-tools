@@ -153,6 +153,7 @@ export const ApiQueryKeys = {
   CSM_CASE_LINKED_INCIDENTS: "csm-case-linked-incidents",
   CSM_CASE_PRODUCT_WORK_ITEMS: "csm-case-product-work-items",
   CSM_PRODUCT_WORK_ITEM: "csm-product-work-item",
+  CSM_MY_WOC_PRODUCT_ISSUES: "csm-my-woc-product-issues",
   CSM_INCIDENT_TASKS: "csm-incident-tasks",
   CSM_INCIDENT_TASK_DETAILS: "csm-incident-task-details",
   CSM_CASE_SEARCH_BY_QUERY: "csm-case-search-by-query",
