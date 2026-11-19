@@ -456,10 +456,12 @@ END $install$;
 -- and the log is append-only, so a DELETE is refused: instead the catch-all is
 -- detached, a fresh one takes its place, the younger rows are copied across, and
 -- the old table is dropped, all in one transaction. The row counts must add up
--- before it commits, or it rolls back and nothing changes. Nothing happens (and
--- nothing is locked) when no row is past retention, which is the usual case.
--- While it runs, audit writes wait on the lock; the catch-all should hold almost
--- nothing, so that is short, and lock_timeout makes it give up if the lock is busy.
+-- before it commits, or it rolls back and nothing changes. The advisory lock comes
+-- first, so the check for expired rows and the swap are one decision: two runs at
+-- once cannot both swap for the same rows. When no row is past retention, which is
+-- the usual case, it returns after that check and takes no table lock.
+-- While it swaps, audit writes wait on the table lock; the catch-all should hold
+-- almost nothing, so that is short, and lock_timeout makes it give up if it is busy.
 DO $install$
 BEGIN
     EXECUTE replace(replace($fn$
@@ -480,11 +482,12 @@ BEGIN
         RAISE EXCEPTION 'audit_purge_default_partition: retention must be at least 1 month, got %', p_retention_months;
     END IF;
 
+    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
+
     IF NOT EXISTS (SELECT 1 FROM csm_audit_log_default WHERE created_on < cutoff) THEN
         RETURN 0;
     END IF;
 
-    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
     PERFORM set_config('lock_timeout', p_lock_timeout, true);
 
     EXECUTE format('ALTER TABLE %1$I.csm_audit_log DETACH PARTITION %1$I.csm_audit_log_default', __SCHEMA_LIT__);
@@ -517,10 +520,10 @@ END $install$;
 
 -- Empty result = healthy. Reports, one message each:
 --   * rows in the catch-all partition (a monthly partition was missing);
---   * fewer than p_months_ahead monthly partitions after the current month, so a
---     partition that failed to be created is noticed the day it is missed, not
---     months later (the daily run creates that many ahead; the monitoring call
---     with no arguments keeps the older minimum of 2).
+--   * any of the next p_months_ahead months with no monthly partition, checked
+--     month by month, so a partition that failed to be created is noticed the day
+--     it is missed, even if a partition further out exists (the daily run creates
+--     that many ahead; the monitoring call with no arguments checks 2).
 -- Data past retention is not reported here: the daily run deletes it, and a
 -- deletion that fails is reported by the run itself.
 DROP FUNCTION IF EXISTS audit_partition_health();
@@ -532,22 +535,25 @@ CREATE OR REPLACE FUNCTION audit_partition_health(p_months_ahead INT DEFAULT 2) 
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
-    this_month   DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
-    future_count INT;
+    this_month DATE := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
+    missing    TEXT;
 BEGIN
     IF EXISTS (SELECT 1 FROM csm_audit_log_default) THEN
         problem := 'rows landed in the catch-all partition csm_audit_log_default';
         RETURN NEXT;
     END IF;
 
-    SELECT count(*) INTO future_count
-      FROM pg_inherits i
-      JOIN pg_class c ON c.oid = i.inhrelid
-     WHERE i.inhparent = format('%I.csm_audit_log', __SCHEMA_LIT__)::regclass
-       AND c.relname ~ '^csm_audit_log_\d{4}_\d{2}$'
-       AND to_date(substr(c.relname, 15), 'YYYY_MM') > this_month;
-    IF future_count < p_months_ahead THEN
-        problem := format('only %s future monthly partition(s); need %s', future_count, p_months_ahead);
+    -- Named as audit_create_partitions names them, and attached to the audit log.
+    SELECT string_agg(to_char(m.month_start, 'YYYY_MM'), ', ' ORDER BY m.month_start) INTO missing
+      FROM generate_series(1, p_months_ahead) AS g(n)
+     CROSS JOIN LATERAL (SELECT (this_month + make_interval(months => g.n))::date AS month_start) AS m
+     WHERE NOT EXISTS (SELECT 1
+                         FROM pg_inherits i
+                         JOIN pg_class c ON c.oid = i.inhrelid
+                        WHERE i.inhparent = format('%I.csm_audit_log', __SCHEMA_LIT__)::regclass
+                          AND c.relname = 'csm_audit_log_' || to_char(m.month_start, 'YYYY_MM'));
+    IF missing IS NOT NULL THEN
+        problem := format('missing future monthly partition(s) for the next %s months: %s', p_months_ahead, missing);
         RETURN NEXT;
     END IF;
 END $$;
