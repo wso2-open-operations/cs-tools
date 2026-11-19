@@ -252,3 +252,83 @@ func TestClient_WaitingForTheTokenRefreshHonoursItsOwnContext(t *testing.T) {
 		t.Fatalf("err=%v after %v", err, time.Since(start))
 	}
 }
+
+const itemsWithContentPage = `{
+ "items": [
+  {"nodeId":"PVTI_1","type":"ISSUE",
+   "content":{"nodeId":"I_1","repository":"example-org/example-repo","number":1,"title":"A title","url":"https://github.com/example-org/example-repo/issues/1",
+     "state":"CLOSED","stateReason":"COMPLETED","isPullRequest":false,"body":"b","labels":["Origin/CS","Priority/High(P2)"],"assignees":["octo"],
+     "parent":null,"createdAt":"2026-11-17T05:20:22Z","updatedAt":"2026-11-17T05:20:30Z","closedAt":"2026-11-17T06:00:00Z"},
+   "draft":null,
+   "fieldValues":[{"name":"Target","dataType":"NUMBER","value":3},{"name":"Status","dataType":"SINGLE_SELECT","value":"WOC"}]},
+  {"nodeId":"PVTI_2","type":"DRAFT_ISSUE","content":null,"draft":{"title":"d","body":""},"fieldValues":[]},
+  {"nodeId":"PVTI_3","type":"ISSUE",
+   "content":{"nodeId":"I_3","repository":"example-org/example-repo","number":3,"title":"T3","url":"u","state":"OPEN","stateReason":null,"isPullRequest":false,"body":"",
+     "labels":[],"assignees":[],"createdAt":"2026-11-17T05:20:22Z","updatedAt":"2026-11-17T05:20:30Z","closedAt":null},
+   "fieldValues":[]}
+ ],
+ "nextCursor": "Y3Vyc29y"
+}`
+
+func TestClient_ListProjectItemsWithContent(t *testing.T) {
+	var gotPath, gotQuery string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.EscapedPath(), r.URL.RawQuery
+		_, _ = w.Write([]byte(itemsWithContentPage))
+	}))
+	defer api.Close()
+	c := New(api.URL, ClientCredentialsConfig{})
+
+	page, err := c.ListProjectItemsWithContent(context.Background(), "example org", 112, "after/1", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/orgs/example%20org/projects/112/items-with-content" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotQuery != "after=after%2F1&perPage=50" {
+		t.Errorf("query = %q", gotQuery)
+	}
+	if len(page.Items) != 3 || page.NextCursor == nil || *page.NextCursor != "Y3Vyc29y" {
+		t.Fatalf("page = %+v", page)
+	}
+	first := page.Items[0]
+	if first.Content == nil || first.Content.NodeID != "I_1" || first.Content.Number != 1 || first.Content.State != "CLOSED" ||
+		first.Content.StateReason == nil || *first.Content.StateReason != "COMPLETED" || len(first.Content.Labels) != 2 ||
+		first.Content.ClosedAt == nil || first.Content.IsPullRequest {
+		t.Errorf("content = %+v", first.Content)
+	}
+	if first.Content.RepositoryOwner() != "example-org" || first.Content.RepositoryName() != "example-repo" {
+		t.Errorf("owner/name = %q %q", first.Content.RepositoryOwner(), first.Content.RepositoryName())
+	}
+	if s, ok := first.Status(); !ok || s != "WOC" {
+		t.Errorf("status = %q %v", s, ok)
+	}
+	if page.Items[1].Content != nil || page.Items[1].Type != "DRAFT_ISSUE" {
+		t.Errorf("draft item = %+v", page.Items[1])
+	}
+	if _, ok := page.Items[2].Status(); ok {
+		t.Error("an item with no Status value reports one")
+	}
+	if (ProjectItemContent{Repository: "norepo"}).RepositoryOwner() != "" || (ProjectItemContent{Repository: "norepo"}).RepositoryName() != "" {
+		t.Error("a repository without a slash must split to empty parts")
+	}
+
+	// First page: no cursor, default page size.
+	if _, err := c.ListProjectItemsWithContent(context.Background(), "o", 1, "", 0); err != nil || gotQuery != "" {
+		t.Errorf("first page query = %q err=%v", gotQuery, err)
+	}
+}
+
+func TestClient_ListProjectItemsWithContent_Errors(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "42")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer api.Close()
+	_, err := New(api.URL, ClientCredentialsConfig{}).ListProjectItemsWithContent(context.Background(), "o", 1, "", 10)
+	var ee *Error
+	if !errors.As(err, &ee) || ee.StatusCode != http.StatusTooManyRequests || ee.RetryAfter != 42*time.Second {
+		t.Fatalf("err = %v", err)
+	}
+}

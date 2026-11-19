@@ -9543,6 +9543,145 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /product-work-items/reconcile:
+    post:
+      summary: >-
+        Reconcile linked product issues with GitHub (service credential only; present only when
+        GIT_INTERNALS_ENABLED=true).
+      description: >-
+        For each tracking board (a distinct owner and `board_project_number` of product_repo_mapping)
+        reads the board's items through the engineering entity and, for each item that belongs to an
+        ACTIVE github_issue_link, refreshes title, labels, priority and state; when the item's Status
+        differs from the stored one it reads the issue's board history and records the missing changes as
+        status events (source RECONCILE, deduplicated by the timeline event id and by column and time),
+        then sets the link's board status. An ACTIVE link of a board's repositories that the listing did
+        not show (archived off the board, or never on it) is refreshed from the issue itself (404 sets
+        the link INACCESSIBLE) and counted in `notOnBoard`; a CLOSED one only when it was last synced
+        over a week before the run began. A call works until its time budget (the request's deadline
+        less a reserve) or `limit` is used, always after at least one unit of work, then returns
+        `nextCursor` and `more`; call again with the cursor until `more` is false. On an engineering
+        429 the call stops at once with `retryAfterSeconds` and the cursor. A pass that finds nothing
+        to change writes only `last_synced_on` of the links it saw. For an internal service credential
+        (a client in M2M_CLIENT_IDS); its caller is csm-scheduled-tasks.
+      operationId: reconcileProductWorkItems
+      security:
+        - clientAssertion: []
+      requestBody:
+        required: false  # an empty body starts a run
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductIssueReconcileRequest'
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueReconcileResponse'
+        "400":
+          description: Bad request (an invalid cursor or value, or a repository that is not mapped to a product).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not an internal service credential (a user token is refused).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: A database failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-work-items/backfill:
+    post:
+      summary: >-
+        Register the Origin/CS issues of one mapped repository that have no work item (service credential
+        only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        An operator's tool, called repeatedly with `nextCursor` while `more` is true. The repository must
+        be a product_repo_mapping row (400 otherwise). Issues considered carry `Origin/CS`: every open
+        one, and closed ones closed within `sinceDays` (default 180). Pull requests and issues labelled
+        `Type/Patch` or `patch` are skipped. An issue that already has a link only has its missing
+        comments and board events filled in (`alreadyKnown`). A new one is matched to a case by the
+        issue body's footer lines `WSO2 case id` (a case's wso2_id) and `Case number`: one line that names
+        a case is enough, two must name the same case, none (or two different cases) leaves it unmatched.
+        It is registered as a PRODUCT_ISSUE with its comments (origin GITHUB, deduplicated by GitHub
+        comment id) and its history on the product's tracking board; a matched one gets an AFFECTS link
+        with source BACKFILL, an unmatched one none (it shows in the unmatched search). The footer's email
+        is stored but never resolved to a user. A dry run writes nothing and reports `wouldCreate*`.
+        Each call considers at most `maxIssues` issues and stops early when short of time or on an
+        engineering 429 (`retryAfterSeconds`). Running it again changes nothing.
+      operationId: backfillProductWorkItems
+      security:
+        - clientAssertion: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductIssueBackfillRequest'
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueBackfillResponse'
+        "502":
+          description: The engineering entity could not list the repository's issues.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "400":
+          description: Bad request (an invalid cursor or value, or a repository that is not mapped to a product).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not an internal service credential (a user token is refused).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: A database failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/{id}/escalations:
     get:
       summary: Get a case's full escalation history, newest first.
@@ -45267,6 +45406,121 @@ components:
         more:
           type: boolean
           description: True while projects are left; call again with nextCursor. False once every project is done.
+    ProductIssueReconcileRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        cursor:
+          type: string
+          description: The previous answer's nextCursor; omit to start a run.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 200
+          description: The most board items and linked issues one call works on.
+    ProductIssueReconcileResponse:
+      type: object
+      required: [boards, itemsChecked, linksUpdated, statusEventsWritten, notOnBoard, failed, nextCursor, more]
+      properties:
+        boards:
+          type: integer
+          description: Tracking boards this call visited.
+        itemsChecked:
+          type: integer
+          description: Board items that matched an ACTIVE link and were compared.
+        linksUpdated:
+          type: integer
+          description: Links whose issue fields, board status or state changed.
+        statusEventsWritten:
+          type: integer
+          description: Board status events recorded (source RECONCILE).
+        notOnBoard:
+          type: integer
+          description: Linked issues of a board's repositories the board listing did not show, refreshed from the issue itself.
+        failed:
+          type: integer
+          description: Boards or issues that could not be processed (the cause is logged; the next run tries again).
+        nextCursor:
+          type: string
+          description: Where the next call resumes; empty when the run is done.
+        more:
+          type: boolean
+          description: True while work is left; call again with nextCursor.
+        retryAfterSeconds:
+          type: integer
+          description: Present when the engineering entity answered 429; the call stopped and the caller should wait this long or give up for the day.
+    ProductIssueBackfillRequest:
+      type: object
+      additionalProperties: false
+      required: [owner, repository]
+      properties:
+        owner:
+          type: string
+        repository:
+          type: string
+        dryRun:
+          type: boolean
+          default: false
+        cursor:
+          type: string
+          description: The previous answer's nextCursor (it encodes the phase, open then closed, and the page).
+        maxIssues:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 25
+          description: The most issues one call considers.
+        sinceDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          default: 180
+          description: Closed issues count only when closed within this many days; fixed by the first call of a run.
+    ProductIssueBackfillResponse:
+      type: object
+      required: [dryRun, considered, wouldCreateMatched, wouldCreateUnmatched, createdMatched, createdUnmatched, alreadyKnown, skippedPatch, skippedPullRequest, commentsWritten, statusEventsWritten, failed, failedIssueNumbers, nextCursor, more]
+      properties:
+        dryRun:
+          type: boolean
+        considered:
+          type: integer
+          description: Origin/CS issues looked at, patches and pull requests included.
+        wouldCreateMatched:
+          type: integer
+          description: Dry run only.
+        wouldCreateUnmatched:
+          type: integer
+          description: Dry run only.
+        createdMatched:
+          type: integer
+        createdUnmatched:
+          type: integer
+        alreadyKnown:
+          type: integer
+        skippedPatch:
+          type: integer
+        skippedPullRequest:
+          type: integer
+        commentsWritten:
+          type: integer
+        statusEventsWritten:
+          type: integer
+        failed:
+          type: integer
+          description: Issues that could not be processed (logged; a later run retries them).
+        failedIssueNumbers:
+          type: array
+          items:
+            type: integer
+          description: GitHub issue numbers of the failed ones (at most 100).
+        nextCursor:
+          type: string
+        more:
+          type: boolean
+        retryAfterSeconds:
+          type: integer
+          description: Present when the engineering entity answered 429.
     AutoclosureCandidatesRequest:
       type: object
       required: [stage]

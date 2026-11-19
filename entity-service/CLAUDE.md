@@ -19,7 +19,7 @@ Handler → Service → Repository → PostgreSQL (pgx/v5)
 
 All wiring happens explicitly in `internal/server/routes.go` (no DI framework). The full dependency graph is built there: `NewRepository(db) → NewService(repo) → NewHandler(svc)`, then registered on a `net/http.ServeMux`.
 
-Middleware chain wraps the mux: **CorrelationID → Recovery → Logger → UserIDToken → auth.Middleware → Timeout** (10 s per request; `auth.Middleware` was missing from this list before — see "Token validation and caller-scoped access" below for what it does).
+Middleware chain wraps the mux: **CorrelationID → Recovery → Logger → UserIDToken → auth.Middleware → Timeout** (`REQUEST_TIMEOUT`, default 60 s per request; `auth.Middleware` was missing from this list before — see "Token validation and caller-scoped access" below for what it does).
 
 `CorrelationID` reads the `X-CSM-Correlation-ID` request header forwarded by the portal BFF, or generates a UUID v4 if absent. The ID is stored in the request context and echoed in the response header. All access log lines and panic logs include the correlation ID for end-to-end request tracing.
 
@@ -13347,3 +13347,50 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
   409 `request_in_progress` ("being registered from a case"), so a manual link cannot steal it. No work note,
   no GitHub write. `DELETE /cases/{id}/product-work-items/{workItemId}/link` sets the active link inactive (404 if
   none, 204 otherwise), leaving the issue unmatched.
+- **Reconciliation and backfill** (`service/product_issue_reconcile.go`, `repository/product_issue_reconcile_repo.go`;
+  same gate, `serviceOnly`: an internal service credential, a user token is refused). Both reuse the webhook branch's
+  repository functions with the sources `RECONCILE` / `BACKFILL`, work against the request's deadline less a reserve of min(15 s, a quarter of the time left at the start; a 30 s budget with the full 15 s when there is no deadline) (a
+  call always does at least one unit, then returns `nextCursor` + `more`), and stop at once on an engineering 429
+  with `retryAfterSeconds`. The cursor is opaque base64 JSON; call again with it until `more` is false.
+  - `POST /product-work-items/reconcile` `{cursor?, limit?}` (default 200, max 500 units a call; the scheduled task
+    `product_issue_reconcile` calls it daily). Per distinct `(owner, board_project_number)` of `product_repo_mapping` it
+    pages `items-with-content` and, for each item with an ACTIVE link (content node id, else owner/repo/number; the
+    repository must map to that board), refreshes title/labels/priority/category/state (not if the item is older than
+    what is stored: the engineering entity may serve a minute-old read) and, when the Status differs from the stored
+    raw status, reads `GetProjectStatusHistory` and records the board's changes as events (key = the timeline event
+    node id; an existing event for the same column within a minute is the same move, so a webhook's is not doubled),
+    then sets the link's board columns from the history's current status; if no recorded event ends in that column it
+    writes one stamped now with key `reconcile:<work item>:<to status>:<UTC date>`. A link on another board of a shared
+    repository keeps that board's status. ACTIVE links of the board's repositories that the listing did not show
+    (archived off the board, never on it) are refreshed with `GetIssueDetail` (404 -> `INACCESSIBLE`) and counted in
+    `notOnBoard`; "seen" is `last_synced_on >= run start` (the run start is read from the database clock and carried
+    in the cursor), so **a pass with nothing to change still writes `last_synced_on`**, nothing else. A CLOSED
+    unlisted link is only rechecked when last synced over 7 days before the run, an OPEN one every run. No CLOSED /
+    REOPENED events are written here (the webhook writes those). Whether `items-with-content` returns archived items is not
+    in the engineering code (it calls GitHub's REST project-items list with only `per_page`, `fields`, `after`, `q`), hence the
+    not-seen pass. A webhook board move that arrives after a reconciliation already recorded a synthetic event for the
+    same column (source `RECONCILE`, key `reconcile:...`, stamped later than the move and within 24 h) corrects that event's
+    time (and `from_status`) instead of adding a second one.
+  - **Known limits.** A board item whose history read failed is counted in `failed` and its link is rechecked in the
+    missing phase, where it counts as not on the board for that run. Items added to or removed from a board between
+    two calls can shift the page offset, so a status correction may wait for the next day's run. The REST board
+    listing does not return archived items (checked live: also not with `q=is:archived`), so an archived item is covered
+    only by the missing phase, which refreshes its issue fields, not its board status.
+  - `POST /product-work-items/backfill` `{owner, repository, dryRun, cursor?, maxIssues?, sinceDays?}` is an operator's
+    tool (no scheduled task): call it with `dryRun: true` first, then without, repeating with the answer's `nextCursor`
+    while `more` is true (default 25 issues a call, max 100; `sinceDays` default 180, fixed by the first call). The
+    repository must be in `product_repo_mapping` (400 otherwise). Considered: `Origin/CS` issues, every open one and
+    closed ones closed within `sinceDays` (the cursor is `open` then `closed` phase, page, offset; the listing leaves pull
+    requests out, so only an empty page ends a phase). `Type/Patch` / `patch` issues and pull requests are skipped and
+    counted. An issue with a link only has its missing comments (by GitHub comment id) and board events filled in; the
+    link's board status is set only while it has none. Comments by the `GIT_INTERNALS_BOT_LOGINS` accounts are not
+    filled in (as the webhook does not mirror them; `github-project-automation[bot]` is never one). A new one is matched by the footer: `WSO2 case id` = a case-like
+    work item's `wso2_id`, `Case number` = its `number`; both lines must be present, each resolve to exactly one case,
+    and name the same case; anything else leaves it unmatched (registered with `Unmatched`, no account, project or
+    AFFECTS link: the unmatched list; the create path and manual registration refuse an empty case id). A known issue
+    with no active AFFECTS link gets the same match re-attempted: on a match the link (source `BACKFILL`) and the
+    case's account and project on the work item are written.
+    Created in one transaction with source `BACKFILL` for the link, all comments (origin GITHUB) and the history on
+    the repository's board (the unarchived board entry with the lowest number when a shared repository has several);
+    the footer email is stored, never resolved to a user. A failed read of one issue is counted in `failed` /
+    `failedIssueNumbers` and the issue is retried by the next run; a 429 stops the call with the cursor on that issue.

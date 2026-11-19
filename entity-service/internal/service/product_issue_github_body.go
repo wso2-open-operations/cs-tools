@@ -207,6 +207,10 @@ func productIssuePriority(level string) string {
 // the issue, as buildProductIssueBody writes it. A field is "" when the footer
 // has no such line or its value is "undefined".
 type ProductIssueFooterInfo struct {
+	// CaseID and CaseNumber are the "WSO2 case id" and "Case number" lines: the
+	// case the issue was raised from (backfill matches issues to cases by them).
+	CaseID         string
+	CaseNumber     string
 	OpenedBy       string
 	ABTTeam        string
 	PublicIssueURL string
@@ -231,6 +235,10 @@ func ParseProductIssueFooter(body string) ProductIssueFooterInfo {
 			value = ""
 		}
 		switch strings.ToLower(strings.TrimSpace(label)) {
+		case "wso2 case id":
+			info.CaseID = value
+		case "case number":
+			info.CaseNumber = value
 		case "opened by":
 			info.OpenedBy = value
 		case "abt team":

@@ -52,6 +52,7 @@ const (
 	CommentOriginPortal     = "PORTAL"
 	LinkStateActive         = "ACTIVE"
 	LinkStateDeleted        = "DELETED"
+	LinkStateInaccessible   = "INACCESSIBLE"
 	LinkStateTransferred    = "TRANSFERRED"
 	githubCommentNoteType   = "WORK_NOTE"
 	githubCommentAuthorSize = 255
@@ -100,13 +101,15 @@ func claimDeliveryInTx(ctx context.Context, tx pgx.Tx) error {
 
 // LinkedIssue is the github_issue_link row a delivery was matched to.
 type LinkedIssue struct {
-	WorkItemID         string
-	Owner, Repository  string
-	IssueNumber        int
-	NodeID             *string
-	LinkState          string
-	GitHubState        string
-	BoardStatus        *string
+	WorkItemID        string
+	Owner, Repository string
+	IssueNumber       int
+	NodeID            *string
+	LinkState         string
+	GitHubState       string
+	BoardStatus       *string
+	// BoardStatusRaw is the column name as GitHub spells it.
+	BoardStatusRaw     *string
 	BoardProjectNumber *int
 	GitHubUpdatedOn    *time.Time
 }
@@ -248,12 +251,12 @@ func NewProductIssueSyncRepository(db *Scoped) ProductIssueSyncRepository {
 }
 
 const linkedIssueColumns = `work_item_id::TEXT, owner, repository, issue_number, node_id, link_state, github_state,
-		board_status, board_project_number, github_updated_on`
+		board_status, board_status_raw, board_project_number, github_updated_on`
 
 func scanLinkedIssue(row pgx.Row) (*LinkedIssue, error) {
 	var l LinkedIssue
 	err := row.Scan(&l.WorkItemID, &l.Owner, &l.Repository, &l.IssueNumber, &l.NodeID, &l.LinkState, &l.GitHubState,
-		&l.BoardStatus, &l.BoardProjectNumber, &l.GitHubUpdatedOn)
+		&l.BoardStatus, &l.BoardStatusRaw, &l.BoardProjectNumber, &l.GitHubUpdatedOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -507,6 +510,16 @@ func (r *productIssueSyncRepo) RecordBoardStatus(ctx context.Context, p BoardSta
 				return out, fmt.Errorf("read previous board event: %w", err)
 			}
 		}
+		// A reconciliation that found the link in this column before the delivery
+		// arrived recorded the move with its own time (a synthetic event, key
+		// reconcile:...). The delivery carries the real time: correct that event
+		// instead of recording the move twice.
+		if merged, err := adoptSyntheticEvent(ctx, tx, p, mapped.Status, from); err != nil || merged {
+			if merged {
+				err = touchLink(ctx, tx, p.WorkItemID, nil)
+			}
+			return out, err
+		}
 		out.Inserted, err = InsertStatusEvent(ctx, tx, StatusEventInput{
 			WorkItemID: p.WorkItemID, From: from, To: mapped.Status, WaitsOn: mapped.WaitsOn,
 			OccurredAt: p.OccurredAt, Actor: p.Actor, Source: p.Source, DedupeKey: p.DedupeKey, RawStatus: p.RawStatus,
@@ -528,6 +541,38 @@ func (r *productIssueSyncRepo) RecordBoardStatus(ctx context.Context, p BoardSta
 		}
 		return out, nil
 	})
+}
+
+// syntheticEventWindow is how much later than the real move a reconciliation's
+// synthetic event may be stamped and still be taken for that move.
+const syntheticEventWindow = 24 * time.Hour
+
+// adoptSyntheticEvent moves a reconciliation's synthetic status event (source
+// RECONCILE, key reconcile:...) to the time of the webhook's move when it is the
+// same move: the same status and raw column, stamped later than the webhook's
+// time and within syntheticEventWindow of it. from, when known, replaces the
+// event's from_status. It reports whether an event was adopted.
+func adoptSyntheticEvent(ctx context.Context, tx pgx.Tx, p BoardStatusParams, to string, from *string) (bool, error) {
+	var id string
+	err := tx.QueryRow(ctx, `
+		SELECT id::TEXT FROM work_item_status_event
+		 WHERE work_item_id = $1::uuid AND source = 'RECONCILE' AND dedupe_key LIKE 'reconcile:%'
+		   AND to_status = $2 AND raw_status IS NOT NULL AND lower(btrim(raw_status)) = lower(btrim($3))
+		   AND occurred_at > $4::timestamptz AND occurred_at <= $4::timestamptz + make_interval(secs => $5::float8)
+		 ORDER BY occurred_at LIMIT 1 FOR UPDATE`,
+		p.WorkItemID, to, p.RawStatus, p.OccurredAt, syntheticEventWindow.Seconds()).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("find synthetic board event: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE work_item_status_event SET occurred_at = $2, from_status = COALESCE($3, from_status) WHERE id = $1::uuid`,
+		id, p.OccurredAt, from); err != nil {
+		return false, fmt.Errorf("correct synthetic board event: %w", err)
+	}
+	return true, nil
 }
 
 // RecordBoardItem implements ProductIssueSyncRepository.

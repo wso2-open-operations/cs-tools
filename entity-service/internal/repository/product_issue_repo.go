@@ -412,6 +412,9 @@ func (r *productIssueRepo) LinkExisting(ctx context.Context, workItemID, caseID,
 }
 
 func (r *productIssueRepo) RegisterManualProductIssue(ctx context.Context, p ManualRegisterParams) (string, error) {
+	if strings.TrimSpace(p.CaseID) == "" {
+		return "", &apierror.ValidationError{Msg: "A case is required to register a product issue."}
+	}
 	ctx = WithSystemIdentity(ctx)
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
 		id, _, err := insertProductIssueRows(ctx, tx, productIssueRows{

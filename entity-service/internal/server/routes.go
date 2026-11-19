@@ -2866,6 +2866,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /cases/{id}/product-work-items/{workItemId}/link", internalOnly(accessSvc, productIssueHandler.UnlinkProductWorkItem))
 		mux.HandleFunc("GET /product-work-items/{id}", internalOnly(accessSvc, productIssueHandler.GetProductWorkItem))
 		mux.HandleFunc("POST /product-work-items/search", internalOnly(accessSvc, productIssueHandler.SearchProductWorkItems))
+		// Reconciliation and backfill: an internal service credential only (the daily
+		// scheduled task, an operator's service client); a user token is refused,
+		// since each call writes to every linked issue or creates work items.
+		productIssueSyncHandler := handler.NewProductIssueSyncHandler(service.NewProductIssueSyncService(
+			engineeringClient, repository.NewProductIssueReconcileRepository(repository.NewScoped(db)), cfg.GitInternalsBotLogins))
+		mux.HandleFunc("POST /product-work-items/reconcile", serviceOnly(accessSvc, productIssueSyncHandler.Reconcile))
+		mux.HandleFunc("POST /product-work-items/backfill", serviceOnly(accessSvc, productIssueSyncHandler.Backfill))
 	}
 
 	mux.HandleFunc("GET /cases/{id}/escalations", guardCaseID(caseEscalationHandler.SearchCaseEscalations))

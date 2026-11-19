@@ -124,13 +124,20 @@ type ProductIssueDeliveries struct {
 // GitHub accounts (GIT_INTERNALS_BOT_LOGINS): comments they post are not mirrored
 // back. Nothing is ignored unless listed.
 func NewProductIssueDeliveries(repo repository.ProductIssueSyncRepository, botLogins []string) *ProductIssueDeliveries {
+	bots := botLoginSet(botLogins)
+	return &ProductIssueDeliveries{repo: repo, bots: bots, boardNumbers: map[string]int{}}
+}
+
+// botLoginSet lower-cases the configured bot logins. The project automation
+// account is never one of them: its comments are always mirrored.
+func botLoginSet(botLogins []string) map[string]bool {
 	bots := map[string]bool{}
 	for _, l := range botLogins {
 		if l = strings.ToLower(strings.TrimSpace(l)); l != "" && l != projectAutomationLogin {
 			bots[l] = true
 		}
 	}
-	return &ProductIssueDeliveries{repo: repo, bots: bots, boardNumbers: map[string]int{}}
+	return bots
 }
 
 func (p *ProductIssueDeliveries) isBot(login string) bool {

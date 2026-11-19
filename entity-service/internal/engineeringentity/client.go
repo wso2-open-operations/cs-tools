@@ -143,6 +143,86 @@ type ProjectStatusHistory struct {
 	Changes       []ProjectStatusChange `json:"changes"`
 }
 
+// ProjectItemFieldValue is one set field of a project item. Value is the
+// engineering entity's simplified value: a string for a single select (the
+// column name), a number for a number field.
+type ProjectItemFieldValue struct {
+	Name     string          `json:"name"`
+	DataType string          `json:"dataType"`
+	Value    json.RawMessage `json:"value"`
+}
+
+// ProjectItemContent is the issue or pull request behind a project item.
+type ProjectItemContent struct {
+	NodeID string `json:"nodeId"`
+	// Repository is "owner/name".
+	Repository    string   `json:"repository"`
+	Number        int      `json:"number"`
+	Title         string   `json:"title"`
+	URL           string   `json:"url"`
+	State         string   `json:"state"` // OPEN, CLOSED (MERGED for a pull request)
+	StateReason   *string  `json:"stateReason"`
+	IsPullRequest bool     `json:"isPullRequest"`
+	Body          string   `json:"body"`
+	Labels        []string `json:"labels"`
+	Assignees     []string `json:"assignees"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
+	ClosedAt      *string  `json:"closedAt"`
+}
+
+// RepositoryOwner and RepositoryName split Repository ("owner/name"); both are
+// "" when it has no slash.
+func (c ProjectItemContent) RepositoryOwner() string {
+	owner, _, _ := strings.Cut(c.Repository, "/")
+	if !strings.Contains(c.Repository, "/") {
+		return ""
+	}
+	return owner
+}
+
+// RepositoryName is the part of Repository after the slash.
+func (c ProjectItemContent) RepositoryName() string {
+	_, name, ok := strings.Cut(c.Repository, "/")
+	if !ok {
+		return ""
+	}
+	return name
+}
+
+// ProjectItem is one item of a project board with its content and field values.
+type ProjectItem struct {
+	NodeID string `json:"nodeId"`
+	// Type is ISSUE, PULL_REQUEST, DRAFT_ISSUE or REDACTED.
+	Type string `json:"type"`
+	// Content is nil for a draft or redacted item.
+	Content     *ProjectItemContent     `json:"content"`
+	FieldValues []ProjectItemFieldValue `json:"fieldValues"`
+}
+
+// Status returns the item's Status column as a string; ok is false when the
+// item has no single-select Status value.
+func (i ProjectItem) Status() (status string, ok bool) {
+	for _, f := range i.FieldValues {
+		if !strings.EqualFold(f.Name, "Status") || !strings.EqualFold(f.DataType, "SINGLE_SELECT") {
+			continue
+		}
+		var v string
+		if json.Unmarshal(f.Value, &v) != nil {
+			return "", false
+		}
+		return v, true
+	}
+	return "", false
+}
+
+// ProjectItemsPage is one page of GET .../projects/{n}/items-with-content.
+type ProjectItemsPage struct {
+	Items []ProjectItem `json:"items"`
+	// NextCursor is the cursor of the next page; nil on the last page.
+	NextCursor *string `json:"nextCursor"`
+}
+
 // ListIssueDetailsQuery are the filters of GET .../issue-details. Zero values
 // are left out of the request.
 type ListIssueDetailsQuery struct {
@@ -272,6 +352,24 @@ func (c *Client) ListIssueComments(ctx context.Context, org, owner, repo string,
 func (c *Client) GetProjectStatusHistory(ctx context.Context, org, owner, repo string, number int) ([]ProjectStatusHistory, error) {
 	var out []ProjectStatusHistory
 	err := c.do(ctx, http.MethodGet, issuesBase(org, owner, repo)+"/issues/"+strconv.Itoa(number)+"/project-status-history", nil, nil, &out)
+	return out, err
+}
+
+// ListProjectItemsWithContent reads one page of a project board's items with
+// their issue content and field values (GET .../projects/{n}/items-with-content).
+// after is the previous page's NextCursor ("" for the first page); perPage 0
+// leaves the engineering entity's default (100). The engineering entity may
+// serve this read from a cache of up to a minute.
+func (c *Client) ListProjectItemsWithContent(ctx context.Context, org string, projectNumber int, after string, perPage int) (ProjectItemsPage, error) {
+	v := url.Values{}
+	if perPage > 0 {
+		v.Set("perPage", strconv.Itoa(perPage))
+	}
+	if after != "" {
+		v.Set("after", after)
+	}
+	var out ProjectItemsPage
+	err := c.do(ctx, http.MethodGet, "/orgs/"+url.PathEscape(org)+"/projects/"+strconv.Itoa(projectNumber)+"/items-with-content", v, nil, &out)
 	return out, err
 }
 

@@ -149,3 +149,73 @@ type LinkProductIssueRequest struct {
 	Repository  string `json:"repository"`
 	IssueNumber int    `json:"issueNumber"`
 }
+
+// ProductIssueReconcileRequest is the body of POST /product-work-items/reconcile,
+// the daily pass that brings every linked product issue up to date with GitHub.
+// Cursor is the previous answer's NextCursor ("" starts a run); Limit is the most
+// issues one call works on (default 100, at most 500).
+type ProductIssueReconcileRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// ProductIssueReconcileResponse reports one call of the reconciliation. Boards
+// counts the tracking boards the call visited; ItemsChecked the board items that
+// matched an active link; LinksUpdated the links whose issue fields or board
+// status changed; StatusEventsWritten the board events recorded; NotOnBoard the
+// linked issues of a board's repositories missing from its listing (refreshed from
+// the issue itself); Failed the issues or boards that could not be processed (the
+// cause is logged). More is true while work is left: call again with NextCursor.
+// RetryAfterSeconds is set when the engineering entity answered 429: the call
+// stopped, and the caller should wait that long (or give up for the day).
+type ProductIssueReconcileResponse struct {
+	Boards              int    `json:"boards"`
+	ItemsChecked        int    `json:"itemsChecked"`
+	LinksUpdated        int    `json:"linksUpdated"`
+	StatusEventsWritten int    `json:"statusEventsWritten"`
+	NotOnBoard          int    `json:"notOnBoard"`
+	Failed              int    `json:"failed"`
+	NextCursor          string `json:"nextCursor"`
+	More                bool   `json:"more"`
+	RetryAfterSeconds   int    `json:"retryAfterSeconds,omitempty"`
+}
+
+// ProductIssueBackfillRequest is the body of POST /product-work-items/backfill:
+// register the Origin/CS issues of one mapped repository that have no work item.
+// Owner and Repository must be a product_repo_mapping row. SinceDays (default
+// 180) is how far back closed issues count; every open one does. MaxIssues is the
+// most issues one call considers (default 25, at most 100). DryRun writes nothing.
+type ProductIssueBackfillRequest struct {
+	Owner      string `json:"owner"`
+	Repository string `json:"repository"`
+	DryRun     bool   `json:"dryRun"`
+	Cursor     string `json:"cursor,omitempty"`
+	MaxIssues  int    `json:"maxIssues,omitempty"`
+	SinceDays  int    `json:"sinceDays,omitempty"`
+}
+
+// ProductIssueBackfillResponse reports one call of the backfill. Considered is
+// every Origin/CS issue looked at (patches and pull requests included). A dry run
+// fills the WouldCreate* counts and writes nothing; a real run fills the Created*
+// counts. AlreadyKnown issues had a link; only their missing comments and board
+// events are filled in. Unmatched issues are registered with no case link: they
+// are the unmatched list. More is true while issues are left: call again with
+// NextCursor. RetryAfterSeconds is set when the engineering entity answered 429.
+type ProductIssueBackfillResponse struct {
+	DryRun               bool   `json:"dryRun"`
+	Considered           int    `json:"considered"`
+	WouldCreateMatched   int    `json:"wouldCreateMatched"`
+	WouldCreateUnmatched int    `json:"wouldCreateUnmatched"`
+	CreatedMatched       int    `json:"createdMatched"`
+	CreatedUnmatched     int    `json:"createdUnmatched"`
+	AlreadyKnown         int    `json:"alreadyKnown"`
+	SkippedPatch         int    `json:"skippedPatch"`
+	SkippedPullRequest   int    `json:"skippedPullRequest"`
+	CommentsWritten      int    `json:"commentsWritten"`
+	StatusEventsWritten  int    `json:"statusEventsWritten"`
+	Failed               int    `json:"failed"`
+	FailedIssueNumbers   []int  `json:"failedIssueNumbers"`
+	NextCursor           string `json:"nextCursor"`
+	More                 bool   `json:"more"`
+	RetryAfterSeconds    int    `json:"retryAfterSeconds,omitempty"`
+}

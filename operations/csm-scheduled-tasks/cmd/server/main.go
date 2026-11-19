@@ -65,6 +65,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgvalidation"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/productissues"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -1761,6 +1762,15 @@ func main() {
 		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
 			entityServiceScopes, scheduleOverrides, recipientOverrides))
 	}
+	// entity-service's daily reconciliation of linked product issues with GitHub
+	// (git internals) -- see internal/productissues and this component's CLAUDE.md,
+	// "Product issue reconcile". OFF unless PRODUCT_ISSUE_RECONCILE_ENABLED=true; it
+	// needs entity-service with GIT_INTERNALS_ENABLED=true (else the route is a 404
+	// and the run fails and alerts).
+	if envBool("PRODUCT_ISSUE_RECONCILE_ENABLED", false) {
+		tasks = append(tasks, productIssueReconcileTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, scheduleOverrides, recipientOverrides))
+	}
 	// The Account Closure Process -- see internal/acp's package doc and this
 	// component's CLAUDE.md, "ACP closure". OFF unless ACP_ENABLED=true: it
 	// emails customers and suspends their projects in CSM and Salesforce, so
@@ -1890,6 +1900,44 @@ func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oaut
 		Name:         acpReopenCheckTaskName,
 		Schedule:     scheduleFor(scheduleOverrides, acpReopenCheckTaskName, "30 3 * * *"),
 		Handler:      acp.RunReopenCheck(client),
+		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
+		To:           to,
+		Cc:           cc,
+	}
+}
+
+// productIssueReconcileCallTimeout bounds one call of the reconciliation:
+// entity-service works up to its own request deadline per call (it stops short of
+// it and answers with a cursor), so a call can take most of a minute.
+const productIssueReconcileCallTimeout = 2 * time.Minute
+
+// productIssueReconcileTask builds the product_issue_reconcile task. Called only
+// when PRODUCT_ISSUE_RECONCILE_ENABLED=true.
+func productIssueReconcileTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	// The shared OAUTH2_* client; its id must be in entity-service's M2M_CLIENT_IDS
+	// (the route is for a service credential only).
+	client, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+		Timeout:      productIssueReconcileCallTimeout,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for the product issue reconcile; refusing to start", "err", err)
+		os.Exit(1)
+	}
+	to, cc := recipientsFor(recipientOverrides, productissues.TaskName)
+	return registry.Task{
+		Name:     productissues.TaskName,
+		Schedule: scheduleFor(scheduleOverrides, productissues.TaskName, productissues.DefaultSchedule),
+		Handler:  productissues.RunReconcile(client),
+		// A retry repeats nothing outward, but a failure that lasts (entity-service's
+		// git internals off, a board that does not exist) would alert every
+		// driver tick; one retry a day, tomorrow's run catches up.
 		RetryBackoff: acpRetryBackoff,
 		MaxAttempts:  acpMaxAttempts,
 		To:           to,

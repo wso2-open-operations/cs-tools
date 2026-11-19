@@ -27,7 +27,8 @@ func TestParseProductIssueFooter(t *testing.T) {
 		want       ProductIssueFooterInfo
 	}{
 		{"built footer", "Description.\n\nProduct : is-6.1.0\nUpdate level : U7\nWSO2 case id : ACME-1\nCase number : CS1\nPublic Git Issue : https://github.com/o/r/issues/9\nABT Team : Sirius\nOpened by : a@wso2.com",
-			ProductIssueFooterInfo{OpenedBy: "a@wso2.com", ABTTeam: "Sirius", PublicIssueURL: "https://github.com/o/r/issues/9"}},
+			ProductIssueFooterInfo{CaseID: "ACME-1", CaseNumber: "CS1", OpenedBy: "a@wso2.com", ABTTeam: "Sirius", PublicIssueURL: "https://github.com/o/r/issues/9"}},
+		{"case lines: last wins, undefined is none", "WSO2 case id : first\nCase number : CS9\nWSO2 case id : last\nCase number : undefined", ProductIssueFooterInfo{CaseID: "last"}},
 		{"undefined means none", "Public Git Issue : undefined\nABT Team : undefined\nOpened by : undefined", ProductIssueFooterInfo{}},
 		{"last occurrence wins", "Opened by : first@wso2.com\nsome text\nOpened by : last@wso2.com\nABT Team : A\nABT Team : B", ProductIssueFooterInfo{OpenedBy: "last@wso2.com", ABTTeam: "B"}},
 		{"a last undefined wins over an earlier value", "Opened by : first@wso2.com\nOpened by : undefined", ProductIssueFooterInfo{}},
@@ -51,7 +52,7 @@ func TestParseProductIssueFooter(t *testing.T) {
 func TestParseProductIssueFooter_RoundTrip(t *testing.T) {
 	body := buildProductIssueBody(pwReq(), "product/is", productIssueFooterContext{Number: "CS1", InternalID: "ACME-1", Team: "Sirius", OpenedBy: pwEmail})
 	got := ParseProductIssueFooter(body)
-	if got.OpenedBy != pwEmail || got.ABTTeam != "Sirius" || got.PublicIssueURL != "" {
+	if got.OpenedBy != pwEmail || got.ABTTeam != "Sirius" || got.PublicIssueURL != "" || got.CaseID != "ACME-1" || got.CaseNumber != "CS1" {
 		t.Errorf("got %+v", got)
 	}
 }

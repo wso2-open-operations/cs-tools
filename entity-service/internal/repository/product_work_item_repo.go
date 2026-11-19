@@ -385,6 +385,9 @@ func lockedRequest(ctx context.Context, tx pgx.Tx, p RegisterParams) (done *Regi
 // work_item.github_* column: migration 0206's trigger would forward the case's
 // comments to the product repository.
 func (r *productWorkItemRepo) RegisterProductIssue(ctx context.Context, p RegisterParams) (RegisterOutcome, error) {
+	if strings.TrimSpace(p.CaseID) == "" {
+		return RegisterOutcome{}, &apierror.ValidationError{Msg: "A case is required to register a product issue."}
+	}
 	ctx = WithSystemIdentity(ctx)
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (RegisterOutcome, error) {
 		done, existing, err := lockedRequest(ctx, tx, p)
@@ -476,25 +479,48 @@ type productIssueRows struct {
 	State, StateReason                               string
 	Labels                                           []string
 	GitHubCreatedOn, GitHubUpdatedOn, GitHubClosedOn *time.Time
-	LinkSource                                       string // CREATION or MANUAL
+	// LinkSource is the AFFECTS link's source: CREATION, MANUAL or BACKFILL.
+	LinkSource string
+	// Unmatched registers the issue without a case (backfill only): no account,
+	// project or AFFECTS link. CaseID must then be "", and must be set otherwise;
+	// an empty CaseID without Unmatched is an error, never an unmatched item.
+	Unmatched bool
 	// ResolveOpenedByUser sets opened_by_user_id from OpenedByEmail. True only
 	// where the email is the authenticated caller's (the create path); false
 	// where it was read from a user-editable issue body (registered from GitHub).
 	ResolveOpenedByUser bool
 }
 
-// insertProductIssueRows writes the four rows of a product issue inside tx and
+// errProductIssueCaseRequired is returned when a product issue is registered
+// with no case and without asking for an unmatched one.
+var errProductIssueCaseRequired = errors.New("a case id is required to register a product issue (Unmatched was not set)")
+
+// insertProductIssueRows writes the four rows of a product issue inside tx (three
+// when Unmatched: an unmatched issue has no case, so no account, project or
+// AFFECTS link) and
 // returns the new work item's id and PI number. It never sets a work_item.github_*
 // column (migration 0206's trigger would push the case's comments to the
 // repository). A github_issue_link unique violation (23505) is
 // ErrGitHubIssueAlreadyLinked; the transaction is then unusable and the caller
 // must return the error so it rolls back.
 func insertProductIssueRows(ctx context.Context, tx pgx.Tx, in productIssueRows) (workItemID, number string, err error) {
-	err = tx.QueryRow(ctx, `
-		INSERT INTO work_item (created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id)
-		SELECT NOW(), NOW(), $2, $2, next_work_item_number('PRODUCT_ISSUE'), $3, 'PRODUCT_ISSUE', c.account_id, c.project_id
-		  FROM work_item c WHERE c.id = $1::uuid
-		RETURNING id::TEXT, number`, in.CaseID, in.Actor, in.Title).Scan(&workItemID, &number)
+	if in.Unmatched != (in.CaseID == "") {
+		return "", "", errProductIssueCaseRequired
+	}
+	if in.Unmatched {
+		// Unmatched (backfill): no case to copy the account and project from, and
+		// no AFFECTS link; the issue shows up in the unmatched list.
+		err = tx.QueryRow(ctx, `
+			INSERT INTO work_item (created_on, updated_on, created_by, updated_by, number, subject, type)
+			VALUES (NOW(), NOW(), $1, $1, next_work_item_number('PRODUCT_ISSUE'), $2, 'PRODUCT_ISSUE')
+			RETURNING id::TEXT, number`, in.Actor, in.Title).Scan(&workItemID, &number)
+	} else {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO work_item (created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id)
+			SELECT NOW(), NOW(), $2, $2, next_work_item_number('PRODUCT_ISSUE'), $3, 'PRODUCT_ISSUE', c.account_id, c.project_id
+			  FROM work_item c WHERE c.id = $1::uuid
+			RETURNING id::TEXT, number`, in.CaseID, in.Actor, in.Title).Scan(&workItemID, &number)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", &apierror.NotFoundError{Msg: "case not found"}
 	}
@@ -531,6 +557,9 @@ func insertProductIssueRows(ctx context.Context, tx pgx.Tx, in productIssueRows)
 			return "", "", ErrGitHubIssueAlreadyLinked
 		}
 		return "", "", fmt.Errorf("insert github issue link: %w", err)
+	}
+	if in.Unmatched {
+		return workItemID, number, nil
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO work_item_link (from_id, to_id, kind, source, created_by, updated_by)
