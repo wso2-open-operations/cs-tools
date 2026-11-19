@@ -83,15 +83,30 @@ func main() {
 	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(entityClient)
 	// sre-alert-core-service's read API (muted alerts, alert field values), for the
 	// CSM portal. Optional: unset, those routes answer 503 and nothing else changes.
+	// It authenticates with this service's own OAuth2 app (the ENTITY_* credentials),
+	// which must also be subscribed to alert-core's "Alert Core Read API".
 	alertCoreHandler := handler.NewAlertCoreHandler(nil)
 	if c := alertcore.NewClient(alertcore.Config{
-		BaseURL: os.Getenv("ALERT_CORE_BASE_URL"),
-		Token:   os.Getenv("ALERT_CORE_API_TOKEN"),
+		BaseURL:      os.Getenv("ALERT_CORE_BASE_URL"),
+		TokenURL:     cfg.TokenURL,
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		Scopes:       splitComma(os.Getenv("ALERT_CORE_SCOPES")),
 	}); c != nil {
 		alertCoreHandler = handler.NewAlertCoreHandler(c)
 	} else {
-		// Never log the URL or the token.
-		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set, or the base URL is not https (http only for loopback); the muted-alerts and alert-field-values routes answer 503")
+		// Name the setting at fault, never its value.
+		reason := "ENTITY_TOKEN_URL, ENTITY_CLIENT_ID or ENTITY_CLIENT_SECRET is blank"
+		switch base := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")); {
+		case base == "":
+			reason = "ALERT_CORE_BASE_URL is not set"
+		case !alertcore.SafeBaseURL(base):
+			reason = "ALERT_CORE_BASE_URL is not https (http only for loopback)"
+		}
+		slog.Warn("alert-core client not configured; the muted-alerts and alert-field-values routes answer 503", "reason", reason)
+	}
+	if strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")) != "" {
+		slog.Warn("ALERT_CORE_API_TOKEN is no longer used; alert-core is called with this service's OAuth2 app. Remove it")
 	}
 	cloudStatusHandler := handler.NewCloudStatusHandler(entityClient)
 	catalogHandler := handler.NewCatalogHandler(entityClient)

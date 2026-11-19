@@ -50,9 +50,10 @@ endpoints:
     networkVisibilities:
       - Public
   # The read API (/alert-mute-rules/{id}/muted-incidents, /alert-mute-rules/muted-counts,
-  # /alert-field-values), guarded by ALERT_CORE_API_TOKEN. csm-integration-service calls it
-  # (ALERT_CORE_BASE_URL there) and exposes it to the CSM portal behind the gateway. Organization,
-  # not Project: its internal URL is https, and the bearer token is never sent over plain http.
+  # /alert-field-values). Keep the gateway's OAuth2 security on: it is the only authentication on
+  # these routes. Callers (the CSM portal backend and csm-integration-service, ALERT_CORE_BASE_URL
+  # there) send a client-credentials token of an app subscribed to this API. Organization, not
+  # Project: its URL is https.
   - name: read-api
     displayName: Alert Core Read API
     service:

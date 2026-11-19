@@ -50,7 +50,7 @@ type AlertCoreHandler struct {
 }
 
 // NewAlertCoreHandler creates an AlertCoreHandler. A nil client (ALERT_CORE_BASE_URL
-// or ALERT_CORE_API_TOKEN unset) makes every route answer 503.
+// unset or not https) makes every route answer 503.
 func NewAlertCoreHandler(core alertCoreClient) *AlertCoreHandler {
 	return &AlertCoreHandler{core: core}
 }

@@ -1955,8 +1955,8 @@ paths:
     get:
       summary: List the incidents an alert mute rule muted.
       description: >
-        Proxies sre-alert-core-service's read API (with its shared
-        ALERT_CORE_API_TOKEN, which stays in this service): one page of the
+        Proxies sre-alert-core-service's read API (called with this service's
+        OAuth2 app through the Choreo gateway): one page of the
         incidents the rule muted, newest first, plus counts by outcome over all
         of them. Alert-core keeps them for 30 days. For the CSM portal's rule
         page.
@@ -2019,7 +2019,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: ServiceUnavailable (ALERT_CORE_BASE_URL / ALERT_CORE_API_TOKEN not set, or alert-core unavailable)
+          description: ServiceUnavailable (ALERT_CORE_BASE_URL not set, or alert-core unavailable)
           content:
             application/json:
               schema:
@@ -2076,7 +2076,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: ServiceUnavailable (ALERT_CORE_BASE_URL / ALERT_CORE_API_TOKEN not set, or alert-core unavailable)
+          description: ServiceUnavailable (ALERT_CORE_BASE_URL not set, or alert-core unavailable)
           content:
             application/json:
               schema:
@@ -2147,7 +2147,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: ServiceUnavailable (ALERT_CORE_BASE_URL / ALERT_CORE_API_TOKEN not set, or alert-core unavailable)
+          description: ServiceUnavailable (ALERT_CORE_BASE_URL not set, or alert-core unavailable)
           content:
             application/json:
               schema:

@@ -204,14 +204,24 @@ func main() {
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
 	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
-	// Muted alerts live in sre-alert-core-service's database; without both values the route answers 503.
+	// Muted alerts live in sre-alert-core-service's database, read through its "Alert Core Read API" with this
+	// backend's shared OAuth2 app (subscribed to that API in Choreo); without a base URL the routes answer 503.
 	var alertCoreClient *alertcore.Client
-	if base, token := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")), strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")); base != "" && token != "" {
-		// The bearer token must never travel over plain HTTP.
+	if base := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")); base != "" {
+		// The access token must never travel over plain HTTP.
 		base = mustHTTPSBaseURL("ALERT_CORE_BASE_URL", base)
-		alertCoreClient = alertcore.NewClient(alertcore.Config{BaseURL: base, Token: token})
+		alertCoreClient = alertcore.NewClient(alertcore.Config{
+			BaseURL:      base,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       splitComma(os.Getenv("ALERT_CORE_SCOPES")),
+		})
 	} else {
-		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set; the muted-alerts and alert-field-values routes answer 503")
+		slog.Warn("ALERT_CORE_BASE_URL not set; the muted-alerts and alert-field-values routes answer 503")
+	}
+	if strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")) != "" {
+		slog.Warn("ALERT_CORE_API_TOKEN is no longer used; alert-core is called with the shared OAuth2 app. Remove it")
 	}
 	// Pass an untyped nil rather than a nil *alertcore.Client, so the handler's nil check sees it.
 	alertMuteRuleMutedAlertsHandler := handler.NewAlertMuteRuleMutedAlertsHandler(nil)
