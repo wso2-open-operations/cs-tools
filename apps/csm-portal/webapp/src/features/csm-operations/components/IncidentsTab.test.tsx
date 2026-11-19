@@ -90,8 +90,14 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
 
 // The real export menu needs an `ErrorBannerProvider` ancestor this test
 // doesn't set up (same approach as ChangeRequestsTab.test.tsx); it has its own test.
+const exportProps = vi.hoisted(() => ({
+  current: undefined as undefined | { header: string[]; toRow: (row: never) => string[] },
+}));
 vi.mock("@components/FilteredExportMenu", () => ({
-  default: ({ title }: { title: string }) => <div>Export {title}</div>,
+  default: (props: { title: string; header: string[]; toRow: (row: never) => string[] }) => {
+    exportProps.current = props;
+    return <div>Export {props.title}</div>;
+  },
 }));
 
 const mockedUseSearch = vi.mocked(useSearchIncidents);
@@ -349,6 +355,31 @@ describe("IncidentsTab — export", () => {
     showRows([INCIDENT]);
     render(<IncidentsTab />);
     expect(screen.getByText("Export Incidents")).toBeInTheDocument();
+  });
+
+  it("exports the columns picked in Customise incident columns, in the order shown", () => {
+    showRows([INCIDENT]);
+    render(<IncidentsTab />);
+    expect(exportProps.current?.header).toEqual([
+      "Number",
+      "Subject",
+      "Caller",
+      "State",
+      "Priority",
+      "Opened",
+      "Updated",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]); // Category
+    fireEvent.click(checkboxes[1]); // Assignment group
+
+    const { header, toRow } = exportProps.current!;
+    expect(header.slice(-2)).toEqual(["Category", "Assignment group"]);
+    const row = toRow(INCIDENT as never);
+    expect(row).toHaveLength(header.length);
+    expect(row.slice(-2)).toEqual(["SERVICE_INTERRUPTION", "Platform CRE"]);
   });
 });
 

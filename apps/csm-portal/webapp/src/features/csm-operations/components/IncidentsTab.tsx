@@ -143,6 +143,30 @@ function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident):
   }
 }
 
+/** The plain-text value of one optional column for the CSV export, mirroring `renderOptionalCell`; empty when the value is missing. */
+function optionalCellText(id: IncidentOptionalColumnId, incident: BeIncident): string {
+  switch (id) {
+    case "category":
+      return incident.category ?? "";
+    case "assignmentGroup":
+      return incident.assignmentGroup?.name ?? "";
+    case "assignedTo":
+      return incident.assignedTo?.name ?? "";
+    case "parent":
+      return incident.parent?.name ?? "";
+    case "createdBy":
+      return incident.createdBy ?? "";
+    case "updatedBy":
+      return incident.updatedBy ?? "";
+    case "createdOn":
+      return formatBackendTimestampForDisplay(incident.createdOn, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }) ?? "";
+  }
+}
+
 type IncidentSortField = "createdOn" | "updatedOn" | "openedOn";
 
 /**
@@ -342,8 +366,10 @@ export default function IncidentsTab(): JSX.Element {
       incidentPriorityLabel(incident.priority),
       formatDate(incident.openedOn),
       formatDate(incident.updatedOn),
+      // The columns picked in "Customise incident columns", in the order shown.
+      ...visibleOptionalColumns.map((id) => optionalCellText(id, incident)),
     ],
-    [],
+    [visibleOptionalColumns],
   );
 
   return (
@@ -358,7 +384,16 @@ export default function IncidentsTab(): JSX.Element {
         <FilteredExportMenu<BeIncident>
           entityName="incidents"
           title="Incidents"
-          header={["Number", "Subject", "Caller", "State", "Priority", "Opened", "Updated"]}
+          header={[
+            "Number",
+            "Subject",
+            "Caller",
+            "State",
+            "Priority",
+            "Opened",
+            "Updated",
+            ...visibleOptionalColumns.map((id) => INCIDENT_OPTIONAL_COLUMNS[id].label),
+          ]}
           toRow={incidentToCsvRow}
           fetchPage={fetchIncidentsPage}
           disabled={isError}
