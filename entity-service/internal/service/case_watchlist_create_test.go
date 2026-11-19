@@ -91,9 +91,9 @@ func (h *wlHarness) run(t *testing.T, watchList []string) error {
 			sev := domain.CaseSeverityHigh
 			return domain.CaseView{ID: caseID, ProjectDetails: &domain.EntityRef{ID: "proj-1"}, Severity: &sev}, nil
 		},
-		addCaseWatcherIfAbsent: func(_ context.Context, caseID, userID string) error {
+		addCaseWatcherByEmailIfAbsent: func(_ context.Context, caseID, email string) error {
 			h.addWatcherCalls++
-			h.addWatcherCaseID, h.addWatcherUserID = caseID, userID
+			h.addWatcherCaseID, h.addWatcherUserID = caseID, email
 			return nil
 		},
 	}
@@ -512,10 +512,15 @@ func TestCreateCase_SNMirror_CreatorAutoSubscribedToWatchList(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if h.addWatcherCalls != 1 {
-		t.Fatalf("AddCaseWatcherIfAbsent calls = %d, want 1", h.addWatcherCalls)
+		t.Fatalf("AddCaseWatcherByEmailIfAbsent calls = %d, want 1", h.addWatcherCalls)
 	}
+	// On this path c.CreatedBy is the mirror's raw actor string
+	// ("jane.doe@example.com"), never a platform id (see
+	// subscribeSNCreatorToWatchList) -- so it must go to
+	// AddCaseWatcherByEmailIfAbsent, which resolves email-to-id itself in
+	// SQL, rather than being written into work_item_watcher.user_id as-is.
 	if h.addWatcherCaseID != "55555555-5555-5555-5555-555555555555" || h.addWatcherUserID != "jane.doe@example.com" {
-		t.Errorf("AddCaseWatcherIfAbsent(%q, %q), want (caseID, the case's own CreatedBy)", h.addWatcherCaseID, h.addWatcherUserID)
+		t.Errorf("AddCaseWatcherByEmailIfAbsent(%q, %q), want (caseID, the creator's email)", h.addWatcherCaseID, h.addWatcherUserID)
 	}
 	if !h.setCalled || len(h.setIDs) != 1 || h.setIDs[0] != wlStaffID {
 		t.Errorf("the explicit watchList must still be written: setCalled=%v setIDs=%v", h.setCalled, h.setIDs)

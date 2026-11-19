@@ -1012,7 +1012,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// reassignment is reflected on the very next notification rather than
 	// staying stuck on whoever held the role at creation time.
 	s.addRequestedWatchers(ctx, c.ID, c.CreatedBy, watcherIDs)
-	s.subscribeCreatorToWatchList(ctx, c.ID, c.CreatedBy)
+	s.subscribeSNCreatorToWatchList(ctx, c.ID, c.CreatedBy)
 
 	// SLA-clock registration runs BEFORE the publish below, not after --
 	// this order is load-bearing (see CreateCase's own doc comment on the
@@ -1270,6 +1270,13 @@ func (s *caseService) addRequestedWatchers(ctx context.Context, caseID, callerEm
 // templates a watcher gets at send time (csm-notification-service), not
 // whether the creator is on the watch list at all.
 //
+// creatorUserID must already be a resolved platform user id, the same thing
+// work_item_watcher.user_id itself is (a UUID foreign key to "user"(id)) --
+// never an email. The plain-Postgres create path's c.CreatedBy already is
+// one (req.CreatedBy is resolved to user.ID before the insert); the
+// ServiceNow-mirror path's isn't (see subscribeSNCreatorToWatchList, its own
+// caller) -- do not pass that path's c.CreatedBy here directly.
+//
 // AddCaseWatcherIfAbsent is additive and idempotent, so this never disturbs
 // whatever addRequestedWatchers already wrote from an explicit watchList --
 // in either call order. Best-effort and silent on failure: the case has
@@ -1280,6 +1287,27 @@ func (s *caseService) subscribeCreatorToWatchList(ctx context.Context, caseID, c
 		return
 	}
 	if err := s.repo.AddCaseWatcherIfAbsent(ctx, caseID, creatorUserID); err != nil {
+		slog.ErrorContext(ctx, "create case: subscribe creator to watch list failed", "caseId", caseID, "error", err)
+	}
+}
+
+// subscribeSNCreatorToWatchList is subscribeCreatorToWatchList for
+// createCaseSNFirst, where c.CreatedBy is NOT a resolved platform user id --
+// it's whatever actor string the ServiceNow-side create response names (in
+// practice, an email), forwarded as-is into the VARCHAR work_item.created_by
+// column with no lookup (CreateCaseFromServiceNow), the same value
+// addRequestedWatchers already treats as an email for its own
+// callerEmail/updated_by stamp just above this call site. Binding that
+// straight into work_item_watcher's real UUID user_id column would fail
+// (caught on review), so this goes through CaseRepository.
+// AddCaseWatcherByEmailIfAbsent instead of AddCaseWatcherIfAbsent -- it
+// resolves the email to a platform user id itself, in the same statement,
+// and skips -- never guesses -- when it matches no real user row.
+func (s *caseService) subscribeSNCreatorToWatchList(ctx context.Context, caseID, creatorEmail string) {
+	if creatorEmail == "" {
+		return
+	}
+	if err := s.repo.AddCaseWatcherByEmailIfAbsent(ctx, caseID, creatorEmail); err != nil {
 		slog.ErrorContext(ctx, "create case: subscribe creator to watch list failed", "caseId", caseID, "error", err)
 	}
 }
