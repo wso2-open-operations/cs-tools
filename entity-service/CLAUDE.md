@@ -267,18 +267,27 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
 - **Rows in the catch-all block their month.** Creating a monthly partition fails while rows for that month sit in `csm_audit_log_default`, so `audit_create_partitions` skips that month with a WARNING and `healthProblems` reports the rows. An admin moves them in one transaction (rename first: the old table must not keep the name `csm_audit_log_default`):
 
   ```sql
+  BEGIN;
   SET LOCAL lock_timeout = '5s';
   ALTER TABLE csm_audit_log DETACH PARTITION csm_audit_log_default;
   ALTER TABLE csm_audit_log_default RENAME TO csm_audit_log_default_old;
   CREATE TABLE csm_audit_log_default PARTITION OF csm_audit_log DEFAULT;
   CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_default
       FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
-  SELECT audit_create_partitions(<months>);
+  SELECT audit_create_partitions(<months>);   -- current and coming months only
+  -- Past months: one partition each, explicit UTC bounds, with the TRUNCATE guard.
+  CREATE TABLE csm_audit_log_2026_09 PARTITION OF csm_audit_log
+      FOR VALUES FROM ('2026-09-01 00:00:00+00') TO ('2026-10-01 00:00:00+00');
+  CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_2026_09
+      FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
   INSERT INTO csm_audit_log SELECT * FROM csm_audit_log_default_old;
-  -- check the counts, then: DROP TABLE csm_audit_log_default_old;
+  -- Verify: this must return true, else ROLLBACK (everything above is undone).
+  SELECT count(*) = <rows_before> AS all_rows_moved FROM csm_audit_log;
+  DROP TABLE csm_audit_log_default_old;
+  COMMIT;
   ```
 
-  Rows whose month still has no partition land in the new catch-all; raise the months argument.
+  Take `<rows_before>` from `SELECT count(*) FROM csm_audit_log` just before `BEGIN`. `audit_create_partitions` covers only the current and coming months, so a past month with rows in the catch-all needs its own `CREATE TABLE … PARTITION OF` as above. Rows whose month still has no partition land in the new catch-all.
 
 ### Rules for new code
 
