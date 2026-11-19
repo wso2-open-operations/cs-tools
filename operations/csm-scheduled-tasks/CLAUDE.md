@@ -260,7 +260,9 @@ schedules assume `TZ=UTC` like every other here.
 - **The CRE weekend summary also lists the SRE weekend people** (`Config.Support`,
   `rotareminder.SREWeekendSupport`, set in `main.go` when `ROTA_REMINDER_FAMILY` is CRE): a
   second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
-  ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days. They
+  ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days, and
+  the weekend Day/Night windows that replace them once switched on, `SRE_WE_DAY` ("SRE
+  Weekend (Day)") and `SRE_WE_NIGHT` ("SRE Night (Weekend Night)"), whose groups read the same. They
   are in each day's SRE Team column, each turn in the CRE window whose hours it overlaps most
   (SRE Weekend with LK, SRE Night with Americas; the nearest start when none overlaps): "Kim (L1)"
   (name and the turn's `tier`), one per line, with the rotation's name up to its bracket and its

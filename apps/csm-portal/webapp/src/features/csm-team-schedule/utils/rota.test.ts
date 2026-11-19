@@ -18,8 +18,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { ScheduleAssignment, ScheduleShift } from "../types";
-import { MOE_DAY, MOE_NIGHT, TZ1, TZ1_L1, TZ1_WE, TZ2, TZ2_WE, TZ3, REGULAR, shift as fixtureShift } from "../test/fixtures";
-import { escalationGrid, familiesRun, kindsOfferedOn, monthPieces, moveKindFor, movesOfferedOn, narrowsToOneRota, readerFamily, rotationHostOf, rotasForReader, rosterRange, rotaZoneName, todayClockOptions, utcOffsetMinutes, zoneColumnOf, zoneDisplayName, zoneLabelOn } from "./rota";
+import { MOE_DAY, MOE_NIGHT, TZ1, TZ1_L1, TZ1_WE, TZ2, TZ2_WE, TZ3, REGULAR, WE_DAY, WE_NIGHT, shift as fixtureShift } from "../test/fixtures";
+import { escalationGrid, weekendZoneTitle, familiesRun, kindsOfferedOn, monthPieces, moveKindFor, movesOfferedOn, narrowsToOneRota, readerFamily, rotationHostOf, rotasForReader, rosterRange, rotaZoneName, todayClockOptions, utcOffsetMinutes, zoneColumnOf, zoneDisplayName, zoneLabelOn } from "./rota";
 import {
   dayLabel,
   zoneAbbreviation,
@@ -260,6 +260,17 @@ describe("escalationGrid", () => {
     expect(grid[0].tiers[2].shift?.code).toBe("SRE_WE_TZ1");
   });
 
+  it("puts a Day/Night weekend's tiers on Day and Night, and a weekday's as before", () => {
+    const dayNight = [TZ1, TZ1_L1, TZ2, { ...TZ3, dayScope: "WEEKDAY" as const }, WE_DAY, WE_NIGHT, REGULAR];
+    const sat = escalationGrid(dayNight, "2026-09-26");
+    expect(sat.map((r) => [r.zoneCode, r.label])).toEqual([["TZ1", "Day"], ["TZ3", "Night"]]);
+    expect(sat[0].tiers.map((t) => t.shift?.code)).toEqual(["SRE_WE_DAY", "SRE_WE_DAY", "SRE_WE_DAY"]);
+    expect(sat[1].tiers.map((t) => t.shift?.code)).toEqual(["SRE_WE_NIGHT", "SRE_WE_NIGHT", "SRE_WE_NIGHT"]);
+    const fri = escalationGrid(dayNight, "2026-09-25");
+    expect(fri.map((r) => r.zoneCode)).toEqual(["TZ1", "TZ2", "TZ3"]);
+    expect(fri[2].tiers.map((t) => t.shift?.code)).toEqual(["SRE_TZ3", "SRE_TZ3", "SRE_TZ3"]);
+  });
+
   it("is empty for a group with no escalation windows", () => {
     expect(escalationGrid([REGULAR], "2026-09-23")).toEqual([]);
   });
@@ -273,6 +284,24 @@ describe("zoneLabelOn", () => {
   it("is the zone's own code on a weekday, and for a zone with no weekend window of its own", () => {
     expect(zoneLabelOn([TZ1, WE_TZ12, TZ3], "TZ1", false)).toBe("TZ1");
     expect(zoneLabelOn([TZ1, WE_TZ12, TZ3], "TZ3", true)).toBe("TZ3");
+  });
+  it("names a Day/Night weekend's lanes Day and Night, and leaves the weekdays alone", () => {
+    const dayNight = [TZ1, TZ2, { ...TZ3, dayScope: "WEEKDAY" as const }, WE_DAY, WE_NIGHT];
+    expect(zoneLabelOn(dayNight, "TZ1", true)).toBe("Day");
+    expect(zoneLabelOn(dayNight, "TZ3", true)).toBe("Night");
+    expect(zoneLabelOn(dayNight, "TZ1", false)).toBe("TZ1");
+    expect(zoneLabelOn(dayNight, "TZ3", false)).toBe("TZ3");
+  });
+});
+
+describe("weekendZoneTitle", () => {
+  it("explains TZ1+2, gives a Day/Night window's hours, and is empty for a zone named by its code", () => {
+    const WE_TZ12 = { ...TZ1_WE, shortCode: "TZ1+2" };
+    expect(weekendZoneTitle([TZ1, WE_TZ12, TZ3], "TZ1")).toBe("TZ1+2: TZ1 and TZ2 are one crew at the weekend");
+    expect(weekendZoneTitle([TZ1, WE_TZ12, TZ3], "TZ3")).toBeUndefined();
+    const dayNight = [TZ1, { ...TZ3, dayScope: "WEEKDAY" as const }, WE_DAY, WE_NIGHT];
+    expect(weekendZoneTitle(dayNight, "TZ1")).toBe("Day: Weekend Day, 06:00–18:00");
+    expect(weekendZoneTitle(dayNight, "TZ3")).toBe("Night: Weekend Night, 18:00–06:00");
   });
 });
 

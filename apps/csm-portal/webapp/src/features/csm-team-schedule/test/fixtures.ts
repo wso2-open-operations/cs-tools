@@ -167,6 +167,36 @@ export const TZ2_WE = shift({
   sortOrder: 60,
 });
 
+/** SaaS SRE's weekend once it is Day/Night (migration 0306, switched on):
+ *  the Day in TZ1 and the Night in TZ3, each leaving the tier open, with TZ3
+ *  then weekday-only. SRE_WE_TZ1 (TZ1_WE above) stays for history. */
+export const WE_DAY = shift({
+  code: "SRE_WE_DAY",
+  shortCode: "Day",
+  label: "Weekend Day",
+  family: "SRE",
+  zoneCode: "TZ1",
+  dayScope: "WEEKEND",
+  startMinute: 360,
+  endMinute: 1080,
+  isEscalation: true,
+  sortOrder: 161,
+});
+export const WE_NIGHT = shift({
+  code: "SRE_WE_NIGHT",
+  shortCode: "Night",
+  label: "Weekend Night",
+  family: "SRE",
+  zoneCode: "TZ3",
+  dayScope: "WEEKEND",
+  startMinute: 1080,
+  endMinute: 1800,
+  crossesMidnight: true,
+  isEscalation: true,
+  sharedAcrossTeams: true,
+  sortOrder: 162,
+});
+
 export function shiftMap(...list: ScheduleShift[]): Map<string, ScheduleShift> {
   return new Map(list.map((s) => [s.code, s]));
 }

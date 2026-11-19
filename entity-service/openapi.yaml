@@ -33991,7 +33991,7 @@ components:
               tier:
                 type: string
                 enum: [L1, L2, L3]
-                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
+                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, SRE_WE_DAY and SRE_WE_NIGHT, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
               from: {type: string, format: date, description: Inside the period.}
               to: {type: string, format: date, description: Inside the period.}
               note: {type: string}
