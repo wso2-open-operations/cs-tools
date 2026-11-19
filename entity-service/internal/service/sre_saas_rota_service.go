@@ -130,7 +130,7 @@ func (s *rotaGenerateService) GenerateMonth(ctx context.Context, req domain.Gene
 	if err != nil {
 		return out, err
 	}
-	windows, err := saasShiftWindows(cat)
+	windows, dayNight, err := saasShiftWindows(cat)
 	if err != nil {
 		return out, err
 	}
@@ -299,7 +299,8 @@ func (s *rotaGenerateService) GenerateMonth(ctx context.Context, req domain.Gene
 	plan := generateSRESaaSRota(saasRotaInput{
 		Month: monthStart, From: from, Members: members,
 		Unavailable: unavailable, NightOn: nightOn, Pinned: pinned, NightCrew: crew, Windows: windows,
-		NightTeam: nightTeam,
+		WeekendDayNight: dayNight,
+		NightTeam:       nightTeam,
 	})
 
 	// A slot a lead filled by hand, or a turn that would overlap one the
@@ -510,18 +511,32 @@ func saasRotaTeams(cat domain.ScheduleCatalogue) ([]string, []saasRotaMember) {
 }
 
 // saasShiftWindows reads the SaaS shifts' windows from the catalogue, and
-// refuses to work against one that lacks any of them.
-func saasShiftWindows(cat domain.ScheduleCatalogue) (map[string][2]int, error) {
+// refuses to work against one that lacks any of them. dayNight is the weekend
+// shape the catalogue offers: Day/Night when both SRE_WE_DAY and SRE_WE_NIGHT
+// are in it (the catalogue serves only active windows, so that is once they
+// are switched on), else TZ1+2 / TZ3 on SRE_WE_TZ1. A catalogue with neither
+// weekend shape is refused.
+func saasShiftWindows(cat domain.ScheduleCatalogue) (windows map[string][2]int, dayNight bool, err error) {
 	out := map[string][2]int{}
 	for _, sh := range cat.Shifts {
 		out[sh.Code] = [2]int{sh.StartMinute, sh.EndMinute}
 	}
 	for _, code := range saasRotaShiftCodes {
 		if _, ok := out[code]; !ok {
-			return nil, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf("the catalogue has no %s shift", code)}
+			return nil, false, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf("the catalogue has no %s shift", code)}
 		}
 	}
-	return out, nil
+	_, day := out[saasShiftWeekendDay]
+	_, night := out[saasShiftWeekendNight]
+	if day && night {
+		return out, true, nil
+	}
+	if _, ok := out[saasShiftWeekend]; ok {
+		return out, false, nil
+	}
+	return nil, false, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf(
+		"the catalogue has no weekend shifts: neither %s nor both %s and %s",
+		saasShiftWeekend, saasShiftWeekendDay, saasShiftWeekendNight)}
 }
 
 func hasAbsenceKind(cat domain.ScheduleCatalogue, code string) bool {
@@ -543,7 +558,10 @@ func saasWrittenShiftCodes() []string {
 }
 
 func saasTurnShiftCodes() []string {
-	return []string{saasShiftTZ1L1, saasShiftTZ1, saasShiftTZ2L1, saasShiftTZ2, saasShiftTZ3, saasShiftWeekend}
+	// Both weekend shapes: a regeneration after the switch to Day/Night must
+	// clear the month's old SRE_WE_TZ1 and weekend SRE_TZ3 turns as well.
+	return []string{saasShiftTZ1L1, saasShiftTZ1, saasShiftTZ2L1, saasShiftTZ2, saasShiftTZ3,
+		saasShiftWeekend, saasShiftWeekendDay, saasShiftWeekendNight}
 }
 
 func saasRegularShiftCodes() []string {
@@ -683,7 +701,7 @@ func saasClashesWithHand(t saasPlannedTurn, byHand []domain.ScheduleAssignment, 
 		if a.Tier != nil {
 			tier = *a.Tier
 		}
-		sameSlot := a.TeamKey == t.TeamKey || t.ShiftCode == saasShiftTZ3
+		sameSlot := a.TeamKey == t.TeamKey || saasSharedShift(t.ShiftCode)
 		if sameSlot && a.ShiftCode == t.ShiftCode && tier == t.Tier {
 			return true
 		}

@@ -32,7 +32,7 @@ import type {
   RotaFamily,
   SchedulePublicHoliday,
 } from "../types";
-import { addDays, initialsOf, isRotationShift, kindsOfferedOn, mondayOf, movesOfferedOn, toIsoDate, zoneColumnOf, zoneLabelOn, type RosterSpan } from "../utils/rota";
+import { addDays, initialsOf, isRotationShift, kindsOfferedOn, mondayOf, movesOfferedOn, toIsoDate, weekendZoneTitle, zoneColumnOf, zoneLabelOn, type RosterSpan } from "../utils/rota";
 import {
   ENGAGEMENTS_FAILED_NOTE,
   ENGAGEMENT_MARK_LEGEND_ITEM,
@@ -1709,7 +1709,9 @@ export default function MonthRoster({
 
             {/* The zone row. A weekend has two columns rather than three
                 because TZ1 and TZ2 are one crew at the weekend ("TZ1+2") and
-                TZ3 is as it is -- the catalogue says so, and this follows it. */}
+                TZ3 is as it is -- or, once the weekend is Day/Night, the Day
+                (in TZ1) and the Night (in TZ3). The catalogue says so, and
+                this follows it. */}
             {split ? (
               <tr className="zrow">
                 {days.map((d) => {
@@ -1722,9 +1724,10 @@ export default function MonthRoster({
                         i === 0 && opensMonth(d) ? " mstart" : ""
                       }${toIsoDate(d) === todayIso ? " today" : ""}${toIsoDate(d) === selectedIso ? " sel" : ""}`}
                       scope="col"
-                      title={zoneLabelOn(shifts, z, weekend) === zoneLabelOn(shifts, z, false) ? undefined : `${zoneLabelOn(shifts, z, weekend)}: TZ1 and TZ2 are one crew at the weekend`}
+                      title={weekend ? weekendZoneTitle(shifts, z) : undefined}
                     >
-                      {/* "TZ1+2" at the weekend, when TZ1 and TZ2 are one crew. */}
+                      {/* "TZ1+2" at the weekend, when TZ1 and TZ2 are one crew;
+                          "Day" / "Night" once SaaS SRE's weekend is Day/Night. */}
                       {zoneLabelOn(shifts, z, weekend)}
                     </th>
                   ));
