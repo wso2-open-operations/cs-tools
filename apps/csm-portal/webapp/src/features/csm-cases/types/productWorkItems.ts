@@ -111,7 +111,7 @@ export interface ProductIssueComment {
   githubCommentId?: number | null;
   authorLogin?: string | null;
   /** Portal-origin comments only: whether GitHub has it yet. null for a GitHub comment. */
-  delivery?: "PENDING" | "DELIVERED" | "FAILED" | null;
+  delivery?: "PENDING" | "DELIVERED" | "FAILED" | "CANCELLED" | null;
   commandId?: string | null;
 }
 

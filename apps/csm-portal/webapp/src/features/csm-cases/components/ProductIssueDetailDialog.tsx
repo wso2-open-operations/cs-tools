@@ -92,12 +92,12 @@ export function ProductIssueDetailDialog({
    * comment's own flag, which only refreshes with the next detail fetch. */
   const deliveryOf = (
     comment: ProductIssueComment,
-  ): { status: "PENDING" | "FAILED" | null; command?: ProductGitHubCommand } => {
+  ): { status: "PENDING" | "FAILED" | "CANCELLED" | null; command?: ProductGitHubCommand } => {
     const command = commands.find(
       (c) => c.id === comment.commandId || (c.commentId && c.commentId === comment.id),
     );
     const status = command?.status ?? comment.delivery;
-    return status === "PENDING" || status === "FAILED" ? { status, command } : { status: null };
+    return status === "PENDING" || status === "FAILED" || status === "CANCELLED" ? { status, command } : { status: null };
   };
 
   return (
@@ -228,6 +228,16 @@ export function ProductIssueDetailDialog({
                     </Typography>
                     {delivery.status === "PENDING" && (
                       <Chip size="small" variant="outlined" label="Pending" sx={{ alignSelf: "flex-start" }} />
+                    )}
+                    {delivery.status === "CANCELLED" && (
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                        <Chip size="small" variant="outlined" color="warning" label="Not sent" />
+                        {delivery.command?.lastError && (
+                          <Typography variant="caption" color="text.secondary">
+                            {delivery.command.lastError}
+                          </Typography>
+                        )}
+                      </Box>
                     )}
                     {delivery.status === "FAILED" && (
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>

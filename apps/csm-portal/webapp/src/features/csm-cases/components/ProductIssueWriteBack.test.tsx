@@ -301,6 +301,53 @@ describe("product issue write-back", () => {
     });
   });
 
+  describe("cancelled comments", () => {
+    const comment = (over: Record<string, unknown> = {}) => ({
+      id: "cm-1",
+      author: "Me",
+      body: "never sent",
+      createdOn: "2026-01-02T00:00:00Z",
+      origin: "PORTAL",
+      commandId: "cmd-c",
+      ...over,
+    });
+    const cancelled = cmd({
+      id: "cmd-c",
+      kind: "ADD_COMMENT",
+      status: "CANCELLED",
+      lastError: "the GitHub issue is no longer linked",
+    });
+
+    it("shows Not sent with the reason and no Retry", async () => {
+      getMock.mockResolvedValue(
+        detail({ conversation: [comment({ delivery: "CANCELLED" })], commands: [cancelled] }),
+      );
+      renderDialog();
+      await loaded();
+      expect(screen.getByText("Not sent")).toBeInTheDocument();
+      expect(screen.getByText("the GitHub issue is no longer linked")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      expect(screen.queryByText("Failed")).toBeNull();
+    });
+
+    it("derives Not sent from the command when delivery is absent", async () => {
+      getMock.mockResolvedValue(
+        detail({ conversation: [comment({ delivery: null })], commands: [cancelled] }),
+      );
+      renderDialog();
+      await loaded();
+      expect(screen.getByText("Not sent")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    });
+
+    it("shows Not sent from the comment alone when its command is not listed", async () => {
+      getMock.mockResolvedValue(detail({ conversation: [comment({ delivery: "CANCELLED" })] }));
+      renderDialog();
+      await loaded();
+      expect(screen.getByText("Not sent")).toBeInTheDocument();
+    });
+  });
+
   describe("failed commands", () => {
     it("shows the error and retries the failed move", async () => {
       getMock.mockResolvedValue(
