@@ -15,33 +15,41 @@
 // under the License.
 
 /**
- * The "optional" columns `IncidentsTab` can render between Priority and
- * Opened — everything a user can add, remove, or reorder via
- * `ColumnCustomizerButton`. Number, Subject, Caller, State, Priority,
- * Opened, and Updated are never optional (the table's original fixed set,
- * unaffected by this feature).
+ * Every column `IncidentsTab` can render, in the default left-to-right
+ * order. All of them can be hidden, shown or reordered through
+ * `ColumnCustomizerButton` (at least one always stays), so a user can show
+ * only what they need -- the original seven (Number, Subject, Caller,
+ * State, Priority, Opened, Updated) are the default set, not a fixed one.
  *
  * Every one of these was already present on `BeIncident` (the
- * `/incidents/search` response) but not rendered anywhere — `category`,
- * `assignmentGroup`, and `assignedTo` are already proven-renderable via
- * `IncidentPreviewDrawer`; `parent`, `createdBy`, and `updatedBy` get the
- * same treatment here for the first time. Fields deliberately left off:
- * - `id` — a raw id, never human-facing.
- * - `createdOn` vs `openedOn`/`updatedOn` — `openedOn`/`updatedOn` are
- *   already fixed columns; `createdOn` is still offered separately below
- *   since ServiceNow's record-creation timestamp and its own "opened at"
- *   can genuinely differ, same reasoning as `CsmCaseRow.createdAt`.
+ * `/incidents/search` response). Fields deliberately left off:
+ * - `id` -- a raw id, never human-facing.
+ * - `createdOn` is offered separately from `openedOn`: the record-creation
+ *   timestamp and the incident's own "opened at" can genuinely differ, same
+ *   reasoning as `CsmCaseRow.createdAt`.
  */
-export type IncidentOptionalColumnId =
+export type IncidentColumnId =
+  | "number"
+  | "subject"
+  | "caller"
+  | "state"
+  | "priority"
   | "category"
   | "assignmentGroup"
   | "assignedTo"
   | "parent"
   | "createdBy"
   | "updatedBy"
-  | "createdOn";
+  | "createdOn"
+  | "openedOn"
+  | "updatedOn";
 
-export const INCIDENT_OPTIONAL_COLUMNS: Record<IncidentOptionalColumnId, { label: string }> = {
+export const INCIDENT_COLUMNS: Record<IncidentColumnId, { label: string }> = {
+  number: { label: "Number" },
+  subject: { label: "Subject" },
+  caller: { label: "Caller" },
+  state: { label: "State" },
+  priority: { label: "Priority" },
   category: { label: "Category" },
   assignmentGroup: { label: "Assignment group" },
   assignedTo: { label: "Assigned to" },
@@ -49,9 +57,22 @@ export const INCIDENT_OPTIONAL_COLUMNS: Record<IncidentOptionalColumnId, { label
   createdBy: { label: "Created by" },
   updatedBy: { label: "Updated by" },
   createdOn: { label: "Created" },
+  openedOn: { label: "Opened" },
+  updatedOn: { label: "Updated" },
 };
 
-/** None of these existed as columns before this feature — the default
- * visible set is empty, so a returning user sees the exact same table until
- * they open the picker themselves. */
-export const DEFAULT_VISIBLE_INCIDENT_COLUMNS: IncidentOptionalColumnId[] = [];
+/** The table's original seven columns: what a user sees until they open the picker. */
+export const DEFAULT_VISIBLE_INCIDENT_COLUMNS: IncidentColumnId[] = [
+  "number",
+  "subject",
+  "caller",
+  "state",
+  "priority",
+  "openedOn",
+  "updatedOn",
+];
+
+/** The saved column choice's own key. A new one (not the earlier "incidents"
+ * view id) because that saved only the optional columns: read as this full
+ * list, it would leave the defaults after them in the wrong order. */
+export const INCIDENT_COLUMNS_VIEW_ID = "incidents-columns";
