@@ -178,9 +178,19 @@ function renderCell(id: IncidentColumnId, incident: BeIncident): JSX.Element {
   }
 }
 
-/** The plain-text value of one optional column for the CSV export, mirroring `renderOptionalCell`; empty when the value is missing. */
-function optionalCellText(id: IncidentOptionalColumnId, incident: BeIncident): string {
+/** The plain-text value of one column for the CSV export, mirroring `renderCell`; empty when the value is missing. */
+function cellText(id: IncidentColumnId, incident: BeIncident): string {
   switch (id) {
+    case "number":
+      return incident.number ?? "";
+    case "subject":
+      return incident.subject ?? "";
+    case "caller":
+      return incident.caller?.name ?? "";
+    case "state":
+      return incidentStateLabel(incident.state);
+    case "priority":
+      return incidentPriorityLabel(incident.priority);
     case "category":
       return incident.category ?? "";
     case "assignmentGroup":
@@ -199,6 +209,10 @@ function optionalCellText(id: IncidentOptionalColumnId, incident: BeIncident): s
         month: "short",
         day: "numeric",
       }) ?? "";
+    case "openedOn":
+      return formatDate(incident.openedOn);
+    case "updatedOn":
+      return formatDate(incident.updatedOn);
   }
 }
 
@@ -397,19 +411,10 @@ export default function IncidentsTab(): JSX.Element {
     [api, payload.filters, payload.sortBy],
   );
 
+  // The export follows the columns picked in "Customise incident columns", in the order shown.
   const incidentToCsvRow = useCallback(
-    (incident: BeIncident): string[] => [
-      incident.number ?? "",
-      incident.subject ?? "",
-      incident.caller?.name ?? "",
-      incidentStateLabel(incident.state),
-      incidentPriorityLabel(incident.priority),
-      formatDate(incident.openedOn),
-      formatDate(incident.updatedOn),
-      // The columns picked in "Customise incident columns", in the order shown.
-      ...visibleOptionalColumns.map((id) => optionalCellText(id, incident)),
-    ],
-    [visibleOptionalColumns],
+    (incident: BeIncident): string[] => visibleColumns.map((id) => cellText(id, incident)),
+    [visibleColumns],
   );
 
   return (
@@ -424,16 +429,7 @@ export default function IncidentsTab(): JSX.Element {
         <FilteredExportMenu<BeIncident>
           entityName="incidents"
           title="Incidents"
-          header={[
-            "Number",
-            "Subject",
-            "Caller",
-            "State",
-            "Priority",
-            "Opened",
-            "Updated",
-            ...visibleOptionalColumns.map((id) => INCIDENT_OPTIONAL_COLUMNS[id].label),
-          ]}
+          header={visibleColumns.map((id) => INCIDENT_COLUMNS[id].label)}
           toRow={incidentToCsvRow}
           fetchPage={fetchIncidentsPage}
           disabled={isError}
