@@ -330,6 +330,11 @@ const (
 	// time card approver) while who may see totals per user is still to be
 	// decided; a separate permission so that decision changes one line here.
 	PermViewTimeCardTotals
+	// PermViewProductIssueDashboard is GET /product-work-items/dashboard: the
+	// product issue dashboard (internal GitHub issues linked to support
+	// cases, aggregated per product). Held ONLY by the cs_lead role and admin.
+	// It grants no read access: cs_lead does not imply PermView.
+	PermViewProductIssueDashboard
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -393,6 +398,12 @@ type AccessConfig struct {
 	// onboarding_lead, an unset variable is not a lockout: admin already holds
 	// PermManageProductCatalog regardless.
 	ProductCatalogManager []string
+	// CsLead grants PermViewProductIssueDashboard (see that permission's own
+	// doc comment) -- the product issue dashboard -- and nothing else: no read
+	// access and no write. Like product_catalog_manager, an unset variable is
+	// not a lockout: admin already holds PermViewProductIssueDashboard
+	// regardless.
+	CsLead []string
 	// SecurityTeam grants PermView, PermViewOperations,
 	// PermViewSecurityCenter and PermViewSecurityReportCases -- the
 	// dedicated role for security-team staff who need to see the Operations
@@ -492,7 +503,9 @@ type portalRole struct {
 // PermManageOnboarding and the PermUpdateProject route floor -- no View, no
 // PermWrite -- and admin alone also holds PermManageOnboarding; cs_engineer
 // deliberately does not. product_catalog_manager is the same shape: it implies
-// only PermManageProductCatalog, which admin alone also holds.
+// only PermManageProductCatalog, which admin alone also holds. cs_lead is the
+// same shape: it implies only PermViewProductIssueDashboard (not PermView),
+// which admin alone also holds.
 func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 	build := func(lists ...[]string) map[string]struct{} {
 		set := make(map[string]struct{})
@@ -519,6 +532,7 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			{key: "comment_updater", names: build(cfg.CommentUpdater)},
 			{key: "onboarding_lead", names: build(cfg.OnboardingLead)},
 			{key: "product_catalog_manager", names: build(cfg.ProductCatalogManager)},
+			{key: "cs_lead", names: build(cfg.CsLead)},
 			{key: "security_team", names: build(cfg.SecurityTeam)},
 		},
 		allowed: map[Permission]map[string]struct{}{
@@ -593,6 +607,9 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// own doc comment.
 			PermManageProductCatalog: build(cfg.ProductCatalogManager, cfg.Admin),
 			PermViewTimeCardTotals:   build(cfg.CsEngineer, cfg.Admin),
+			// cs_lead and admin only. See PermViewProductIssueDashboard's own
+			// doc comment.
+			PermViewProductIssueDashboard: build(cfg.CsLead, cfg.Admin),
 		},
 	}
 }

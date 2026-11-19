@@ -100,6 +100,32 @@ func TestLoadDir_HappyPath(t *testing.T) {
 	}
 }
 
+func TestLoadDir_AcceptsProductIssueWidgets(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "pi.json", `{
+  "id": "product-issues", "displayName": "Product Issues", "type": "cs",
+  "widgets": [
+    {"id": "open", "displayName": "Open", "resourceType": "product_issue", "shape": "count", "gridWidth": 3, "query": {}},
+    {"id": "recent", "displayName": "Recent", "resourceType": "product_issue", "shape": "list", "gridWidth": 9, "listLimit": 5, "query": {}}
+  ]
+}`)
+	got, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Widgets) != 2 {
+		t.Fatalf("got %+v, want one dashboard with 2 widgets", got)
+	}
+	for _, w := range got[0].Widgets {
+		if w.ResourceType != ResourceProductIssue {
+			t.Errorf("widget %q resourceType = %q, want %q", w.ID, w.ResourceType, ResourceProductIssue)
+		}
+	}
+	if _, ok := generatedResourceRules[ResourceProductIssue]; ok {
+		t.Error("product_issue must not be in generatedResourceRules")
+	}
+}
+
 func TestLoadDir_EmptyDirectory(t *testing.T) {
 	got, err := LoadDir(t.TempDir())
 	if err != nil {
@@ -858,6 +884,18 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "incident", "shape": "line", "gridWidth": 6,
 			 "query": {}}`,
 			want: `widget "w": shape "line" only supports resourceType "case" or "plg_registration", got "incident"`,
+		},
+		{
+			name: "line widget on product issues",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "product_issue", "shape": "line", "gridWidth": 6,
+			 "query": {}}`,
+			want: `widget "w": shape "line" only supports resourceType "case" or "plg_registration", got "product_issue"`,
+		},
+		{
+			name: "groupBy pie on product issues",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "product_issue", "shape": "pie", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "boardStatus"}}`,
+			want: `widget "w": resourceType "product_issue" does not support "groupBy"; use "slices"`,
 		},
 		{
 			name: "line widget on PLG organisations",

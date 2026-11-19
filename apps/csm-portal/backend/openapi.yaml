@@ -7587,6 +7587,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /product-work-items/dashboard:
+    get:
+      summary: Product issue dashboard (cs_lead and admin).
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). Needs the `cs_lead` or `admin` role (`cs_lead` grants nothing else, not even viewing); anyone else gets 403. The entity service re-checks that the caller is internal.
+
+        Forwards only `from`, `to`, `bucket` and `products` to the entity service and returns its aggregate as is: totals, a per-bucket trend, per-product counts, waiting-on-CS ageing, cases blocked by open product issues, and the breached open issues. Counts are over the filtered products; the open and waiting counts are as of the time of the call, while the opened, resolved and SLA outcome counts and the trend use the period. Not cached.
+      operationId: getProductIssueDashboard
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Period start, `YYYY-MM-DD`. Defaults to the Monday 12 weeks before the Monday of the current week (Asia/Kolkata).
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Period end (exclusive), `YYYY-MM-DD`. Must be after `from`; the range is at most 400 days. Defaults to tomorrow (Asia/Kolkata).
+          schema:
+            type: string
+            format: date
+        - name: bucket
+          in: query
+          required: false
+          description: Trend bucket size; weeks start on Monday. Defaults to `week`.
+          schema:
+            type: string
+            enum: [week, month]
+        - name: products
+          in: query
+          required: false
+          description: Comma-separated product names (case-insensitive); the literal `Unmapped` selects issues with no product. Empty means all.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The dashboard, as the entity service built it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: An invalid `from`, `to`, `bucket` or `products` value; the message names it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (needs the `cs_lead` or `admin` role, and an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /product-work-items/{id}/comments:
     post:
       summary: Add a portal comment to a product issue.
@@ -26309,6 +26385,7 @@ components:
             - case_feedback
             - plg_organization
             - plg_registration
+            - product_issue
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
@@ -26325,7 +26402,11 @@ components:
             searched with POST /plg/organizations/search, which only PLG
             users may call. plg_registration is PLG registrations (one per
             organisation and product), searched with POST
-            /plg/registrations/search, PLG users only as well.
+            /plg/registrations/search, PLG users only as well. product_issue
+            is product issues (internal GitHub issues linked to support
+            cases), searched with POST /product-work-items/search; only the
+            count and list shapes apply, and it is not offered to generated
+            dashboards.
         shape:
           type: string
           enum:
@@ -27380,7 +27461,7 @@ components:
           type: array
           items:
             type: string
-            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, product_catalog_manager, admin]
+            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, product_catalog_manager, cs_lead, admin]
           description: >
             The portal roles the caller holds, decided from the roles on their token. A caller can
             hold several. Always present; empty when they hold none. This is not the entity

@@ -78,6 +78,12 @@ const (
 	// /plg/organizations/search. Only PLG users (handler.PermUsePlg) can read
 	// it, so the webapp shows a no-access tile to anyone else.
 	ResourcePlgOrganization ResourceType = "plg_organization"
+	// ResourceProductIssue identifies a widget whose data is product issues
+	// (internal GitHub issues linked to support cases), searched with POST
+	// /product-work-items/search (handler.PermView). Authored by hand only: it
+	// is deliberately not in generatedResourceRules, so no AI-generated
+	// dashboard can use it. Only the count and list shapes are meaningful here.
+	ResourceProductIssue ResourceType = "product_issue"
 	// ResourcePlgRegistration identifies a widget whose data is PLG
 	// registrations, one per organisation and product, searched with
 	// POST /plg/registrations/search. PLG users only, like

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -251,6 +252,9 @@ func (m *mockProductWorkItemClient) GetProductWorkItem(_ context.Context, id str
 }
 func (m *mockProductWorkItemClient) SearchProductWorkItems(_ context.Context, b []byte) ([]byte, error) {
 	return m.rec("search " + string(b))
+}
+func (m *mockProductWorkItemClient) GetProductIssueDashboard(_ context.Context, q url.Values) ([]byte, error) {
+	return m.rec("dashboard " + q.Encode())
 }
 func (m *mockProductWorkItemClient) LinkCaseProductWorkItem(_ context.Context, c string, b []byte) ([]byte, error) {
 	return m.rec("link " + c + " " + string(b))
@@ -568,5 +572,87 @@ func TestProductWorkItemWriteBack(t *testing.T) {
 				t.Errorf("upstream calls = %v, want exactly the engineer's", m.calls)
 			}
 		})
+	}
+}
+
+func TestGetProductIssueDashboard(t *testing.T) {
+	serve := func(m *mockProductWorkItemClient, rawQuery string, user bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/product-work-items/dashboard?"+rawQuery, nil)
+		if user {
+			r = withUser(r)
+		}
+		w := httptest.NewRecorder()
+		NewProductWorkItemHandler(m).GetProductIssueDashboard(w, r)
+		return w
+	}
+	t.Run("forwards exactly from, to, bucket and products", func(t *testing.T) {
+		m := &mockProductWorkItemClient{resp: []byte(`{"totals":{}}`)}
+		w := serve(m, "from=2026-01-05&to=2026-03-01&bucket=month&products=API+Manager%2CUnmapped&extra=1&caseId=x&from=2020-01-01", true)
+		assertStatus(t, w, http.StatusOK)
+		if w.Body.String() != `{"totals":{}}` {
+			t.Errorf("body = %q", w.Body.String())
+		}
+		want := "dashboard bucket=month&from=2026-01-05&products=API+Manager%2CUnmapped&to=2026-03-01"
+		if len(m.calls) != 1 || m.calls[0] != want {
+			t.Errorf("calls = %v, want %q", m.calls, want)
+		}
+	})
+	t.Run("no parameters forwards none", func(t *testing.T) {
+		m := &mockProductWorkItemClient{resp: []byte(`{}`)}
+		assertStatus(t, serve(m, "other=1", true), http.StatusOK)
+		if len(m.calls) != 1 || m.calls[0] != "dashboard " {
+			t.Errorf("calls = %v", m.calls)
+		}
+	})
+	t.Run("requires a user", func(t *testing.T) {
+		m := &mockProductWorkItemClient{}
+		assertStatus(t, serve(m, "", false), http.StatusUnauthorized)
+		if len(m.calls) != 0 {
+			t.Error("upstream called")
+		}
+	})
+	t.Run("400 passes through with the upstream reason", func(t *testing.T) {
+		m := &mockProductWorkItemClient{err: &apierror.Error{StatusCode: 400, Body: `{"message":"to must be after from."}`}}
+		w := serve(m, "from=2026-03-01&to=2026-01-01", true)
+		assertStatus(t, w, http.StatusBadRequest)
+		if got := decodeJSON[map[string]any](t, w)["message"]; got != "to must be after from." {
+			t.Errorf("message = %v", got)
+		}
+	})
+	t.Run("other upstream failures use the generic mapping", func(t *testing.T) {
+		for upstream, want := range map[int]int{401: 401, 403: 403, 404: 404, 500: 500, 502: 503, 503: 503} {
+			m := &mockProductWorkItemClient{err: &apierror.Error{StatusCode: upstream, Body: `{"message":"internal detail"}`}}
+			w := serve(m, "", true)
+			assertStatus(t, w, want)
+			if strings.Contains(w.Body.String(), "internal detail") {
+				t.Errorf("upstream %d leaked its body: %s", upstream, w.Body.String())
+			}
+		}
+		m := &mockProductWorkItemClient{err: errors.New("boom")}
+		assertStatus(t, serve(m, "", true), http.StatusInternalServerError)
+	})
+}
+
+// TestGetProductIssueDashboard_AccessGuard: through the guard, only cs_lead and
+// admin reach the handler; a viewer or cs_engineer gets 403 and no upstream call.
+func TestGetProductIssueDashboard_AccessGuard(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	for roles, want := range map[string]int{
+		"test-cs-lead":     http.StatusOK,
+		"test-admin":       http.StatusOK,
+		"test-viewer":      http.StatusForbidden,
+		"test-cs-engineer": http.StatusForbidden,
+		"unrelated-role":   http.StatusForbidden,
+	} {
+		m := &mockProductWorkItemClient{resp: []byte(`{}`)}
+		h := g.Require(PermViewProductIssueDashboard, NewProductWorkItemHandler(m).GetProductIssueDashboard)
+		r := httptest.NewRequest("GET", "/product-work-items/dashboard", nil)
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "a@example.com", UserID: "u1", Roles: []string{roles}}))
+		w := httptest.NewRecorder()
+		h(w, r)
+		assertStatus(t, w, want)
+		if (want == http.StatusOK) != (len(m.calls) == 1) {
+			t.Errorf("%s: upstream calls = %v", roles, m.calls)
+		}
 	}
 }

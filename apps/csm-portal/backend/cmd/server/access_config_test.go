@@ -27,7 +27,7 @@ func TestLoadAccessConfig(t *testing.T) {
 		"AUTH_ATTACHMENT_DOWNLOADER_ROLES", "AUTH_USAGE_METRICS_VIEWER_ROLES",
 		"AUTH_SUPPORT_ENGINEER_ROLES", "AUTH_ADMIN_ROLES", "AUTH_TIMECARD_APPROVER_ROLES",
 		"AUTH_DASHBOARD_DESIGNER_ROLES", "AUTH_ANNOUNCEMENT_CREATOR_ROLES", "AUTH_SECURITY_TEAM_ROLES", "AUTH_ONBOARDING_LEAD_ROLES",
-		"AUTH_PRODUCT_CATALOG_MANAGER_ROLES",
+		"AUTH_PRODUCT_CATALOG_MANAGER_ROLES", "AUTH_CS_LEAD_ROLES",
 	}
 	resetEnv := func(t *testing.T) {
 		for _, name := range envs {
@@ -97,6 +97,19 @@ func TestLoadAccessConfig(t *testing.T) {
 		t.Setenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES", "")
 		if got := loadAccessConfig().ProductCatalogManager; len(got) != 0 {
 			t.Errorf("ProductCatalogManager = %v, want empty when unset", got)
+		}
+	})
+
+	t.Run("the cs lead role reads its own variable and is optional", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("AUTH_CS_LEAD_ROLES", " test-cs-leads , test-leads ")
+		got := loadAccessConfig()
+		if want := []string{"test-cs-leads", "test-leads"}; !slices.Equal(got.CsLead, want) {
+			t.Errorf("CsLead = %v, want %v", got.CsLead, want)
+		}
+		t.Setenv("AUTH_CS_LEAD_ROLES", "")
+		if got := loadAccessConfig().CsLead; len(got) != 0 {
+			t.Errorf("CsLead = %v, want empty when unset", got)
 		}
 	})
 

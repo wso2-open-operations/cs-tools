@@ -853,6 +853,18 @@ func (c *CustomerEntityClient) SearchProductWorkItems(ctx context.Context, body 
 	return c.do(ctx, http.MethodPost, "/product-work-items/search", body)
 }
 
+// GetProductIssueDashboard calls GET /product-work-items/dashboard on the
+// entity service (registered there only when its GIT_INTERNALS_ENABLED is on).
+// query holds the already-validated-by-name parameters (from, to, bucket,
+// products); a nil or empty one sends none. Response is returned as raw JSON.
+func (c *CustomerEntityClient) GetProductIssueDashboard(ctx context.Context, query url.Values) ([]byte, error) {
+	path := "/product-work-items/dashboard"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	return c.do(ctx, http.MethodGet, path, nil)
+}
+
 // LinkCaseProductWorkItem calls POST /cases/{id}/product-work-items/links on the
 // entity service. Response is returned as raw JSON.
 func (c *CustomerEntityClient) LinkCaseProductWorkItem(ctx context.Context, caseID string, body []byte) ([]byte, error) {

@@ -47,6 +47,7 @@ func testAccessConfig() AccessConfig {
 		CommentUpdater:        []string{"test-comment-updater"},
 		OnboardingLead:        []string{"test-onboarding-lead"},
 		ProductCatalogManager: []string{"test-product-catalog-manager"},
+		CsLead:                []string{"test-cs-lead"},
 		SecurityTeam:          []string{"test-security-team"},
 	}
 }
@@ -76,7 +77,7 @@ func TestAccessGuard_PermissionMatrix(t *testing.T) {
 	// separately below -- approving a time card is a dedicated responsibility
 	// cs_engineer does not share, the same way PermAdmin isn't.
 	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg, PermViewCustomerHealth, PermViewTimeCardTotals}
-	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermManagePlaybooks, PermCreateAnnouncement)
+	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermManagePlaybooks, PermCreateAnnouncement, PermViewProductIssueDashboard)
 	tests := []struct {
 		name  string
 		roles []string
@@ -94,6 +95,7 @@ func TestAccessGuard_PermissionMatrix(t *testing.T) {
 		{"dashboard designer can view only", []string{"test-dashboard-designer"}, []Permission{PermView}},
 		{"sales solutions role alone grants none of these -- it holds PermViewSharedEntity/PermViewerAccess instead, tested separately", []string{"test-sales-solutions"}, nil},
 		{"security team can view, view operations, and view security center -- but no write/escalate/approve permission of any kind", []string{"test-security-team"}, []Permission{PermView, PermViewOperations, PermViewSecurityCenter}},
+		{"cs lead alone holds only the product issue dashboard -- not even view", []string{"test-cs-lead"}, []Permission{PermViewProductIssueDashboard}},
 		{"roles combine", []string{"test-viewer", "test-escalator", "test-attachment-downloader"}, []Permission{PermView, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermViewCustomerHealth}},
 		{"unrelated roles grant nothing", []string{"wso2-everyone", "admin", "agent", "customer"}, nil},
 		{"no roles", nil, nil},
@@ -230,8 +232,8 @@ func TestAccessGuard_RolesFor(t *testing.T) {
 			"test-viewer", "test-escalator", "test-attachment-downloader",
 			"test-cs-engineer", "test-usage-metrics-viewer", "test-timecard-approver",
 			"test-dashboard-designer", "test-admin", "test-sales-solutions", "test-worknote-creator", "test-announcement-creator",
-			"test-comment-updater", "test-security-team",
-		}, []string{"viewer", "escalator", "attachment_downloader", "cs_engineer", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "admin", "sales_solutions", "worknote_creator", "announcement_creator", "comment_updater", "security_team"}},
+			"test-comment-updater", "test-security-team", "test-cs-lead",
+		}, []string{"viewer", "escalator", "attachment_downloader", "cs_engineer", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "admin", "sales_solutions", "worknote_creator", "announcement_creator", "comment_updater", "cs_lead", "security_team"}},
 		{"announcement creator is reported like any other portal role", []string{"test-cs-engineer", "test-announcement-creator"}, []string{"cs_engineer", "announcement_creator"}},
 		{"comment updater is reported like any other portal role", []string{"test-cs-engineer", "test-comment-updater"}, []string{"cs_engineer", "comment_updater"}},
 		{"unrelated roles are ignored", []string{"wso2-everyone", "agent"}, []string{}},
@@ -602,7 +604,7 @@ func TestAccessGuard_SecurityReportCasesAlsoAllowsViewer(t *testing.T) {
 // names none.
 func TestAccessGuard_UnconfiguredRolesAreHeldByNobody(t *testing.T) {
 	g := NewAccessGuard(AccessConfig{})
-	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermManageProductCatalog, PermViewTimeCardTotals} {
+	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermManageProductCatalog, PermViewTimeCardTotals, PermViewProductIssueDashboard} {
 		if status, _ := serveWithRoles(g, perm, []string{"test-admin", "test-viewer", ""}); status != http.StatusForbidden {
 			t.Errorf("permission %d with no roles configured: status = %d, want 403", perm, status)
 		}
@@ -969,6 +971,46 @@ func TestAccessGuard_ProductCatalogPermissions(t *testing.T) {
 	}
 	if got := g.RolesFor([]string{"test-product-catalog-manager"}); len(got) != 1 || got[0] != "product_catalog_manager" {
 		t.Errorf("RolesFor = %v, want [product_catalog_manager]", got)
+	}
+}
+
+// TestAccessGuard_ProductIssueDashboardPermission pins who holds
+// PermViewProductIssueDashboard (cs_lead and admin only), that cs_lead grants
+// nothing else (not even PermView), and that an unset cs_lead is just admin-only.
+func TestAccessGuard_ProductIssueDashboardPermission(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	for _, role := range []string{"test-cs-lead", "test-admin"} {
+		if status, _ := serveWithRoles(g, PermViewProductIssueDashboard, []string{role}); status != http.StatusNoContent {
+			t.Errorf("%s PermViewProductIssueDashboard: status = %d, want 204", role, status)
+		}
+	}
+	for _, role := range []string{
+		"test-cs-engineer", "test-viewer", "test-escalator", "test-attachment-downloader",
+		"test-usage-metrics-viewer", "test-timecard-approver", "test-dashboard-designer",
+		"test-comment-updater", "test-announcement-creator", "test-security-team",
+		"test-onboarding-lead", "test-product-catalog-manager", "test-worknote-creator", "test-sales-solutions",
+	} {
+		if status, _ := serveWithRoles(g, PermViewProductIssueDashboard, []string{role}); status != http.StatusForbidden {
+			t.Errorf("%s must not hold PermViewProductIssueDashboard: status = %d, want 403", role, status)
+		}
+	}
+	for _, perm := range []Permission{PermView, PermViewSharedEntity, PermWrite, PermAdmin, PermManageOnboarding, PermManageProductCatalog} {
+		if status, _ := serveWithRoles(g, perm, []string{"test-cs-lead"}); status != http.StatusForbidden {
+			t.Errorf("cs_lead must not hold permission %d: status = %d, want 403", perm, status)
+		}
+	}
+	if got := g.RolesFor([]string{"test-cs-lead"}); len(got) != 1 || got[0] != "cs_lead" {
+		t.Errorf("RolesFor = %v, want [cs_lead]", got)
+	}
+	// Unset: only admin holds it.
+	cfg := testAccessConfig()
+	cfg.CsLead = nil
+	g = NewAccessGuard(cfg)
+	if status, _ := serveWithRoles(g, PermViewProductIssueDashboard, []string{"test-admin"}); status != http.StatusNoContent {
+		t.Errorf("admin without cs_lead configured: status = %d, want 204", status)
+	}
+	if status, _ := serveWithRoles(g, PermViewProductIssueDashboard, []string{"test-cs-lead"}); status != http.StatusForbidden {
+		t.Errorf("unconfigured cs_lead: status = %d, want 403", status)
 	}
 }
 

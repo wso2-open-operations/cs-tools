@@ -25,6 +25,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -199,6 +200,7 @@ type productWorkItemClient interface {
 	ListCaseProductWorkItems(ctx context.Context, caseID string) ([]byte, error)
 	GetProductWorkItem(ctx context.Context, id string) ([]byte, error)
 	SearchProductWorkItems(ctx context.Context, body []byte) ([]byte, error)
+	GetProductIssueDashboard(ctx context.Context, query url.Values) ([]byte, error)
 	LinkCaseProductWorkItem(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	UnlinkCaseProductWorkItem(ctx context.Context, caseID, workItemID string) ([]byte, error)
 	CommentProductWorkItem(ctx context.Context, id string, body []byte, idempotencyKey string) (int, []byte, error)
@@ -313,6 +315,43 @@ func (h *ProductWorkItemHandler) SearchProductWorkItems(w http.ResponseWriter, r
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProductWorkItems failed", "userID", user.UserID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search product issues.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// productIssueDashboardParams are the only query parameters forwarded to the
+// entity service's dashboard route; anything else is dropped.
+var productIssueDashboardParams = []string{"from", "to", "bucket", "products"}
+
+// GetProductIssueDashboard handles GET /product-work-items/dashboard (route
+// permission PermViewProductIssueDashboard). It forwards only from, to, bucket
+// and products, re-encoded, and passes the entity service's 200 body through.
+// The entity service validates the values; its 400 reason reaches the caller
+// (the reason names only the rejected parameter, never data); every other
+// failure is the generic mapping.
+func (h *ProductWorkItemHandler) GetProductIssueDashboard(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	in := r.URL.Query()
+	q := url.Values{}
+	for _, name := range productIssueDashboardParams {
+		if vals, ok := in[name]; ok && len(vals) > 0 {
+			q.Set(name, vals[0])
+		}
+	}
+	result, err := h.entity.GetProductIssueDashboard(r.Context(), q)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProductIssueDashboard failed", "userID", user.UserID, "err", err)
+		var apiErr *apierror.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+			mapUpstreamError(w, err, "Failed to load the product issue dashboard.")
+			return
+		}
+		mapUpstreamErrorGeneric(w, err, "Failed to load the product issue dashboard.")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

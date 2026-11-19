@@ -772,6 +772,7 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	// injectImpliedTypeFilters).
 	ResourceServiceRequest: true, ResourceSecurityReportAnalysis: true,
 	ResourceAnnouncement: true, ResourceEngagement: true,
+	ResourceProductIssue:    true,
 	ResourceCaseFeedback:    true,
 	ResourcePlgOrganization: true,
 	ResourcePlgRegistration: true,
@@ -1020,6 +1021,12 @@ func validateWidgets(d Dashboard, source string) error {
 		if (w.Shape == ShapePie || w.Shape == ShapeBar) && len(w.Slices) == 0 && w.GroupBy == nil {
 			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: shape %q needs either \"slices\" or \"groupBy\"",
 				source, d.ID, w.ID, w.Shape)
+		}
+		if w.GroupBy != nil && w.ResourceType == ResourceProductIssue {
+			// Product issues have no group-by endpoint (only POST
+			// /product-work-items/search), so a pie or bar must use "slices".
+			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q does not support \"groupBy\"; use \"slices\"",
+				source, d.ID, w.ID, ResourceProductIssue)
 		}
 		if w.GroupBy != nil {
 			hasField := strings.TrimSpace(w.GroupBy.Field) != ""

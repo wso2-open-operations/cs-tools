@@ -540,6 +540,7 @@ func main() {
 		route("DELETE /cases/{id}/product-work-items/{workItemId}/link", handler.PermWrite, productWorkItemHandler.UnlinkCaseProductWorkItem)
 		route("GET /product-work-items/{id}", handler.PermView, productWorkItemHandler.GetProductWorkItem)
 		route("POST /product-work-items/search", handler.PermView, productWorkItemHandler.SearchProductWorkItems)
+		route("GET /product-work-items/dashboard", handler.PermViewProductIssueDashboard, productWorkItemHandler.GetProductIssueDashboard)
 		route("POST /product-work-items/{id}/comments", handler.PermWrite, productWorkItemHandler.CommentProductWorkItem)
 		route("POST /product-work-items/{id}/board-status", handler.PermWrite, productWorkItemHandler.SetProductWorkItemBoardStatus)
 		route("POST /product-work-items/{id}/close", handler.PermWrite, productWorkItemHandler.CloseProductWorkItem)
@@ -1315,7 +1316,7 @@ func loadDirectory() *directory.Directory {
 //	AUTH_SUPPORT_ENGINEER_ROLES, AUTH_ADMIN_ROLES, AUTH_TIMECARD_APPROVER_ROLES,
 //	AUTH_DASHBOARD_DESIGNER_ROLES, AUTH_SALES_SOLUTIONS_ROLES,
 //	AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES,
-//	AUTH_PRODUCT_CATALOG_MANAGER_ROLES, AUTH_SECURITY_TEAM_ROLES
+//	AUTH_PRODUCT_CATALOG_MANAGER_ROLES, AUTH_CS_LEAD_ROLES, AUTH_SECURITY_TEAM_ROLES
 //	    Each is a comma-separated list of role names; a caller whose token's
 //	    "roles" claim holds any one of them has that role.
 //
@@ -1327,7 +1328,7 @@ func loadDirectory() *directory.Directory {
 //
 // AUTH_SALES_SOLUTIONS_ROLES, AUTH_WORKNOTE_CREATOR_ROLES,
 // AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES and
-// AUTH_PRODUCT_CATALOG_MANAGER_ROLES are unlike the rest:
+// AUTH_PRODUCT_CATALOG_MANAGER_ROLES and AUTH_CS_LEAD_ROLES are unlike the rest:
 // leaving any of them unset
 // does not warn. sales_solutions is a normal, expected unconfigured state (CS
 // Portal alone still works fine) rather than a misconfiguration nobody can
@@ -1339,7 +1340,8 @@ func loadDirectory() *directory.Directory {
 // leaving either empty is purely "this extra role isn't provisioned yet,"
 // never a state that locks anyone out. onboarding_lead is the same: admin
 // already holds PermManageOnboarding regardless; and product_catalog_manager:
-// admin already holds PermManageProductCatalog regardless.
+// admin already holds PermManageProductCatalog regardless; and cs_lead: admin
+// already holds PermViewProductIssueDashboard regardless.
 func loadAccessConfig() handler.AccessConfig {
 	var unset []string
 	roles := func(name string) []string {
@@ -1373,15 +1375,17 @@ func loadAccessConfig() handler.AccessConfig {
 		SecurityTeam: roles("AUTH_SECURITY_TEAM_ROLES"),
 		// Unlike the roles above, an unset AUTH_SALES_SOLUTIONS_ROLES,
 		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES,
-		// AUTH_ONBOARDING_LEAD_ROLES or AUTH_PRODUCT_CATALOG_MANAGER_ROLES is a
+		// AUTH_ONBOARDING_LEAD_ROLES, AUTH_PRODUCT_CATALOG_MANAGER_ROLES or
+		// AUTH_CS_LEAD_ROLES is a
 		// normal, supported state (see this function's own doc comment for why
-		// each is), so all five deliberately bypass the roles() helper
+		// each is), so all seven deliberately bypass the roles() helper
 		// to avoid adding themselves to the unset-variable warning below.
 		SalesSolutions:        splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
 		WorknoteCreator:       splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
 		CommentUpdater:        splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
 		OnboardingLead:        splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
 		ProductCatalogManager: splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
+		CsLead:                splitComma(os.Getenv("AUTH_CS_LEAD_ROLES")),
 	}
 	if len(unset) > 0 {
 		slog.Warn("access-control role variables are unset, so no token role grants them", "variables", unset)
