@@ -34,8 +34,30 @@ describe("CancelIncidentDialog", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it("disables Go back while the cancellation is in flight", () => {
-    render(<CancelIncidentDialog isSubmitting onClose={vi.fn()} onConfirm={vi.fn()} />);
+  it("disables Go back and ignores Escape while the cancellation is in flight", () => {
+    const onClose = vi.fn();
+    render(<CancelIncidentDialog isSubmitting onClose={onClose} onConfirm={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Go back" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on Escape when nothing is in flight", () => {
+    const onClose = vi.fn();
+    render(<CancelIncidentDialog isSubmitting={false} onClose={onClose} onConfirm={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("says final without implying it can be reopened elsewhere", () => {
+    render(<CancelIncidentDialog incidentNumber="INC0012345" isSubmitting={false} onClose={vi.fn()} onConfirm={vi.fn()} />);
+    expect(screen.getByRole("dialog")).toHaveTextContent("a cancelled incident can't be reopened or commented on.");
+    expect(screen.getByRole("dialog")).not.toHaveTextContent(/from here/);
+  });
+
+  it("speaks of every incident when it covers more than one (bulk Edit)", () => {
+    render(<CancelIncidentDialog incidentCount={3} isSubmitting={false} onClose={vi.fn()} onConfirm={vi.fn()} />);
+    expect(screen.getByRole("dialog", { name: "Cancel 3 incidents?" })).toHaveTextContent("3 incidents will be moved to Cancelled.");
+    expect(screen.getByRole("button", { name: "Cancel incidents" })).toBeInTheDocument();
   });
 });

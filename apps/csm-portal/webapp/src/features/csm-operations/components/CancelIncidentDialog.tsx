@@ -27,6 +27,11 @@ import type { JSX } from "react";
 interface CancelIncidentDialogProps {
   /** Shown in the body so the engineer can see which incident they're ending. */
   incidentNumber?: string | null;
+  /**
+   * How many incidents the confirmation covers (bulk Edit). Above 1 the copy
+   * and the confirm button switch to the plural; `incidentNumber` is ignored.
+   */
+  incidentCount?: number;
   /** True while the `PATCH { state: CANCELLED }` is in flight. */
   isSubmitting: boolean;
   onClose: () => void;
@@ -35,15 +40,23 @@ interface CancelIncidentDialogProps {
 
 /**
  * Confirmation before moving an incident to `CANCELLED`. Cancelled is terminal
- * (no transition out, comments disabled), so a single misclick in the
- * "Change state" menu must not end the incident on its own.
+ * (no transition out, comments disabled), so a single misclick must not end
+ * the incident on its own. Every path to Cancelled goes through it: the
+ * "Change state" menu, the Edit dialog's save and the list's bulk Edit.
  */
 export default function CancelIncidentDialog({
   incidentNumber,
+  incidentCount = 1,
   isSubmitting,
   onClose,
   onConfirm,
 }: CancelIncidentDialogProps): JSX.Element {
+  const plural = incidentCount > 1;
+  const subject = plural
+    ? `${incidentCount} incidents will be moved to Cancelled.`
+    : incidentNumber
+      ? `${incidentNumber} will be moved to Cancelled.`
+      : "This incident will be moved to Cancelled.";
   return (
     <Dialog
       open
@@ -55,11 +68,12 @@ export default function CancelIncidentDialog({
       aria-labelledby="cancel-incident-title"
       aria-describedby="cancel-incident-body"
     >
-      <DialogTitle id="cancel-incident-title">Cancel this incident?</DialogTitle>
+      <DialogTitle id="cancel-incident-title">
+        {plural ? `Cancel ${incidentCount} incidents?` : "Cancel this incident?"}
+      </DialogTitle>
       <DialogContent dividers>
         <DialogContentText id="cancel-incident-body" variant="body2">
-          {incidentNumber ? `${incidentNumber} will be moved to Cancelled.` : "This incident will be moved to Cancelled."}{" "}
-          Cancelled is final: the incident can&apos;t be reopened or commented on from here.
+          {subject} Cancelled is final: a cancelled incident can&apos;t be reopened or commented on.
         </DialogContentText>
       </DialogContent>
       <DialogActions>
@@ -68,7 +82,7 @@ export default function CancelIncidentDialog({
           Go back
         </Button>
         <Button variant="contained" color="error" onClick={onConfirm} loading={isSubmitting}>
-          Cancel incident
+          {plural ? "Cancel incidents" : "Cancel incident"}
         </Button>
       </DialogActions>
     </Dialog>

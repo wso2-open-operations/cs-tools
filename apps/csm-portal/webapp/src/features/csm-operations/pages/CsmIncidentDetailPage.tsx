@@ -172,6 +172,15 @@ function IncidentDescription({ text }: { text: string }): JSX.Element {
 }
 
 /**
+ * What to show when a write to this incident fails: the backend's own words for
+ * a 4xx (a caller-actionable refusal, e.g. an illegal transition or a bad id),
+ * else `fallback` (a 5xx message is not for people).
+ */
+function patchErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof BackendApiError && err.status < 500 && err.message ? err.message : fallback;
+}
+
+/**
  * A single confirmed-live upstream limitation of `PATCH /incidents/{id}`
  * (entity-service/ServiceNow, not this BFF or the FE): `state: RESOLVED`/
  * `CLOSED` 500s without a resolution, fixed by having
@@ -470,11 +479,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           onError: (err) => {
             // The watch-list 400s name the offending value (an unknown or
             // malformed user id), which is worth surfacing verbatim.
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the watch list. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the watch list. Please try again."), err);
           },
         },
       );
@@ -516,11 +521,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         { id, patch: { state: target, ...claim } },
         {
           onError: (err) => {
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the incident's state. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the incident's state. Please try again."), err);
           },
         },
       );
@@ -536,11 +537,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         {
           onSuccess: () => setResolutionTarget(null),
           onError: (err) => {
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the incident's state. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the incident's state. Please try again."), err);
           },
         },
       );
@@ -548,33 +545,33 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     [id, patchIncident, resolutionTarget, showError],
   );
 
-  /** Send the Edit dialog's patch; closes the dialog once it has saved. */
+  /**
+   * Send the Edit dialog's patch; closes the dialog once it has saved. A
+   * dropped note keeps it open for a retry, unless the save made the incident
+   * terminal (Cancelled from Edit): there is nothing left to edit then.
+   */
   const sendEdit = useCallback(
-    (patch: BeUpdateIncidentPayload, onSettled?: () => void) => {
+    (patch: BeUpdateIncidentPayload, onSaved?: () => void) => {
       if (!id) return;
       patchIncident.mutate(
         { id, patch },
         {
           onSuccess: (saved) => {
-            onSettled?.();
+            onSaved?.();
             const droppedFields = checkSilentlyDroppedNotes(patch, saved.incident);
             if (droppedFields.length > 0) {
               showError(
                 `${droppedFields.join(" and ")} didn't save — the request was accepted but that ` +
                   "change wasn't actually persisted. Any other fields in this edit were saved; please retry the note separately.",
               );
-              return;
+              if (!isIncidentTerminal(saved.incident.state)) return;
             }
             setEditOpen(false);
           },
           onError: (err) => {
             // Real validation messages (e.g. an invalid UUID in one of the
             // linking fields) are worth surfacing, same as CreateIncidentPage.
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the incident. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the incident. Please try again."), err);
           },
         },
       );
@@ -605,11 +602,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       {
         onSuccess: () => setCancelRequest(null),
         onError: (err) => {
-          const msg =
-            err instanceof BackendApiError && err.status < 500 && err.message
-              ? err.message
-              : "Could not update the incident's state. Please try again.";
-          showError(msg, err);
+          showError(patchErrorMessage(err, "Could not update the incident's state. Please try again."), err);
         },
       },
     );
@@ -630,11 +623,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         {
           onSuccess: (response) => setHandoffResult(response.handoff),
           onError: (err) => {
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not hand off the incident. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not hand off the incident. Please try again."), err);
           },
         },
       );

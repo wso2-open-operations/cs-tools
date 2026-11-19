@@ -733,6 +733,22 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
     );
   });
 
+  it("keeps the confirmation open and shows the backend's words when the cancel PATCH is refused", () => {
+    patchMutateMock.mockImplementationOnce(
+      (_vars: unknown, opts: { onError: (err: unknown) => void }) =>
+        opts.onError(new BackendApiError(400, "Invalid state transition.")),
+    );
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel incident$/i }));
+
+    expect(showErrorMock).toHaveBeenCalledWith("Invalid state transition.", expect.any(BackendApiError));
+    // Still open, so a refused cancellation never looks finished.
+    expect(screen.getByRole("dialog", { name: /cancel this incident\?/i })).toBeInTheDocument();
+  });
+
   it("asks for the same confirmation when the Edit dialog sets Cancelled, keeping its other edits", () => {
     // Every field the Edit dialog requires before Save is enabled.
     mockQueryResult({
@@ -912,13 +928,14 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     expect(label.parentElement, stage).toHaveTextContent(/^Channel\s*PHONE$/);
   };
 
-  const transition = (target: RegExp): void => {
-    // A state with one legal next state (NEW) renders a single button, not the menu.
-    const single = screen.queryByRole("button", { name: target });
-    if (single) {
-      fireEvent.click(single);
-      return;
-    }
+  /** A state with exactly one legal next state (NEW) renders it as a single button. */
+  const clickSingleAction = (target: RegExp): void => {
+    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: target }));
+  };
+
+  /** A state with several legal next states renders them in the "Change state" menu. */
+  const chooseFromMenu = (target: RegExp): void => {
     fireEvent.click(screen.getByRole("button", { name: /change state/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: target }));
   };
@@ -947,7 +964,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("NEW") });
     const newStage = renderPage();
     expectChannelShown("NEW");
-    transition(/in progress/i);
+    clickSingleAction(/in progress/i);
     expect(lastPatch()).toEqual({ state: "IN_PROGRESS", assignedEngineerId: ME_ID });
     newStage.unmount();
 
@@ -955,7 +972,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("IN_PROGRESS") });
     const inProgress = renderPage();
     expectChannelShown("IN_PROGRESS");
-    transition(/resolved/i);
+    chooseFromMenu(/resolved/i);
     submitResolutionDialog(/^move to resolved$/i);
     expect(lastPatch()).toEqual({ state: "RESOLVED", ...RESOLUTION });
     inProgress.unmount();
@@ -964,7 +981,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("RESOLVED") });
     const resolved = renderPage();
     expectChannelShown("RESOLVED");
-    transition(/closed/i);
+    chooseFromMenu(/closed/i);
     submitResolutionDialog(/^move to closed$/i);
     expect(lastPatch()).toMatchObject({ state: "CLOSED" });
     resolved.unmount();

@@ -62,6 +62,30 @@ describe("BulkEditIncidentsDialog", () => {
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["No change", "In Progress"]);
   });
 
+  it("confirms before setting Cancelled, and applies only on confirm", () => {
+    render(
+      <BulkEditIncidentsDialog
+        incidents={[incident("a", "IN_PROGRESS"), incident("b", "ON_HOLD")]}
+        isApplying={false}
+        onClose={vi.fn()}
+        onApply={onApply}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Edit 2 incidents" });
+    fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: "State" }));
+    fireEvent.click(screen.getByRole("option", { name: "Cancelled" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 incidents" }));
+    expect(onApply).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+    expect(screen.queryByRole("dialog", { name: "Cancel 2 incidents?" })).not.toBeInTheDocument();
+    expect(onApply).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 incidents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel incidents" }));
+    expect(onApply).toHaveBeenCalledWith({ patch: { state: "CANCELLED" } });
+  });
+
   it("can't apply with nothing changed", () => {
     render(
       <BulkEditIncidentsDialog incidents={[incident("a", "NEW")]} isApplying={false} onClose={vi.fn()} onApply={onApply} />,
