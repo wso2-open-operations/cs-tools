@@ -227,12 +227,16 @@ Portal; this service exposes nothing else about them.
 `GET /alert-mute-rules/{id}/muted-incidents`, `GET /alert-mute-rules/muted-counts` and
 `GET /alert-field-values` (`internal/handler/alert_core.go`) proxy
 sre-alert-core-service's read API for the CSM portal, through `internal/alertcore`, not
-entity-service. Alert-core answers only with its shared `ALERT_CORE_API_TOKEN`, which
-stays in this service: callers authenticate at the gateway like every other route, and
-alert-core needs no public endpoint (its `read-api` endpoint is Organization visibility, an https internal URL). The base URL must be https (http only for loopback), so the token is never sent in plaintext. Only
-the documented query parameters are forwarded, and rule ids are checked as UUIDs here.
-`ALERT_CORE_BASE_URL` or `ALERT_CORE_API_TOKEN` unset: these routes answer 503 and the
-service otherwise starts as normal.
+entity-service. This service calls alert-core's `read-api` endpoint (Organization
+visibility, an https internal URL) through the Choreo gateway with its own OAuth2 app
+(the `ENTITY_*` client credentials, plus optional `ALERT_CORE_SCOPES`), which must be
+subscribed to the "Alert Core Read API"; alert-core lets in only the client ids in its
+`ALERT_CORE_READ_CLIENT_IDS`. Callers of these routes authenticate at this service's
+gateway like every other route. The base URL must be https (http only for loopback), so
+the access token is never sent in plaintext, and redirects are not followed. Only the
+documented query parameters are forwarded, and rule ids are checked as UUIDs here.
+`ALERT_CORE_BASE_URL` unset: these routes answer 503 and the service otherwise starts as
+normal. `ALERT_CORE_API_TOKEN` (the shared secret this used before) is no longer read.
 
 ## Contacts and opportunity reads on `DATA_SOURCE=postgres`
 

@@ -32,44 +32,57 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/entity"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // maxBody caps a response read from alert-core (one page is at most 100 incidents).
 const maxBody = 1 << 20
 
-// Config holds alert-core's base URL and the shared token its read API expects
-// (ALERT_CORE_API_TOKEN on both services).
+// tokenFetchTimeout bounds a call to the token endpoint.
+var tokenFetchTimeout = 5 * time.Second
+
+// Config holds alert-core's read API URL (its "Alert Core Read API" endpoint in
+// Choreo) and the OAuth2 client-credentials app the call authenticates as. The
+// app must be subscribed to that API; the gateway checks the token and alert-core
+// lets in only the client ids in its ALERT_CORE_READ_CLIENT_IDS.
 type Config struct {
-	BaseURL string
-	Token   string
+	BaseURL      string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	Scopes       []string
 }
 
-// Client calls alert-core's read API with Authorization: Bearer <token>.
+// Client calls alert-core's read API with an OAuth2 access token, fetched and
+// refreshed by the client-credentials flow.
 type Client struct {
 	http    *http.Client
 	baseURL string
-	token   string
 }
 
-// NewClient returns a Client, or nil when either value is empty or the base URL
-// is not https (http is allowed only for a loopback host, for local runs): the
-// shared bearer token is never sent in plaintext. The routes that need the client
-// then answer 503, so a missing or unsafe setting never fails startup.
+// NewClient returns a Client, or nil when the base URL or a credential is empty or
+// the base URL is not https (http is allowed only for a loopback host, for local
+// runs): the access token is never sent in plaintext. The routes that need the
+// client then answer 503, so a missing or unsafe setting never fails startup.
 func NewClient(cfg Config) *Client {
 	base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	token := strings.TrimSpace(cfg.Token)
-	if base == "" || token == "" || !SafeBaseURL(base) {
+	if base == "" || !SafeBaseURL(base) || strings.TrimSpace(cfg.TokenURL) == "" ||
+		strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
 		return nil
 	}
-	return &Client{
-		http: &http.Client{
-			Timeout: 10 * time.Second,
-			// The token is never sent anywhere alert-core redirects to.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-		baseURL: base,
-		token:   token,
+	cc := clientcredentials.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		TokenURL:     cfg.TokenURL,
+		Scopes:       cfg.Scopes,
 	}
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: tokenFetchTimeout})
+	httpClient := cc.Client(tokenCtx)
+	httpClient.Timeout = 10 * time.Second
+	// The token is never sent anywhere alert-core redirects to.
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{http: httpClient, baseURL: base}
 }
 
 // SafeBaseURL reports whether base may carry the bearer token: an absolute https
@@ -119,7 +132,6 @@ func (c *Client) get(ctx context.Context, path string, query url.Values) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("alertcore: build request GET %s: %w", path, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
 	if id := entity.CorrelationIDFromContext(ctx); id != "" {
 		req.Header.Set("X-CSM-Correlation-ID", id)
