@@ -667,3 +667,35 @@ func TestCleanDisplayName(t *testing.T) {
 		}
 	}
 }
+
+func TestProductIssueCommands_RetriedCommentOnAMissingIssueFailsPermanently(t *testing.T) {
+	e := pwcSetup(t)
+	res := e.comment("issue is gone")
+	e.eng.on("POST", pwcComments, answer(500, ""))
+	e.run() // ambiguous: delivery_attempted is now set
+	// The issue no longer exists: the lookup's 404 has no X-GitHub-Status (a plain
+	// answer of the read route), the post's 404 is GitHub's.
+	e.eng.on("GET", pwcComments, answer(404, ""))
+	e.eng.on("POST", pwcComments, answer(404, "", "X-GitHub-Status", "404"))
+	e.makeDue(res.Command.ID)
+	e.run()
+	r := e.row(res.Command.ID)
+	if r.status != "FAILED" || r.ghStatus == nil || *r.ghStatus != 404 || r.attempts != 2 {
+		t.Fatalf("row = %+v, want FAILED from the post's 404", r)
+	}
+	if e.eng.count("GET", pwcComments) != 1 || e.eng.count("POST", pwcComments) != 2 {
+		t.Errorf("GET=%d POST=%d", e.eng.count("GET", pwcComments), e.eng.count("POST", pwcComments))
+	}
+
+	// Another lookup failure (a 500) stays retryable and posts nothing.
+	res2 := e.comment("lookup down")
+	e.eng.on("POST", pwcComments, answer(500, ""))
+	e.run()
+	posts := e.eng.count("POST", pwcComments)
+	e.eng.on("GET", pwcComments, answer(500, ""))
+	e.makeDue(res2.Command.ID)
+	e.run()
+	if r := e.row(res2.Command.ID); r.status != "PENDING" || e.eng.count("POST", pwcComments) != posts {
+		t.Errorf("lookup 500: %+v posts %d -> %d", r, posts, e.eng.count("POST", pwcComments))
+	}
+}

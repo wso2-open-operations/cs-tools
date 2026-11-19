@@ -365,6 +365,13 @@ func (w *ProductIssueCommandWorker) addComment(ctx context.Context, cmd reposito
 	// never reset, so a retried command looks too).
 	if cmd.DeliveryAttempted {
 		found, err := w.findPostedComment(ctx, cmd, l, p.Body)
+		var ee *engineeringentity.Error
+		if errors.As(err, &ee) && ee.StatusCode == http.StatusNotFound {
+			// The read routes answer with real statuses and no X-GitHub-Status: a 404
+			// here means nothing was found, and the post below decides (its 404 is
+			// GitHub's and permanent).
+			found, err = nil, nil
+		}
 		if err != nil {
 			return outcome{err: err}
 		}
