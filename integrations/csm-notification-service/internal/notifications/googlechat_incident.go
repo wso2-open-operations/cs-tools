@@ -56,6 +56,34 @@ type IncidentRoutes struct {
 	// SRE ladder (paging.KnownSRETeam); nil until the paging configuration is
 	// loaded, when every group counts as unknown.
 	knownSRETeam func(group string) bool
+	// sreTeams resolves an assignment group to its SRE team keys
+	// (paging.SRETeamsForGroup); nil until the paging configuration is
+	// loaded, when every group has none.
+	sreTeams func(group string) []string
+}
+
+// SetSRETeams sets how an assignment group resolves to its SRE team keys
+// (paging.SRETeamsForGroup over the merged SRE ladder configuration).
+func (r *IncidentRoutes) SetSRETeams(teams func(group string) []string) {
+	r.mu.Lock()
+	r.sreTeams = teams
+	r.mu.Unlock()
+}
+
+// SRETeams is the SRE team keys an incident's assignment group belongs to,
+// whose team.chat_webhook_url and team.group_email its SLA alert reaches, as
+// a case's reaches its CRE team's. None before SetSRETeams, or for a nil r.
+func (r *IncidentRoutes) SRETeams(group string) []string {
+	if r == nil || strings.TrimSpace(group) == "" {
+		return nil
+	}
+	r.mu.RLock()
+	teams := r.sreTeams
+	r.mu.RUnlock()
+	if teams == nil {
+		return nil
+	}
+	return teams(group)
 }
 
 // SetKnownSRETeam sets the SRE ladder's known-team check (paging.KnownSRETeam).
@@ -172,34 +200,15 @@ func IncidentAudiences(routes *IncidentRoutes, env map[string][]string, group st
 	return audiences, false
 }
 
-// IncidentSLAAudiencePrefix namespaces INCIDENT_SLA_CHAT_SPACES entries: an
-// incident's SLA alerts go to a space of their own, apart from the space that
-// gets its "Incident Reported" card.
+// IncidentSLAAudiencePrefix namespaces an SRE team's incident SLA space: the
+// team's own team.chat_webhook_url (GoogleChatClient.SetIncidentSLATeamSpaces),
+// apart from the paging-config rooms that get the incident's cards.
 const IncidentSLAAudiencePrefix = "incident-sla/"
 
-// IncidentSLAAudience is the Chat audience key of an assignment group's (or
-// SRE team key's) incident SLA space.
-func IncidentSLAAudience(group string) string {
-	return IncidentSLAAudiencePrefix + strings.ToLower(strings.TrimSpace(group))
-}
-
-// IncidentSLAAudiences is the SLA spaces an incident's SLA alerts go to: the
-// INCIDENT_SLA_CHAT_SPACES spaces of the same groups its incident card goes
-// to (routes.Groups -- so a default group fans out to the SRE teams exactly
-// as its card does), each kept only when has knows it. No shared fallback: a
-// group with no SLA space gets no SLA card.
-func IncidentSLAAudiences(routes *IncidentRoutes, env map[string][]string, group string, has func(string) bool) []string {
-	if strings.TrimSpace(group) == "" {
-		return nil
-	}
-	var audiences []string
-	for _, target := range routes.Groups(env, group) {
-		audience := IncidentSLAAudience(target)
-		if has(audience) && !slices.Contains(audiences, audience) {
-			audiences = append(audiences, audience)
-		}
-	}
-	return audiences
+// IncidentSLAAudience is the Chat audience key of an SRE team's incident SLA
+// space, by team key.
+func IncidentSLAAudience(teamKey string) string {
+	return IncidentSLAAudiencePrefix + strings.ToLower(strings.TrimSpace(teamKey))
 }
 
 // IncidentGroups is the assignment groups whose INCIDENT_CHAT_SPACES spaces get a group's incident messages: its INCIDENT_CHAT_FANOUT list, else the group itself.

@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 )
 
 func TestRegisterIncidentClocks_RegistersTheRunningClock(t *testing.T) {
@@ -101,10 +103,41 @@ func TestRegisterIncidentClocks_SkipsAClockThatAlreadyEnded(t *testing.T) {
 	}
 }
 
-// An incident's tier goes to its assignment group's incident SLA spaces (a
-// default group fans out to both teams), never the case audiences, plus the
-// assignee and group emails -- and no Americas copy, even overnight.
-func TestTick_IncidentBreach_GoesToIncidentSLASpacesAndEmails(t *testing.T) {
+// sreTeamWiring wires e the way cmd/server does for incidents: an assignment
+// group resolves to SRE team keys by teamsByGroup (paging.SRETeamsForGroup in
+// production), each key in spaces has its team.chat_webhook_url space, and
+// groupEmails is the team.key -> group_email table. It records the group each
+// alert resolved.
+func sreTeamWiring(e *Engine, chat *fakeChat, teamsByGroup map[string][]string, spaces []string, groupEmails map[string]string) *[]string {
+	var resolved []string
+	e.WithIncidentSLATeams(func(group string) []string {
+		resolved = append(resolved, group)
+		return teamsByGroup[group]
+	})
+	if chat.spaces == nil {
+		chat.spaces = map[string]bool{}
+	}
+	for _, key := range spaces {
+		chat.spaces[notifications.IncidentSLAAudience(key)] = true
+	}
+	e.SetTeamGroupEmails(groupEmails)
+	return &resolved
+}
+
+func incidentRecipients(calls []fakeEmailCall) []string {
+	var out []string
+	for _, c := range calls {
+		out = append(out, c.to...)
+	}
+	return out
+}
+
+// An incident's tier reaches its SRE team(s) as a case's reaches its CRE
+// team: each team's own SLA space (team.chat_webhook_url) and group email
+// (team.group_email). A default group is every teamless team. The account
+// CRE team in GetClockState's TeamEmail/TeamLeadName is never used, there is
+// no Americas copy even overnight, and never the case audiences.
+func TestTick_IncidentBreach_GoesToItsSRETeamsSpacesAndEmails(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
 	pub := &fakePublisher{}
@@ -112,18 +145,16 @@ func TestTick_IncidentBreach_GoesToIncidentSLASpacesAndEmails(t *testing.T) {
 	e := newTestEngine(st, chat, pub)
 	e.email = email
 	e.now = func() time.Time { return time.Date(2026, time.October, 14, 17, 0, 0, 0, time.UTC) } // 22:30 IST, the Americas window
-	e.SetTeamGroupEmails(map[string]string{slaBreachAmericasTeamKey: "americas@example.com"})
-	var routedGroup string
-	e.WithIncidentSLAAudiences(func(group string) []string {
-		routedGroup = group
-		return []string{"incident-sla/apollo sre group", "incident-sla/artemis sre group"}
-	})
+	resolved := sreTeamWiring(e, chat,
+		map[string][]string{"Default SRE Group": {"apollo", "artemis"}},
+		[]string{"apollo", "artemis"},
+		map[string]string{"apollo": "apollo@example.com", "artemis": "artemis@example.com", slaBreachAmericasTeamKey: "americas@example.com"})
 	past := time.Now().Add(-5 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"inc-1|" + ClockResolution: {
 			Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past,
 			AssigneeName: "Melan Rashitha", AssigneeEmail: "melan@example.com",
-			TeamEmail: "default-sre@example.com", TeamLeadName: "SRE Manager",
+			TeamEmail: "cre-team@example.com", TeamLeadName: "CRE Lead", OnboardingTeamEmail: "onboarding@example.com",
 		},
 	}}
 	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseTitle: "Router 5xx", CaseType: CaseTypeIncident, Team: "Default SRE Group", Product: "Choreo", Priority: "CRITICAL", StartedAt: past}
@@ -133,8 +164,8 @@ func TestTick_IncidentBreach_GoesToIncidentSLASpacesAndEmails(t *testing.T) {
 		t.Fatalf("Tick() error = %v", err)
 	}
 
-	if routedGroup != "Default SRE Group" {
-		t.Errorf("routed group = %q, want the incident's assignment group", routedGroup)
+	if !slices.Equal(*resolved, []string{"Default SRE Group"}) {
+		t.Errorf("resolved groups = %v, want the incident's assignment group", *resolved)
 	}
 	if len(chat.calls) != 0 {
 		t.Errorf("case chat calls = %+v, want none for an incident", chat.calls)
@@ -144,45 +175,44 @@ func TestTick_IncidentBreach_GoesToIncidentSLASpacesAndEmails(t *testing.T) {
 		audiences = append(audiences, c.audience)
 		a := c.alert
 		if a.Number != "INC0091536" || a.Tier != "100" || a.ClockType != ClockResolution || a.AssignmentGroup != "Default SRE Group" ||
-			a.GroupManagerName != "SRE Manager" || a.Service != "Choreo" || a.IncidentLink != "https://csm.example.com/incidents/inc-1" {
+			a.Service != "Choreo" || a.IncidentLink != "https://csm.example.com/incidents/inc-1" {
 			t.Errorf("incident alert = %+v, want the incident's fields and link", a)
 		}
 	}
-	if want := []string{"incident-sla/apollo sre group", "incident-sla/artemis sre group"}; !slices.Equal(audiences, want) {
+	if want := []string{notifications.IncidentSLAAudience("apollo"), notifications.IncidentSLAAudience("artemis")}; !slices.Equal(audiences, want) {
 		t.Errorf("incident SLA audiences = %v, want %v", audiences, want)
 	}
 
 	if len(email.calls) != 2 {
-		t.Fatalf("email calls = %d, want 2 (assignee and group, no Americas copy)", len(email.calls))
+		t.Fatalf("email calls = %d, want 2 (assignee, SRE teams; no Americas copy)", len(email.calls))
 	}
-	var recipients []string
 	for _, c := range email.calls {
-		recipients = append(recipients, c.to...)
 		if !strings.Contains(c.subject, "INC0091536") {
 			t.Errorf("subject = %q, want the incident number", c.subject)
 		}
-		if strings.Contains(c.htmlBody, "View Case") || strings.Contains(c.htmlBody, "Case ID") {
-			t.Errorf("email body uses case wording for an incident")
+		if strings.Contains(c.htmlBody, "View Case") || strings.Contains(c.htmlBody, "Case ID") || strings.Contains(c.htmlBody, "CRE Lead") {
+			t.Errorf("email body uses case wording or the CRE team lead")
 		}
 		if !strings.Contains(c.htmlBody, "https://csm.example.com/incidents/inc-1") {
 			t.Errorf("email body has no incident link")
 		}
 	}
-	if want := []string{"melan@example.com", "default-sre@example.com"}; !slices.Equal(recipients, want) {
-		t.Errorf("email recipients = %v, want %v", recipients, want)
+	if want := []string{"melan@example.com", "apollo@example.com", "artemis@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) {
+		t.Errorf("email recipients = %v, want %v", incidentRecipients(email.calls), want)
 	}
 	if pub.calls != 1 {
 		t.Errorf("publish calls = %d, want 1", pub.calls)
 	}
 }
 
-// With no incident SLA space configured the emails still go out.
+// A team with no SLA space gets no card; its group email still goes out.
 func TestTick_IncidentBreach_NoSLASpace_StillEmails(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
 	email := &fakeEmail{}
 	e := newTestEngine(st, chat, &fakePublisher{})
 	e.email = email
+	sreTeamWiring(e, chat, map[string][]string{"Artemis SRE Group": {"artemis"}}, nil, map[string]string{"artemis": "artemis@example.com"})
 	past := time.Now().Add(-3 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past, AssigneeEmail: "melan@example.com"},
@@ -196,8 +226,35 @@ func TestTick_IncidentBreach_NoSLASpace_StillEmails(t *testing.T) {
 	if len(chat.calls)+len(chat.incidentCalls) != 0 {
 		t.Errorf("chat calls = %+v / %+v, want none", chat.calls, chat.incidentCalls)
 	}
-	if len(email.calls) != 1 || !slices.Equal(email.calls[0].to, []string{"melan@example.com"}) {
-		t.Errorf("email calls = %+v, want the assignee email only (no group email on file)", email.calls)
+	if want := []string{"melan@example.com", "artemis@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) {
+		t.Errorf("email recipients = %v, want %v", incidentRecipients(email.calls), want)
+	}
+}
+
+// A group that maps to no SRE team reaches the assignee only: never the
+// account CRE team, never Incident Monitor.
+func TestTick_IncidentBreach_NoSRETeam_AssigneeOnly(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, &fakePublisher{})
+	e.email = email
+	sreTeamWiring(e, chat, nil, []string{"apollo"}, map[string]string{"apollo": "apollo@example.com"})
+	past := time.Now().Add(-5 * time.Hour)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com", TeamEmail: "cre-team@example.com"},
+	}}
+	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Choreo Runtime Group", Priority: "CRITICAL", StartedAt: past}
+	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if len(chat.calls)+len(chat.incidentCalls) != 0 {
+		t.Errorf("chat calls = %+v / %+v, want none", chat.calls, chat.incidentCalls)
+	}
+	if want := []string{"melan@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) {
+		t.Errorf("email recipients = %v, want the assignee only", incidentRecipients(email.calls))
 	}
 }
 
@@ -210,7 +267,7 @@ func TestTick_IncidentCancelledAfterRegistration_SendsNothing(t *testing.T) {
 	email := &fakeEmail{}
 	e := newTestEngine(st, chat, &fakePublisher{})
 	e.email = email
-	e.WithIncidentSLAAudiences(func(string) []string { return []string{"incident-sla/artemis sre group"} })
+	sreTeamWiring(e, chat, map[string][]string{"Artemis SRE Group": {"artemis"}}, []string{"artemis"}, map[string]string{"artemis": "artemis@example.com"})
 	past := time.Now().Add(-4 * time.Hour)
 	e.entity = &fakeEntityClockStatus{
 		// The newest row for the incident is a different, active clock: only
@@ -242,10 +299,10 @@ func TestTick_IncidentBreach_SendingDisabled_SendsNothing(t *testing.T) {
 	e := newTestEngine(st, chat, &fakePublisher{})
 	e.email = email
 	e.slaEmailSendingEnabled = false
-	e.WithIncidentSLAAudiences(func(string) []string { return []string{"incident-sla/artemis sre group"} })
+	sreTeamWiring(e, chat, map[string][]string{"Artemis SRE Group": {"artemis"}}, []string{"artemis"}, map[string]string{"artemis": "artemis@example.com"})
 	past := time.Now().Add(-5 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com", TeamEmail: "artemis@example.com"},
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com"},
 	}}
 	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Artemis SRE Group", Priority: "CRITICAL", StartedAt: past}
 	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
@@ -261,16 +318,15 @@ func TestTick_IncidentBreach_SendingDisabled_SendsNothing(t *testing.T) {
 // A Chat space that fails does not stop the other space or the emails.
 func TestTick_IncidentBreach_ChatFailure_StillSendsTheRest(t *testing.T) {
 	st := newFakeStore()
-	chat := &fakeChat{failFor: map[string]bool{"incident-sla/apollo sre group": true}}
+	chat := &fakeChat{failFor: map[string]bool{notifications.IncidentSLAAudience("apollo"): true}}
 	email := &fakeEmail{}
 	e := newTestEngine(st, chat, &fakePublisher{})
 	e.email = email
-	e.WithIncidentSLAAudiences(func(string) []string {
-		return []string{"incident-sla/apollo sre group", "incident-sla/artemis sre group"}
-	})
+	sreTeamWiring(e, chat, map[string][]string{"Default SRE Group": {"apollo", "artemis"}}, []string{"apollo", "artemis"},
+		map[string]string{"apollo": "apollo@example.com", "artemis": "artemis@example.com"})
 	past := time.Now().Add(-5 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com", TeamEmail: "default-sre@example.com"},
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com"},
 	}}
 	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Default SRE Group", Priority: "CRITICAL", StartedAt: past}
 	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
@@ -282,22 +338,24 @@ func TestTick_IncidentBreach_ChatFailure_StillSendsTheRest(t *testing.T) {
 		t.Errorf("incident SLA chat attempts = %d, want both spaces tried", len(chat.incidentCalls))
 	}
 	if len(email.calls) != 2 {
-		t.Errorf("email calls = %d, want the assignee and group emails despite the Chat failure", len(email.calls))
+		t.Errorf("email calls = %d, want the assignee and team emails despite the Chat failure", len(email.calls))
 	}
 }
 
 // The onboarding team is a case concern: an incident on an onboarding
-// project emails its assignee and assignment group only.
+// project emails its assignee and SRE team only.
 func TestTick_IncidentBreach_OnboardingProject_NoOnboardingTeamCopy(t *testing.T) {
 	st := newFakeStore()
+	chat := &fakeChat{}
 	email := &fakeEmail{}
-	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e := newTestEngine(st, chat, &fakePublisher{})
 	e.email = email
+	sreTeamWiring(e, chat, map[string][]string{"Artemis SRE Group": {"artemis"}}, nil, map[string]string{"artemis": "artemis@example.com"})
 	past := time.Now().Add(-5 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"inc-1|" + ClockResolution: {
 			Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past,
-			AssigneeEmail: "melan@example.com", TeamEmail: "artemis@example.com", OnboardingTeamEmail: "onboarding@example.com",
+			AssigneeEmail: "melan@example.com", OnboardingTeamEmail: "onboarding@example.com",
 		},
 	}}
 	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Artemis SRE Group", Priority: "CRITICAL", StartedAt: past}
@@ -306,12 +364,8 @@ func TestTick_IncidentBreach_OnboardingProject_NoOnboardingTeamCopy(t *testing.T
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
 		t.Fatalf("Tick() error = %v", err)
 	}
-	var recipients []string
-	for _, c := range email.calls {
-		recipients = append(recipients, c.to...)
-	}
-	if want := []string{"melan@example.com", "artemis@example.com"}; !slices.Equal(recipients, want) {
-		t.Errorf("email recipients = %v, want %v (no onboarding team copy for an incident)", recipients, want)
+	if want := []string{"melan@example.com", "artemis@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) {
+		t.Errorf("email recipients = %v, want %v (no onboarding team copy for an incident)", incidentRecipients(email.calls), want)
 	}
 }
 
@@ -339,27 +393,21 @@ func TestRegisterIncidentClocks_ElevationKeepsStoredGroupAndNumber(t *testing.T)
 	}
 }
 
-// A reassigned incident alerts its current group (entity-service's
-// AssignmentGroupName), not the one it was registered with: the card's group,
-// its SLA space and the email's team all follow, matching the group email and
-// manager entity-service already returns for it.
+// A reassigned incident alerts its current group's SRE team (entity-service's
+// AssignmentGroupName), not the team of the group it was registered with.
 func TestTick_IncidentBreach_ReassignedIncidentAlertsItsCurrentGroup(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
 	email := &fakeEmail{}
 	e := newTestEngine(st, chat, &fakePublisher{})
 	e.email = email
-	var routedGroup string
-	e.WithIncidentSLAAudiences(func(group string) []string {
-		routedGroup = group
-		return []string{IncidentSLATestAudience(group)}
-	})
+	resolved := sreTeamWiring(e, chat,
+		map[string][]string{"Artemis SRE Group": {"artemis"}, "Apollo SRE Group": {"apollo"}},
+		[]string{"apollo", "artemis"},
+		map[string]string{"apollo": "apollo@example.com", "artemis": "artemis@example.com"})
 	past := time.Now().Add(-5 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"inc-1|" + ClockResolution: {
-			Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past,
-			AssignmentGroupName: "Apollo SRE Group", TeamEmail: "apollo@example.com", TeamLeadName: "Apollo Manager",
-		},
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssignmentGroupName: "Apollo SRE Group"},
 	}}
 	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Artemis SRE Group", Priority: "CRITICAL", StartedAt: past}
 	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
@@ -367,14 +415,14 @@ func TestTick_IncidentBreach_ReassignedIncidentAlertsItsCurrentGroup(t *testing.
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
 		t.Fatalf("Tick() error = %v", err)
 	}
-	if routedGroup != "Apollo SRE Group" {
-		t.Errorf("routed group = %q, want the current Apollo SRE Group", routedGroup)
+	if !slices.Equal(*resolved, []string{"Apollo SRE Group"}) {
+		t.Errorf("resolved groups = %v, want the current Apollo SRE Group", *resolved)
 	}
-	if len(chat.incidentCalls) != 1 || chat.incidentCalls[0].alert.AssignmentGroup != "Apollo SRE Group" || chat.incidentCalls[0].alert.GroupManagerName != "Apollo Manager" {
-		t.Errorf("incident alert = %+v, want Apollo SRE Group with its manager", chat.incidentCalls)
+	if len(chat.incidentCalls) != 1 || chat.incidentCalls[0].audience != notifications.IncidentSLAAudience("apollo") || chat.incidentCalls[0].alert.AssignmentGroup != "Apollo SRE Group" {
+		t.Errorf("incident alert = %+v, want Apollo's SLA space naming Apollo SRE Group", chat.incidentCalls)
 	}
-	if len(email.calls) != 1 || !slices.Equal(email.calls[0].to, []string{"apollo@example.com"}) || !strings.Contains(email.calls[0].htmlBody, "Apollo SRE Group") {
-		t.Errorf("email = %+v, want the Apollo group email naming Apollo SRE Group", email.calls)
+	if want := []string{"apollo@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) || !strings.Contains(email.calls[0].htmlBody, "Apollo SRE Group") {
+		t.Errorf("email recipients = %v, want Apollo's group email naming Apollo SRE Group", incidentRecipients(email.calls))
 	}
 }
 
@@ -384,7 +432,7 @@ func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
 	e := newTestEngine(st, chat, &fakePublisher{}).HoldIncidentTiersUntilRoutingReady()
-	e.WithIncidentSLAAudiences(func(group string) []string { return []string{IncidentSLATestAudience(group)} })
+	sreTeamWiring(e, chat, map[string][]string{"Artemis SRE Group": {"artemis"}}, []string{"artemis"}, nil)
 	past := time.Now().Add(-5 * time.Hour)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past},
@@ -414,6 +462,3 @@ func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
 		t.Errorf("incident alerts after routing ready = %d, want 1", len(chat.incidentCalls))
 	}
 }
-
-// IncidentSLATestAudience is the incident SLA audience the tests route a group to.
-func IncidentSLATestAudience(group string) string { return "incident-sla/" + strings.ToLower(group) }

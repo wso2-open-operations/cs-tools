@@ -289,21 +289,27 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   and unclaimed until cmd/server has finished setting up incident routing
   (`IncidentRoutingReady`, after `applyIncidentRoutes`, whether or not a
   mapping was applied); the ticker starts first. Cases never wait.
-- **Chat:** `sendIncidentBreachAlert` posts `SendIncidentSLAAlert` to the
-  `INCIDENT_SLA_CHAT_SPACES` spaces (audience `incident-sla/<group>`) of the
-  groups the incident's card goes to (`notifications.IncidentSLAAudiences` over
-  `IncidentRoutes.Groups`, so a default group fans out like its card), never
-  `chataudience.Resolve`'s case audiences. No shared fallback room. The group
-  is the incident's current one (`GetClockState`'s `assignmentGroupName`), so
-  a reassigned incident alerts its new group; an entity-service without the
-  field leaves the registration-time group.
+- **Routing, the same way as a case:** a case's alert reaches its account
+  CRE team; an incident's reaches its **SRE team(s)**. The incident's current
+  assignment group (`GetClockState`'s `assignmentGroupName`, else the
+  registration-time group) resolves to team keys through the SRE ladder's own
+  mapping (`paging.SRETeamsForGroup` over the merged Alert Settings + file
+  config: `teams.aliases` such as "Apollo SRE Group" -> `apollo`; a default
+  group -> every `teamlessChats` team; any other group -> none), set on
+  `IncidentRoutes.SetSRETeams` in `applyIncidentRoutes`.
+- **Chat:** each team's own `team.chat_webhook_url` -- the column a CRE
+  team's case alerts use -- refreshed with the case team spaces but by team
+  key (`GET /teams/chat-webhooks`'s `key`, `GetTeamChatWebhooksByKey` ->
+  `GoogleChatClient.SetIncidentSLATeamSpaces`, audience
+  `incident-sla/<team key>`). A team with no webhook gets no card: no shared
+  fallback, never Incident Monitor (the CRE room) or a case audience.
 - **Email:** the case emails, worded for an incident
   (`SLABreachEmailData.Incident`: "Incident ID", "View Incident", "Service",
   and an "SLA violated" preview at 100%; a case's wording is unchanged): the
-  assignee, and the assignment group's
-  `group_email` (entity-service's `GetClockState` returns the incident's
-  group as its team). No Americas copy, and no onboarding-team copy even
-  when the incident's project is onboarding.
+  assignee, and each SRE team's `team.group_email` (the `team.key` table
+  `SetTeamGroupEmails` already loads), with no lead greeting. Never the
+  account CRE team's `TeamEmail`, no Americas copy, and no onboarding-team
+  copy.
 - **Known gap:** `Reconcile` rebuilds from `GET /sla-status`, which lists
   case-like work items only, so a Redis wipe loses running incident clocks
   until their incident is elevated again. `cleanupStaleClocks` re-checks each

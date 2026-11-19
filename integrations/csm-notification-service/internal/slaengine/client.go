@@ -371,6 +371,10 @@ type clockState struct {
 	// it): an incident's SLA alert routes by it, so a reassigned incident
 	// alerts its new group. Empty falls back to the registration-time group.
 	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
+	// incidentTeamEmails is set by sendIncidentBreachAlert, never decoded:
+	// an incident's SRE team group emails, which sendBreachEmails uses as its
+	// team recipients in place of TeamEmail/OnboardingTeamEmail.
+	incidentTeamEmails []string
 }
 
 // GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>

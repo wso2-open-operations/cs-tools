@@ -31794,6 +31794,9 @@ components:
           type: string
         chatWebhookUrl:
           type: string
+        key:
+          type: string
+          description: The team's key (team.key); omitted when the team has none. csm-notification-service keys an incident's SRE team SLA space by it.
 
     ListTeamChatWebhooksResponse:
       type: object

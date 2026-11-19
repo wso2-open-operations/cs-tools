@@ -225,13 +225,10 @@ type IncidentSLAAlert struct {
 	Number          string
 	Title           string
 	AssignmentGroup string
-	// GroupManagerName, when set, follows the group in parens, as a case
-	// card's team lead does.
-	GroupManagerName string
-	Priority         string
-	Service          string
-	OpenedAt         string
-	IncidentLink     string
+	Priority        string
+	Service         string
+	OpenedAt        string
+	IncidentLink    string
 }
 
 // SendIncidentSLAAlert posts an incident SLA tier crossing to an incident
@@ -270,11 +267,7 @@ func (c *GoogleChatClient) SendIncidentSLAAlert(ctx context.Context, audience st
 		lines = append(lines, caseAlertLine(`<b>Service :</b> %s`, a.Service))
 	}
 	if a.AssignmentGroup != "" {
-		group := a.AssignmentGroup
-		if a.GroupManagerName != "" {
-			group = a.AssignmentGroup + " (" + a.GroupManagerName + ")"
-		}
-		lines = append(lines, caseAlertLine(`<b>Assignment Group :</b> <font color="%s"><b>%s</b></font>`, slaBreachColor(a.Tier), group))
+		lines = append(lines, caseAlertLine(`<b>Assignment Group :</b> <font color="%s"><b>%s</b></font>`, slaBreachColor(a.Tier), a.AssignmentGroup))
 	}
 	if label := priority.label; label != "" {
 		lines = append(lines, caseAlertLine(`<b>Priority :</b> %s`, label))

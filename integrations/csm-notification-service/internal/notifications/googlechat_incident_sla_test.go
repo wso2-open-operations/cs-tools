@@ -25,16 +25,15 @@ import (
 
 func incidentSLAAlert(tier string) IncidentSLAAlert {
 	return IncidentSLAAlert{
-		ClockType:        "resolution",
-		Tier:             tier,
-		Number:           "INC0091536",
-		Title:            "Router control plane 5xx",
-		AssignmentGroup:  "Artemis SRE Group",
-		GroupManagerName: "Artemis Lead",
-		Priority:         "CRITICAL",
-		Service:          "Choreo",
-		OpenedAt:         "2026-11-03 07:19:53 (UTC)",
-		IncidentLink:     "https://csm.example/incidents/inc-1",
+		ClockType:       "resolution",
+		Tier:            tier,
+		Number:          "INC0091536",
+		Title:           "Router control plane 5xx",
+		AssignmentGroup: "Artemis SRE Group",
+		Priority:        "CRITICAL",
+		Service:         "Choreo",
+		OpenedAt:        "2026-11-03 07:19:53 (UTC)",
+		IncidentLink:    "https://csm.example/incidents/inc-1",
 	}
 }
 
@@ -48,7 +47,7 @@ func TestSendIncidentSLAAlert_Breach(t *testing.T) {
 		t.Errorf("title = %q, want %q", card.Header.Title, want)
 	}
 	body := card.Sections[0].Widgets[0].TextParagraph.Text
-	for _, want := range []string{"Incident ID :</b> INC0091536", "Service :</b> Choreo", "Artemis SRE Group (Artemis Lead)", "P1 - Critical", "100%"} {
+	for _, want := range []string{"Incident ID :</b> INC0091536", "Service :</b> Choreo", "Artemis SRE Group", "P1 - Critical", "100%"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body = %q, want it to contain %q", body, want)
 		}
@@ -81,41 +80,50 @@ func TestSendIncidentSLAAlert_RequiresNumber(t *testing.T) {
 	}
 }
 
-func TestIncidentSLAAudiences(t *testing.T) {
-	has := func(spaces ...string) func(string) bool {
-		return func(a string) bool { return slices.Contains(spaces, a) }
+func TestIncidentRoutes_SRETeams(t *testing.T) {
+	var nilRoutes *IncidentRoutes
+	if got := nilRoutes.SRETeams("Apollo SRE Group"); got != nil {
+		t.Errorf("nil routes = %v, want none", got)
 	}
-	apollo, artemis := IncidentSLAAudience("Apollo SRE Group"), IncidentSLAAudience("Artemis SRE Group")
-	fanout := map[string][]string{"Default SRE Group": {"Apollo SRE Group", "Artemis SRE Group"}}
-
-	cases := []struct {
-		name   string
-		routes *IncidentRoutes
-		group  string
-		has    func(string) bool
-		want   []string
-	}{
-		{"own group", nil, "Apollo SRE Group", has(apollo, artemis), []string{apollo}},
-		{"default group fans out", nil, "default sre group", has(apollo, artemis), []string{apollo, artemis}},
-		{"fan-out target without a space is left out", nil, "Default SRE Group", has(artemis), []string{artemis}},
-		{"no SLA space, no fallback", nil, "Apollo SRE Group", has(IncidentAudience("Apollo SRE Group"), IncidentFallbackAudience), nil},
-		{"empty group", nil, "", has(apollo), nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := IncidentSLAAudiences(tc.routes, fanout, tc.group, tc.has)
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("IncidentSLAAudiences(%q) = %v, want %v", tc.group, got, tc.want)
-			}
-		})
-	}
-
-	// The Alert Settings mapping fans a default group out to SRE team keys.
 	routes := &IncidentRoutes{}
-	routes.Set(map[string][]string{"ms/pc sre group": {"apollo", "artemis"}})
-	got := IncidentSLAAudiences(routes, nil, "MS/PC SRE Group", has(IncidentSLAAudience("apollo"), IncidentSLAAudience("artemis")))
-	if want := []string{IncidentSLAAudience("apollo"), IncidentSLAAudience("artemis")}; !slices.Equal(got, want) {
-		t.Errorf("IncidentSLAAudiences via mapping = %v, want %v", got, want)
+	if got := routes.SRETeams("Apollo SRE Group"); got != nil {
+		t.Errorf("before SetSRETeams = %v, want none", got)
+	}
+	routes.SetSRETeams(func(group string) []string {
+		return map[string][]string{"Apollo SRE Group": {"apollo"}, "Default SRE Group": {"apollo", "artemis"}}[group]
+	})
+	if got := routes.SRETeams("Default SRE Group"); !slices.Equal(got, []string{"apollo", "artemis"}) {
+		t.Errorf("SRETeams(Default SRE Group) = %v, want both teamless teams", got)
+	}
+	if got := routes.SRETeams("  "); got != nil {
+		t.Errorf("SRETeams(blank) = %v, want none", got)
+	}
+}
+
+// An SRE team's incident SLA space is its team.chat_webhook_url by team key,
+// reachable only under IncidentSLAAudience: never as a case team audience,
+// and a static or incident card space never answers for it.
+func TestGoogleChatClient_IncidentSLATeamSpaces(t *testing.T) {
+	c := NewGoogleChatClient(GoogleChatConfig{AudienceSpaces: []GoogleChatAudienceSpace{
+		{Audience: IncidentSLAAudience("artemis"), WebhookURL: "https://chat.example/static"},
+	}})
+	c.SetIncidentSLATeamSpaces(map[string]string{" Apollo ": "https://chat.example/apollo", "iaas": "", "": "https://chat.example/x"})
+
+	if !c.HasAudienceSpace(IncidentSLAAudience("apollo")) {
+		t.Error("apollo's SLA space not found")
+	}
+	if c.HasAudienceSpace(IncidentSLAAudience("artemis")) {
+		t.Error("a static space answered for artemis's SLA space")
+	}
+	if c.HasAudienceSpace(IncidentSLAAudience("iaas")) {
+		t.Error("a team with a blank URL has an SLA space")
+	}
+	if c.HasAudienceSpace("apollo") || c.HasAudienceSpace(IncidentAudience("apollo")) {
+		t.Error("an SRE team's SLA space answered as a case or incident card audience")
+	}
+	c.SetIncidentSLATeamSpaces(nil)
+	if c.HasAudienceSpace(IncidentSLAAudience("apollo")) {
+		t.Error("SLA spaces not cleared")
 	}
 }
 

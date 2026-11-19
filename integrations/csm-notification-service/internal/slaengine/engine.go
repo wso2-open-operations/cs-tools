@@ -309,11 +309,11 @@ type Engine struct {
 	// concurrency shape as GoogleChatClient.teamAudienceSpaces.
 	teamGroupEmailsMu sync.RWMutex
 	teamGroupEmails   map[string]string
-	// incidentSLAAudiences maps an incident's assignment group to its
-	// incident SLA spaces (notifications.IncidentSLAAudiences, set by
-	// WithIncidentSLAAudiences). nil: an incident's SLA alert goes to no
-	// Chat space, only its emails.
-	incidentSLAAudiences func(assignmentGroup string) []string
+	// incidentSLATeams resolves an incident's assignment group to its SRE
+	// team keys (notifications.IncidentRoutes.SRETeams, set by
+	// WithIncidentSLATeams). nil: an incident's SLA alert reaches only its
+	// assignee.
+	incidentSLATeams func(assignmentGroup string) []string
 	// incidentRoutingPending holds every incident tier back (left due, not
 	// claimed) until cmd/server has set up incident routing: the ticker
 	// starts before the Alert Settings mapping is applied, and a tier sent
@@ -322,10 +322,10 @@ type Engine struct {
 	incidentRoutingPending atomic.Bool
 }
 
-// WithIncidentSLAAudiences sets how an incident's SLA alert finds its Chat
-// spaces; see Engine.incidentSLAAudiences.
-func (e *Engine) WithIncidentSLAAudiences(audiences func(assignmentGroup string) []string) *Engine {
-	e.incidentSLAAudiences = audiences
+// WithIncidentSLATeams sets how an incident's SLA alert finds its SRE teams;
+// see Engine.incidentSLATeams.
+func (e *Engine) WithIncidentSLATeams(teams func(assignmentGroup string) []string) *Engine {
+	e.incidentSLATeams = teams
 	return e
 }
 
@@ -1574,14 +1574,15 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 	e.sendBreachEmails(ctx, meta, caseID, clockType, tier, caseNumber, openedAt, caseLink, state, isAmericas)
 }
 
-// sendIncidentBreachAlert is sendBreachAlert for an incident's clock: the
-// card goes to the incident SLA spaces of its assignment group
-// (incidentSLAAudiences -- a default group fans out to the SRE teams, as its
-// incident card does), not chataudience.Resolve's case audiences, and the
-// same assignee and team emails a case gets follow. Its team email is the
-// assignment group's group_email (entity-service's GetClockState resolves it
-// for an incident); there is no Americas copy, which is CRE coverage. A
-// failed send to one space is logged and not retried, as for a case.
+// sendIncidentBreachAlert is sendBreachAlert for an incident's clock, the way
+// a case's reaches its CRE team: the incident's current assignment group is
+// resolved to its SRE team(s) (incidentSLATeams -- the SRE ladder's own
+// group->team mapping, so a default group is every teamless team), and each
+// team's own team.chat_webhook_url (its incident SLA space) gets the card and
+// its team.group_email the team email, beside the assignee's. A team with no
+// space gets no card; there is no shared fallback room, no Americas or
+// onboarding copy (CRE coverage), and never a call. A failed send to one
+// space is logged and not retried, as for a case.
 func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, incidentID, clockType string, tier int, state clockState) {
 	number := meta.CaseNumber
 	if number == "" {
@@ -1593,32 +1594,39 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 	}
 	link := e.links.IncidentLink(incidentID)
 
-	// The group as it is now: TeamEmail/TeamLeadName (the group email and
-	// manager) are already the current group's, so the card, its space and
-	// the email follow a reassignment too. An entity-service without the
-	// field leaves the registration-time group.
+	// The group as it is now, so a reassigned incident alerts its new
+	// group's team(s). An entity-service without the field leaves the
+	// registration-time group.
 	if state.AssignmentGroupName != "" {
 		meta.Team = state.AssignmentGroupName
 	}
 
-	var audiences []string
-	if e.incidentSLAAudiences != nil {
-		audiences = e.incidentSLAAudiences(meta.Team)
+	var teams []string
+	if e.incidentSLATeams != nil {
+		teams = e.incidentSLATeams(meta.Team)
+	}
+	var audiences, teamEmails []string
+	for _, team := range teams {
+		if audience := notifications.IncidentSLAAudience(team); e.chat.HasAudienceSpace(audience) && !slices.Contains(audiences, audience) {
+			audiences = append(audiences, audience)
+		}
+		if email, ok := e.teamGroupEmail(team); ok {
+			teamEmails = append(teamEmails, email)
+		}
 	}
 	if len(audiences) == 0 {
-		slog.InfoContext(ctx, "slaengine: incident's assignment group has no incident SLA chat space, no chat alert", "incidentId", incidentID, "clockType", clockType, "tier", tier, "assignmentGroup", meta.Team)
+		slog.InfoContext(ctx, "slaengine: incident's SRE team has no incident SLA chat space, no chat alert", "incidentId", incidentID, "clockType", clockType, "tier", tier, "assignmentGroup", meta.Team, "sreTeams", teams)
 	}
 	alert := notifications.IncidentSLAAlert{
-		ClockType:        clockType,
-		Tier:             tierLabel(tier),
-		Number:           number,
-		Title:            meta.CaseTitle,
-		AssignmentGroup:  meta.Team,
-		GroupManagerName: state.TeamLeadName,
-		Priority:         meta.Priority,
-		Service:          meta.Product,
-		OpenedAt:         openedAt,
-		IncidentLink:     link,
+		ClockType:       clockType,
+		Tier:            tierLabel(tier),
+		Number:          number,
+		Title:           meta.CaseTitle,
+		AssignmentGroup: meta.Team,
+		Priority:        meta.Priority,
+		Service:         meta.Product,
+		OpenedAt:        openedAt,
+		IncidentLink:    link,
 	}
 	for _, audience := range audiences {
 		if err := e.chat.SendIncidentSLAAlert(ctx, audience, alert); err != nil {
@@ -1626,6 +1634,10 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 		}
 	}
 
+	// GetClockState's TeamEmail/TeamLeadName are the account CRE team's; an
+	// incident's team email goes to its SRE team(s) instead, with no lead.
+	state.TeamEmail, state.TeamLeadName = "", ""
+	state.incidentTeamEmails = teamEmails
 	e.sendBreachEmails(ctx, meta, incidentID, clockType, tier, number, openedAt, link, state, false)
 }
 
@@ -1761,14 +1773,12 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	// onboarding team's lead leads the team actually working the case (a
 	// CodeRabbit-caught gap in an earlier version of this fix).
 	//
-	// An incident's team is its assignment group alone: the onboarding team
-	// is a case concern, so an incident on an onboarding project does not
-	// copy it.
-	onboardingTeamEmail := state.OnboardingTeamEmail
+	teamEmails := nonEmptyUnique(state.TeamEmail, state.OnboardingTeamEmail)
 	if meta.CaseType == CaseTypeIncident {
-		onboardingTeamEmail = ""
+		// Its SRE team(s)' group emails (sendIncidentBreachAlert), never the
+		// account CRE or onboarding team's.
+		teamEmails = nonEmptyUnique(state.incidentTeamEmails...)
 	}
-	teamEmails := nonEmptyUnique(state.TeamEmail, onboardingTeamEmail)
 	send("team", teamEmails, meta.Team, func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor

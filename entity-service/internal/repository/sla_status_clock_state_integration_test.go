@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// GetClockState's team fields for an incident come from its assignment
-// group, not an account CRE team; a case keeps the CRE team even when it has
-// the same assignment group. Same DSN and skip-when-unset pattern as the
+// GetClockState returns an incident's current assignment group name (and
+// nothing for a case with the same group), while TeamEmail/TeamLeadName stay
+// the account CRE team's for both. Same DSN and skip-when-unset pattern as the
 // other SLA integration tests:
 //
 //	CASE_STATS_TEST_DSN=postgres://... go test ./internal/repository/ -run ClockStateIntegration
@@ -38,7 +38,7 @@ const (
 	clockStatePolicyID   = "48888888-0000-0000-0000-000000000005"
 )
 
-func TestClockStateIntegration_IncidentTeamIsAssignmentGroup(t *testing.T) {
+func TestClockStateIntegration_IncidentAssignmentGroupName(t *testing.T) {
 	pool := caseStatsPool(t)
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
@@ -94,11 +94,8 @@ func TestClockStateIntegration_IncidentTeamIsAssignmentGroup(t *testing.T) {
 	if !incident.Found {
 		t.Fatal("GetClockState(incident): Found = false, want true")
 	}
-	if incident.TeamEmail != "sre-group@example.com" {
-		t.Errorf("incident TeamEmail = %q, want the assignment group's group_email", incident.TeamEmail)
-	}
-	if incident.TeamLeadName != "Clock State Manager" {
-		t.Errorf("incident TeamLeadName = %q, want the assignment group's manager", incident.TeamLeadName)
+	if incident.TeamEmail != "" || incident.TeamLeadName != "" {
+		t.Errorf("incident TeamEmail/TeamLeadName = %q/%q, want empty: still the account CRE team's (none here), never the assignment group's", incident.TeamEmail, incident.TeamLeadName)
 	}
 	if incident.AssignmentGroupName != "Clock State SRE Group" {
 		t.Errorf("incident AssignmentGroupName = %q, want the incident's current assignment group", incident.AssignmentGroupName)

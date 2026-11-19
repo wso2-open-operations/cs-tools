@@ -6247,6 +6247,10 @@ type SearchTeamsResponse struct {
 type TeamChatWebhook struct {
 	Name           string `json:"name"`
 	ChatWebhookURL string `json:"chatWebhookUrl"`
+	// Key is the team's key (team.key): csm-notification-service keys an
+	// incident's SRE team SLA space by it, the key the SRE ladder resolves an
+	// assignment group to. Additive; case routing still reads Name.
+	Key string `json:"key,omitempty"`
 }
 
 // ListTeamChatWebhooksResponse is the response for GET /teams/chat-webhooks

@@ -125,3 +125,32 @@ func ChatWebhookURL(c Chat, shared interface {
 	}
 	return shared.AudienceWebhookURL(audience)
 }
+
+// SRETeamsForGroup is the SRE team key(s) an incident's assignment group
+// belongs to on l, the way the SRE ladder sees it: a group that is an SRE
+// team of its own (KnownSRETeam, through teams.aliases -- the Alert Settings
+// group routes included) is its one team; a default group (no SRE team of
+// its own) is every teamlessChats team, where its paging cards already go;
+// any other group has none. The incident SLA alert reaches each team's own
+// team.chat_webhook_url and team.group_email, as a case's does its CRE team's.
+func SRETeamsForGroup(l LadderConfig, group string) []string {
+	key := teamKeyFor(group)
+	if key == "" {
+		return nil
+	}
+	for _, g := range l.Teams.DefaultGroups {
+		if teamKeyFor(g) == key {
+			var teams []string
+			for _, t := range l.TeamlessChats {
+				if k := teamKeyFor(t); k != "" && !contains(teams, k) {
+					teams = append(teams, k)
+				}
+			}
+			return teams
+		}
+	}
+	if KnownSRETeam(l, group) {
+		return []string{sreTeamKeyIn(l, group)}
+	}
+	return nil
+}
