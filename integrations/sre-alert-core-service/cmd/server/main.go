@@ -227,21 +227,16 @@ func main() {
 		os.Exit(1)
 	}
 	mux.Handle("/alertz", auth.RequireWakeToken(wakeToken, base.With("component", "auth"))(http.HandlerFunc(h.ServeAlert)))
-	// The CSM portal backend (and csm-integration-service) read which incidents each alert mute rule muted, through
-	// the Choreo gateway: each calls with an OAuth2 client-credentials token of an app subscribed to this API, the
-	// gateway checks it and forwards x-jwt-assertion, and only the client ids listed here are let in.
-	readClientIDs := auth.SplitClientIDs(os.Getenv("ALERT_CORE_READ_CLIENT_IDS"))
-	if len(readClientIDs) == 0 {
-		logger.Warn("ALERT_CORE_READ_CLIENT_IDS not set; the read API rejects every call, so the CSM portal cannot list muted alerts")
-	}
+	// The CSM portal backend and csm-integration-service read which incidents each alert mute rule muted, through
+	// the Choreo gateway: the "Alert Core Read API" endpoint lets in only apps subscribed to it, with their OAuth2
+	// token, so this service does no authentication of its own on these routes.
 	if strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")) != "" {
-		logger.Warn("ALERT_CORE_API_TOKEN is no longer used; callers authenticate through the Choreo gateway (ALERT_CORE_READ_CLIENT_IDS). Remove it")
+		logger.Warn("ALERT_CORE_API_TOKEN is no longer used; the Choreo gateway authenticates read API callers. Remove it")
 	}
 	apiHandler := api.New(base.With("component", "api"), incidents)
-	requireReadClient := auth.RequireClientID(readClientIDs, base.With("component", "auth"))
-	mux.Handle("GET /alert-mute-rules/{id}/muted-incidents", requireReadClient(http.HandlerFunc(apiHandler.MutedIncidents)))
-	mux.Handle("GET /alert-field-values", requireReadClient(http.HandlerFunc(apiHandler.FieldValues)))
-	mux.Handle("GET /alert-mute-rules/muted-counts", requireReadClient(http.HandlerFunc(apiHandler.MutedCounts)))
+	mux.HandleFunc("GET /alert-mute-rules/{id}/muted-incidents", apiHandler.MutedIncidents)
+	mux.HandleFunc("GET /alert-field-values", apiHandler.FieldValues)
+	mux.HandleFunc("GET /alert-mute-rules/muted-counts", apiHandler.MutedCounts)
 
 	port := os.Getenv("PORT")
 	if port == "" {
