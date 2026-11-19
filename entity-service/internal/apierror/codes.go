@@ -201,3 +201,24 @@ const (
 // active link to another case (POST /cases/{id}/product-work-items/links). The
 // message names that case; nothing was changed.
 const CodeAlreadyLinked = "already_linked"
+
+// Refusals of the product issue write-back routes (POST /product-work-items/{id}/
+// comments, /board-status, /close and /commands/{commandId}/retry). Nothing was
+// queued.
+const (
+	// CodeLinkInactive: the issue's GitHub link is no longer ACTIVE (deleted or
+	// transferred on GitHub).
+	CodeLinkInactive = "link_inactive"
+	// CodeNotWaitingOnCS: the stored board status is not WAITING_ON_CS.
+	CodeNotWaitingOnCS = "not_waiting_on_cs"
+	// CodeCommandPending: the issue already has an open command of this kind.
+	CodeCommandPending = "command_pending"
+	// CodeNoTrackingBoard: no product_repo_mapping row names a board for the issue's repository.
+	CodeNoTrackingBoard = "no_tracking_board"
+	// CodeAlreadyClosed: the stored GitHub state is already closed.
+	CodeAlreadyClosed = "already_closed"
+	// CodeCommandNotFailed: a retry was asked for a command that is not FAILED.
+	CodeCommandNotFailed = "not_failed"
+	// CodeUnsupportedStatus: the board status asked for is not one the portal sets.
+	CodeUnsupportedStatus = "unsupported_status"
+)

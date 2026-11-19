@@ -68,7 +68,11 @@ type Error struct {
 	StatusCode int
 	// RetryAfter is the parsed Retry-After header (seconds form); 0 if absent.
 	RetryAfter time.Duration
-	Message    string
+	// GitHubStatus is GitHub's own status code when the failure is an answer from
+	// GitHub, from the X-GitHub-Status response header; 0 when absent (the
+	// engineering entity failed without a GitHub answer, or nothing answered).
+	GitHubStatus int
+	Message      string
 }
 
 func (e *Error) Error() string {
@@ -192,6 +196,9 @@ func (c ProjectItemContent) RepositoryName() string {
 
 // ProjectItem is one item of a project board with its content and field values.
 type ProjectItem struct {
+	// ItemID is the numeric item id the item update route needs (an additive field
+	// of the engineering entity); 0 when the engineering entity does not send it.
+	ItemID int64  `json:"itemId"`
 	NodeID string `json:"nodeId"`
 	// Type is ISSUE, PULL_REQUEST, DRAFT_ISSUE or REDACTED.
 	Type string `json:"type"`
@@ -373,6 +380,112 @@ func (c *Client) ListProjectItemsWithContent(ctx context.Context, org string, pr
 	return out, err
 }
 
+// IssueState is the part of an issue update answer the write-back needs.
+type IssueState struct {
+	ID          int64   `json:"id"`
+	NodeID      string  `json:"nodeId"`
+	Number      int     `json:"number"`
+	State       string  `json:"state"` // "open" or "closed", lower case as GitHub spells it
+	StateReason *string `json:"stateReason"`
+}
+
+// ProjectFieldOption is one option of a single-select project field.
+type ProjectFieldOption struct {
+	ID string `json:"id"`
+	// Name is the option's display name as the engineering entity flattens it (the
+	// HTML form of GitHub's name; plain text for an ordinary name).
+	Name string `json:"name"`
+}
+
+// ProjectField is one field of a project board (GET .../projects/{n}/fields).
+type ProjectField struct {
+	ID       int64                `json:"id"`
+	NodeID   string               `json:"nodeId"`
+	Name     string               `json:"name"`
+	DataType string               `json:"dataType"` // e.g. "single_select"
+	Options  []ProjectFieldOption `json:"options"`
+}
+
+// ProjectItemRef is one element of GET .../projects/{n}/items: the numeric item id
+// the update needs, and the issue behind it. The route returns no repository, so an
+// item is identified by Content.NodeID (unique across GitHub), not by number alone.
+type ProjectItemRef struct {
+	ID      int64  `json:"id"`
+	NodeID  string `json:"nodeId"`
+	Content struct {
+		ID     int64  `json:"id"`
+		NodeID string `json:"nodeId"`
+		Number int    `json:"number"`
+	} `json:"content"`
+}
+
+// ListProjectItemsQuery are the parameters of GET .../projects/{n}/items. The route
+// has no paging: it returns one page of at most PerPage items (eng default 30, GitHub
+// max 100) matching Q (eng default "is:open").
+type ListProjectItemsQuery struct {
+	PerPage int
+	Q       string
+}
+
+// AddIssueComment posts a comment (POST .../issues/{n}/comments). The answer carries
+// the comment id and timestamps; AuthorLogin is not part of it (nil).
+func (c *Client) AddIssueComment(ctx context.Context, org, owner, repo string, number int, body string) (IssueComment, error) {
+	var out IssueComment
+	err := c.do(ctx, http.MethodPost, issuesBase(org, owner, repo)+"/issues/"+strconv.Itoa(number)+"/comments", nil,
+		map[string]string{"body": body}, &out)
+	if err != nil {
+		return IssueComment{}, err
+	}
+	if out.ID <= 0 {
+		return IssueComment{}, &Error{StatusCode: http.StatusBadGateway, Message: "add comment answer has no comment id"}
+	}
+	return out, nil
+}
+
+// CloseIssue closes an issue (PATCH .../issues/{n}) with the given state reason
+// ("completed"). The answer is the issue's state after the call.
+func (c *Client) CloseIssue(ctx context.Context, org, owner, repo string, number int, stateReason string) (IssueState, error) {
+	var out IssueState
+	err := c.do(ctx, http.MethodPatch, issuesBase(org, owner, repo)+"/issues/"+strconv.Itoa(number), nil,
+		map[string]string{"state": "closed", "stateReason": stateReason}, &out)
+	return out, err
+}
+
+// ListProjectFields reads the fields of a project board with their options.
+func (c *Client) ListProjectFields(ctx context.Context, org string, projectNumber int) ([]ProjectField, error) {
+	v := url.Values{}
+	v.Set("perPage", "100")
+	var out []ProjectField
+	err := c.do(ctx, http.MethodGet, "/orgs/"+url.PathEscape(org)+"/projects/"+strconv.Itoa(projectNumber)+"/fields", v, nil, &out)
+	return out, err
+}
+
+// ListProjectItems reads one page of a board's items (GET .../projects/{n}/items).
+func (c *Client) ListProjectItems(ctx context.Context, org string, projectNumber int, q ListProjectItemsQuery) ([]ProjectItemRef, error) {
+	v := url.Values{}
+	if q.PerPage > 0 {
+		v.Set("perPage", strconv.Itoa(q.PerPage))
+	}
+	if q.Q != "" {
+		v.Set("q", q.Q)
+	}
+	var out []ProjectItemRef
+	err := c.do(ctx, http.MethodGet, "/orgs/"+url.PathEscape(org)+"/projects/"+strconv.Itoa(projectNumber)+"/items", v, nil, &out)
+	return out, err
+}
+
+type projectFieldUpdate struct {
+	ID    int64  `json:"id"`
+	Value string `json:"value"`
+}
+
+// UpdateProjectItemStatus sets a single-select field of a board item to an option
+// (PATCH .../projects/{n}/items/{itemId}). optionID is the option's id, not its name.
+func (c *Client) UpdateProjectItemStatus(ctx context.Context, org string, projectNumber int, itemID, fieldID int64, optionID string) error {
+	body := map[string][]projectFieldUpdate{"fields": {{ID: fieldID, Value: optionID}}}
+	return c.do(ctx, http.MethodPatch, "/orgs/"+url.PathEscape(org)+"/projects/"+strconv.Itoa(projectNumber)+"/items/"+strconv.FormatInt(itemID, 10), nil, body, nil)
+}
+
 // do performs one call, refreshing the token once on a 401.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	var payload []byte
@@ -445,6 +558,11 @@ func (c *Client) send(ctx context.Context, token, method, path string, query url
 		return nil
 	}
 	e := &Error{StatusCode: resp.StatusCode, Message: fmt.Sprintf("%s %s returned %d", method, safePath(path), resp.StatusCode)}
+	if gs := strings.TrimSpace(resp.Header.Get("X-GitHub-Status")); gs != "" {
+		if code, perr := strconv.Atoi(gs); perr == nil && code > 0 {
+			e.GitHubStatus = code
+		}
+	}
 	if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
 		if secs, perr := strconv.Atoi(ra); perr == nil && secs > 0 {
 			e.RetryAfter = time.Duration(secs) * time.Second

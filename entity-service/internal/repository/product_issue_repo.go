@@ -201,11 +201,16 @@ func (r *productIssueRepo) GetDetail(ctx context.Context, id string) (domain.Pro
 	// The latest comments, oldest first. A comment deleted in the portal or on
 	// GitHub is not part of the conversation.
 	crows, err := r.db.Query(ctx, `
-		SELECT id, type, author, content, created_on, origin, github_comment_id, author_login FROM (
+		SELECT id, type, author, content, created_on, origin, github_comment_id, author_login, delivery, command_id FROM (
 		  SELECT c.id::TEXT AS id, c.type::TEXT AS type, c.created_by AS author, COALESCE(c.content, '') AS content, c.created_on,
-		         ref.origin, ref.github_comment_id, ref.author_login
+		         ref.origin, ref.github_comment_id, ref.author_login,
+		         CASE WHEN ref.origin = 'PORTAL' AND gc.status IN ('PENDING', 'DELIVERED', 'FAILED', 'CANCELLED') THEN gc.status END AS delivery,
+		         CASE WHEN ref.origin = 'PORTAL' THEN gc.id::TEXT END AS command_id
 		    FROM comment c
 		    LEFT JOIN comment_github_ref ref ON ref.comment_id = c.id
+		    LEFT JOIN LATERAL (SELECT g2.id, g2.status FROM github_command g2
+		                        WHERE g2.comment_id = c.id AND g2.kind = 'ADD_COMMENT'
+		                        ORDER BY g2.created_on DESC, g2.id DESC LIMIT 1) gc ON TRUE
 		   WHERE c.work_item_id = $1::uuid AND c.deleted_at IS NULL AND ref.deleted_on IS NULL
 		   ORDER BY c.created_on DESC, c.id DESC
 		   LIMIT $2) latest
@@ -217,7 +222,7 @@ func (r *productIssueRepo) GetDetail(ctx context.Context, id string) (domain.Pro
 	d.Conversation = []domain.ProductIssueComment{}
 	for crows.Next() {
 		var c domain.ProductIssueComment
-		if err := crows.Scan(&c.ID, &c.Type, &c.Author, &c.Body, &c.CreatedOn, &c.Origin, &c.GitHubCommentID, &c.AuthorLogin); err != nil {
+		if err := crows.Scan(&c.ID, &c.Type, &c.Author, &c.Body, &c.CreatedOn, &c.Origin, &c.GitHubCommentID, &c.AuthorLogin, &c.Delivery, &c.CommandID); err != nil {
 			return d, fmt.Errorf("scan product issue comment: %w", err)
 		}
 		d.Conversation = append(d.Conversation, c)
@@ -245,7 +250,20 @@ func (r *productIssueRepo) GetDetail(ctx context.Context, id string) (domain.Pro
 		}
 		d.StatusHistory = append(d.StatusHistory, e)
 	}
-	return d, erows.Err()
+	if err := erows.Err(); err != nil {
+		return d, err
+	}
+	erows.Close()
+
+	cmds, err := listGitHubCommands(ctx, r.db, id)
+	if err != nil {
+		return d, err
+	}
+	d.Commands = make([]domain.GitHubCommand, 0, len(cmds))
+	for _, c := range cmds {
+		d.Commands = append(d.Commands, c.Domain())
+	}
+	return d, nil
 }
 
 func (r *productIssueRepo) Search(ctx context.Context, f domain.SearchProductIssuesFilters, p domain.Pagination) ([]domain.ProductIssueSummary, int, error) {

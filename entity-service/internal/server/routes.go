@@ -2288,7 +2288,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// branch and the reconcile/backfill routes below; nil unless git internals is on.
 	var gitInternalsSLA service.WorkItemSLAEngine
 	var gitInternalsTagRule service.ProductIssueCaseTagRule
-	if cfg.GitInternalsActive() && db != nil && cfg.DataSource != config.DataSourceServiceNow {
+	if cfg.GitInternalsServed(db != nil) {
 		gitInternalsSLA = service.NewWorkItemSLAEngine(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))
 		gitInternalsTagRule = service.NewProductIssueCaseTagRule(
 			repository.NewProductIssueCaseTagRepository(repository.NewScoped(db)), activeCaseSvc)
@@ -2880,6 +2880,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /cases/{id}/product-work-items/{workItemId}/link", internalOnly(accessSvc, productIssueHandler.UnlinkProductWorkItem))
 		mux.HandleFunc("GET /product-work-items/{id}", internalOnly(accessSvc, productIssueHandler.GetProductWorkItem))
 		mux.HandleFunc("POST /product-work-items/search", internalOnly(accessSvc, productIssueHandler.SearchProductWorkItems))
+		// Write-back: queued for GitHub (202); the worker started in cmd/api delivers.
+		productIssueWriteHandler := handler.NewProductIssueWriteHandler(service.NewProductIssueWriteService(
+			repository.NewGitHubCommandRepository(repository.NewScoped(db)), accessSvc))
+		mux.HandleFunc("POST /product-work-items/{id}/comments", internalOnly(accessSvc, productIssueWriteHandler.AddComment))
+		mux.HandleFunc("POST /product-work-items/{id}/board-status", internalOnly(accessSvc, productIssueWriteHandler.SetBoardStatus))
+		mux.HandleFunc("POST /product-work-items/{id}/close", internalOnly(accessSvc, productIssueWriteHandler.CloseProductWorkItem))
+		mux.HandleFunc("POST /product-work-items/{id}/commands/{commandId}/retry", internalOnly(accessSvc, productIssueWriteHandler.RetryCommand))
 		// Reconciliation and backfill: an internal service credential only (the daily
 		// scheduled task, an operator's service client); a user token is refused,
 		// since each call writes to every linked issue or creates work items.

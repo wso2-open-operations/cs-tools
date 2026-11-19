@@ -870,6 +870,10 @@ type Config struct {
 	// Git issue management feature set. Off, none of its routes are registered.
 	// It needs EngineeringEntityBaseURL and a database pool (GitInternalsActive).
 	GitInternalsEnabled bool
+	// GitInternalsCommandInterval is GIT_INTERNALS_COMMAND_INTERVAL (default 10s): how
+	// often the write-back worker looks for queued portal actions (comment, move to
+	// WOW, close) to deliver to GitHub. Runs only when git internals is active.
+	GitInternalsCommandInterval time.Duration
 	// GitInternalsBotLogins is GIT_INTERNALS_BOT_LOGINS (comma-separated): the
 	// portal's own GitHub accounts. A comment they post on a product issue is not
 	// mirrored back as a new comment. github-project-automation[bot] is never
@@ -1129,6 +1133,7 @@ func Load() *Config {
 		SalesEntityClientSecret:                       os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
 		SalesEntityScopes:                             os.Getenv("SALES_ENTITY_SCOPES"),
 		GitInternalsEnabled:                           os.Getenv("GIT_INTERNALS_ENABLED") == "true",
+		GitInternalsCommandInterval:                   envDuration("GIT_INTERNALS_COMMAND_INTERVAL", 10*time.Second),
 		GitInternalsBotLogins:                         splitLoginList(os.Getenv("GIT_INTERNALS_BOT_LOGINS")),
 		EngineeringEntityBaseURL:                      strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")),
 		EngineeringEntityTokenURL:                     strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_TOKEN_URL")),
@@ -1735,6 +1740,13 @@ func (c *Config) EngineeringEntityAuthConfigured() bool {
 // with db != nil.
 func (c *Config) GitInternalsActive() bool {
 	return c.GitInternalsEnabled && c.EngineeringEntityBaseURL != ""
+}
+
+// GitInternalsServed is the one predicate for everything git internals starts
+// (the routes and the write-back worker): active, a database pool, and not the
+// ServiceNow data source.
+func (c *Config) GitInternalsServed(havePool bool) bool {
+	return c.GitInternalsActive() && havePool && c.DataSource != DataSourceServiceNow
 }
 
 // SCIMConfigured reports whether every WSO2 internal-org SCIM search env var is set.

@@ -9497,6 +9497,318 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /product-work-items/{id}/comments:
+    post:
+      summary: Add a comment to a product issue's GitHub issue.
+      description: >-
+        Writes the comment to the conversation at once (delivery PENDING) and queues it for GitHub. Internal callers only; present only when GIT_INTERNALS_ENABLED=true. The action is queued
+        and delivered to GitHub by a worker; the issue's stored board and GitHub state change only when
+        GitHub confirms it. Another work item type is a 404. A 409 carries `errorCode`: `link_inactive`, `idempotency_key_reused`.
+      operationId: addProductIssueComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Product issue work item UUID.
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+          description: A repeat with the same key on the same issue returns the first command with 200 instead of 202 and queues nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddProductIssueCommentRequest'
+      responses:
+        "202":
+          description: The comment and its queued command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddProductIssueCommentResponse'
+        "200":
+          description: A repeat of an earlier request (same Idempotency-Key); nothing new was queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddProductIssueCommentResponse'
+        "400":
+          description: Invalid id, body or Idempotency-Key, or no signed-in user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Product issue (or command) not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The action is not allowed now (see errorCode).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-work-items/{id}/board-status:
+    post:
+      summary: Move a product issue from Waiting on CS to Waiting on product team.
+      description: >-
+        Queues the board move WOC to WOW. Only WAITING_ON_PRODUCT_TEAM is accepted (400 `unsupported_status` otherwise). Internal callers only; present only when GIT_INTERNALS_ENABLED=true. The action is queued
+        and delivered to GitHub by a worker; the issue's stored board and GitHub state change only when
+        GitHub confirms it. Another work item type is a 404. A 409 carries `errorCode`: `not_waiting_on_cs`, `command_pending`, `link_inactive`, `no_tracking_board`, `idempotency_key_reused`.
+      operationId: setProductIssueBoardStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Product issue work item UUID.
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+          description: A repeat with the same key on the same issue returns the first command with 200 instead of 202 and queues nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetProductIssueBoardStatusRequest'
+      responses:
+        "202":
+          description: The queued command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueCommandResponse'
+        "200":
+          description: A repeat of an earlier request (same Idempotency-Key); nothing new was queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueCommandResponse'
+        "400":
+          description: Invalid id, body or Idempotency-Key, or no signed-in user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Product issue (or command) not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The action is not allowed now (see errorCode).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-work-items/{id}/close:
+    post:
+      summary: Close a product issue's GitHub issue as completed.
+      description: >-
+        Queues closing the issue with state reason completed. Internal callers only; present only when GIT_INTERNALS_ENABLED=true. The action is queued
+        and delivered to GitHub by a worker; the issue's stored board and GitHub state change only when
+        GitHub confirms it. Another work item type is a 404. A 409 carries `errorCode`: `already_closed`, `command_pending`, `link_inactive`, `idempotency_key_reused`.
+      operationId: closeProductIssue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Product issue work item UUID.
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+          description: A repeat with the same key on the same issue returns the first command with 200 instead of 202 and queues nothing.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "202":
+          description: The queued command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueCommandResponse'
+        "200":
+          description: A repeat of an earlier request (same Idempotency-Key); nothing new was queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueCommandResponse'
+        "400":
+          description: Invalid id, body or Idempotency-Key, or no signed-in user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Product issue (or command) not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The action is not allowed now (see errorCode).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-work-items/{id}/commands/{commandId}/retry:
+    post:
+      summary: Retry a failed write-back command.
+      description: >-
+        Puts a FAILED command back to PENDING with a fresh 24 hour window, after the same state checks as the original action. Internal callers only; present only when GIT_INTERNALS_ENABLED=true. The action is queued
+        and delivered to GitHub by a worker; the issue's stored board and GitHub state change only when
+        GitHub confirms it. Another work item type is a 404. A 409 carries `errorCode`: `not_failed`, `not_waiting_on_cs`, `already_closed`, `command_pending`, `link_inactive`, `no_tracking_board`.
+      operationId: retryProductIssueCommand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Product issue work item UUID.
+        - name: commandId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The GitHubCommand id.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "202":
+          description: The command, PENDING again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueCommandResponse'
+        "400":
+          description: Invalid id, body or Idempotency-Key, or no signed-in user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Product issue (or command) not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The action is not allowed now (see errorCode).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /product-work-items/search:
     post:
       summary: Search product issues (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
@@ -33756,6 +34068,52 @@ components:
         origin: {type: string, nullable: true, enum: [PORTAL, GITHUB], description: "Null for a comment with no GitHub reference."}
         githubCommentId: {type: integer, format: int64, nullable: true}
         authorLogin: {type: string, nullable: true}
+        delivery: {type: string, nullable: true, enum: [PENDING, DELIVERED, FAILED, CANCELLED], description: "Delivery of a portal comment to GitHub; null for a GitHub comment. CANCELLED means it was not sent (the reason is the command's lastError)."}
+        commandId: {type: string, format: uuid, nullable: true, description: "The comment's GitHubCommand; null for a GitHub comment."}
+
+    GitHubCommand:
+      type: object
+      description: A portal action queued for GitHub and delivered by a background worker.
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [ADD_COMMENT, SET_BOARD_STATUS, SET_STATE]}
+        status: {type: string, enum: [PENDING, DELIVERED, FAILED, CANCELLED]}
+        attempts: {type: integer}
+        nextAttemptOn: {type: string, format: date-time, nullable: true, description: "Set while PENDING."}
+        lastError: {type: string, nullable: true, description: "A classification of the last failure, never GitHub's own words."}
+        requestedBy: {type: string}
+        createdOn: {type: string, format: date-time}
+        deliveredOn: {type: string, format: date-time, nullable: true}
+        commentId: {type: string, format: uuid, nullable: true, description: "ADD_COMMENT only."}
+        targetStatus: {type: string, nullable: true, description: "SET_BOARD_STATUS only: WAITING_ON_PRODUCT_TEAM."}
+
+    ProductIssueCommandResponse:
+      type: object
+      properties:
+        command:
+          $ref: '#/components/schemas/GitHubCommand'
+
+    AddProductIssueCommentRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: {type: string, minLength: 1, maxLength: 60000, description: "The comment, trimmed. Sent to GitHub as `**<name>** (CS) wrote:` followed by a blank line and the text."}
+
+    AddProductIssueCommentResponse:
+      type: object
+      properties:
+        comment:
+          $ref: '#/components/schemas/ProductIssueComment'
+        command:
+          $ref: '#/components/schemas/GitHubCommand'
+
+    SetProductIssueBoardStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, enum: [WAITING_ON_PRODUCT_TEAM]}
 
     ProductIssueStatusEvent:
       type: object
@@ -33789,6 +34147,11 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/ProductIssueStatusEvent'
+            commands:
+              type: array
+              description: Every PENDING or FAILED write-back command of the issue plus the 10 newest others, newest first.
+              items:
+                $ref: '#/components/schemas/GitHubCommand'
 
     SearchProductWorkItemsRequest:
       type: object
@@ -38865,6 +39228,10 @@ components:
             POST /cases/{id}/product-work-items, `idempotency_key_reused` (409: a key already used
             for a different request) and `request_in_progress` (409: the same request while another
             attempt with the key is still running; retry shortly), and, on
+            POST /product-work-items/{id}/comments, /board-status, /close and /commands/{commandId}/retry,
+            `link_inactive`, `not_waiting_on_cs`, `command_pending`, `no_tracking_board`, `already_closed`,
+            `not_failed` (409) and `unsupported_status` (400), and `idempotency_key_reused` (409; the key
+            was used for another kind of action), and, on
             POST /cases/{id}/product-work-items/links, `already_linked` (409: the product issue is linked to
             another case, named in the message; nothing changed) and `request_in_progress` (409: the issue is
             being registered from a case right now; retry shortly), and, on POST /incidents,

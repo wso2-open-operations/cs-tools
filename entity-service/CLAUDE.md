@@ -67,6 +67,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
 | `GIT_INTERNALS_ENABLED` | no | `false` | Must be `"true"` to register the git-internals routes (`POST /cases/{id}/product-work-items`, internal only). Also needs a pool and `ENGINEERING_ENTITY_BASE_URL`. Off means the routes are **not registered at all** |
 | `GIT_INTERNALS_BOT_LOGINS` | no | — | Comma-separated GitHub logins of the portal's own accounts. A comment they post on a linked product issue is not mirrored back (comments only; their issue and board events are applied). **No login is ignored unless listed: set it to the bot account(s) the engineering entity writes as, or the comments the portal posts to GitHub are mirrored back as new comments** (startup logs a WARN while it is empty and git internals is active). `github-project-automation[bot]` is never ignored even if listed. Entries with spaces or `<>"'@/\` refuse to start |
+| `GIT_INTERNALS_COMMAND_INTERVAL` | no | `10s` | How often the git-internals write-back worker delivers queued portal actions (comment, move to WOW, close) to GitHub. Runs only where the git-internals routes are registered |
 | `ENGINEERING_ENTITY_BASE_URL` | no* | — | WSO2 engineering entity service base URL. *Required when the gate is on or any `ENGINEERING_ENTITY_*` var is set |
 | `ENGINEERING_ENTITY_TOKEN_URL` | no* | — | OAuth2 token endpoint. Token URL, client id and client secret are all-or-none; with none set the client sends no `Authorization` header (local use) and startup logs a WARN |
 | `ENGINEERING_ENTITY_CLIENT_ID` | no* | — | OAuth2 client id |
@@ -13390,6 +13391,33 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
     AFFECTS link: the unmatched list; the create path and manual registration refuse an empty case id). A known issue
     with no active AFFECTS link gets the same match re-attempted: on a match the link (source `BACKFILL`) and the
     case's account and project on the work item are written.
+- **Write-back** (migration 0309 `github_command`, RLS 100031; `service/product_issue_write.go`,
+  `service/product_issue_commands.go`, `repository/github_command_repo.go`; routes in the same gate, `internalOnly`):
+  `POST /product-work-items/{id}/comments` (`{body}`, 1-60000 chars), `/board-status` (`{status: WAITING_ON_PRODUCT_TEAM}`),
+  `/close` and `/commands/{commandId}/retry` queue the portal's only three actions on an issue (comment, board move
+  WOC to WOW, close as completed) and answer 202 (200 for an `Idempotency-Key` repeat on the same item; a key reused for
+  another kind is 409 `idempotency_key_reused`). Refusals are 409 `{message, errorCode}` (`link_inactive`,
+  `not_waiting_on_cs`, `command_pending`, `no_tracking_board`, `already_closed`, `not_failed`) or 400 `unsupported_status`.
+  A comment is written at once as a WORK_NOTE with a `comment_github_ref` (PORTAL, no GitHub id) and its command; GitHub gets
+  `**<name>** (CS) wrote:` + blank line + text (name from `"user"`, else the email). **Stored `board_status` and `github_state`
+  are never changed by these routes or the worker**: they change only when GitHub confirms, through the webhook or
+  reconciliation (which run SLA and s_dip). The worker (`ProductIssueCommandWorker`, started in `cmd/api/main.go` under
+  `Config.GitInternalsServed`, the predicate `routes.go` uses; `GIT_INTERNALS_COMMAND_INTERVAL`, default 10s) claims due
+  PENDING rows `FOR UPDATE SKIP LOCKED` with a 5-minute lease and writes the attempt count before the first call (so a crash
+  mid-call leaves `attempts > 0`, which makes an ADD_COMMENT first look for its own body among the issue's comments since
+  `created_on` instead of posting twice). Re-checks before calling: a move needs link ACTIVE and stored status
+  WAITING_ON_CS (else CANCELLED "issue left WOC before delivery"); a close or comment needs an ACTIVE link (else CANCELLED).
+  The WOW option is found by name (trimmed, case-insensitive, HTML-unescaped) in the board's Status field, cached per
+  (org, board) and re-read once on a miss; the item id is `github_issue_link.board_item_id`, else found by paging
+  items-with-content for the link's node id (its `itemId`; 0 or absent = "not on the tracking board") and stored.
+  Permanent (FAILED): GitHub status (`X-GitHub-Status`, else the engineering entity's own) 404, 410, 422, 403 without
+  Retry-After, or an engineering entity 400; anything else retries at min(30s*2^(n-1), 1h), at least Retry-After, and gives
+  up (FAILED "gave up after 24 h") once `window_started_on` is 24 h old; Retry puts FAILED back with a fresh window.
+  **Echo:** `InsertGitHubComment` (webhook created/edited/deleted of an unknown comment, backfill, reconciliation) first
+  calls `AdoptPendingPortalComment`: a PORTAL ref with no GitHub id on the same work item whose command body equals the
+  GitHub body (line endings compared as LF) takes the GitHub id and its command becomes DELIVERED (PENDING or FAILED); no
+  second comment is inserted. Needs no bot-login list. The old `github_outbound_queue` is not involved (trigger 0206 acts on
+  type COMMENT only; these are WORK_NOTE with no `github_*` columns).
     Created in one transaction with source `BACKFILL` for the link, all comments (origin GITHUB) and the history on
     the repository's board (the unarchived board entry with the lowest number when a shared repository has several);
     the footer email is stored, never resolved to a user. A failed read of one issue is counted in `failed` /

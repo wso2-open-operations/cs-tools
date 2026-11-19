@@ -34,7 +34,7 @@ func TestProductIssueSyncRoutesAreGatedAndServiceOnly(t *testing.T) {
 		t.Fatalf("read routes.go: %v", err)
 	}
 	src := string(b)
-	gate := strings.Index(src, "if cfg.GitInternalsActive() && db != nil")
+	gate := strings.Index(src, "if cfg.GitInternalsServed(db != nil)")
 	end := strings.Index(src[gate+1:], `mux.HandleFunc("GET /cases/{id}/escalations"`)
 	if gate < 0 || end < 0 {
 		t.Fatal("the git internals block was not found in routes.go")
@@ -48,5 +48,44 @@ func TestProductIssueSyncRoutesAreGatedAndServiceOnly(t *testing.T) {
 		if strings.Count(src, `"`+route+`"`) != 1 {
 			t.Errorf("%s must be registered exactly once", route)
 		}
+	}
+}
+
+// TestProductIssueWriteRoutesAreGatedAndInternalOnly: the write-back routes sit in
+// the same git internals block, each wrapped in internalOnly, and the worker that
+// delivers them is started in cmd/api under the very same predicate
+// (Config.GitInternalsServed), so with the flag off neither exists.
+func TestProductIssueWriteRoutesAreGatedAndInternalOnly(t *testing.T) {
+	b, err := os.ReadFile("routes.go")
+	if err != nil {
+		t.Fatalf("read routes.go: %v", err)
+	}
+	src := string(b)
+	gate := strings.Index(src, "if cfg.GitInternalsServed(db != nil)")
+	end := strings.Index(src[gate+1:], `mux.HandleFunc("GET /cases/{id}/escalations"`)
+	if gate < 0 || end < 0 {
+		t.Fatal("the git internals block was not found in routes.go")
+	}
+	block := src[gate : gate+1+end]
+	for _, route := range []string{
+		"POST /product-work-items/{id}/comments", "POST /product-work-items/{id}/board-status",
+		"POST /product-work-items/{id}/close", "POST /product-work-items/{id}/commands/{commandId}/retry",
+	} {
+		re := regexp.MustCompile(`mux\.HandleFunc\("` + regexp.QuoteMeta(route) + `",\s*internalOnly\(`)
+		if !re.MatchString(block) {
+			t.Errorf("%s must be registered inside the git internals block and wrapped in internalOnly", route)
+		}
+		if strings.Count(src, `"`+route+`"`) != 1 {
+			t.Errorf("%s must be registered exactly once", route)
+		}
+	}
+	mb, err := os.ReadFile("../../cmd/api/main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	main := string(mb)
+	at := strings.Index(main, "if cfg.GitInternalsServed(pool != nil) {")
+	if at < 0 || !strings.Contains(main[at:], "NewProductIssueCommandWorker") || strings.Count(main, "NewProductIssueCommandWorker") != 1 {
+		t.Error("the write-back worker must be started once, under cfg.GitInternalsServed(pool != nil)")
 	}
 }

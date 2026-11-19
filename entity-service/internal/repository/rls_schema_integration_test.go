@@ -83,6 +83,7 @@ var rlsProtectedTables = []string{
 	"comment_github_ref",
 	"board_status_map",
 	"work_item_creation_request",
+	"github_command",
 }
 
 // TestRLSSchemaIntegration_EveryProtectedTableHasForceRowLevelSecurity is the

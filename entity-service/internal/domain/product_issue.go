@@ -129,6 +129,59 @@ type ProductIssueComment struct {
 	Origin          *string `json:"origin"`
 	GitHubCommentID *int64  `json:"githubCommentId"`
 	AuthorLogin     *string `json:"authorLogin"`
+	// Delivery is the state of a portal comment's GitHub delivery (PENDING,
+	// DELIVERED, FAILED or CANCELLED); null for a GitHub comment. CommandID is its command.
+	Delivery  *string `json:"delivery"`
+	CommandID *string `json:"commandId"`
+}
+
+// Product issue write-back (github_command): the portal's actions on the GitHub
+// issue, queued and delivered by a worker.
+const (
+	GitHubCommandAddComment     = "ADD_COMMENT"
+	GitHubCommandSetBoardStatus = "SET_BOARD_STATUS"
+	GitHubCommandSetState       = "SET_STATE"
+
+	// ProductIssueBoardStatusWaitingOnProductTeam is the only status the portal
+	// moves an issue to.
+	ProductIssueBoardStatusWaitingOnProductTeam = "WAITING_ON_PRODUCT_TEAM"
+)
+
+// GitHubCommand is one queued portal action. TargetStatus is set for
+// SET_BOARD_STATUS only; CommentID for ADD_COMMENT only.
+type GitHubCommand struct {
+	ID            string     `json:"id"`
+	Kind          string     `json:"kind"`
+	Status        string     `json:"status"`
+	Attempts      int        `json:"attempts"`
+	NextAttemptOn *time.Time `json:"nextAttemptOn"`
+	LastError     *string    `json:"lastError"`
+	RequestedBy   string     `json:"requestedBy"`
+	CreatedOn     time.Time  `json:"createdOn"`
+	DeliveredOn   *time.Time `json:"deliveredOn"`
+	CommentID     *string    `json:"commentId"`
+	TargetStatus  *string    `json:"targetStatus"`
+}
+
+// AddProductIssueCommentRequest is the body of POST /product-work-items/{id}/comments.
+type AddProductIssueCommentRequest struct {
+	Body string `json:"body"`
+}
+
+// AddProductIssueCommentResponse is its answer.
+type AddProductIssueCommentResponse struct {
+	Comment ProductIssueComment `json:"comment"`
+	Command GitHubCommand       `json:"command"`
+}
+
+// SetProductIssueBoardStatusRequest is the body of POST /product-work-items/{id}/board-status.
+type SetProductIssueBoardStatusRequest struct {
+	Status string `json:"status"`
+}
+
+// ProductIssueCommandResponse is the answer of the board-status, close and retry routes.
+type ProductIssueCommandResponse struct {
+	Command GitHubCommand `json:"command"`
 }
 
 // ProductIssueStatusEvent is one row of the issue's board status history.
@@ -154,6 +207,9 @@ type ProductIssueDetail struct {
 	Conversation          []ProductIssueComment     `json:"conversation"`
 	ConversationTruncated bool                      `json:"conversationTruncated"`
 	StatusHistory         []ProductIssueStatusEvent `json:"statusHistory"`
+	// Commands are the issue's PENDING and FAILED write-back commands and the 10
+	// newest others, newest first.
+	Commands []GitHubCommand `json:"commands"`
 }
 
 // ProductIssueListResponse is GET /cases/{id}/product-work-items.

@@ -625,7 +625,9 @@ func (r *productIssueSyncRepo) RecordBoardItem(ctx context.Context, workItemID, 
 // trg_github_outbound_comment) acts on type COMMENT alone, so a mirrored GitHub
 // comment can never be queued back to GitHub. created_by is the GitHub login (the
 // conversation read model shows it as the author). When the GitHub comment id is
-// already recorded nothing is written and the existing comment id is returned.
+// already recorded nothing is written and the existing comment id is returned. A
+// comment whose body equals a pending portal comment's (AdoptPendingPortalComment)
+// is recorded on that comment instead: its id is returned with inserted false.
 func InsertGitHubComment(ctx context.Context, tx pgx.Tx, in GitHubCommentInput) (commentID string, inserted bool, err error) {
 	err = tx.QueryRow(ctx, `SELECT comment_id::TEXT FROM comment_github_ref WHERE github_comment_id = $1`, in.GitHubCommentID).Scan(&commentID)
 	if err == nil {
@@ -633,6 +635,17 @@ func InsertGitHubComment(ctx context.Context, tx pgx.Tx, in GitHubCommentInput) 
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", false, fmt.Errorf("look up github comment: %w", err)
+	}
+	// A comment that echoes one written in the portal is that comment, not a new
+	// one (the portal's own ref gets the GitHub id; its command is delivered).
+	if in.Origin == "" || in.Origin == CommentOriginGitHub {
+		adopted, aerr := AdoptPendingPortalComment(ctx, tx, in.WorkItemID, in.Body, in.GitHubCommentID, in.Author, in.UpdatedOn)
+		if aerr != nil {
+			return "", false, aerr
+		}
+		if adopted != "" {
+			return adopted, false, nil
+		}
 	}
 	author := truncateColumn(in.Author, githubCommentAuthorSize)
 	if author == "" {
@@ -646,17 +659,37 @@ func InsertGitHubComment(ctx context.Context, tx pgx.Tx, in GitHubCommentInput) 
 	if origin == "" {
 		origin = CommentOriginGitHub
 	}
-	if err = tx.QueryRow(ctx, `
+	// In a savepoint: two writers racing on one GitHub comment id (a webhook and a
+	// reconciliation, a redelivery) both pass the lookup above; the loser's ref insert
+	// hits the unique index. That means "already recorded", not a failure, and the
+	// transaction must stay usable.
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("github comment savepoint: %w", err)
+	}
+	if err = sp.QueryRow(ctx, `
 		INSERT INTO comment (created_on, created_by, type, work_item_id, content)
 		VALUES ($1, $2, `+"'"+githubCommentNoteType+"'"+`, $3::uuid, $4) RETURNING id::TEXT`,
 		created, author, in.WorkItemID, in.Body).Scan(&commentID); err != nil {
+		_ = sp.Rollback(ctx)
 		return "", false, fmt.Errorf("insert github comment: %w", err)
 	}
-	if _, err = tx.Exec(ctx, `
+	if _, err = sp.Exec(ctx, `
 		INSERT INTO comment_github_ref (comment_id, github_comment_id, origin, author_login, github_updated_on)
 		VALUES ($1::uuid, $2, $3, NULLIF($4, ''), $5)`,
 		commentID, in.GitHubCommentID, origin, in.Author, in.UpdatedOn); err != nil {
+		_ = sp.Rollback(ctx)
+		if isUniqueOn(err, githubCommentIDKeyName) {
+			var existing string
+			if qerr := tx.QueryRow(ctx, `SELECT comment_id::TEXT FROM comment_github_ref WHERE github_comment_id = $1`, in.GitHubCommentID).Scan(&existing); qerr != nil {
+				return "", false, fmt.Errorf("look up github comment after a conflict: %w", qerr)
+			}
+			return existing, false, nil
+		}
 		return "", false, fmt.Errorf("insert github comment ref: %w", err)
+	}
+	if err = sp.Commit(ctx); err != nil {
+		return "", false, fmt.Errorf("release github comment savepoint: %w", err)
 	}
 	return commentID, true, nil
 }

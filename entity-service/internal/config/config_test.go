@@ -1733,3 +1733,34 @@ func TestConfig_Validate_RejectsAMalformedBotLogin(t *testing.T) {
 		t.Fatalf("valid logins refused: %v", err)
 	}
 }
+
+func TestConfig_GitInternalsServed(t *testing.T) {
+	base := Config{GitInternalsEnabled: true, EngineeringEntityBaseURL: "http://x", DataSource: DataSourcePostgres}
+	if !base.GitInternalsServed(true) {
+		t.Error("enabled, base URL, pool, postgres: want served")
+	}
+	if base.GitInternalsServed(false) {
+		t.Error("no pool: want not served")
+	}
+	sn := base
+	sn.DataSource = DataSourceServiceNow
+	if sn.GitInternalsServed(true) {
+		t.Error("servicenow data source: want not served")
+	}
+	off := base
+	off.GitInternalsEnabled = false
+	if off.GitInternalsServed(true) {
+		t.Error("flag off: want not served (neither routes nor worker)")
+	}
+}
+
+func TestConfig_GitInternalsCommandInterval(t *testing.T) {
+	t.Setenv("GIT_INTERNALS_COMMAND_INTERVAL", "")
+	if got := Load().GitInternalsCommandInterval; got != 10*time.Second {
+		t.Errorf("default = %v", got)
+	}
+	t.Setenv("GIT_INTERNALS_COMMAND_INTERVAL", "3s")
+	if got := Load().GitInternalsCommandInterval; got != 3*time.Second {
+		t.Errorf("set = %v", got)
+	}
+}
