@@ -44,8 +44,8 @@ var tokenFetchTimeout = 5 * time.Second
 
 // Config holds alert-core's read API URL (its "Alert Core Read API" endpoint in
 // Choreo) and the OAuth2 client-credentials app the call authenticates as. The
-// app must be subscribed to that API; the gateway checks the token and alert-core
-// lets in only the client ids in its ALERT_CORE_READ_CLIENT_IDS.
+// app must be subscribed to that API; the gateway checks the token, and alert-core
+// itself does no authentication on these routes.
 type Config struct {
 	BaseURL      string
 	TokenURL     string
