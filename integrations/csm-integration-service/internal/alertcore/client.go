@@ -77,7 +77,13 @@ func NewClient(cfg Config) *Client {
 		TokenURL:     cfg.TokenURL,
 		Scopes:       cfg.Scopes,
 	}
-	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: tokenFetchTimeout})
+	// The token request carries the client secret (Authorization: Basic), which Go
+	// copies to a same-host redirect, plain http included, so the token endpoint's
+	// redirects are not followed either.
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
+		Timeout:       tokenFetchTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	})
 	httpClient := cc.Client(tokenCtx)
 	httpClient.Timeout = 10 * time.Second
 	// The token is never sent anywhere alert-core redirects to.
