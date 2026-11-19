@@ -1813,13 +1813,21 @@ func envPositiveInt(key string, def int) int {
 	return n
 }
 
-// envIntInRange reads a positive integer like envPositiveInt, and also falls
-// back to def, with a warning that names the value, when it is outside lo..hi.
+// envIntInRange reads an integer that must lie in lo..hi. Unset is def, silently.
+// A value that is not a number, or is outside the range (zero and negative
+// included), falls back to def with a warning that names the value as it was
+// written. It validates the raw text itself: going through envPositiveInt first
+// would turn a bad value into def before the range check, and no warning would
+// ever be logged.
 func envIntInRange(key string, def, lo, hi int) int {
-	n := envPositiveInt(key, def)
-	if n < lo || n > hi {
-		slog.Warn("configuration value out of range, using the default",
-			"key", key, "value", n, "min", lo, "max", hi, "default", def)
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < lo || n > hi {
+		slog.Warn("configuration value invalid or out of range, using the default",
+			"key", key, "value", raw, "min", lo, "max", hi, "default", def)
 		return def
 	}
 	return n
