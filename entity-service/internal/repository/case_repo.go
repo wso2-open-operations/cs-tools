@@ -584,6 +584,16 @@ type CaseRepository interface {
 	// deeper, already-surfaced problem, not something to fail subscription
 	// over).
 	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
+	// AddCaseWatcherByEmailIfAbsent is AddCaseWatcherIfAbsent for a caller
+	// that only has the watcher's email, not their already-resolved
+	// platform id -- the ServiceNow-mirror create path's own creator
+	// identity (CreateCaseFromServiceNow's createdBy is a raw actor string,
+	// never a user id; see that method's own doc comment). Resolves email
+	// to "user".id and inserts in the same statement, so a caseID or email
+	// that doesn't resolve to a real row is a no-op, not an error -- never
+	// a guess, and never two round trips for something this cheap to do in
+	// one.
+	AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, email string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
 	// named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
@@ -4306,6 +4316,25 @@ func (r *caseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID st
 		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, userID)
 	if err != nil {
 		return fmt.Errorf("add case watcher if absent: %w", err)
+	}
+	return nil
+}
+
+// AddCaseWatcherByEmailIfAbsent implements CaseRepository.
+func (r *caseRepo) AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, email string) error {
+	// Same ON CONFLICT DO NOTHING shape as AddCaseWatcherIfAbsent, with the
+	// email-to-"user".id resolution folded into the same statement (a join,
+	// not a prior lookup) so an email matching no user, like a caseID that
+	// doesn't exist, simply inserts zero rows rather than erroring.
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO work_item_watcher (id, work_item_id, user_id)
+		SELECT gen_random_uuid(), wi.id, u.id
+		FROM work_item wi
+		JOIN "user" u ON LOWER(u.email) = LOWER($2)
+		WHERE wi.id = $1
+		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, email)
+	if err != nil {
+		return fmt.Errorf("add case watcher by email if absent: %w", err)
 	}
 	return nil
 }

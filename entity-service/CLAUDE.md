@@ -4671,6 +4671,36 @@ changed.
   way, this addition is purely about what the Postgres mirror also
   guarantees.
 
+  **The case's own creator is always added as a watcher on create, on
+  every data source and every case-like type** (`subscribeCreatorToWatchList`,
+  called from `CreateCase`'s plain-Postgres branch, right alongside
+  `addRequestedWatchers`) — via `CaseRepository.AddCaseWatcherIfAbsent`, the
+  same targeted, idempotent single-row insert `subscribeCommenterToWatchList`
+  already uses for a commenter, not `SetCaseWatchList`'s full replace, so it
+  never disturbs whatever `req.WatchList` itself already wrote. On
+  `createCaseSNFirst`, `c.CreatedBy` is NOT a platform user id the way the
+  plain path's is — it's whatever raw actor string (in practice, an email)
+  ServiceNow's own create response names, forwarded as-is into the VARCHAR
+  `work_item.created_by` column with no lookup — so that path instead calls
+  `subscribeSNCreatorToWatchList`, which goes through the sibling
+  `CaseRepository.AddCaseWatcherByEmailIfAbsent`: email-to-id resolution
+  folded into the same insert statement (a join, not a prior lookup), so an
+  email matching no platform user simply inserts nothing rather than
+  guessing or binding an email into the real UUID `user_id` column (a gap
+  caught on review before it merged). Unconditional either way: the creator
+  is added whether or not they named themselves (or anyone else) in
+  `watchList`, and regardless of whether they are internal or external —
+  that distinction has no bearing on whether they're a watcher at all (it
+  only changes which portal link csm-notification-service embeds in the
+  email it already sends every watcher, not the email's content or whether
+  it's sent). Because this writes a real `work_item_watcher` row, it flows
+  through `fetchCaseWatchers` below like any other watcher — including that
+  CTE's own `EXTERNAL`-watcher caveat:
+  an external creator shows up on the case's "Watchers" list only while
+  they are still a live, non-`DEACTIVATED` `project_contact` of that
+  project (true at creation time, since they just acted on it, but not
+  guaranteed to stay true forever).
+
   **The account's four named stakeholders are never persisted into
   `work_item_watcher` at all, on either the create or the update path —
   they're resolved fresh, straight from the account row, every time a
