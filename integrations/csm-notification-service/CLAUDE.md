@@ -317,7 +317,9 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   key (`GET /teams/chat-webhooks`'s `key`, `GetTeamChatWebhooksByKey` ->
   `GoogleChatClient.SetIncidentSLATeamSpaces`, audience
   `incident-sla/<team key>`). A team with no webhook gets no card: no shared
-  fallback, never Incident Monitor (the CRE room) or a case audience.
+  fallback, never Incident Monitor (the CRE room) or a case audience. This
+  is a second `GET /teams/chat-webhooks` per refresh, on purpose, so the case
+  loader stays untouched; #3538 tracks loading it once, by team key.
 - **Email:** the case emails, worded for an incident
   (`SLABreachEmailData.Incident`: "Incident ID", "View Incident", "Service",
   and an "SLA violated" preview at 100%; a case's wording is unchanged): the
@@ -329,7 +331,10 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   case-like work items only, so a Redis wipe loses running incident clocks
   until their incident is elevated again. `cleanupStaleClocks` re-checks each
   clock with `GetClockState` before deleting, so a running incident clock is
-  never removed by a recalculation.
+  never removed by a recalculation. Two more, deferred: a paused incident
+  clock is never un-paused here (nothing re-checks it), and a failed
+  `GetClockState` at registration leaves the incident untracked until it is
+  elevated again.
 
 ## Cases and incidents are different entities
 
