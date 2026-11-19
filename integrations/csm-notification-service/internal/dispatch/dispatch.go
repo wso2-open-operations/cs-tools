@@ -125,9 +125,6 @@ type slaEngineService interface {
 	// ReviseClocks is called from handleSeverityChanged — see that method's
 	// own doc comment.
 	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string)
-	// RegisterIncidentClocks is called from handleIncidentCreated and
-	// handleIncidentPriorityElevated -- see slaengine.Engine's own doc comment.
-	RegisterIncidentClocks(ctx context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -1212,14 +1209,9 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
 	case events.TypeIncidentAssigned:
 		return d.handleIncidentAssigned(ctx, record, env.EntityID, env.Payload)
-	case events.TypeIncidentPriorityElevated:
-		// The call-escalation ladder (internal/paging) owns this event; the
-		// dispatcher only registers any SLA clock the raised priority started.
-		d.registerElevatedIncidentClocks(ctx, env.EntityID, env.Payload)
-		return nil
-	case events.TypeIncidentAcknowledged, events.TypeIncidentCommentAdded:
+	case events.TypeIncidentAcknowledged, events.TypeIncidentPriorityElevated, events.TypeIncidentCommentAdded:
 		// The incident call-escalation ladder (internal/paging) owns
-		// these two; the notification dispatcher reacts to neither. Same
+		// these three; the notification dispatcher reacts to none of them. Same
 		// reasoning as the sla.* case below — erroring here would burn this
 		// consumer's retries and dead-letter a perfectly valid event that
 		// simply is not this consumer's concern.
@@ -2660,15 +2652,6 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 		}
 	}
 
-	// After the call and the card: registration reads each clock from
-	// entity-service (with a short retry when none is found, the usual case
-	// for an incident outside the SLA policies), and that must not delay the
-	// page. Best effort and idempotent, so a redelivered record re-registering
-	// is harmless.
-	if d.slaEngine != nil {
-		d.slaEngine.RegisterIncidentClocks(ctx, incidentID, p.Priority, incidentEventTime(p.ReportedAt), p.Number, p.Title, p.Team, p.Service)
-	}
-
 	// endRecord runs exactly once per call, as in handleCaseCreated.
 	safeToRelease := endRecord(len(errs) > 0)
 	if record.NoMoreRetries || safeToRelease {
@@ -2676,35 +2659,6 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 		d.forget(chatKey)
 	}
 	return errors.Join(errs...)
-}
-
-// registerElevatedIncidentClocks registers the SLA clocks of an incident
-// whose priority was raised: entity-service's incident SLA policy starts on
-// Critical/High, so the raise may have started one. Best effort and never an
-// error -- the event belongs to the paging ladder, and a clock already
-// registered is left as it is (SetClock keeps the same incarnation's tiers).
-// The event carries no service, so the SLA card of a clock first registered
-// here shows none.
-func (d *Dispatcher) registerElevatedIncidentClocks(ctx context.Context, incidentID string, raw json.RawMessage) {
-	if d.slaEngine == nil {
-		return
-	}
-	var p events.IncidentPriorityElevatedPayload
-	if err := json.Unmarshal(raw, &p); err != nil {
-		slog.WarnContext(ctx, "dispatch: incident.priority_elevated payload not decodable, sla clocks not registered", "incidentId", incidentID, "err", err)
-		return
-	}
-	d.slaEngine.RegisterIncidentClocks(ctx, incidentID, p.NewPriority, incidentEventTime(p.ElevatedAt), p.Number, p.Title, p.Team, "")
-}
-
-// incidentEventTime parses an incident event's RFC 3339 timestamp, falling
-// back to now: it only stands in for a clock's start when entity-service
-// reports none, which a registered clock always has.
-func incidentEventTime(s string) time.Time {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t
-	}
-	return time.Now()
 }
 
 // handleIncidentAssigned posts the "Incident Acknowledged." reply in the incident's Chat thread.

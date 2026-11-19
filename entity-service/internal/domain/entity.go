@@ -6247,10 +6247,6 @@ type SearchTeamsResponse struct {
 type TeamChatWebhook struct {
 	Name           string `json:"name"`
 	ChatWebhookURL string `json:"chatWebhookUrl"`
-	// Key is the team's key (team.key): csm-notification-service keys an
-	// incident's SRE team SLA space by it, the key the SRE ladder resolves an
-	// assignment group to. Additive; case routing still reads Name.
-	Key string `json:"key,omitempty"`
 }
 
 // ListTeamChatWebhooksResponse is the response for GET /teams/chat-webhooks
@@ -9244,17 +9240,6 @@ type SLAClockState struct {
 	// other, so it sends to TeamEmail and OnboardingTeamEmail together
 	// rather than this service picking one.
 	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
-	// AssignmentGroupName is an incident's assignment group as it is now
-	// (empty for every other work item type): csm-notification-service routes
-	// an incident's SLA alert by it, so a reassigned incident alerts its new
-	// group, whose group_email/manager TeamEmail/TeamLeadName already carry.
-	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
-	// AssignmentGroupTeamKey is the key of the team whose id the incident's
-	// current assignment group has (empty when none, and for every other
-	// type): a specialist handoff escalates an incident to its SME team's
-	// group, which shares that team's id (EnsureTeamGroups), so an incident
-	// escalated to an SME team names that team here.
-	AssignmentGroupTeamKey string `json:"assignmentGroupTeamKey,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

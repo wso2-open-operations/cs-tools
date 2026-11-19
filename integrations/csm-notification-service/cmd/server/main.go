@@ -680,14 +680,7 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients).
-			// An incident's SLA alert reaches its SRE team(s), resolved by the
-			// SRE ladder's group mapping, as a case's reaches its CRE team.
-			WithIncidentSLATeams(incidentRoutes.SRETeams).
-			// The ticker below starts before the Alert Settings mapping is
-			// applied (applyIncidentRoutes, further down); incident tiers wait
-			// for it. Released by IncidentRoutingReady once that setup ends.
-			HoldIncidentTiersUntilRoutingReady()
+		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -739,19 +732,7 @@ func main() {
 	// CUSTOMER_ENTITY_BASE_URL like every other optional entity-service
 	// feature — without it, a team simply has no Chat space unless one is
 	// still listed in GOOGLE_CHAT_SPACES.
-	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "" && slaEngine != nil {
-		// No entity-service: no team SLA space or group email can ever load,
-		// so don't hold incident tiers for them.
-		slaEngine.IncidentTeamLookupsLoaded()
-	}
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") != "" {
-		// Releases the incident SLA tier hold once both team lookups an
-		// incident alert needs have loaded; never releases with no engine.
-		incidentLookups := newIncidentTeamLookups(func() {
-			if slaEngine != nil {
-				slaEngine.IncidentTeamLookupsLoaded()
-			}
-		})
 		refreshTeamAudienceSpaces := func(ctx context.Context) error {
 			webhookCtx, cancelWebhooks := context.WithTimeout(ctx, 30*time.Second)
 			webhooks, webhooksErr := customerEntityClient.GetTeamChatWebhooks(webhookCtx)
@@ -784,21 +765,6 @@ func main() {
 					slog.Error("slaengine: failed to refresh team group emails from entity-service; keeping the previous set", "err", emailsErr)
 				} else {
 					slaEngine.SetTeamGroupEmails(groupEmails)
-					incidentLookups.groupEmailsLoaded()
-				}
-
-				// The SRE teams' incident SLA spaces: the same
-				// team.chat_webhook_url, keyed by team key (an incident's
-				// assignment group resolves to a key). Its own fetch, so the
-				// case spaces above are untouched by it.
-				slaSpacesCtx, cancelSLASpaces := context.WithTimeout(ctx, 30*time.Second)
-				byKey, byKeyErr := customerEntityClient.GetTeamChatWebhooksByKey(slaSpacesCtx)
-				cancelSLASpaces()
-				if byKeyErr != nil {
-					slog.Error("slaengine: failed to refresh SRE team incident SLA chat spaces from entity-service; keeping the previous set", "err", byKeyErr)
-				} else {
-					googleChatClient.SetIncidentSLATeamSpaces(byKey)
-					incidentLookups.slaSpacesLoaded()
 				}
 			}
 
@@ -1039,12 +1005,6 @@ func main() {
 		sreCfg, sreRunning := escalationCfg.For(paging.LadderKeySRE)
 		if cfgErr == nil {
 			applyIncidentRoutes(sreCfg, googleChatClient, incidentRoutes)
-		}
-		// Routing setup has ended either way (a config that failed to load
-		// applies no mapping, so an incident resolves to no SRE team and its
-		// SLA alert reaches the assignee only): release the held tiers.
-		if slaEngine != nil {
-			slaEngine.IncidentRoutingReady()
 		}
 		escalationRunning := creRunning || sreRunning
 		if cfgErr == nil {
@@ -1962,7 +1922,6 @@ func applyIncidentRoutes(sre paging.LadderConfig, chat *notifications.GoogleChat
 	routes.Set(table.Fanout)
 	routes.SetTeamless(table.Teamless)
 	routes.SetKnownSRETeam(func(group string) bool { return paging.KnownSRETeam(sre, group) })
-	routes.SetSRETeams(func(group string) []string { return paging.SRETeamsForGroup(sre, group) })
 	_, fallback := table.Spaces[notifications.IncidentFallbackAudience]
 	slog.Info("incident cards follow the Alert Settings group mapping",
 		"mappedGroups", table.Mapped, "defaultGroupsFannedOut", len(table.Fanout), "sharedSRERoom", fallback)
