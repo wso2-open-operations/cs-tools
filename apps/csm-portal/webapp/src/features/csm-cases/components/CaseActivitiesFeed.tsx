@@ -54,7 +54,8 @@ import CallRequestDetailModal from "@features/csm-cases/components/CallRequestDe
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import ImageFullscreenModal from "@features/csm-cases/components/ImageFullscreenModal";
 import SmartAlertDetailModal from "@features/csm-cases/components/SmartAlertDetailModal";
-import RelativeTime from "@components/RelativeTime";
+import RelativeTime, { CopyPermalinkButton } from "@components/RelativeTime";
+import CommentCardHeader from "@features/csm-cases/components/CommentCardHeader";
 import UserRefLink from "@components/UserRefLink";
 import { formatBytes } from "@utils/formatBytes";
 import { formatAbsoluteForUser } from "@utils/dateTime";
@@ -564,13 +565,8 @@ export default function CaseActivitiesFeed({
                     {/* Header mirrors the comment bubble: actor + time up top,
                         so a field-change entry reads the same way as a
                         comment before the reader gets to what changed. */}
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 1,
-                        flexWrap: "wrap",
-                      }}
+                    <CommentCardHeader
+                      actions={<CopyPermalinkButton href={`#${e.entry.id}`} />}
                     >
                       <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                         <UserRefLink
@@ -589,9 +585,10 @@ export default function CaseActivitiesFeed({
                         <RelativeTime
                           iso={e.entry.createdAt}
                           href={`#${e.entry.id}`}
+                          hideCopyButton
                         />
                       </Typography>
-                    </Box>
+                    </CommentCardHeader>
                     <Box sx={{ minWidth: 0, overflowWrap: "anywhere" }}>
                       {e.entry.changes && e.entry.changes.length > 0 ? (
                         <Box
@@ -653,13 +650,8 @@ export default function CaseActivitiesFeed({
                       borderColor: "action.disabled",
                     }}
                   >
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 1,
-                        flexWrap: "wrap",
-                      }}
+                    <CommentCardHeader
+                      actions={<CopyPermalinkButton href={`#${e.feedback.id}`} />}
                     >
                       <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                         <UserRefLink
@@ -679,9 +671,10 @@ export default function CaseActivitiesFeed({
                         <RelativeTime
                           iso={e.feedback.submittedAt}
                           href={`#${e.feedback.id}`}
+                          hideCopyButton
                         />
                       </Typography>
-                    </Box>
+                    </CommentCardHeader>
                     {e.feedback.comment && (
                       <Typography
                         variant="body2"
@@ -734,13 +727,8 @@ export default function CaseActivitiesFeed({
                     overflow: "hidden",
                   }}
                 >
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 1,
-                      flexWrap: "wrap",
-                    }}
+                  <CommentCardHeader
+                    actions={<CopyPermalinkButton href={`#${e.attachment.id}`} />}
                   >
                     <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                       <UserRefLink
@@ -757,9 +745,10 @@ export default function CaseActivitiesFeed({
                       <RelativeTime
                         iso={e.attachment.uploadedAt}
                         href={`#${e.attachment.id}`}
+                        hideCopyButton
                       />
                     </Typography>
-                  </Box>
+                  </CommentCardHeader>
                   <Box
                     sx={{
                       display: "flex",

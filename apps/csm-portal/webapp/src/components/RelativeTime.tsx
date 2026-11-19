@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Tooltip } from "@wso2/oxygen-ui";
+import { Box, IconButton, Tooltip } from "@wso2/oxygen-ui";
 import { Check, Link2 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
 import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
@@ -206,6 +206,14 @@ interface RelativeTimeProps {
   href?: string;
   /** Optional className passthrough for layout tweaks. */
   className?: string;
+  /**
+   * Leaves out the copy-link button that normally follows the permalink, for
+   * a caller that renders {@link CopyPermalinkButton} itself somewhere else
+   * (a comment card puts it in the card's top-right corner, beside the
+   * actions menu, where it is easier to notice than next to a timestamp).
+   * No effect without `href`.
+   */
+  hideCopyButton?: boolean;
 }
 
 /**
@@ -215,8 +223,12 @@ interface RelativeTimeProps {
  * same Copy/Check + 2-second-reset pattern as {@link QueryErrorState}'s
  * tracking-ID copy button, but rests on a chain-link icon to signal
  * "permalink" rather than a generic copy action.
+ *
+ * Sized and coloured like the neighbouring "Comment actions" icon-button
+ * (16px icon, `text.secondary`): an earlier 13px `text.disabled` version
+ * sat so close to the background that engineers did not see it at all.
  */
-function CopyPermalinkButton({ href }: { href: string }): JSX.Element {
+export function CopyPermalinkButton({ href }: { href: string }): JSX.Element {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = (): void => {
@@ -237,16 +249,14 @@ function CopyPermalinkButton({ href }: { href: string }): JSX.Element {
 
   return (
     <Tooltip title={label} placement="top">
-      <Button
+      <IconButton
         size="small"
-        variant="text"
-        color="inherit"
         onClick={handleCopy}
-        sx={{ minWidth: 0, p: 0.5, color: "text.disabled" }}
+        sx={{ color: "text.secondary" }}
         aria-label={label}
       >
-        {copied ? <Check size={13} /> : <Link2 size={13} />}
-      </Button>
+        {copied ? <Check size={16} /> : <Link2 size={16} />}
+      </IconButton>
     </Tooltip>
   );
 }
@@ -262,6 +272,7 @@ export default function RelativeTime({
   iso,
   href,
   className,
+  hideCopyButton,
 }: RelativeTimeProps): JSX.Element {
   // Resolve the epoch this instance tracks, so the shared scheduler can
   // compute exactly when *this* timestamp's display text would next change
@@ -298,7 +309,7 @@ export default function RelativeTime({
     </span>
   );
 
-  if (!href) {
+  if (!href || hideCopyButton) {
     return (
       <Tooltip title={absolute} placement="top" arrow>
         {inner}
