@@ -71,9 +71,11 @@ export const INCIDENT_STATES = Object.keys(STATE_LABEL) as BeIncidentState[];
  * behavior — ServiceNow enforces no old-state -> new-state legality check
  * for incidents in this org (only role-gating), so there's no SN precedent
  * to mirror here. `CLOSED` and `CANCELLED` are terminal: no outgoing edges.
+ * `NEW` can only be started: Cancelled is offered once work is under way
+ * (In Progress / On Hold), not on an incident nobody has picked up yet.
  */
 const STATE_TRANSITIONS: Record<BeIncidentState, BeIncidentState[]> = {
-  NEW: ["IN_PROGRESS", "CANCELLED"],
+  NEW: ["IN_PROGRESS"],
   IN_PROGRESS: ["ON_HOLD", "RESOLVED", "CANCELLED"],
   ON_HOLD: ["IN_PROGRESS", "CANCELLED"],
   RESOLVED: ["CLOSED", "IN_PROGRESS"],

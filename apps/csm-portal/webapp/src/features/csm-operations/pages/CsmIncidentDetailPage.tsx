@@ -71,6 +71,7 @@ import IncidentRunbookSection from "@features/csm-operations/components/Incident
 import IncidentActionBar from "@features/csm-operations/components/IncidentActionBar";
 import IncidentCreateMenu from "@features/csm-operations/components/IncidentCreateMenu";
 import IncidentResolutionDialog from "@features/csm-operations/components/IncidentResolutionDialog";
+import CancelIncidentDialog from "@features/csm-operations/components/CancelIncidentDialog";
 import HandoffToSpecialistDialog from "@features/csm-operations/components/HandoffToSpecialistDialog";
 import { useSpecialistHandoffTeams } from "@features/csm-operations/api/useSpecialistHandoffTeams";
 import SpecialistHandoffBadge from "@features/csm-operations/components/SpecialistHandoffBadge";
@@ -321,6 +322,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const [resolutionTarget, setResolutionTarget] = useState<
     Extract<BeIncidentState, "RESOLVED" | "CLOSED"> | null
   >(null);
+  // Cancelled is terminal, so picking it from the "Change state" menu opens a
+  // confirmation instead of PATCHing on the first click.
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const engineerName = useEngineerDisplayName();
   // Signed-in engineer's platform UUID (self-subscribe writes) and email
   // (matching a watch-list entry to "me"), same pair the case detail page
@@ -476,7 +480,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   /**
    * Dispatch a state transition from `IncidentActionBar`. `RESOLVED`/`CLOSED`
    * need the resolution dialog first (ServiceNow requires those fields — see
-   * the file-level doc comment); every other target PATCHes directly, same
+   * the file-level doc comment), `CANCELLED` needs a confirmation (it is
+   * terminal); every other target PATCHes directly, same
    * split of responsibility as `CaseActionBar` + `CsmCaseDetailPage.onAction`.
    */
   const onIncidentAction = useCallback(
@@ -484,6 +489,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       if (!id) return;
       if (target === "RESOLVED" || target === "CLOSED") {
         setResolutionTarget(target);
+        return;
+      }
+      if (target === "CANCELLED") {
+        setCancelConfirmOpen(true);
         return;
       }
       // Starting work on an unassigned incident implicitly claims it, same
@@ -533,6 +542,23 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     },
     [id, patchIncident, resolutionTarget, showError],
   );
+
+  const onCancelConfirm = useCallback(() => {
+    if (!id) return;
+    patchIncident.mutate(
+      { id, patch: { state: "CANCELLED" } },
+      {
+        onSuccess: () => setCancelConfirmOpen(false),
+        onError: (err) => {
+          const msg =
+            err instanceof BackendApiError && err.status < 500 && err.message
+              ? err.message
+              : "Could not update the incident's state. Please try again.";
+          showError(msg, err);
+        },
+      },
+    );
+  }, [id, patchIncident, showError]);
 
   /**
    * Submit the handoff. Deliberately not gated on the incident's service or
@@ -1239,6 +1265,17 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             if (!patchIncident.isPending) setResolutionTarget(null);
           }}
           onSubmit={onResolutionSubmit}
+        />
+      )}
+
+      {cancelConfirmOpen && (
+        <CancelIncidentDialog
+          incidentNumber={data?.number}
+          isSubmitting={patchIncident.isPending}
+          onClose={() => {
+            if (!patchIncident.isPending) setCancelConfirmOpen(false);
+          }}
+          onConfirm={onCancelConfirm}
         />
       )}
 

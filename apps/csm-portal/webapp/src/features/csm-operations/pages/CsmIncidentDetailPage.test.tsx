@@ -683,8 +683,8 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
   it("claims an unassigned incident for the signed-in engineer when starting work (-> IN_PROGRESS)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW", assignedTo: null } });
     renderPage();
-    openChangeState();
-    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    // NEW has one legal next state, so the bar is a single In Progress button.
+    fireEvent.click(screen.getByRole("button", { name: /in progress/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       {
         id: "inc-1",
@@ -706,12 +706,38 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
       },
     });
     renderPage();
-    openChangeState();
-    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    // NEW has one legal next state, so the bar is a single In Progress button.
+    fireEvent.click(screen.getByRole("button", { name: /in progress/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       { id: "inc-1", patch: { state: "IN_PROGRESS" } },
       expect.objectContaining({ onError: expect.any(Function) }),
     );
+  });
+
+  it("asks for confirmation before cancelling, and PATCHes only on confirm", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: /cancel this incident\?/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /go back/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel incident$/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "inc-1", patch: { state: "CANCELLED" } },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it("offers no Cancelled on a NEW incident", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW" } });
+    renderPage();
+    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancelled/i })).not.toBeInTheDocument();
   });
 
   it("renders no state-transition buttons for a terminal incident (CLOSED)", () => {
@@ -848,9 +874,15 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     expect(label.parentElement, stage).toHaveTextContent(/^Channel\s*PHONE$/);
   };
 
-  const transition = (menuItem: RegExp): void => {
+  const transition = (target: RegExp): void => {
+    // A state with one legal next state (NEW) renders a single button, not the menu.
+    const single = screen.queryByRole("button", { name: target });
+    if (single) {
+      fireEvent.click(single);
+      return;
+    }
     fireEvent.click(screen.getByRole("button", { name: /change state/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
+    fireEvent.click(screen.getByRole("menuitem", { name: target }));
   };
 
   const submitResolutionDialog = (submit: RegExp): void => {
