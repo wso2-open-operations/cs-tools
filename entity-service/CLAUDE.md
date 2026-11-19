@@ -13394,11 +13394,31 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
     the repository's board (the unarchived board entry with the lowest number when a shared repository has several);
     the footer email is stored, never resolved to a user. A failed read of one issue is counted in `failed` /
     `failedIssueNumbers` and the issue is retried by the next run; a 429 stops the call with the cursor on that issue.
+- **SLA clocks and tag follow-ups** (`service/product_issue_effects.go`; optional, wired with git internals only through
+  `ProductIssueDeliveries.WithWorkItemSLA` and `service.WithWorkItemSLA`). After a repository write has committed, the
+  webhook branch calls the product-issue SLA engine and the `s_dip` rule: a close/reopen event applies at its own time
+  (`SnapshotOutcome.EventNewest` = nothing later is stored, else rebuild); a board move applies inline when in order
+  (`Inserted && Applied`) and rebuilds when late or when it corrected a reconcile's synthetic event
+  (`BoardStatusOutcome.Adopted`); a changed priority (`PriorityChanged`) revises the clocks; a `github_state` flip with no
+  event of its own rebuilds. **On the webhook path they run asynchronously** (a goroutine over `WithoutCancel`, one 30 s
+  timeout for all steps of a delivery, SLA step then tag rule, at most 8 at once, a delivery waits 1 s for a slot and then
+  drops its follow-up with a warning; nothing waits for them at shutdown). They are best effort, an error is logged and
+  never fails the delivery, and a dropped or failed one is **repaired by the daily reconcile**, which for every ACTIVE
+  linked issue it visits (board items and the missing-link refresh), changed or not, rebuilds the clocks, revises them
+  (old-priority clock cancelled, missing one registered back-dated) and runs the tag rule. Backfill registers the clocks
+  of a created issue and converges a known one it fills; both run synchronously inside their own time budget. A duplicate
+  delivery is refused before any of this. The read model: summaries and the detail carry `sla` (state, consumed,
+  remaining, budget, running, paused-since, from the newest started, not cancelled RESOLUTION clock; the budget is the
+  policy's duration) and `nonStandardColumn`; search takes `mine`, `boardStatuses` and `sort` (`created`, `pausedSince`,
+  `slaPercentage`; the percentage sorts on the stored column, as of the last engine write). `POST /slas/search` and
+  `GET /slas/{id}` never return a clock of an internal-only work item (a product issue).
 - **`s_dip` is maintained by entity-service** (`service/product_issue_case_tags.go`,
   `repository/product_issue_case_tag_repo.go`; wired only with git internals active). A case that has at least one
   AFFECTS link from a product issue carries `s_dip` exactly while one of its actively linked product issues is open
-  (not RESOLVED, not CLOSED; CLOSED when the GitHub issue is closed; not on a board = open). The rule runs after a
-  create (once the request is COMPLETED), a link and an unlink, under a per-case advisory lock, and never fails the
+  (not RESOLVED, not CLOSED; CLOSED when the GitHub issue is closed; a GitHub reopen newer than the latest board move
+  makes a card still on RESOLVED/CLOSED open again, as the SLA engine reads it; not on a board = open). The rule runs
+  after a create (once the request is COMPLETED), a link and an unlink, a webhook state change, deleted or transferred
+  delivery, and every reconcile visit, under a per-case advisory lock, and never fails the
   request. **It only removes an `s_dip` it added itself**: the add is recorded in `case_tag_automation` (migration
   0308, internal-only RLS 100030, excluded from the audit log) and every attachment must have `created_by` =
   `product-issue-case-tags`; a tag a person added (before, or re-added after removing the system's) is never removed.

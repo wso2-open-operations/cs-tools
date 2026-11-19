@@ -9150,7 +9150,8 @@ paths:
     get:
       summary: List the product issues linked to a case (internal callers only; present only when GIT_INTERNALS_ENABLED=true).
       description: >-
-        The Product Issue work items that have an active AFFECTS link to the case, newest first. The case
+        The Product Issue work items that have an active AFFECTS link to the case, newest first, each with its
+        `sla` standing (loaded for the whole list in one query). The case
         must be a case-like work item. Untracked patches (Type/Patch issues, which register no work item)
         are not listed. Read from the database only; no GitHub call.
       operationId: listCaseProductWorkItems
@@ -9447,7 +9448,7 @@ paths:
       description: >-
         The product issue with its GitHub state, the affected case (when linked), the latest 200 comments of
         its conversation (oldest first; `conversationTruncated` says older ones were left out) and its board
-        status history (oldest first). Read from the database only; no GitHub call. Any other work item
+        status history (oldest first), plus its `sla` standing. Read from the database only; no GitHub call. Any other work item
         type is a 404.
       operationId: getProductWorkItem
       parameters:
@@ -9519,7 +9520,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SearchProductWorkItemsResponse'
         "400":
-          description: Unknown filter value, or an invalid filter combination.
+          description: Unknown filter value, an invalid filter combination, an unknown `sort`, or `mine` without a signed-in user.
           content:
             application/json:
               schema:
@@ -33702,6 +33703,39 @@ components:
           type: string
           description: State of the GitHub link itself.
           enum: [ACTIVE, INACCESSIBLE, DELETED, TRANSFERRED]
+        nonStandardColumn:
+          type: boolean
+          description: >-
+            True when the issue sits in a project board column the portal does not map (`boardStatus` is OTHER);
+            `boardStatusRaw` is that column's name.
+        sla:
+          $ref: '#/components/schemas/ProductIssueSla'
+
+    ProductIssueSla:
+      type: object
+      description: >-
+        The standing of the issue's newest RESOLUTION clock, computed when read (never from the `sla_live` view):
+        consumed = the schedule's business time from `start_on` to the clock's end (`end_on` when finished,
+        `paused_on` when paused, now when running) minus the business pause time. Always present; `state` is
+        NONE when the issue has no clock (no recognised priority, or a cancelled clock), and every number is then
+        0. A running or paused clock that has consumed its whole budget is BREACHED even before the stored
+        `has_breached` flag catches up. `percentage` is rounded to two decimals; AT_RISK uses the unrounded value.
+      properties:
+        state:
+          type: string
+          enum: [NONE, OK, AT_RISK, PAUSED, MET, BREACHED]
+          description: >-
+            NONE: no clock. MET: finished, not breached. BREACHED: breached, finished or not. PAUSED: paused, not
+            breached. AT_RISK: running, not breached, at least 75% of the budget consumed. OK: running, under 75%.
+        budgetSeconds: {type: integer, format: int64, description: "The policy's duration, in business seconds."}
+        consumedSeconds: {type: integer, format: int64}
+        remainingSeconds: {type: integer, format: int64, description: "Never negative."}
+        percentage: {type: number, description: "consumed / budget * 100; above 100 once breached."}
+        running: {type: boolean, description: "True only for an open, unpaused clock."}
+        pausedSince: {type: string, format: date-time, nullable: true, description: "When the clock paused (waiting on CS); null otherwise."}
+        priority: {type: string, nullable: true, description: "The issue's priority."}
+        policyName: {type: string, nullable: true, description: "Null when state is NONE."}
+        schedule: {type: string, nullable: true, description: "The clock's schedule, CS 24x7 or CS 12x5 IST; null when state is NONE."}
 
     ProductIssueListResponse:
       type: object
@@ -33775,6 +33809,18 @@ components:
             repository: {type: string}
             unmatched: {type: boolean, description: "Only product issues with no active case link."}
             query: {type: string, maxLength: 200}
+            mine:
+              type: boolean
+              default: false
+              description: >-
+                Only issues the signed-in caller opened (creator, or the footer's "Opened by" email) or whose
+                actively linked case is assigned to the caller. 400 when the request carries no user.
+            sort:
+              type: string
+              enum: [created, pausedSince, slaPercentage]
+              description: >-
+                `created` newest first (default); `pausedSince` oldest paused clock first, unpaused last (default
+                when `mine` is true); `slaPercentage` highest stored percentage first. Ties fall back to newest first.
         pagination:
           type: object
           additionalProperties: false

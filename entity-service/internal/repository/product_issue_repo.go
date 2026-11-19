@@ -70,6 +70,7 @@ func scanProductIssueSummary(row pgx.Row) (domain.ProductIssueSummary, error) {
 			return s, fmt.Errorf("decode labels: %w", err)
 		}
 	}
+	s.NonStandardColumn = s.BoardStatus != nil && *s.BoardStatus == "OTHER"
 	if caseID != nil {
 		s.Case = &domain.ProductIssueCaseRef{ID: *caseID, Number: stringOrEmpty(caseNumber)}
 	}
@@ -153,7 +154,11 @@ func (r *productIssueRepo) ListForCase(ctx context.Context, caseID string) ([]do
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return out, attachProductIssueClocks(ctx, r.db, out)
 }
 
 func (r *productIssueRepo) GetSummary(ctx context.Context, id string) (domain.ProductIssueSummary, error) {
@@ -168,7 +173,11 @@ func (r *productIssueRepo) GetSummary(ctx context.Context, id string) (domain.Pr
 	if err != nil {
 		return s, fmt.Errorf("get product issue: %w", err)
 	}
-	return s, nil
+	one := []domain.ProductIssueSummary{s}
+	if err := attachProductIssueClocks(ctx, r.db, one); err != nil {
+		return s, err
+	}
+	return one[0], nil
 }
 
 func (r *productIssueRepo) GetDetail(ctx context.Context, id string) (domain.ProductIssueDetail, error) {
@@ -274,6 +283,16 @@ func (r *productIssueRepo) Search(ctx context.Context, f domain.SearchProductIss
 		}
 		conds = append(conds, cond+")")
 	}
+	if f.Mine {
+		args = append(args, f.MineEmail)
+		n := len(args)
+		// created_by / opened_by_email are emails; the case's assignee is a user row.
+		conds = append(conds, fmt.Sprintf(`(lower(wi.created_by) = lower($%[1]d) OR lower(pi.opened_by_email) = lower($%[1]d)
+		    OR EXISTS (SELECT 1 FROM work_item_link ml
+		                 JOIN work_item mc ON mc.id = ml.to_id
+		                 JOIN "user" mu ON mu.id = mc.assigned_to_id
+		                WHERE ml.from_id = wi.id AND ml.kind = 'AFFECTS' AND ml.is_active AND lower(mu.email) = lower($%[1]d)))`, n))
+	}
 	where := " WHERE " + strings.Join(conds, " AND ")
 
 	var total int
@@ -285,8 +304,24 @@ func (r *productIssueRepo) Search(ctx context.Context, f domain.SearchProductIss
 		return nil, 0, fmt.Errorf("count product issues: %w", err)
 	}
 	pageArgs := append(append([]any{}, args...), p.Limit, p.Offset)
-	rows, err := r.db.Query(ctx, ProductIssueSelectSQL+where+fmt.Sprintf(
-		" ORDER BY wi.created_on DESC, wi.id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), pageArgs...)
+	from, order := ProductIssueSelectSQL, "wi.created_on DESC, wi.id DESC"
+	if f.Sort == domain.ProductIssueSortPausedSince || f.Sort == domain.ProductIssueSortSLAPercentage {
+		// The newest resolution clock row decides the order: the same row the clock read
+		// attaches (productIssueClockWhere, productIssueClockRank). The percentage is the
+		// stored column, which is as of the last engine write.
+		from += ` LEFT JOIN LATERAL (
+		    SELECT s.paused_on, s.business_elapsed_percentage AS pct
+		      FROM sla s JOIN sla_policy sp ON sp.id = s.sla_policy_id
+		     WHERE s.work_item_id = wi.id AND ` + productIssueClockWhere + `
+		     ORDER BY ` + productIssueClockRank + ` LIMIT 1) ck ON TRUE`
+		if f.Sort == domain.ProductIssueSortPausedSince {
+			order = "ck.paused_on ASC NULLS LAST, " + order
+		} else {
+			order = "ck.pct DESC NULLS LAST, " + order
+		}
+	}
+	rows, err := r.db.Query(ctx, from+where+fmt.Sprintf(
+		" ORDER BY %s LIMIT $%d OFFSET $%d", order, len(args)+1, len(args)+2), pageArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search product issues: %w", err)
 	}
@@ -299,7 +334,14 @@ func (r *productIssueRepo) Search(ctx context.Context, f domain.SearchProductIss
 		}
 		out = append(out, s)
 	}
-	return out, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	if err := attachProductIssueClocks(ctx, r.db, out); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // digitsToInt parses a query made only of 1 to 9 digits.

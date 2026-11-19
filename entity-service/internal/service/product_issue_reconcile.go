@@ -110,6 +110,7 @@ type productIssueSync struct {
 	// bots are the portal's own GitHub logins (lower case): backfill does not
 	// mirror their comments, as the webhook path does not.
 	bots map[string]bool
+	fx   productIssueEffects
 
 	// Overridable in tests.
 	now           func() time.Time
@@ -122,6 +123,16 @@ type productIssueSync struct {
 // reads them.
 func NewProductIssueSyncService(eng productIssueSyncEngineering, repo repository.ProductIssueReconcileRepository, botLogins []string) ProductIssueSyncService {
 	return &productIssueSync{eng: eng, repo: repo, bots: botLoginSet(botLogins), now: time.Now, reserve: syncTimeReserve, defaultBudget: syncDefaultBudget}
+}
+
+// WithWorkItemSLA makes reconciliation and backfill keep the SLA clocks and the
+// case s_dip tag in step with what they write. svc must be the service
+// NewProductIssueSyncService returned; any other is returned unchanged.
+func WithWorkItemSLA(svc ProductIssueSyncService, sla WorkItemSLAEngine, tags ProductIssueCaseTagRule) ProductIssueSyncService {
+	if s, ok := svc.(*productIssueSync); ok {
+		s.fx = productIssueEffects{sla: sla, tags: tags}
+	}
+	return svc
 }
 
 // syncBudget is the time one call may still use.
@@ -431,7 +442,18 @@ func (s *productIssueSync) reconcileItem(ctx context.Context, run *reconcileRun,
 	if res.Changed {
 		run.resp.LinksUpdated++
 	}
+	s.afterReconcile(ctx, link.WorkItemID)
 	return 0, nil
+}
+
+// afterReconcile converges a visited active issue whether or not the run changed
+// it: a follow-up that failed or timed out after a webhook (a delivery is never
+// replayed, and an unchanged item is otherwise skipped) is repaired here. The
+// clocks of a priority that changed are cancelled and the new one registered
+// (revise), then every clock is rebuilt from the history (recalculate); the case
+// tag follows. A few queries per issue, in a daily job.
+func (s *productIssueSync) afterReconcile(ctx context.Context, workItemID string) {
+	s.fx.converge(ctx, workItemID, s.now().UTC())
 }
 
 // refreshMissingLink refreshes a linked issue the board listing did not show
@@ -450,6 +472,7 @@ func (s *productIssueSync) refreshMissingLink(ctx context.Context, run *reconcil
 				return 0, nil
 			}
 			run.resp.LinksUpdated++
+			s.fx.tagRule(ctx, l.WorkItemID)
 			return 0, nil
 		}
 		if ctx.Err() != nil {
@@ -470,6 +493,7 @@ func (s *productIssueSync) refreshMissingLink(ctx context.Context, run *reconcil
 	if res.Changed {
 		run.resp.LinksUpdated++
 	}
+	s.afterReconcile(ctx, l.WorkItemID)
 	return 0, nil
 }
 
@@ -799,6 +823,12 @@ func (s *productIssueSync) backfillIssue(ctx context.Context, run *backfillRun, 
 	}
 	resp.CommentsWritten += res.CommentsInserted
 	resp.StatusEventsWritten += res.EventsWritten
+	// Registers the clocks back-dated to the issue's creation and rebuilds them from
+	// the history just written, so an already-resolved issue gets its achieved clock.
+	s.fx.register(ctx, res.WorkItemID)
+	if caseID != "" {
+		s.fx.tagRule(ctx, res.WorkItemID)
+	}
 	return 0, nil
 }
 
@@ -818,6 +848,7 @@ func (s *productIssueSync) fillKnownIssue(ctx context.Context, run *backfillRun,
 	}
 	run.resp.CommentsWritten += res.CommentsInserted
 	run.resp.StatusEventsWritten += res.EventsWritten
+	s.fx.converge(ctx, link.WorkItemID, s.now().UTC())
 	return 0, nil
 }
 
@@ -846,6 +877,7 @@ func (s *productIssueSync) attachCaseIfUnmatched(ctx context.Context, run *backf
 	if attached {
 		slog.InfoContext(ctx, "product issue backfill: linked a known issue to the case its footer names",
 			"owner", run.owner, "repo", run.repository, "number", issue.Number)
+		s.fx.tagRule(ctx, workItemID)
 	}
 	return nil
 }

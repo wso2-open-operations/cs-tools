@@ -79,17 +79,25 @@ func NewProductIssueCaseTagRepository(db *Scoped) ProductIssueCaseTagRepository 
 // caseTagRuleLockQuery takes the per-case lock of the rule.
 const caseTagRuleLockQuery = `SELECT pg_advisory_xact_lock(hashtextextended('case-tag-rule:' || $1::text, 0))`
 
-// The effective status of a linked product issue: CLOSED when GitHub says the
-// issue is closed, else the board status. NULL (not on a board, or no GitHub
-// row) counts as open.
+// The effective status of a linked product issue, the same rule the SLA engine
+// uses (productIssueState): CLOSED when GitHub says the issue is closed; open
+// again when the board still says RESOLVED/CLOSED but a GitHub reopen is newer
+// than the latest board move; else the board status. NULL (not on a board, or
+// no GitHub row) counts as open.
 const caseTagRuleOpenIssuesQuery = `
 	SELECT pi.number
 	  FROM work_item_link l
 	  JOIN work_item pi ON pi.id = l.from_id AND pi.type = 'PRODUCT_ISSUE'
 	  LEFT JOIN github_issue_link g ON g.work_item_id = pi.id
 	 WHERE l.to_id = $1::uuid AND l.kind = 'AFFECTS' AND l.is_active
-	   AND COALESCE(CASE WHEN g.github_state = 'CLOSED' THEN 'CLOSED' ELSE g.board_status END, 'OPEN')
-	       NOT IN ('RESOLVED', 'CLOSED')
+	   AND (
+	        COALESCE(CASE WHEN g.github_state = 'CLOSED' THEN 'CLOSED' ELSE g.board_status END, 'OPEN')
+	            NOT IN ('RESOLVED', 'CLOSED')
+	     OR (g.github_state = 'OPEN' AND g.board_status IN ('RESOLVED', 'CLOSED')
+	         AND (SELECT MAX(e.occurred_at) FROM work_item_status_event e
+	               WHERE e.work_item_id = pi.id AND e.raw_status IS NULL AND e.to_status = 'REOPENED')
+	             > COALESCE((SELECT MAX(e.occurred_at) FROM work_item_status_event e
+	                          WHERE e.work_item_id = pi.id AND e.raw_status IS NOT NULL), '-infinity'::timestamptz)))
 	 ORDER BY pi.number`
 
 func (r *productIssueCaseTagRepo) WithCaseLock(ctx context.Context, caseID string, fn func(ctx context.Context, tx CaseTagRuleTx) error) error {

@@ -238,7 +238,8 @@ func taskSlaStageDisplay(raw string) *string {
 
 // SearchTaskSlas implements TaskSlaRepository.
 func (r *taskSlaRepo) SearchTaskSlas(ctx context.Context, taskIDs []string, limit, offset int) ([]domain.TaskSlaView, int, error) {
-	where := "WHERE 1=1"
+	// Product-issue (internal-only) clocks are never served here.
+	where := "WHERE 1=1 AND (wi.type IS NULL OR NOT work_item_type_is_internal_only(wi.type))"
 	args := []any{}
 	if len(taskIDs) > 0 {
 		args = append(args, taskIDs)
@@ -313,7 +314,7 @@ func (r *taskSlaRepo) GetTaskSla(ctx context.Context, id string) (domain.TaskSla
 		FROM sla_live sla
 		LEFT JOIN work_item wi ON wi.id = sla.work_item_id
 		LEFT JOIN sla_policy pol ON pol.id = sla.sla_policy_id
-		WHERE sla.id = $1`, id,
+		WHERE sla.id = $1 AND (wi.type IS NULL OR NOT work_item_type_is_internal_only(wi.type))`, id,
 	)
 
 	var (

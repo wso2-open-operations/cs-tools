@@ -67,6 +67,55 @@ type ProductIssueSummary struct {
 	LinkedOn       *time.Time           `json:"linkedOn"`
 	LastActivityOn *time.Time           `json:"lastActivityOn"`
 	LinkState      string               `json:"linkState"`
+	// SLA is the issue's resolution clock standing, computed at read time. Always an
+	// object; State is "NONE" when the issue has no clock.
+	SLA ProductIssueSLA `json:"sla"`
+	// NonStandardColumn is true when the issue sits in a project board column the
+	// portal does not map (BoardStatus OTHER); BoardStatusRaw is that column's name.
+	NonStandardColumn bool `json:"nonStandardColumn"`
+	// Clock is the newest resolution clock row the repository loaded; the service
+	// turns it into SLA and clears it. Never serialised.
+	Clock *ProductIssueClock `json:"-"`
+}
+
+// Product issue SLA standing states.
+const (
+	ProductIssueSLANone     = "NONE"
+	ProductIssueSLAOK       = "OK"
+	ProductIssueSLAAtRisk   = "AT_RISK"
+	ProductIssueSLAPaused   = "PAUSED"
+	ProductIssueSLAMet      = "MET"
+	ProductIssueSLABreached = "BREACHED"
+)
+
+// ProductIssueClock is the newest RESOLUTION sla row of a product issue, as stored.
+type ProductIssueClock struct {
+	PolicyName           string
+	Schedule             string
+	Stage                string
+	StartOn              time.Time
+	PausedOn             *time.Time
+	EndOn                *time.Time
+	BudgetSeconds        float64
+	BusinessPauseSeconds float64
+	HasBreached          bool
+	StoredPercentage     float64
+}
+
+// ProductIssueSLA is a product issue's SLA standing. Seconds are business seconds on
+// the clock's schedule. PausedSince is set only while State is PAUSED (or BREACHED
+// on a paused clock). The zero-clock answer is State NONE with every number 0.
+type ProductIssueSLA struct {
+	State            string     `json:"state"`
+	BudgetSeconds    int64      `json:"budgetSeconds"`
+	ConsumedSeconds  int64      `json:"consumedSeconds"`
+	RemainingSeconds int64      `json:"remainingSeconds"`
+	Percentage       float64    `json:"percentage"`
+	Running          bool       `json:"running"`
+	PausedSince      *time.Time `json:"pausedSince"`
+	Priority         *string    `json:"priority"`
+	PolicyName       *string    `json:"policyName"`
+	Schedule         *string    `json:"schedule"`
 }
 
 // ProductIssueComment is one comment of a product issue's conversation.
@@ -124,7 +173,23 @@ type SearchProductIssuesFilters struct {
 	// Query is a substring of the PI number or title (a plain number also matches
 	// the GitHub issue number).
 	Query string `json:"query"`
+	// Mine selects issues the caller opened (work_item.created_by or
+	// product_issue.opened_by_email) or whose linked case is assigned to the caller.
+	// The caller is the signed-in user of the request.
+	Mine bool `json:"mine"`
+	// Sort is "created" (default; newest first), "pausedSince" (oldest first; the
+	// default when Mine is true) or "slaPercentage" (highest stored percentage first).
+	Sort string `json:"sort"`
+	// MineEmail is the resolved caller; set by the service, never read from the body.
+	MineEmail string `json:"-"`
 }
+
+// Search sort orders.
+const (
+	ProductIssueSortCreated       = "created"
+	ProductIssueSortPausedSince   = "pausedSince"
+	ProductIssueSortSLAPercentage = "slaPercentage"
+)
 
 // SearchProductIssuesRequest is the body of POST /product-work-items/search.
 type SearchProductIssuesRequest struct {

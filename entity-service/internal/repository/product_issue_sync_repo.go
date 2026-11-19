@@ -140,6 +140,11 @@ type SnapshotOutcome struct {
 	Stale        bool
 	StateChanged bool
 	EventWritten bool
+	// EventNewest is true when EventWritten and no stored status event is later than
+	// the one written (the same ordering the SLA engine rebuilds by).
+	EventNewest bool
+	// PriorityChanged is true when the stored product priority differs after the write.
+	PriorityChanged bool
 }
 
 // GitHubCommentInput is one GitHub issue comment to mirror.
@@ -199,7 +204,10 @@ type BoardStatusOutcome struct {
 	// Inserted is true when the event row was new, Applied when the link's board
 	// columns moved (false for an out-of-order event older than the latest).
 	Inserted, Applied bool
-	Status            string
+	// Adopted is true when the delivery corrected a reconciliation's synthetic
+	// event instead of inserting a new one (nothing inserted, the timeline moved).
+	Adopted bool
+	Status  string
 }
 
 // BoardStatus is board_status_map's reading of a raw column name.
@@ -381,11 +389,20 @@ func (r *productIssueSyncRepo) ApplyIssueSnapshot(ctx context.Context, s IssueSn
 			s.WorkItemID, labelsJSON, state, s.StateReason, s.ClosedOn, s.UpdatedOn, stateMayChange); err != nil {
 			return out, fmt.Errorf("update github issue link: %w", err)
 		}
+		var prevPriority *string
+		if err := tx.QueryRow(ctx, `SELECT priority FROM product_issue WHERE id = $1::uuid`, s.WorkItemID).Scan(&prevPriority); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return out, fmt.Errorf("read product issue priority: %w", err)
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE product_issue SET priority = NULLIF($2, ''), category = NULLIF($3, '') WHERE id = $1::uuid`,
 			s.WorkItemID, truncateColumn(s.Priority, 50), truncateColumn(s.Category, 100)); err != nil {
 			return out, fmt.Errorf("update product issue labels: %w", err)
 		}
+		prev := ""
+		if prevPriority != nil {
+			prev = *prevPriority
+		}
+		out.PriorityChanged = prev != truncateColumn(s.Priority, 50)
 		out.StateChanged = state != prevState
 		if out.StateChanged && s.RecordStateEvent {
 			ev := StatusEventInput{
@@ -400,6 +417,13 @@ func (r *productIssueSyncRepo) ApplyIssueSnapshot(ctx context.Context, s IssueSn
 			}
 			if out.EventWritten, err = InsertStatusEvent(ctx, tx, ev); err != nil {
 				return out, err
+			}
+			if out.EventWritten {
+				if err := tx.QueryRow(ctx, `
+					SELECT NOT EXISTS (SELECT 1 FROM work_item_status_event WHERE work_item_id = $1::uuid AND occurred_at > $2::timestamptz)`,
+					s.WorkItemID, s.OccurredAt).Scan(&out.EventNewest); err != nil {
+					return out, fmt.Errorf("read newest status event: %w", err)
+				}
 			}
 		}
 		return out, nil
@@ -516,6 +540,7 @@ func (r *productIssueSyncRepo) RecordBoardStatus(ctx context.Context, p BoardSta
 		// instead of recording the move twice.
 		if merged, err := adoptSyntheticEvent(ctx, tx, p, mapped.Status, from); err != nil || merged {
 			if merged {
+				out.Adopted = true
 				err = touchLink(ctx, tx, p.WorkItemID, nil)
 			}
 			return out, err

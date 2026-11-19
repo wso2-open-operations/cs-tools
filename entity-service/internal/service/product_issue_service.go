@@ -73,6 +73,25 @@ type productIssueService struct {
 	repo    repository.ProductIssueRepository
 	access  AccessService
 	tagRule ProductIssueCaseTagRule // nil: s_dip is not maintained (WithProductIssueCaseTagRule)
+	now     func() time.Time        // the SLA standing's "now"; time.Now when nil
+}
+
+func (s *productIssueService) clockNow() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func (s *productIssueService) withStanding(sum domain.ProductIssueSummary) domain.ProductIssueSummary {
+	one := []domain.ProductIssueSummary{sum}
+	s.standing(one)
+	return one[0]
+}
+
+// standing fills the SLA field of the summaries in place.
+func (s *productIssueService) standing(items []domain.ProductIssueSummary) {
+	applyStanding(items, s.clockNow())
 }
 
 // NewProductIssueService constructs a ProductIssueService.
@@ -95,6 +114,7 @@ func (s *productIssueService) ListForCase(ctx context.Context, caseID string) (d
 		return domain.ProductIssueListResponse{}, err
 	}
 	items, err := s.repo.ListForCase(ctx, caseID)
+	s.standing(items)
 	return domain.ProductIssueListResponse{Items: items}, err
 }
 
@@ -105,7 +125,14 @@ func (s *productIssueService) Get(ctx context.Context, id string) (domain.Produc
 	if !validate.IsUUID(id) {
 		return domain.ProductIssueDetail{}, &apierror.ValidationError{Msg: fmt.Sprintf("id contains invalid UUID: %q", id)}
 	}
-	return s.repo.GetDetail(ctx, id)
+	d, err := s.repo.GetDetail(ctx, id)
+	if err != nil {
+		return d, err
+	}
+	one := []domain.ProductIssueSummary{d.ProductIssueSummary}
+	s.standing(one)
+	d.ProductIssueSummary = one[0]
+	return d, nil
 }
 
 func (s *productIssueService) Search(ctx context.Context, req domain.SearchProductIssuesRequest) (domain.SearchProductIssuesResponse, error) {
@@ -135,6 +162,22 @@ func (s *productIssueService) Search(ctx context.Context, req domain.SearchProdu
 	if err := validateSearchQuery(f.Query); err != nil {
 		return domain.SearchProductIssuesResponse{}, err
 	}
+	switch f.Sort = strings.TrimSpace(f.Sort); f.Sort {
+	case "":
+		f.Sort = domain.ProductIssueSortCreated
+		if f.Mine {
+			f.Sort = domain.ProductIssueSortPausedSince
+		}
+	case domain.ProductIssueSortCreated, domain.ProductIssueSortPausedSince, domain.ProductIssueSortSLAPercentage:
+	default:
+		return domain.SearchProductIssuesResponse{}, &apierror.ValidationError{Msg: "sort must be created, pausedSince or slaPercentage."}
+	}
+	f.MineEmail = ""
+	if f.Mine {
+		if f.MineEmail = strings.TrimSpace(auth.IdentityFromContext(ctx).UserEmail); f.MineEmail == "" {
+			return domain.SearchProductIssuesResponse{}, &apierror.ValidationError{Msg: "mine requires a signed-in user."}
+		}
+	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchProductIssuesResponse{}, err
 	}
@@ -142,6 +185,7 @@ func (s *productIssueService) Search(ctx context.Context, req domain.SearchProdu
 	if err != nil {
 		return domain.SearchProductIssuesResponse{}, err
 	}
+	s.standing(items)
 	return domain.SearchProductIssuesResponse{Items: items, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
 
@@ -220,7 +264,7 @@ func (s *productIssueService) Link(ctx context.Context, req domain.LinkProductIs
 	if registered {
 		applyCaseTagRule(ctx, s.tagRule, req.CaseID)
 		sum, err := s.repo.GetSummary(ctx, workItemID)
-		return sum, true, err
+		return s.withStanding(sum), true, err
 	}
 	if workItemID == "" {
 		// The unique index refused the insert for a link the lookup cannot see
@@ -233,7 +277,7 @@ func (s *productIssueService) Link(ctx context.Context, req domain.LinkProductIs
 	}
 	applyCaseTagRule(ctx, s.tagRule, req.CaseID)
 	sum, err := s.repo.GetSummary(ctx, workItemID)
-	return sum, created, err
+	return s.withStanding(sum), created, err
 }
 
 // registerFromGitHub reads the issue and registers it as a product issue linked

@@ -2284,8 +2284,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// Git internals: product issue deliveries are taken in front of the customer
 	// repository sync (newGithubDeliveryService). With the flag off this changes
 	// nothing: the handler is the one built above, or none.
+	// The SLA engine and the s_dip rule are built once and shared by the delivery
+	// branch and the reconcile/backfill routes below; nil unless git internals is on.
+	var gitInternalsSLA service.WorkItemSLAEngine
+	var gitInternalsTagRule service.ProductIssueCaseTagRule
+	if cfg.GitInternalsActive() && db != nil && cfg.DataSource != config.DataSourceServiceNow {
+		gitInternalsSLA = service.NewWorkItemSLAEngine(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))
+		gitInternalsTagRule = service.NewProductIssueCaseTagRule(
+			repository.NewProductIssueCaseTagRepository(repository.NewScoped(db)), activeCaseSvc)
+	}
 	if db != nil {
-		if svc := newGithubDeliveryService(cfg, db, githubSync); svc != nil && svc != githubSync {
+		if svc := newGithubDeliveryService(cfg, db, githubSync, func(p *service.ProductIssueDeliveries) {
+			p.WithWorkItemSLA(gitInternalsSLA, gitInternalsTagRule)
+		}); svc != nil && svc != githubSync {
 			githubDeliveryHandler = handler.NewGithubDeliveryHandler(svc, cfg.M2MClientIDs)
 		}
 	}
@@ -2853,8 +2864,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		}
 		// s_dip ("waiting on a product team") follows the case's linked product issues;
 		// it adds and removes the tag through the same case service.
-		productCaseTagRule := service.NewProductIssueCaseTagRule(
-			repository.NewProductIssueCaseTagRepository(repository.NewScoped(db)), activeCaseSvc)
+		productCaseTagRule := gitInternalsTagRule
 		productWorkItemHandler := handler.NewProductWorkItemHandler(service.WithProductCaseTagRule(service.NewProductWorkItemService(
 			engineeringClient,
 			repository.NewProductWorkItemRepository(repository.NewScoped(db)),
@@ -2873,8 +2883,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Reconciliation and backfill: an internal service credential only (the daily
 		// scheduled task, an operator's service client); a user token is refused,
 		// since each call writes to every linked issue or creates work items.
-		productIssueSyncHandler := handler.NewProductIssueSyncHandler(service.NewProductIssueSyncService(
-			engineeringClient, repository.NewProductIssueReconcileRepository(repository.NewScoped(db)), cfg.GitInternalsBotLogins))
+		productIssueSyncHandler := handler.NewProductIssueSyncHandler(service.WithWorkItemSLA(service.NewProductIssueSyncService(
+			engineeringClient, repository.NewProductIssueReconcileRepository(repository.NewScoped(db)), cfg.GitInternalsBotLogins),
+			gitInternalsSLA, gitInternalsTagRule))
 		mux.HandleFunc("POST /product-work-items/reconcile", serviceOnly(accessSvc, productIssueSyncHandler.Reconcile))
 		mux.HandleFunc("POST /product-work-items/backfill", serviceOnly(accessSvc, productIssueSyncHandler.Backfill))
 	}

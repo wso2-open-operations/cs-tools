@@ -111,6 +111,8 @@ func (p webhookPayload) labelNames() []string {
 type ProductIssueDeliveries struct {
 	repo repository.ProductIssueSyncRepository
 	bots map[string]bool
+	fx   productIssueEffects
+	fu   *followUps
 
 	// boardNumbers remembers which project node id is which project number. A
 	// Status edit carries both; a board item "created" event carries only the node
@@ -125,8 +127,27 @@ type ProductIssueDeliveries struct {
 // back. Nothing is ignored unless listed.
 func NewProductIssueDeliveries(repo repository.ProductIssueSyncRepository, botLogins []string) *ProductIssueDeliveries {
 	bots := botLoginSet(botLogins)
-	return &ProductIssueDeliveries{repo: repo, bots: bots, boardNumbers: map[string]int{}}
+	return &ProductIssueDeliveries{repo: repo, bots: bots, fu: newFollowUps(), boardNumbers: map[string]int{}}
 }
+
+// WithWorkItemSLA makes the branch keep the issue's SLA clocks and its case's
+// s_dip tag in step with the GitHub state it writes. Either may be nil. Without
+// it the branch writes exactly what it wrote before.
+func (p *ProductIssueDeliveries) WithWorkItemSLA(sla WorkItemSLAEngine, tags ProductIssueCaseTagRule) *ProductIssueDeliveries {
+	p.fx = productIssueEffects{sla: sla, tags: tags}
+	return p
+}
+
+// WithInlineFollowUps runs the follow-ups in the delivery's own goroutine, before
+// it returns. Tests use it to be deterministic; production leaves them
+// asynchronous, since GitHub gives a delivery 10 seconds.
+func (p *ProductIssueDeliveries) WithInlineFollowUps() *ProductIssueDeliveries {
+	p.fu.inline = true
+	return p
+}
+
+// WaitFollowUps waits for the asynchronous follow-ups started so far (tests).
+func (p *ProductIssueDeliveries) WaitFollowUps() { p.fu.wg.Wait() }
 
 // botLoginSet lower-cases the configured bot logins. The project automation
 // account is never one of them: its comments are always mirrored.
@@ -240,7 +261,13 @@ func (p *ProductIssueDeliveries) planIssue(d Delivery, wp webhookPayload, link *
 	switch wp.Action {
 	case "deleted":
 		return func(ctx context.Context) (Outcome, error) {
-			return Outcome{Action: "product_issue_deleted"}, p.repo.SetLinkState(ctx, id, repository.LinkStateDeleted)
+			if err := p.repo.SetLinkState(ctx, id, repository.LinkStateDeleted); err != nil {
+				return Outcome{Action: "product_issue_deleted"}, err
+			}
+			fu := newWebhookFollowUp(p.fx, id)
+			fu.tagOnly()
+			fu.dispatch(ctx, p.fu)
+			return Outcome{Action: "product_issue_deleted"}, nil
 		}, "", nil
 	case "transferred":
 		// No transferred delivery was captured and GitHub's changes.new_issue shape is
@@ -250,7 +277,13 @@ func (p *ProductIssueDeliveries) planIssue(d Delivery, wp webhookPayload, link *
 		return func(ctx context.Context) (Outcome, error) {
 			slog.Warn("github: a product issue was transferred; its link is marked TRANSFERRED and needs a manual re-link",
 				"workItemId", id, "delivery", d.ID)
-			return Outcome{Action: "product_issue_transferred"}, p.repo.SetLinkState(ctx, id, repository.LinkStateTransferred)
+			if err := p.repo.SetLinkState(ctx, id, repository.LinkStateTransferred); err != nil {
+				return Outcome{Action: "product_issue_transferred"}, err
+			}
+			fu := newWebhookFollowUp(p.fx, id)
+			fu.tagOnly()
+			fu.dispatch(ctx, p.fu)
+			return Outcome{Action: "product_issue_transferred"}, nil
 		}, "", nil
 	case "opened", "edited", "labeled", "unlabeled", "closed", "reopened":
 	default:
@@ -284,6 +317,20 @@ func (p *ProductIssueDeliveries) planIssue(d Delivery, wp webhookPayload, link *
 		if res.Stale {
 			return Outcome{Action: "product_issue_stale"}, nil
 		}
+		// After the write has committed, asynchronously. A close or reopen that wrote
+		// its event moves the clocks at the event's own time; a priority change swaps
+		// the clock; a state flip with no event of its own (a missed close delivery
+		// seen through a later labeled or edited one) rebuilds from the history.
+		fu := newWebhookFollowUp(p.fx, id)
+		if res.EventWritten {
+			fu.status(occurred, res.EventNewest)
+		} else if res.StateChanged {
+			fu.recalculate()
+		}
+		if res.PriorityChanged {
+			fu.revise(occurred)
+		}
+		fu.dispatch(ctx, p.fu)
 		return Outcome{Action: "product_issue_" + wp.Action}, nil
 	}, "", nil
 }
@@ -374,11 +421,25 @@ func (p *ProductIssueDeliveries) planBoardItem(ctx context.Context, d Delivery, 
 			occurred = *item.UpdatedAt
 		}
 		return p.boardGate(ctx, d, link, wp, number, func(ctx context.Context) (Outcome, error) {
-			_, err := p.repo.RecordBoardStatus(ctx, repository.BoardStatusParams{
+			res, err := p.repo.RecordBoardStatus(ctx, repository.BoardStatusParams{
 				WorkItemID: link.WorkItemID, ProjectNumber: number, ItemID: itemID, RawStatus: raw,
 				DedupeKey: d.ID, Source: repository.StatusSourceWebhook, Actor: wp.Sender.Login, OccurredAt: occurred,
 			})
-			return Outcome{Action: "product_issue_board_status"}, err
+			if err != nil {
+				return Outcome{Action: "product_issue_board_status"}, err
+			}
+			// A new, in-order move is applied at its own time. An older move or a
+			// corrected synthetic event changed the timeline behind the clocks: rebuild.
+			// A duplicate inserted nothing and changes nothing.
+			fu := newWebhookFollowUp(p.fx, link.WorkItemID)
+			switch {
+			case res.Inserted && res.Applied:
+				fu.status(occurred, true)
+			case res.Inserted || res.Adopted:
+				fu.recalculate()
+			}
+			fu.dispatch(ctx, p.fu)
+			return Outcome{Action: "product_issue_board_status"}, nil
 		})
 	}
 	return nil, "board item action " + wp.Action + " is not handled", nil

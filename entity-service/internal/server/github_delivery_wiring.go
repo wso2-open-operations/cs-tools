@@ -33,7 +33,7 @@ import (
 // With it on, product issue deliveries are taken first; inner (nil when the
 // customer repository sync is off) still gets everything else, so the old path
 // runs only when its own gate is on.
-func newGithubDeliveryService(cfg *config.Config, db *pgxpool.Pool, inner service.GithubSyncService) service.GithubSyncService {
+func newGithubDeliveryService(cfg *config.Config, db *pgxpool.Pool, inner service.GithubSyncService, opts ...func(*service.ProductIssueDeliveries)) service.GithubSyncService {
 	if !cfg.GitInternalsActive() || db == nil || cfg.DataSource == config.DataSourceServiceNow {
 		return inner
 	}
@@ -42,5 +42,8 @@ func newGithubDeliveryService(cfg *config.Config, db *pgxpool.Pool, inner servic
 	}
 	front := service.NewProductIssueDeliveries(
 		repository.NewProductIssueSyncRepository(repository.NewScoped(db)), cfg.GitInternalsBotLogins)
+	for _, o := range opts {
+		o(front)
+	}
 	return service.WithProductIssueDeliveries(inner, front)
 }
