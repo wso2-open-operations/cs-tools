@@ -176,3 +176,29 @@ func TestDoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("err=%v leaked=%v, want the 302 as an error and no call to the redirect target", err, leaked.Load())
 	}
 }
+
+// TestTokenRequestDoesNotFollowRedirects: a redirect from the token endpoint fails the fetch, and the client secret
+// (sent as Authorization: Basic) never reaches the redirect target, even on the same host.
+func TestTokenRequestDoesNotFollowRedirects(t *testing.T) {
+	var leaked atomic.Bool
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/leak" {
+			// The secret arrives as Basic auth, or in the body when the library retries without it.
+			if r.Header.Get("Authorization") != "" || (r.ParseForm() == nil && r.PostForm.Get("client_secret") != "") {
+				leaked.Store(true)
+			}
+			return
+		}
+		http.Redirect(w, r, "/leak", http.StatusTemporaryRedirect)
+	}))
+	defer tokenSrv.Close()
+	var called atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called.Store(true) }))
+	defer srv.Close()
+	_, err := NewClient(Config{BaseURL: srv.URL, TokenURL: tokenSrv.URL + "/token", ClientID: "a", ClientSecret: "b"}).
+		MutedCounts(context.Background(), []string{"x"})
+	if err == nil || leaked.Load() || called.Load() {
+		t.Fatalf("err=%v leaked=%v called=%v, want a failed token fetch, no secret at the redirect target, no API call",
+			err, leaked.Load(), called.Load())
+	}
+}
