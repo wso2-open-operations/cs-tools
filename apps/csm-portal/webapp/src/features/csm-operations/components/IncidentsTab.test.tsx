@@ -380,6 +380,11 @@ describe("IncidentsTab — export", () => {
     const row = toRow(INCIDENT as never);
     expect(row).toHaveLength(header.length);
     expect(row.slice(-2)).toEqual(["SERVICE_INTERRUPTION", "Platform CRE"]);
+    // An unassigned incident reads "Unassigned" in the export, as in the table.
+    fireEvent.click(checkboxes[2]); // Assigned to
+    expect(exportProps.current!.toRow({ ...INCIDENT, assignedTo: null } as never).at(-1)).toBe(
+      "Unassigned",
+    );
   });
 });
 

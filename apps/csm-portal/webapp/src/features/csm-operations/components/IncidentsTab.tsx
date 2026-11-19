@@ -151,7 +151,7 @@ function optionalCellText(id: IncidentOptionalColumnId, incident: BeIncident): s
     case "assignmentGroup":
       return incident.assignmentGroup?.name ?? "";
     case "assignedTo":
-      return incident.assignedTo?.name ?? "";
+      return incident.assignedTo?.name || "Unassigned";
     case "parent":
       return incident.parent?.name ?? "";
     case "createdBy":
