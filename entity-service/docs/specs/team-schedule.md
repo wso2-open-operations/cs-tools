@@ -82,7 +82,7 @@ runs as on a weekday: `SRE_TZ3` is `day_scope = 'ANY'`, and TZ3 is its own
 weekend zone. An older database's weekend TZ2 window (`SRE_WE_TZ2`, standing in
 for TZ3) is folded into `SRE_TZ3` by 0154, turns included.
 
-**Weekend Day/Night (0305, then a switch-on migration).** SaaS SRE's weekends
+**Weekend Day/Night (0306, then a switch-on migration).** SaaS SRE's weekends
 move to two shifts: **Day**, 06:00–18:00 (`SRE_WE_DAY`, zone TZ1, per team) and
 **Night**, 18:00–06:00 (`SRE_WE_NIGHT`, zone TZ3, `shared_across_teams`, one
 crew for the rota). Weekdays keep TZ1, TZ2 and TZ3; Friday's TZ3 still runs to
@@ -91,7 +91,7 @@ zones the weekend already used, so roster columns and lanes and the pager's
 shared night crew (zone TZ3) are unchanged. The crews are the same people the
 TZ1+2 / TZ3 weekend had; only their hours move.
 
-- **0305** seeds both windows `is_active = FALSE`. Nothing offers, generates or
+- **0306** seeds both windows `is_active = FALSE`. Nothing offers, generates or
   pages them, and "Generate month" keeps writing TZ1+2 / TZ3 weekends.
 - **The switch-on** is a separate migration added in the week before the first
   Day/Night weekend (after Monday 06:00, before Saturday 06:00 IST). One
@@ -821,8 +821,8 @@ download the template from the environment you import into):
 - **`excludeAbsent` on the rota search.** `POST /team-schedule/assignments/search` takes `excludeAbsent: true` to leave out anyone away on the assignment's rota day: leave, excluded from the rota, or an allocation that moves them to another team (a span that moves somebody to another team does not count against that team's shifts). An allocation that moves nobody (Allo-INT, Allo-EXT, ENG, ...) does not count, since it does not hide a turn on the same day (`reminderAbsenceOn` in `schedule_repo.go`). `/team-schedule/on-duty` (both its modes) still counts every allocation (`absenceOn`), so for a person with such an allocation on a turn day the reminder and the pager differ until the on-duty rule is changed too. Off by default: the rota views draw leave over the rota. No schema change. Its caller is csm-scheduled-tasks' rota reminders (`rota_weekday_reminder`, `rota_weekend_notice`); an entity-service without the field refuses it (unknown field, 400), so deploy entity-service first.
 
 - **0199–0200 rotas.** The SME family; `team_schedule_rota`; `zone.rota_id` (TZ1–TZ3 on `SRE_SAAS`); the zone-family check widened from SRE to SRE or SME; IaaS and seven SME rotas, each with a Day and a Night zone and window; the `sme_rota_admin` role. Nothing is removed, renamed or re-typed, but existing objects do change: 0199 adds a value to `team_schedule_shift_family_enum`; 0200 adds the nullable column `team_schedule_zone.rota_id` and sets it on the existing TZ1–TZ3 rows, and replaces the zone-family CHECK with a wider one (every existing row satisfies it). IaaS's two windows are seeded inactive until the new webapp is deployed.
-- **0305 weekend Day/Night.** `SRE_WE_DAY` and `SRE_WE_NIGHT` (`shared_across_teams`), inserted inactive; see §2. Data only, re-runnable.
-- **0223 shared windows.** `team_schedule_shift.shared_across_teams` (BOOLEAN, default FALSE), TRUE for `SRE_TZ3` only (and `SRE_WE_NIGHT` since 0305): its tiers are one crew for the whole SaaS rota. `POST /team-schedule/assignments/apply` refuses (409, naming the holder) an SRE tier somebody else already holds on that zone and day -- per team, or across the rota on a shared window. Additive only; no constraint is added, since data written before it may already hold two people on one tier.
+- **0306 weekend Day/Night.** `SRE_WE_DAY` and `SRE_WE_NIGHT` (`shared_across_teams`), inserted inactive; see §2. Data only, re-runnable.
+- **0223 shared windows.** `team_schedule_shift.shared_across_teams` (BOOLEAN, default FALSE), TRUE for `SRE_TZ3` only (and `SRE_WE_NIGHT` since 0306): its tiers are one crew for the whole SaaS rota. `POST /team-schedule/assignments/apply` refuses (409, naming the holder) an SRE tier somebody else already holds on that zone and day -- per team, or across the rota on a shared window. Additive only; no constraint is added, since data written before it may already hold two people on one tier.
 - **0152–0155** replace `000088`–`000107`, which were written in the old
   up/down format. They reproduce the schema and catalogue that chain ended in
   exactly (compared with `pg_dump` against a server built from the old chain).

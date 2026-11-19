@@ -28,7 +28,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// The weekend Day/Night shape (migration 0305): the weekday windows as
+// The weekend Day/Night shape (migration 0306): the weekday windows as
 // before, SRE_WE_TZ1 retired, and the two weekend windows in its place.
 var saasTestWindowsDayNight = func() map[string][2]int {
 	out := map[string][2]int{}
