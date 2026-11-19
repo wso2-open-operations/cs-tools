@@ -167,7 +167,7 @@ export const TZ2_WE = shift({
   sortOrder: 60,
 });
 
-/** SaaS SRE's weekend once it is Day/Night (migration 0305, switched on):
+/** SaaS SRE's weekend once it is Day/Night (migration 0306, switched on):
  *  the Day in TZ1 and the Night in TZ3, each leaving the tier open, with TZ3
  *  then weekday-only. SRE_WE_TZ1 (TZ1_WE above) stays for history. */
 export const WE_DAY = shift({

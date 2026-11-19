@@ -45,7 +45,7 @@ import (
 // SRE_WE_NIGHT instead of SRE_TZ3. Only the hours differ, so only the codes a
 // weekend is written on change (saasWeekendShifts). Which shape a run uses is
 // saasRotaInput.WeekendDayNight, which the service reads off the catalogue:
-// the two Day/Night windows are seeded inactive (migration 0305) and switched
+// the two Day/Night windows are seeded inactive (migration 0306) and switched
 // on, with SRE_WE_TZ1 retired and SRE_TZ3 made weekday-only, in the week
 // before the first Day/Night weekend. Weekdays are the same in both shapes.
 //
