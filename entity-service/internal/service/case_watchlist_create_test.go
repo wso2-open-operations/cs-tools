@@ -481,9 +481,9 @@ func TestCaseService_CreateCase_PlainPostgres_CreatorAutoSubscribedToWatchList(t
 		createCaseCommentAsSystem: func(context.Context, domain.CreateCaseCommentRequest, *time.Time) (domain.CaseComment, error) {
 			return domain.CaseComment{}, nil
 		},
-		addCaseWatcherIfAbsent: func(_ context.Context, caseID, userID string) error {
+		addCaseWatcherByEmailIfAbsent: func(_ context.Context, caseID, identity string) error {
 			addCalls++
-			addCaseID, addUserID = caseID, userID
+			addCaseID, addUserID = caseID, identity
 			return nil
 		},
 	}
@@ -494,10 +494,10 @@ func TestCaseService_CreateCase_PlainPostgres_CreatorAutoSubscribedToWatchList(t
 		t.Fatalf("CreateCase: %v", err)
 	}
 	if addCalls != 1 {
-		t.Fatalf("AddCaseWatcherIfAbsent calls = %d, want 1", addCalls)
+		t.Fatalf("AddCaseWatcherByEmailIfAbsent calls = %d, want 1", addCalls)
 	}
 	if addCaseID != "case-1" || addUserID != "creator-1" {
-		t.Errorf("AddCaseWatcherIfAbsent(%q, %q), want (case-1, creator-1)", addCaseID, addUserID)
+		t.Errorf("AddCaseWatcherByEmailIfAbsent(%q, %q), want (case-1, creator-1)", addCaseID, addUserID)
 	}
 }
 

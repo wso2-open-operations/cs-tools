@@ -585,15 +585,15 @@ type CaseRepository interface {
 	// over).
 	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
 	// AddCaseWatcherByEmailIfAbsent is AddCaseWatcherIfAbsent for a caller
-	// that only has the watcher's email, not their already-resolved
-	// platform id -- the ServiceNow-mirror create path's own creator
-	// identity (CreateCaseFromServiceNow's createdBy is a raw actor string,
-	// never a user id; see that method's own doc comment). Resolves email
-	// to "user".id and inserts in the same statement, so a caseID or email
-	// that doesn't resolve to a real row is a no-op, not an error -- never
-	// a guess, and never two round trips for something this cheap to do in
-	// one.
-	AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, email string) error
+	// that doesn't already have the watcher's resolved platform id -- only
+	// an identity string of unverified shape, matched as EITHER a user id
+	// or an email (see the implementation's own doc comment for why this
+	// can't assume one shape). work_item.created_by is exactly such a
+	// string: not reliably a platform id across every create path and
+	// deployment. A caseID or identity that resolves to no real row is a
+	// no-op, not an error -- never a guess, and never two round trips for
+	// something this cheap to resolve-and-insert in one.
+	AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, identity string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
 	// named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
@@ -4321,18 +4321,27 @@ func (r *caseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID st
 }
 
 // AddCaseWatcherByEmailIfAbsent implements CaseRepository.
-func (r *caseRepo) AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, email string) error {
+func (r *caseRepo) AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, identity string) error {
 	// Same ON CONFLICT DO NOTHING shape as AddCaseWatcherIfAbsent, with the
-	// email-to-"user".id resolution folded into the same statement (a join,
-	// not a prior lookup) so an email matching no user, like a caseID that
-	// doesn't exist, simply inserts zero rows rather than erroring.
+	// identity-to-"user".id resolution folded into the same statement (a
+	// join, not a prior lookup). identity is matched as EITHER a user id
+	// (u.id::text, never cast the other way -- casting an arbitrary string
+	// to uuid raises rather than failing the WHERE, which a plain email
+	// would trip on every call) OR an email, case-insensitively: callers of
+	// this method pass whatever work_item.created_by actually holds for
+	// the case's own data source, which in practice is not consistently
+	// one shape or the other (confirmed live: a dual-write create's
+	// createdBy is ServiceNow's own raw actor string; a same-looking column
+	// on another path can already be a resolved id). Either way, an
+	// identity matching no user, like a caseID that doesn't exist, simply
+	// inserts zero rows rather than erroring or guessing.
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO work_item_watcher (id, work_item_id, user_id)
 		SELECT gen_random_uuid(), wi.id, u.id
 		FROM work_item wi
-		JOIN "user" u ON LOWER(u.email) = LOWER($2)
+		JOIN "user" u ON u.id::text = $2 OR LOWER(u.email) = LOWER($2)
 		WHERE wi.id = $1
-		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, email)
+		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, identity)
 	if err != nil {
 		return fmt.Errorf("add case watcher by email if absent: %w", err)
 	}
