@@ -95,9 +95,9 @@ vi.mock("@components/FilteredExportMenu", () => ({
 }));
 
 const mockedUseSearch = vi.mocked(useSearchIncidents);
-// The picker only lists the 7 optional columns (Number/Subject/Caller/State/
-// Priority/Opened/Updated are fixed and never appear in it).
-const INCIDENT_OPTIONAL_COLUMN_COUNT = 7;
+// The picker lists every column: the original seven, shown by default, and
+// the seven optional ones.
+const INCIDENT_COLUMN_COUNT = 14;
 
 let queryClient: QueryClient;
 
@@ -150,14 +150,14 @@ beforeEach(() => {
 });
 
 describe("IncidentsTab — list states", () => {
-  it("renders a row from the search result with only the original fixed columns visible", () => {
+  it("renders a row from the search result with only the original seven columns visible", () => {
     mockResult({ data: { incidents: [INCIDENT], total: 1, limit: 20, offset: 0 } });
     render(<IncidentsTab />);
 
     expect(screen.getByText("INC0000001")).toBeInTheDocument();
     expect(screen.getByText("Cluster degraded")).toBeInTheDocument();
     expect(screen.getByText("Caller Person")).toBeInTheDocument();
-    // None of the new optional columns are visible by default.
+    // The optional columns are hidden by default.
     expect(screen.queryByRole("columnheader", { name: "Category" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Assignment group" })).not.toBeInTheDocument();
   });
@@ -169,14 +169,27 @@ describe("IncidentsTab — list states", () => {
   });
 });
 
+/** Toggles a column by its label in the picker (the row's text is its own button). */
+function toggleColumn(label: string): void {
+  fireEvent.click(
+    within(screen.getByRole("list", { name: "Customise incident columns" })).getByText(label),
+  );
+}
+
 describe("IncidentsTab — customise columns", () => {
-  it("offers every new optional column in the picker", () => {
+  it("offers every column in the picker, the original seven included", () => {
     mockResult({ data: { incidents: [INCIDENT], total: 1, limit: 20, offset: 0 } });
     render(<IncidentsTab />);
 
     fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
 
+    const list = within(screen.getByRole("list", { name: "Customise incident columns" }));
     for (const label of [
+      "Number",
+      "Subject",
+      "Caller",
+      "State",
+      "Priority",
       "Category",
       "Assignment group",
       "Assigned to",
@@ -184,12 +197,28 @@ describe("IncidentsTab — customise columns", () => {
       "Created by",
       "Updated by",
       "Created",
+      "Opened",
+      "Updated",
     ]) {
       // Scoped to the picker: the filter bar has a "Category" field too.
-      expect(
-        within(screen.getByRole("list", { name: "Customise incident columns" })).getByText(label),
-      ).toBeInTheDocument();
+      expect(list.getByText(label)).toBeInTheDocument();
     }
+    expect(list.getAllByRole("checkbox")).toHaveLength(INCIDENT_COLUMN_COUNT);
+  });
+
+  it("hides a default column when unchecked", () => {
+    mockResult({ data: { incidents: [INCIDENT], total: 1, limit: 20, offset: 0 } });
+    render(<IncidentsTab />);
+    expect(screen.getByRole("columnheader", { name: "Caller" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
+    toggleColumn("Caller");
+
+    expect(screen.queryByRole("columnheader", { name: "Caller", hidden: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("Caller Person")).not.toBeInTheDocument();
+    // The others stay.
+    expect(screen.getByRole("columnheader", { name: "Number", hidden: true })).toBeInTheDocument();
+    expect(screen.getByText("Cluster degraded")).toBeInTheDocument();
   });
 
   it("adds the Category column when checked, and it renders the row's category", () => {
@@ -197,10 +226,7 @@ describe("IncidentsTab — customise columns", () => {
     render(<IncidentsTab />);
 
     fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
-    // Column order matches `INCIDENT_OPTIONAL_COLUMNS`: Category(0),
-    // Assignment group(1), Assigned to(2), ...
-    const checkboxes = screen.getAllByRole("checkbox");
-    fireEvent.click(checkboxes[0]);
+    toggleColumn("Category");
 
     expect(screen.getByRole("columnheader", { name: "Category", hidden: true })).toBeInTheDocument();
     expect(screen.getByText("SERVICE_INTERRUPTION")).toBeInTheDocument();
@@ -213,23 +239,17 @@ describe("IncidentsTab — customise columns", () => {
     render(<IncidentsTab />);
 
     fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
-    const checkboxes = screen.getAllByRole("checkbox");
-    fireEvent.click(checkboxes[2]); // Assigned to
+    toggleColumn("Assigned to");
 
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
   });
 
-  it("never lets every column be unchecked, once at least one is checked", () => {
+  it("never lets the last column be unchecked", () => {
     mockResult({ data: { incidents: [INCIDENT], total: 1, limit: 20, offset: 0 } });
     render(<IncidentsTab />);
 
     fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
-    // Check every column first (none are checked by default here, unlike
-    // Change Requests), then try to uncheck them all.
-    for (let i = 0; i < INCIDENT_OPTIONAL_COLUMN_COUNT; i++) {
-      fireEvent.click(screen.getAllByRole("checkbox")[i]);
-    }
-    for (let i = 0; i < INCIDENT_OPTIONAL_COLUMN_COUNT; i++) {
+    for (let i = 0; i < INCIDENT_COLUMN_COUNT; i++) {
       const checkbox = screen.getAllByRole("checkbox")[i];
       if (checkbox && !checkbox.hasAttribute("disabled") && (checkbox as HTMLInputElement).checked) {
         fireEvent.click(checkbox);
