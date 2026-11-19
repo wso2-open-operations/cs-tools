@@ -685,7 +685,11 @@ func main() {
 			// spaces of the groups its incident card goes to.
 			WithIncidentSLAAudiences(func(group string) []string {
 				return notifications.IncidentSLAAudiences(incidentRoutes, incidentChatFanout, group, googleChatClient.HasAudienceSpace)
-			})
+			}).
+			// The ticker below starts before the Alert Settings mapping is
+			// applied (applyIncidentRoutes, further down); incident tiers wait
+			// for it. Released by IncidentRoutingReady once that setup ends.
+			HoldIncidentTiersUntilRoutingReady()
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -1010,6 +1014,12 @@ func main() {
 		sreCfg, sreRunning := escalationCfg.For(paging.LadderKeySRE)
 		if cfgErr == nil {
 			applyIncidentRoutes(sreCfg, googleChatClient, incidentRoutes)
+		}
+		// Routing setup has ended either way (a config that failed to load
+		// applies no mapping, and its incidents route by group and
+		// INCIDENT_CHAT_FANOUT alone): release the held incident SLA tiers.
+		if slaEngine != nil {
+			slaEngine.IncidentRoutingReady()
 		}
 		escalationRunning := creRunning || sreRunning
 		if cfgErr == nil {

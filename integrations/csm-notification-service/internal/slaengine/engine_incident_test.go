@@ -314,3 +314,106 @@ func TestTick_IncidentBreach_OnboardingProject_NoOnboardingTeamCopy(t *testing.T
 		t.Errorf("email recipients = %v, want %v (no onboarding team copy for an incident)", recipients, want)
 	}
 }
+
+// incident.priority_elevated may omit the group and number too: an empty one
+// keeps the stored value, a non-empty one still replaces it.
+func TestRegisterIncidentClocks_ElevationKeepsStoredGroupAndNumber(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	started := time.Date(2026, 11, 3, 7, 19, 53, 0, time.UTC)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {Found: true, Stage: "IN_PROGRESS", StartedOn: &started, DurationSeconds: int64((4 * time.Hour).Seconds())},
+	}}
+
+	e.RegisterIncidentClocks(context.Background(), "inc-1", "HIGH", started, "INC0091536", "Router 5xx", "Artemis SRE Group", "Choreo")
+	e.RegisterIncidentClocks(context.Background(), "inc-1", "CRITICAL", started, "", "", "", "")
+	meta, _, _ := st.GetClock(context.Background(), "inc-1", ClockResolution)
+	if meta.Team != "Artemis SRE Group" || meta.CaseNumber != "INC0091536" {
+		t.Errorf("group/number = %q/%q, want the stored Artemis SRE Group/INC0091536 kept", meta.Team, meta.CaseNumber)
+	}
+
+	e.RegisterIncidentClocks(context.Background(), "inc-1", "CRITICAL", started, "INC0091999", "", "Apollo SRE Group", "")
+	meta, _, _ = st.GetClock(context.Background(), "inc-1", ClockResolution)
+	if meta.Team != "Apollo SRE Group" || meta.CaseNumber != "INC0091999" {
+		t.Errorf("group/number = %q/%q, want the new non-empty values", meta.Team, meta.CaseNumber)
+	}
+}
+
+// A reassigned incident alerts its current group (entity-service's
+// AssignmentGroupName), not the one it was registered with: the card's group,
+// its SLA space and the email's team all follow, matching the group email and
+// manager entity-service already returns for it.
+func TestTick_IncidentBreach_ReassignedIncidentAlertsItsCurrentGroup(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, &fakePublisher{})
+	e.email = email
+	var routedGroup string
+	e.WithIncidentSLAAudiences(func(group string) []string {
+		routedGroup = group
+		return []string{IncidentSLATestAudience(group)}
+	})
+	past := time.Now().Add(-5 * time.Hour)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {
+			Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past,
+			AssignmentGroupName: "Apollo SRE Group", TeamEmail: "apollo@example.com", TeamLeadName: "Apollo Manager",
+		},
+	}}
+	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Artemis SRE Group", Priority: "CRITICAL", StartedAt: past}
+	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if routedGroup != "Apollo SRE Group" {
+		t.Errorf("routed group = %q, want the current Apollo SRE Group", routedGroup)
+	}
+	if len(chat.incidentCalls) != 1 || chat.incidentCalls[0].alert.AssignmentGroup != "Apollo SRE Group" || chat.incidentCalls[0].alert.GroupManagerName != "Apollo Manager" {
+		t.Errorf("incident alert = %+v, want Apollo SRE Group with its manager", chat.incidentCalls)
+	}
+	if len(email.calls) != 1 || !slices.Equal(email.calls[0].to, []string{"apollo@example.com"}) || !strings.Contains(email.calls[0].htmlBody, "Apollo SRE Group") {
+		t.Errorf("email = %+v, want the Apollo group email naming Apollo SRE Group", email.calls)
+	}
+}
+
+// Until cmd/server has set up incident routing, an incident tier stays due
+// and unclaimed (cases never wait on it); once ready, it is sent.
+func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	e := newTestEngine(st, chat, &fakePublisher{}).HoldIncidentTiersUntilRoutingReady()
+	e.WithIncidentSLAAudiences(func(group string) []string { return []string{IncidentSLATestAudience(group)} })
+	past := time.Now().Add(-5 * time.Hour)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past},
+	}}
+	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Artemis SRE Group", Priority: "CRITICAL", StartedAt: past}
+	member := wakeMember("inc-1", ClockResolution, 100)
+	st.wake[member] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if len(chat.incidentCalls) != 0 {
+		t.Fatalf("incident alert sent before routing was ready: %+v", chat.incidentCalls)
+	}
+	if _, ok := st.wake[member]; !ok {
+		t.Fatal("the held tier's wake entry was removed, want it left due")
+	}
+	if meta, _, _ := st.GetClock(context.Background(), "inc-1", ClockResolution); meta.AlertedTier >= 100 {
+		t.Fatalf("AlertedTier = %d, want the held tier not marked alerted", meta.AlertedTier)
+	}
+
+	e.IncidentRoutingReady()
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if len(chat.incidentCalls) != 1 {
+		t.Errorf("incident alerts after routing ready = %d, want 1", len(chat.incidentCalls))
+	}
+}
+
+// IncidentSLATestAudience is the incident SLA audience the tests route a group to.
+func IncidentSLATestAudience(group string) string { return "incident-sla/" + strings.ToLower(group) }

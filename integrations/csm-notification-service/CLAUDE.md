@@ -275,15 +275,28 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   (`ClockMeta.CaseType = "INCIDENT"`, `Team` = assignment group, `Product` =
   service). A clock entity-service already ended (a priority lowered first) is
   skipped, so a cancelled-after-breach clock never alerts. A re-registration
-  of the same clock keeps its alerted tier (`setClockScript`).
+  of the same clock keeps its alerted tier (`setClockScript`), and an empty
+  service, title, group or number (`incident.priority_elevated` may omit
+  them) keeps the stored one. Registration runs after the incident's direct
+  call and card, so it never delays them.
 - **Lifecycle:** no incident state events feed the engine. A clock cancelled
   by a priority drop, or achieved on resolve, is caught by
-  `verifyTierStillDue` before each tier, which asks entity-service.
+  `verifyTierStillDue` before each tier, which asks entity-service -- unless
+  it had already breached: cancellation keeps `has_breached`, so a clock
+  cancelled after passing its duration still sends its pending tiers (it did
+  breach; same rule as a case).
+- **Startup:** `HoldIncidentTiersUntilRoutingReady` keeps incident tiers due
+  and unclaimed until cmd/server has finished setting up incident routing
+  (`IncidentRoutingReady`, after `applyIncidentRoutes`, whether or not a
+  mapping was applied); the ticker starts first. Cases never wait.
 - **Chat:** `sendIncidentBreachAlert` posts `SendIncidentSLAAlert` to the
   `INCIDENT_SLA_CHAT_SPACES` spaces (audience `incident-sla/<group>`) of the
   groups the incident's card goes to (`notifications.IncidentSLAAudiences` over
   `IncidentRoutes.Groups`, so a default group fans out like its card), never
-  `chataudience.Resolve`'s case audiences. No shared fallback room.
+  `chataudience.Resolve`'s case audiences. No shared fallback room. The group
+  is the incident's current one (`GetClockState`'s `assignmentGroupName`), so
+  a reassigned incident alerts its new group; an entity-service without the
+  field leaves the registration-time group.
 - **Email:** the case emails, worded for an incident
   (`SLABreachEmailData.Incident`: "Incident ID", "View Incident", "Service",
   and an "SLA violated" preview at 100%; a case's wording is unchanged): the

@@ -314,6 +314,12 @@ type Engine struct {
 	// WithIncidentSLAAudiences). nil: an incident's SLA alert goes to no
 	// Chat space, only its emails.
 	incidentSLAAudiences func(assignmentGroup string) []string
+	// incidentRoutingPending holds every incident tier back (left due, not
+	// claimed) until cmd/server has set up incident routing: the ticker
+	// starts before the Alert Settings mapping is applied, and a tier sent
+	// in that gap could find no space for a group that only the mapping
+	// routes. Cases never wait on it. False unless HoldIncidentTiersUntilRoutingReady.
+	incidentRoutingPending atomic.Bool
 }
 
 // WithIncidentSLAAudiences sets how an incident's SLA alert finds its Chat
@@ -321,6 +327,21 @@ type Engine struct {
 func (e *Engine) WithIncidentSLAAudiences(audiences func(assignmentGroup string) []string) *Engine {
 	e.incidentSLAAudiences = audiences
 	return e
+}
+
+// HoldIncidentTiersUntilRoutingReady makes incident tiers wait for
+// IncidentRoutingReady; see Engine.incidentRoutingPending.
+func (e *Engine) HoldIncidentTiersUntilRoutingReady() *Engine {
+	e.incidentRoutingPending.Store(true)
+	return e
+}
+
+// IncidentRoutingReady releases the incident tiers held since
+// HoldIncidentTiersUntilRoutingReady. cmd/server calls it once routing setup
+// has finished, whether or not it applied a mapping, so a deployment
+// without one is not held forever.
+func (e *Engine) IncidentRoutingReady() {
+	e.incidentRoutingPending.Store(false)
 }
 
 // clock returns e.now(), or time.Now() when no clock is set.
@@ -571,9 +592,10 @@ func (e *Engine) RegisterIncidentClocks(ctx context.Context, incidentID, priorit
 // registerClocks is RegisterClocks' body: base carries every display field,
 // StartedAt/Schedule are filled from entity-service per clock type.
 // incident (RegisterIncidentClocks) leaves out a clock entity-service already
-// reports ended, and keeps the stored service and title when base has none --
-// incident.priority_elevated carries no service, so re-registering from it
-// must not blank what incident.created stored. A case's registration is
+// reports ended, and keeps the stored service, title, group and number when
+// base has none -- incident.priority_elevated carries no service and may omit
+// the others, so re-registering from it must not blank what incident.created
+// stored. A case's registration is
 // unaffected by either.
 func (e *Engine) registerClocks(ctx context.Context, caseID string, createdAt time.Time, base ClockMeta, incident bool) {
 	if e.entity == nil {
@@ -607,13 +629,19 @@ func (e *Engine) registerClocks(ctx context.Context, caseID string, createdAt ti
 		meta.StartedAt = startedAt
 		meta.Schedule = state.Schedule
 		meta.SLAID = state.ID
-		if incident && (meta.Product == "" || meta.CaseTitle == "") {
+		if incident && (meta.Product == "" || meta.CaseTitle == "" || meta.Team == "" || meta.CaseNumber == "") {
 			if stored, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
 				if meta.Product == "" {
 					meta.Product = stored.Product
 				}
 				if meta.CaseTitle == "" {
 					meta.CaseTitle = stored.CaseTitle
+				}
+				if meta.Team == "" {
+					meta.Team = stored.Team
+				}
+				if meta.CaseNumber == "" {
+					meta.CaseNumber = stored.CaseNumber
 				}
 			}
 		}
@@ -1021,6 +1049,11 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 		return e.store.RemoveWake(ctx, member)
 	}
 	if meta.Paused {
+		return nil
+	}
+	if meta.CaseType == CaseTypeIncident && e.incidentRoutingPending.Load() {
+		// Left due and unclaimed, as a paused clock is: the next tick after
+		// routing is ready sends it.
 		return nil
 	}
 
@@ -1559,6 +1592,14 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 		openedAt = meta.StartedAt.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
 	}
 	link := e.links.IncidentLink(incidentID)
+
+	// The group as it is now: TeamEmail/TeamLeadName (the group email and
+	// manager) are already the current group's, so the card, its space and
+	// the email follow a reassignment too. An entity-service without the
+	// field leaves the registration-time group.
+	if state.AssignmentGroupName != "" {
+		meta.Team = state.AssignmentGroupName
+	}
 
 	var audiences []string
 	if e.incidentSLAAudiences != nil {

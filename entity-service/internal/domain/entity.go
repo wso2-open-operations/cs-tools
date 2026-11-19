@@ -9240,6 +9240,11 @@ type SLAClockState struct {
 	// other, so it sends to TeamEmail and OnboardingTeamEmail together
 	// rather than this service picking one.
 	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
+	// AssignmentGroupName is an incident's assignment group as it is now
+	// (empty for every other work item type): csm-notification-service routes
+	// an incident's SLA alert by it, so a reassigned incident alerts its new
+	// group, whose group_email/manager TeamEmail/TeamLeadName already carry.
+	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

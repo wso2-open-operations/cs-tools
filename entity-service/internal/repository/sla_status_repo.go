@@ -615,7 +615,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		            ELSE COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')) END,
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
 		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
-		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END,
+		       incident_group.name
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -651,14 +652,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail, assignmentGroupName *string
 	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.ID, &state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
-		&onboardingStatus, &isEvaluation, &onboardingTeamEmail,
+		&onboardingStatus, &isEvaluation, &onboardingTeamEmail, &assignmentGroupName,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -682,6 +683,7 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
 	state.IsEvaluationAccount = isEvaluation
 	state.OnboardingTeamEmail = stringOrEmpty(onboardingTeamEmail)
+	state.AssignmentGroupName = stringOrEmpty(assignmentGroupName)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

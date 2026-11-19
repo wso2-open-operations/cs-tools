@@ -366,6 +366,11 @@ type clockState struct {
 	// other, so the real CRE team is never dropped just because the
 	// project happens to be onboarding.
 	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
+	// AssignmentGroupName is an incident's assignment group as entity-service
+	// has it now (empty for a case, and from an entity-service that predates
+	// it): an incident's SLA alert routes by it, so a reassigned incident
+	// alerts its new group. Empty falls back to the registration-time group.
+	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
 }
 
 // GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>

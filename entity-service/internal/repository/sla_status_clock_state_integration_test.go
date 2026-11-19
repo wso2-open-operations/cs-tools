@@ -100,6 +100,9 @@ func TestClockStateIntegration_IncidentTeamIsAssignmentGroup(t *testing.T) {
 	if incident.TeamLeadName != "Clock State Manager" {
 		t.Errorf("incident TeamLeadName = %q, want the assignment group's manager", incident.TeamLeadName)
 	}
+	if incident.AssignmentGroupName != "Clock State SRE Group" {
+		t.Errorf("incident AssignmentGroupName = %q, want the incident's current assignment group", incident.AssignmentGroupName)
+	}
 
 	c, err := repo.GetClockState(ctx, clockStateCaseID, "RESOLUTION", "")
 	if err != nil {
@@ -110,5 +113,8 @@ func TestClockStateIntegration_IncidentTeamIsAssignmentGroup(t *testing.T) {
 	}
 	if c.TeamEmail != "" || c.TeamLeadName != "" {
 		t.Errorf("case TeamEmail/TeamLeadName = %q/%q, want empty: a case's team is its account CRE team, never its assignment group", c.TeamEmail, c.TeamLeadName)
+	}
+	if c.AssignmentGroupName != "" {
+		t.Errorf("case AssignmentGroupName = %q, want empty (incidents only)", c.AssignmentGroupName)
 	}
 }
