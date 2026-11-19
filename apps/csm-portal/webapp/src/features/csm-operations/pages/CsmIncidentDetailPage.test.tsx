@@ -18,7 +18,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { JSX } from "react";
-import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type InitialEntry } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeIncidentDetail } from "@api/backend/types";
@@ -785,6 +785,42 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
       },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+  });
+
+  it("never sends a pending cancellation to another incident when the id changes under it", () => {
+    // With case tabs off the page stays mounted across an id change.
+    function GoToOtherIncident(): JSX.Element {
+      const navigate = useNavigate();
+      return <button type="button" data-testid="go-inc-2" onClick={() => navigate("/operations/incidents/inc-2")} />;
+    }
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/operations/incidents/inc-1"]}>
+          <Routes>
+            <Route
+              path="/operations/incidents/:id"
+              element={
+                <>
+                  <CsmIncidentDetailPage />
+                  <GoToOtherIncident />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    expect(screen.getByRole("dialog", { name: /cancel this incident\?/i })).toBeInTheDocument();
+
+    mockQueryResult({ data: { ...BASE_INCIDENT, id: "inc-2", number: "INC0099999", state: "IN_PROGRESS" } });
+    fireEvent.click(screen.getByTestId("go-inc-2"));
+
+    expect(screen.queryByRole("dialog", { name: /cancel this incident\?/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^cancel incident$/i })).not.toBeInTheDocument();
+    expect(patchMutateMock).not.toHaveBeenCalled();
   });
 
   it("offers no Cancelled on a NEW incident", () => {

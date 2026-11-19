@@ -335,10 +335,14 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // the Edit dialog's State select) opens a confirmation first. Holds the
   // patch to send on confirm: `{ state: CANCELLED }` from the action bar, or
   // the whole Edit dialog patch (its other edits go in the same request).
+  // Bound to the incident that raised it: with case tabs off this page stays
+  // mounted across an id change, and a request must never reach another one.
   const [cancelRequest, setCancelRequest] = useState<{
+    incidentId: string;
     patch: BeUpdateIncidentPayload;
     fromEdit: boolean;
   } | null>(null);
+  const activeCancelRequest = cancelRequest && cancelRequest.incidentId === id ? cancelRequest : null;
   const engineerName = useEngineerDisplayName();
   // Signed-in engineer's platform UUID (self-subscribe writes) and email
   // (matching a watch-list entry to "me"), same pair the case detail page
@@ -502,7 +506,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         return;
       }
       if (target === "CANCELLED") {
-        setCancelRequest({ patch: { state: "CANCELLED" }, fromEdit: false });
+        setCancelRequest({ incidentId: id, patch: { state: "CANCELLED" }, fromEdit: false });
         return;
       }
       // Starting work on an unassigned incident implicitly claims it, same
@@ -583,22 +587,22 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const onEditSave = useCallback(
     (patch: BeUpdateIncidentPayload) => {
       if (patch.state === "CANCELLED") {
-        setCancelRequest({ patch, fromEdit: true });
+        if (id) setCancelRequest({ incidentId: id, patch, fromEdit: true });
         return;
       }
       sendEdit(patch);
     },
-    [sendEdit],
+    [id, sendEdit],
   );
 
   const onCancelConfirm = useCallback(() => {
-    if (!id || !cancelRequest) return;
-    if (cancelRequest.fromEdit) {
-      sendEdit(cancelRequest.patch, () => setCancelRequest(null));
+    if (!id || !activeCancelRequest) return;
+    if (activeCancelRequest.fromEdit) {
+      sendEdit(activeCancelRequest.patch, () => setCancelRequest(null));
       return;
     }
     patchIncident.mutate(
-      { id, patch: cancelRequest.patch },
+      { id, patch: activeCancelRequest.patch },
       {
         onSuccess: () => setCancelRequest(null),
         onError: (err) => {
@@ -606,7 +610,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         },
       },
     );
-  }, [id, cancelRequest, patchIncident, sendEdit, showError]);
+  }, [id, activeCancelRequest, patchIncident, sendEdit, showError]);
 
   /**
    * Submit the handoff. Deliberately not gated on the incident's service or
@@ -1287,7 +1291,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       )}
 
       {/* Go back keeps the Edit dialog (and its edits) open underneath. */}
-      {cancelRequest && (
+      {activeCancelRequest && (
         <CancelIncidentDialog
           incidentNumber={data?.number}
           isSubmitting={patchIncident.isPending}
