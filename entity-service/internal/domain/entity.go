@@ -9249,6 +9249,12 @@ type SLAClockState struct {
 	// an incident's SLA alert by it, so a reassigned incident alerts its new
 	// group, whose group_email/manager TeamEmail/TeamLeadName already carry.
 	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
+	// AssignmentGroupTeamKey is the key of the team whose id the incident's
+	// current assignment group has (empty when none, and for every other
+	// type): a specialist handoff escalates an incident to its SME team's
+	// group, which shares that team's id (EnsureTeamGroups), so an incident
+	// escalated to an SME team names that team here.
+	AssignmentGroupTeamKey string `json:"assignmentGroupTeamKey,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

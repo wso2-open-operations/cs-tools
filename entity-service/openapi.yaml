@@ -38649,6 +38649,15 @@ components:
         teamLeadName:
           type: string
           description: Mirrors SLAStatus.teamLeadName. Empty when not resolvable.
+        assignmentGroupName:
+          type: string
+          description: An incident's current assignment group name. Omitted for every other work item type.
+        assignmentGroupTeamKey:
+          type: string
+          description: >-
+            The key of the team whose id an incident's current assignment group has: a specialist
+            handoff escalates to its SME team's group, which shares that team's id. Omitted when
+            none, and for every other type.
 
     SLADurationPolicyItem:
       type: object

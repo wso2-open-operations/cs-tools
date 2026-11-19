@@ -462,3 +462,39 @@ func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
 		t.Errorf("incident alerts after routing ready = %d, want 1", len(chat.incidentCalls))
 	}
 }
+
+// An incident escalated to an SME team alerts that team only (the one
+// entity-service names for the current group), not the SRE team it came from.
+func TestTick_IncidentBreach_EscalatedToSMEAlertsTheSMETeam(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, &fakePublisher{})
+	e.email = email
+	resolved := sreTeamWiring(e, chat,
+		map[string][]string{"Apollo SRE Group": {"apollo"}},
+		[]string{"apollo", "asgardeo"},
+		map[string]string{"apollo": "apollo@example.com", "asgardeo": "asgardeo@example.com"})
+	past := time.Now().Add(-5 * time.Hour)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {
+			Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past,
+			AssigneeEmail: "melan@example.com", AssignmentGroupName: "Asgardeo", AssignmentGroupTeamKey: " Asgardeo ",
+		},
+	}}
+	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Apollo SRE Group", Priority: "CRITICAL", StartedAt: past}
+	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if len(*resolved) != 0 {
+		t.Errorf("SRE mapping consulted for %v, want the SME team used directly", *resolved)
+	}
+	if len(chat.incidentCalls) != 1 || chat.incidentCalls[0].audience != notifications.IncidentSLAAudience("asgardeo") || chat.incidentCalls[0].alert.AssignmentGroup != "Asgardeo" {
+		t.Errorf("incident alert = %+v, want Asgardeo's SLA space only", chat.incidentCalls)
+	}
+	if want := []string{"melan@example.com", "asgardeo@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) {
+		t.Errorf("email recipients = %v, want %v", incidentRecipients(email.calls), want)
+	}
+}

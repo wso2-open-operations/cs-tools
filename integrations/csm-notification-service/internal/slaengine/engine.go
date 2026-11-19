@@ -1576,8 +1576,9 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 
 // sendIncidentBreachAlert is sendBreachAlert for an incident's clock, the way
 // a case's reaches its CRE team: the incident's current assignment group is
-// resolved to its SRE team(s) (incidentSLATeams -- the SRE ladder's own
-// group->team mapping, so a default group is every teamless team), and each
+// resolved to its team -- an SME team entity-service names (an escalation to
+// SME), else its SRE team(s) (incidentSLATeams -- the SRE ladder's own
+// group->team mapping, so a default group is every teamless team) -- and each
 // team's own team.chat_webhook_url (its incident SLA space) gets the card and
 // its team.group_email the team email, beside the assignee's. A team with no
 // space gets no card; there is no shared fallback room, no Americas or
@@ -1603,8 +1604,13 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 		meta.Team = state.AssignmentGroupName
 	}
 
+	// The current group's own team: an SME team entity-service names for it
+	// (escalated to an SME team), else the SRE team(s) the ladder maps the
+	// group to. Whichever team holds the incident now gets the alert.
 	var teams []string
-	if e.incidentSLATeams != nil {
+	if key := strings.ToLower(strings.TrimSpace(state.AssignmentGroupTeamKey)); key != "" {
+		teams = []string{key}
+	} else if e.incidentSLATeams != nil {
 		teams = e.incidentSLATeams(meta.Team)
 	}
 	var audiences, teamEmails []string

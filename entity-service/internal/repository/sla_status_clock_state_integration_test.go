@@ -58,6 +58,7 @@ func TestClockStateIntegration_IncidentAssignmentGroupName(t *testing.T) {
 		}
 		_, _ = scoped.Exec(ctx, `DELETE FROM sla_policy WHERE id = $1::uuid`, clockStatePolicyID)
 		_, _ = scoped.Exec(ctx, `DELETE FROM "group" WHERE id = $1::uuid`, clockStateGroupID)
+		_, _ = scoped.Exec(ctx, `DELETE FROM team WHERE id = $1::uuid`, clockStateGroupID)
 		_, _ = scoped.Exec(ctx, `DELETE FROM "user" WHERE id = $1::uuid`, clockStateManagerID)
 	}
 	cleanup()
@@ -68,6 +69,11 @@ func TestClockStateIntegration_IncidentAssignmentGroupName(t *testing.T) {
 	mustExec(`INSERT INTO "group" (id, created_on, updated_on, created_by, updated_by, name, group_email, manager_id)
 	          VALUES ($1, now(), now(), 'clock-state-test', 'clock-state-test', 'Clock State SRE Group', 'sre-group@example.com', $2)`,
 		clockStateGroupID, clockStateManagerID)
+	// The group shares its id with a team, as an SME team's escalation group
+	// does (EnsureTeamGroups).
+	mustExec(`INSERT INTO team (id, created_on, updated_on, created_by, updated_by, name, type, key)
+	          VALUES ($1, now(), now(), 'clock-state-test', 'clock-state-test', 'Clock State SME', 'sme-clock-state', 'clock-state-sme')`,
+		clockStateGroupID)
 	for _, wi := range []struct{ id, number, typ string }{
 		{clockStateIncidentID, "CLOCKSTATEINC1", "INCIDENT"},
 		{clockStateCaseID, "CLOCKSTATECASE1", "CASE"},
@@ -100,6 +106,9 @@ func TestClockStateIntegration_IncidentAssignmentGroupName(t *testing.T) {
 	if incident.AssignmentGroupName != "Clock State SRE Group" {
 		t.Errorf("incident AssignmentGroupName = %q, want the incident's current assignment group", incident.AssignmentGroupName)
 	}
+	if incident.AssignmentGroupTeamKey != "clock-state-sme" {
+		t.Errorf("incident AssignmentGroupTeamKey = %q, want the key of the team sharing the group's id", incident.AssignmentGroupTeamKey)
+	}
 
 	c, err := repo.GetClockState(ctx, clockStateCaseID, "RESOLUTION", "")
 	if err != nil {
@@ -111,7 +120,7 @@ func TestClockStateIntegration_IncidentAssignmentGroupName(t *testing.T) {
 	if c.TeamEmail != "" || c.TeamLeadName != "" {
 		t.Errorf("case TeamEmail/TeamLeadName = %q/%q, want empty: a case's team is its account CRE team, never its assignment group", c.TeamEmail, c.TeamLeadName)
 	}
-	if c.AssignmentGroupName != "" {
-		t.Errorf("case AssignmentGroupName = %q, want empty (incidents only)", c.AssignmentGroupName)
+	if c.AssignmentGroupName != "" || c.AssignmentGroupTeamKey != "" {
+		t.Errorf("case AssignmentGroupName/TeamKey = %q/%q, want empty (incidents only)", c.AssignmentGroupName, c.AssignmentGroupTeamKey)
 	}
 }

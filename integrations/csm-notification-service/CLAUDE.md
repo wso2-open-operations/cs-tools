@@ -290,7 +290,14 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   (`IncidentRoutingReady`, after `applyIncidentRoutes`, whether or not a
   mapping was applied); the ticker starts first. Cases never wait.
 - **Routing, the same way as a case:** a case's alert reaches its account
-  CRE team; an incident's reaches its **SRE team(s)**. The incident's current
+  CRE team; an incident's reaches the team that holds it **now**, SRE or SME
+  (an incident starts with SRE and may be escalated to an SME team; only the
+  current group's team is alerted). An SME team comes first:
+  `GetClockState`'s `assignmentGroupTeamKey` names it when the current group
+  shares its id with a team -- a specialist handoff (`SPECIALIST_HANDOFF_CONFIG`,
+  Team Schedule teams) escalates to the SME team's own group, which entity-service
+  creates with that team's id -- no config here. The old ServiceNow "... Special
+  Ops" groups share no team's id and reach no team. Otherwise the SRE team(s): the incident's current
   assignment group (`GetClockState`'s `assignmentGroupName`; empty -- an
   older entity-service, or no group right now -- keeps the registration-time
   group on purpose, so the last owning team is still alerted) resolves to
