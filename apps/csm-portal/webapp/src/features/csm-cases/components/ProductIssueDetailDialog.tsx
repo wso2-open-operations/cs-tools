@@ -28,12 +28,23 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { RefreshCw, X } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
+import type {
+  ProductGitHubCommand,
+  ProductIssueComment,
+} from "@features/csm-cases/types/productWorkItems";
 import {
   NonStandardColumnHint,
   ProductIssueSlaStanding,
 } from "@features/csm-cases/components/ProductIssueSlaStanding";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
+import {
+  type ProductIssueActionContext,
+  ProductIssueActions,
+  ProductIssueCommentBox,
+} from "@features/csm-cases/components/ProductIssueWriteBack";
 import { useProductWorkItem } from "@features/csm-cases/api/useProductWorkItem";
+import { useRetryProductIssueCommand } from "@features/csm-cases/api/useProductIssueActions";
 import {
   productHistorySourceLabel,
   productHistoryStatusLabel,
@@ -64,6 +75,30 @@ export function ProductIssueDetailDialog({
   const linkNote = item ? productLinkStateLabel(item.linkState) : null;
   const conversation = item?.conversation ?? [];
   const history = item?.statusHistory ?? [];
+  const { canWrite } = usePortalAccess();
+  const retry = useRetryProductIssueCommand(workItemId);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const ctx: ProductIssueActionContext = {
+    setActionError,
+    retrying: retry.isPending,
+    retry: (commandId) => {
+      setActionError(null);
+      retry.mutate({ commandId }, { onError: (e) => setActionError(e.message) });
+    },
+  };
+  const commands = item?.commands ?? [];
+
+  /** Delivery of a portal comment: the command's live status wins over the
+   * comment's own flag, which only refreshes with the next detail fetch. */
+  const deliveryOf = (
+    comment: ProductIssueComment,
+  ): { status: "PENDING" | "FAILED" | null; command?: ProductGitHubCommand } => {
+    const command = commands.find(
+      (c) => c.id === comment.commandId || (c.commentId && c.commentId === comment.id),
+    );
+    const status = command?.status ?? comment.delivery;
+    return status === "PENDING" || status === "FAILED" ? { status, command } : { status: null };
+  };
 
   return (
     <Dialog open onClose={onClose} maxWidth="md" fullWidth>
@@ -161,7 +196,9 @@ export function ProductIssueDetailDialog({
                   No comments yet.
                 </Typography>
               ) : (
-                conversation.map((comment) => (
+                conversation.map((comment) => {
+                  const delivery = deliveryOf(comment);
+                  return (
                   <Box
                     key={comment.id}
                     sx={{
@@ -189,9 +226,41 @@ export function ProductIssueDetailDialog({
                     >
                       {comment.body}
                     </Typography>
+                    {delivery.status === "PENDING" && (
+                      <Chip size="small" variant="outlined" label="Pending" sx={{ alignSelf: "flex-start" }} />
+                    )}
+                    {delivery.status === "FAILED" && (
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                        <Chip size="small" variant="outlined" color="error" label="Failed" />
+                        {delivery.command?.lastError && (
+                          <Typography variant="caption" color="error">
+                            {delivery.command.lastError}
+                          </Typography>
+                        )}
+                        {canWrite && delivery.command && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={retry.isPending}
+                            onClick={() => ctx.retry((delivery.command as ProductGitHubCommand).id)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            Retry
+                          </Button>
+                        )}
+                      </Box>
+                    )}
                   </Box>
-                ))
+                  );
+                })
               )}
+              {actionError && (
+                <Typography variant="body2" color="error" role="alert">
+                  {actionError}
+                </Typography>
+              )}
+              <ProductIssueCommentBox item={item} ctx={ctx} />
+              <ProductIssueActions item={item} ctx={ctx} />
             </Box>
 
             <Divider />

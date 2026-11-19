@@ -110,6 +110,36 @@ export interface ProductIssueComment {
   origin?: "PORTAL" | "GITHUB" | null;
   githubCommentId?: number | null;
   authorLogin?: string | null;
+  /** Portal-origin comments only: whether GitHub has it yet. null for a GitHub comment. */
+  delivery?: "PENDING" | "DELIVERED" | "FAILED" | null;
+  commandId?: string | null;
+}
+
+export type ProductCommandKind = "ADD_COMMENT" | "SET_BOARD_STATUS" | "SET_STATE";
+export type ProductCommandStatus = "PENDING" | "DELIVERED" | "FAILED" | "CANCELLED";
+
+/** A queued write to GitHub (`GitHubCommand` in entity-service). */
+export interface ProductGitHubCommand {
+  id: string;
+  kind: ProductCommandKind;
+  status: ProductCommandStatus;
+  attempts: number;
+  nextAttemptOn?: string | null;
+  lastError?: string | null;
+  requestedBy: string;
+  createdOn: string;
+  deliveredOn?: string | null;
+  commentId?: string | null;
+  targetStatus?: string | null;
+}
+
+export interface ProductAddCommentResponse {
+  comment: ProductIssueComment;
+  command: ProductGitHubCommand;
+}
+
+export interface ProductCommandResponse {
+  command: ProductGitHubCommand;
 }
 
 export interface ProductIssueStatusEvent {
@@ -132,4 +162,6 @@ export interface ProductIssueDetail extends ProductIssueSummary {
   conversation?: ProductIssueComment[];
   conversationTruncated?: boolean;
   statusHistory?: ProductIssueStatusEvent[];
+  /** Every PENDING or FAILED command plus the 10 newest others, newest first. */
+  commands?: ProductGitHubCommand[];
 }

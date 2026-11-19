@@ -15,6 +15,7 @@
 // under the License.
 
 import type {
+  ProductGitHubCommand,
   ProductIssueSla,
   ProductIssueSlaState,
   ProductIssueSummary,
@@ -137,4 +138,47 @@ export function productSlaConsumedText(sla: ProductIssueSla | null | undefined):
   if (!sla || sla.state === "NONE") return null;
   const base = `${formatSlaDuration(sla.consumedSeconds)} of ${formatSlaDuration(sla.budgetSeconds)}`;
   return sla.schedule === "CS 12x5 IST" ? `${base} (business hours, IST)` : base;
+}
+
+/** How long after GitHub accepted a move/close we still wait for its webhook to
+ * change the stored state before offering the action again. */
+export const AWAITING_GITHUB_GRACE_MS = 2 * 60 * 1000;
+
+/** A move/close delivered to GitHub whose confirmation has not come back yet. */
+export function isAwaitingGithub(
+  command: Pick<ProductGitHubCommand, "kind" | "status" | "deliveredOn">,
+  now: number,
+): boolean {
+  if (command.status !== "DELIVERED" || !command.deliveredOn) return false;
+  if (command.kind !== "SET_BOARD_STATUS" && command.kind !== "SET_STATE") return false;
+  const at = Date.parse(command.deliveredOn);
+  return !Number.isNaN(at) && now - at < AWAITING_GITHUB_GRACE_MS;
+}
+
+/** A request id that also works outside a secure context, where
+ * `crypto.randomUUID` is missing. */
+export function newRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      /* fall through */
+    }
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** True when the server (or gateway) answered; false for a network failure,
+ * where the same idempotency key must be kept so a true retry dedupes. */
+export function requestWasAnswered(error: unknown): boolean {
+  return typeof (error as { status?: unknown } | null)?.status === "number";
 }

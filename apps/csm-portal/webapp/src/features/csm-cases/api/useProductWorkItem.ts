@@ -17,7 +17,10 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { isAwaitingGithub } from "@features/csm-cases/utils/productWorkItems";
 import type { ProductIssueDetail } from "@features/csm-cases/types/productWorkItems";
+
+export const PENDING_POLL_MS = 5000;
 
 /** One product issue with conversation and status history, via
  * `GET /product-work-items/{id}`. `null` when the id is unknown (404). */
@@ -34,5 +37,10 @@ export function useProductWorkItem(
     // The conversation changes on GitHub; always refetch when the dialog opens.
     staleTime: 0,
     refetchOnMount: "always",
+    // While GitHub has not confirmed a queued write, poll until it does.
+    refetchInterval: (query) =>
+      query.state.data?.commands?.some((c) => c.status === "PENDING" || isAwaitingGithub(c, Date.now()))
+        ? PENDING_POLL_MS
+        : false,
   });
 }
