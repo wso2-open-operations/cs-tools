@@ -2239,7 +2239,7 @@ func TestPatchCase_PendingVerification(t *testing.T) {
 		if req.PreviousStatus != "WORK_IN_PROGRESS" {
 			t.Errorf("previousStatus = %q, want %q", req.PreviousStatus, "WORK_IN_PROGRESS")
 		}
-		wantNote := "Automatically added for verification — case closed by WSO2 Support."
+		wantNote := "Automatically added for verification — case closed by Choreo Labs Support."
 		if req.Note != wantNote {
 			t.Errorf("note = %q, want %q", req.Note, wantNote)
 		}
@@ -2288,7 +2288,7 @@ func TestPatchCase_PendingVerification(t *testing.T) {
 		if req.PreviousStatus != "SOLUTION_PROPOSED" {
 			t.Errorf("previousStatus = %q, want %q", req.PreviousStatus, "SOLUTION_PROPOSED")
 		}
-		wantNote := "Automatically added for verification — case closed by WSO2 Support."
+		wantNote := "Automatically added for verification — case closed by Choreo Labs Support."
 		if req.Note != wantNote {
 			t.Errorf("note = %q, want %q", req.Note, wantNote)
 		}
@@ -2325,7 +2325,7 @@ func TestPatchCase_PendingVerification(t *testing.T) {
 		if req.PreviousStatus != "" {
 			t.Errorf("previousStatus = %q, want empty (MANUAL forbids it)", req.PreviousStatus)
 		}
-		wantNote := "Automatically added for verification — case closed by WSO2 Support. Previous status: Open."
+		wantNote := "Automatically added for verification — case closed by Choreo Labs Support. Previous status: Open."
 		if req.Note != wantNote {
 			t.Errorf("note = %q, want %q", req.Note, wantNote)
 		}
