@@ -2851,16 +2851,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		if !engineeringClient.AuthEnabled() {
 			slog.Warn("git internals: ENGINEERING_ENTITY_TOKEN_URL, ENGINEERING_ENTITY_CLIENT_ID and ENGINEERING_ENTITY_CLIENT_SECRET are not set; calls to the engineering entity carry no Authorization header (fine for a local engineering entity, not for Choreo)")
 		}
-		productWorkItemHandler := handler.NewProductWorkItemHandler(service.NewProductWorkItemService(
+		// s_dip ("waiting on a product team") follows the case's linked product issues;
+		// it adds and removes the tag through the same case service.
+		productCaseTagRule := service.NewProductIssueCaseTagRule(
+			repository.NewProductIssueCaseTagRepository(repository.NewScoped(db)), activeCaseSvc)
+		productWorkItemHandler := handler.NewProductWorkItemHandler(service.WithProductCaseTagRule(service.NewProductWorkItemService(
 			engineeringClient,
 			repository.NewProductWorkItemRepository(repository.NewScoped(db)),
 			repository.NewProductRepoMappingRepository(db),
 			activeCaseSvc, // the service POST /cases/{id}/comments and /tags use (dual-write aware)
-			accessSvc))
+			accessSvc), productCaseTagRule))
 		mux.HandleFunc("POST /cases/{id}/product-work-items", internalOnly(accessSvc, productWorkItemHandler.CreateProductWorkItem))
 		// Reads, manual link and unlink of product issues (internal callers only).
-		productIssueHandler := handler.NewProductIssueHandler(service.NewProductIssueService(
-			engineeringClient, repository.NewProductIssueRepository(repository.NewScoped(db)), accessSvc))
+		productIssueHandler := handler.NewProductIssueHandler(service.WithProductIssueCaseTagRule(service.NewProductIssueService(
+			engineeringClient, repository.NewProductIssueRepository(repository.NewScoped(db)), accessSvc), productCaseTagRule))
 		mux.HandleFunc("GET /cases/{id}/product-work-items", internalOnly(accessSvc, productIssueHandler.ListCaseProductWorkItems))
 		mux.HandleFunc("POST /cases/{id}/product-work-items/links", internalOnly(accessSvc, productIssueHandler.LinkProductWorkItem))
 		mux.HandleFunc("DELETE /cases/{id}/product-work-items/{workItemId}/link", internalOnly(accessSvc, productIssueHandler.UnlinkProductWorkItem))

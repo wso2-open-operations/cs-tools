@@ -69,9 +69,10 @@ type productIssueEngineering interface {
 }
 
 type productIssueService struct {
-	eng    productIssueEngineering
-	repo   repository.ProductIssueRepository
-	access AccessService
+	eng     productIssueEngineering
+	repo    repository.ProductIssueRepository
+	access  AccessService
+	tagRule ProductIssueCaseTagRule // nil: s_dip is not maintained (WithProductIssueCaseTagRule)
 }
 
 // NewProductIssueService constructs a ProductIssueService.
@@ -159,6 +160,7 @@ func (s *productIssueService) Unlink(ctx context.Context, caseID, workItemID str
 	if !ok {
 		return &apierror.NotFoundError{Msg: "no active link between this product issue and the case"}
 	}
+	applyCaseTagRule(ctx, s.tagRule, caseID)
 	return nil
 }
 
@@ -216,6 +218,7 @@ func (s *productIssueService) Link(ctx context.Context, req domain.LinkProductIs
 		}
 	}
 	if registered {
+		applyCaseTagRule(ctx, s.tagRule, req.CaseID)
 		sum, err := s.repo.GetSummary(ctx, workItemID)
 		return sum, true, err
 	}
@@ -228,6 +231,7 @@ func (s *productIssueService) Link(ctx context.Context, req domain.LinkProductIs
 	if err != nil {
 		return zero, false, err
 	}
+	applyCaseTagRule(ctx, s.tagRule, req.CaseID)
 	sum, err := s.repo.GetSummary(ctx, workItemID)
 	return sum, created, err
 }

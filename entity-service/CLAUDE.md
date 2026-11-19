@@ -13394,3 +13394,16 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
     the repository's board (the unarchived board entry with the lowest number when a shared repository has several);
     the footer email is stored, never resolved to a user. A failed read of one issue is counted in `failed` /
     `failedIssueNumbers` and the issue is retried by the next run; a 429 stops the call with the cursor on that issue.
+- **`s_dip` is maintained by entity-service** (`service/product_issue_case_tags.go`,
+  `repository/product_issue_case_tag_repo.go`; wired only with git internals active). A case that has at least one
+  AFFECTS link from a product issue carries `s_dip` exactly while one of its actively linked product issues is open
+  (not RESOLVED, not CLOSED; CLOSED when the GitHub issue is closed; not on a board = open). The rule runs after a
+  create (once the request is COMPLETED), a link and an unlink, under a per-case advisory lock, and never fails the
+  request. **It only removes an `s_dip` it added itself**: the add is recorded in `case_tag_automation` (migration
+  0308, internal-only RLS 100030, excluded from the audit log) and every attachment must have `created_by` =
+  `product-issue-case-tags`; a tag a person added (before, or re-added after removing the system's) is never removed.
+  A case with no product-issue link is never touched; `patch` is never removed. Each automatic change writes a work
+  note. Tags go through `CaseService.AddCaseTagAs` / `RemoveCaseTagAs` (the latter is `RemoveCaseTag` with an explicit
+  actor, for callers with no user token). Known limits: the lock transaction holds a pooled connection while the tag
+  and note calls take another; a person removing and re-adding `s_dip` in the instant between the rule's read and its
+  delete can lose the re-add until the next run.

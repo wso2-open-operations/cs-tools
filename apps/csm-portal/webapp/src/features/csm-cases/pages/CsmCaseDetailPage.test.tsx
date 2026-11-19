@@ -309,8 +309,14 @@ vi.mock("@features/csm-cases/api/useSearchCaseTasks", () => ({
 vi.mock("@features/csm-cases/api/useSearchLinkedIncidents", () => ({
   useSearchLinkedIncidents: () => ({ data: undefined }),
 }));
+// Default: feature off (the route answered 404 -> data null, query succeeded).
+const { productWorkItemsResult } = vi.hoisted(() => ({
+  productWorkItemsResult: {
+    value: { data: null, isSuccess: true } as { data: unknown; isSuccess: boolean },
+  },
+}));
 vi.mock("@features/csm-cases/api/useCaseProductWorkItems", () => ({
-  useCaseProductWorkItems: () => ({ data: null }),
+  useCaseProductWorkItems: () => productWorkItemsResult.value,
 }));
 vi.mock("@features/csm-cases/api/useSearchDeployments", () => ({
   useSearchDeployments: () => ({
@@ -2875,6 +2881,7 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
     addTagMutateAsyncMock.mockResolvedValue(undefined);
     showErrorMock.mockClear();
     githubDialogProps = undefined;
+    productWorkItemsResult.value = { data: null, isSuccess: true };
   });
 
   /** Opens the dialog, submits `payload`, and returns what the page sent to the Git issue request. */
@@ -3021,6 +3028,51 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
     });
 
     expect(addedTags()).toEqual(["s_dip", "s_rg", "migration"]);
+  });
+
+  describe("when the backend serves the product-issue routes (git internals on)", () => {
+    const featureOn = (): void => {
+      productWorkItemsResult.value = { data: [], isSuccess: true };
+    };
+
+    it("adds no s_dip for a discussion issue", async () => {
+      featureOn();
+      const { options } = submitGithubIssue({ reason: "default", title: "t", description: "d" });
+      await act(async () => {
+        options.onSuccess(issueCreated);
+        await Promise.resolve();
+      });
+      expect(addedTags()).toEqual([]);
+    });
+
+    it("adds no patch for a patch issue, but keeps s_rg and migration", async () => {
+      featureOn();
+      const { options } = submitGithubIssue({
+        reason: "migration",
+        regression: true,
+        issueTypeLabel: "Type/Patch",
+        title: "t",
+        description: "d",
+      });
+      await act(async () => {
+        options.onSuccess(issueCreated);
+        await Promise.resolve();
+      });
+      expect(addedTags()).toEqual(["s_rg", "migration"]);
+    });
+
+    it.each([
+      ["still loading", { data: undefined, isSuccess: false }],
+      ["failed with another error", { data: undefined, isSuccess: false }],
+    ])("falls back to the browser adding s_dip while the query is %s", async (_n, result) => {
+      productWorkItemsResult.value = result;
+      const { options } = submitGithubIssue({ reason: "default", title: "t", description: "d" });
+      await act(async () => {
+        options.onSuccess(issueCreated);
+        await Promise.resolve();
+      });
+      expect(addedTags()).toEqual(["s_dip"]);
+    });
   });
 
   it("adds no tag when the Git issue could not be created", async () => {

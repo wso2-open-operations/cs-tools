@@ -43,12 +43,28 @@ export const GITHUB_ISSUE_REGRESSION_CASE_TAG = "s_rg";
 /** Added when the issue is a migration issue. */
 export const GITHUB_ISSUE_MIGRATION_CASE_TAG = "migration";
 
+/**
+ * How the label choice depends on who owns the tags.
+ *
+ * `serverManagesIssueTags` is true only when the backend serves the
+ * product-issue routes (git internals on): the server then writes `s_dip` /
+ * `patch` itself, so the browser must not. `s_rg` and `migration` stay
+ * browser-added either way.
+ */
+export interface GithubIssueCaseTagOptions {
+  serverManagesIssueTags: boolean;
+}
+
 /** The case tags to add after a Git issue is filed with this payload. */
 export function githubIssueCaseTags(
   payload: Pick<BeCreateCaseGithubIssuePayload, "regression" | "reason" | "issueTypeLabel">,
+  options: GithubIssueCaseTagOptions,
 ): string[] {
-  const isPatch = payload.issueTypeLabel?.trim() === GITHUB_PATCH_ISSUE_TYPE;
-  const tags = [isPatch ? GITHUB_PATCH_ISSUE_CASE_TAG : GITHUB_ISSUE_CASE_TAG];
+  const tags: string[] = [];
+  if (!options.serverManagesIssueTags) {
+    const isPatch = payload.issueTypeLabel?.trim() === GITHUB_PATCH_ISSUE_TYPE;
+    tags.push(isPatch ? GITHUB_PATCH_ISSUE_CASE_TAG : GITHUB_ISSUE_CASE_TAG);
+  }
   if (payload.regression) tags.push(GITHUB_ISSUE_REGRESSION_CASE_TAG);
   if (payload.reason === "migration") tags.push(GITHUB_ISSUE_MIGRATION_CASE_TAG);
   return tags;

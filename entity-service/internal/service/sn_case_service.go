@@ -5489,6 +5489,12 @@ func (s *snCaseService) AddCaseTag(ctx context.Context, caseID, label string) (d
 	}, nil
 }
 
+// RemoveCaseTagAs implements CaseService. A plain passthrough, for the reason
+// AddCaseTagAs is: this data source forwards whatever token is on ctx.
+func (s *snCaseService) RemoveCaseTagAs(ctx context.Context, caseID, tagID, _ string) error {
+	return s.RemoveCaseTag(ctx, caseID, tagID)
+}
+
 // RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
 func (s *snCaseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) error {
 	if err := validateUUIDs("id", []string{caseID}); err != nil {

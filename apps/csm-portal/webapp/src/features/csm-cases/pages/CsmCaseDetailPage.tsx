@@ -151,6 +151,7 @@ import { LinkedServiceRequestsWidget } from "@features/csm-cases/components/Link
 import { LinkedChangeRequestsWidget } from "@features/csm-cases/components/LinkedChangeRequestsWidget";
 import { LinkedIncidentWidget } from "@features/csm-cases/components/LinkedIncidentWidget";
 import { LinkedIncidentsListWidget } from "@features/csm-cases/components/LinkedIncidentsListWidget";
+import { useCaseProductWorkItems } from "@features/csm-cases/api/useCaseProductWorkItems";
 import { ProductIssuesWidget } from "@features/csm-cases/components/ProductIssuesWidget";
 import { useSearchLinkedIncidents } from "@features/csm-cases/api/useSearchLinkedIncidents";
 import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
@@ -844,6 +845,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [githubIssueResult, setGithubIssueResult] =
     useState<BeCreateCaseGithubIssueResponse | null>(null);
   const postGithubIssue = usePostCaseGithubIssue();
+  // Same query (same key) as the Product issues card, so react-query shares
+  // the request. The routes exist only when git internals is on, and then the
+  // server writes s_dip / patch itself. Only a succeeded query with a list
+  // (not the 404 -> null "feature off" answer) counts; loading or any other
+  // error falls back to the browser adding them, which is harmless if doubled.
+  const productWorkItems = useCaseProductWorkItems(data?.id);
+  const serverManagesIssueTags =
+    productWorkItems.isSuccess && productWorkItems.data != null;
   // One Idempotency-Key per open of the dialog, reused by every submit.
   const githubIssueKey = useOpenIdempotencyKey(githubIssueOpen);
   const postTimeCard = usePostTimeCard();
@@ -3646,7 +3655,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   // done reading the confirmation.
                   setActiveTab("activities");
                   setGithubIssueResult(res);
-                  const tagLabels = githubIssueCaseTags(payload);
+                  const tagLabels = githubIssueCaseTags(payload, { serverManagesIssueTags });
                   // Each mutateAsync promise is handled on its own. Per-call
                   // callbacks on mutate are replaced by the next call.
                   void Promise.all(

@@ -124,6 +124,7 @@ type productWorkItemService struct {
 	mappings productRepoMappingLister
 	cases    productWorkItemCases
 	access   AccessService
+	tagRule  ProductIssueCaseTagRule // nil: s_dip is not maintained (WithProductCaseTagRule)
 }
 
 // NewProductWorkItemService constructs a ProductWorkItemService.
@@ -371,6 +372,14 @@ func (s *productWorkItemService) CreateProductWorkItem(ctx context.Context, req 
 	out, err := s.repo.CompleteRequest(regCtx, params)
 	if err != nil {
 		return domain.CreateProductWorkItemResponse{}, false, notRecorded("complete", err)
+	}
+
+	// 4. s_dip: the new issue is open, so the rule adds it. After COMPLETED, so
+	//    a slow rule cannot use up regCtx and fail a request whose issue was
+	//    filed; best effort (logged, never returned). A request that dies before
+	//    this point is converged by its retry or by the next rule run.
+	if kind == domain.ProductWorkItemKindProductIssue {
+		applyCaseTagRule(ctx, s.tagRule, req.CaseID)
 	}
 	return s.storedResponse(out, !out.Replayed, cr.ID)
 }
