@@ -367,6 +367,12 @@ type Config struct {
 	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
 	// the audit log's own health check reports a problem every day.
 	AuditLogMonthsAhead int
+	// AuditLogRetentionMonths is how long audit rows are kept
+	// (CSM_AUDIT_LOG_RETENTION_MONTHS, default 18, from 12 to 120). Each daily
+	// maintenance run deletes the monthly partitions that ended at least this
+	// many months ago; the data is not archived. The floor stops a typo from
+	// deleting recent history.
+	AuditLogRetentionMonths int
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -1159,6 +1165,7 @@ func Load() *Config {
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
 	cfg.AuditLogEnabled = getBoolOrDefault("CSM_AUDIT_LOG_ENABLED", false)
 	cfg.AuditLogMonthsAhead = envIntInRange("CSM_AUDIT_LOG_MONTHS_AHEAD", 3, 2, 24)
+	cfg.AuditLogRetentionMonths = envIntInRange("CSM_AUDIT_LOG_RETENTION_MONTHS", 18, 12, 120)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
@@ -1818,13 +1825,21 @@ func envPositiveInt(key string, def int) int {
 	return n
 }
 
-// envIntInRange reads a positive integer like envPositiveInt, and also falls
-// back to def, with a warning that names the value, when it is outside lo..hi.
+// envIntInRange reads an integer that must lie in lo..hi. Unset is def, silently.
+// A value that is not a number, or is outside the range (zero and negative
+// included), falls back to def with a warning that names the value as it was
+// written. It validates the raw text itself: going through envPositiveInt first
+// would turn a bad value into def before the range check, and no warning would
+// ever be logged.
 func envIntInRange(key string, def, lo, hi int) int {
-	n := envPositiveInt(key, def)
-	if n < lo || n > hi {
-		slog.Warn("configuration value out of range, using the default",
-			"key", key, "value", n, "min", lo, "max", hi, "default", def)
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < lo || n > hi {
+		slog.Warn("configuration value invalid or out of range, using the default",
+			"key", key, "value", raw, "min", lo, "max", hi, "default", def)
 		return def
 	}
 	return n

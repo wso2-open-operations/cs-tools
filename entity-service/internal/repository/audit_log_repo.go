@@ -24,14 +24,23 @@ import (
 
 // AuditLogRepository runs the audit log's upkeep functions (migration 0295).
 // They are SECURITY DEFINER, so the application role needs EXECUTE on them and
-// nothing else on the audit tables. Retiring old partitions is deliberately not
-// here: an admin does that by hand.
+// nothing else on the audit tables.
 type AuditLogRepository interface {
+	// RetirePartitions deletes the monthly partitions that ended at least
+	// retentionMonths ago (detached, then dropped) and returns their names. The
+	// catch-all partition is never touched.
+	RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error)
+	// PurgeDefaultPartition deletes the rows in the catch-all partition that are
+	// older than retentionMonths, which whole-partition deletion cannot reach, and
+	// returns how many it deleted.
+	PurgeDefaultPartition(ctx context.Context, retentionMonths int) (int64, error)
 	// CreatePartitions creates the missing monthly partitions and returns how
 	// many it created.
 	CreatePartitions(ctx context.Context, monthsAhead int) (int, error)
-	// PartitionHealth returns one message per problem; none means healthy.
-	PartitionHealth(ctx context.Context) ([]string, error)
+	// PartitionHealth returns one message per problem; none means healthy. It
+	// reports a catch-all row and fewer than monthsAhead future monthly
+	// partitions.
+	PartitionHealth(ctx context.Context, monthsAhead int) ([]string, error)
 	// Reconcile compares the registry with the triggers that exist. With repair,
 	// missing or disabled triggers are put back.
 	Reconcile(ctx context.Context, repair bool) ([]domain.AuditTriggerProblem, error)
@@ -56,9 +65,41 @@ func (r *auditLogRepository) CreatePartitions(ctx context.Context, monthsAhead i
 	return created, nil
 }
 
+// RetirePartitions implements AuditLogRepository.
+func (r *auditLogRepository) RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT audit_retire_partitions($1, '2s')`, retentionMonths)
+	if err != nil {
+		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
+	}
+	defer rows.Close()
+
+	var retired []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("audit log: scan retired partition: %w", err)
+		}
+		retired = append(retired, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
+	}
+	return retired, nil
+}
+
+// PurgeDefaultPartition implements AuditLogRepository.
+func (r *auditLogRepository) PurgeDefaultPartition(ctx context.Context, retentionMonths int) (int64, error) {
+	var deleted int64
+	err := r.db.QueryRow(WithSystemIdentity(ctx), `SELECT audit_purge_default_partition($1, '2s')`, retentionMonths).Scan(&deleted)
+	if err != nil {
+		return 0, fmt.Errorf("audit log: purge default partition: %w", err)
+	}
+	return deleted, nil
+}
+
 // PartitionHealth implements AuditLogRepository.
-func (r *auditLogRepository) PartitionHealth(ctx context.Context) ([]string, error) {
-	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT problem FROM audit_partition_health()`)
+func (r *auditLogRepository) PartitionHealth(ctx context.Context, monthsAhead int) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT problem FROM audit_partition_health($1)`, monthsAhead)
 	if err != nil {
 		return nil, fmt.Errorf("audit log: partition health: %w", err)
 	}
