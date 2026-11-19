@@ -33414,7 +33414,7 @@ components:
         partitionsCreated:
           type: integer
           description: Monthly partitions this run created.
-        partitionsRetired:
+        partitionsDeleted:
           type: array
           description: Names of the monthly partitions this run deleted because they ended at least the retention period ago.
           items:

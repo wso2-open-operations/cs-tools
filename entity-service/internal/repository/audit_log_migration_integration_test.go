@@ -678,12 +678,12 @@ func retentionPartitions(t *testing.T, pool *pgxpool.Pool) (expired, recent stri
 	return expired, recent
 }
 
-func TestAuditMigration_RetirePartitionsDeletesTheExpiredAndKeepsTheRest(t *testing.T) {
+func TestAuditMigration_DeleteExpiredPartitionsDeletesTheExpiredAndKeepsTheRest(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	expired, recent := retentionPartitions(t, pool)
 
-	got, err := repo.RetirePartitions(context.Background(), 18)
+	got, err := repo.DeleteExpiredPartitions(context.Background(), 18)
 	if err != nil {
 		t.Fatalf("RetirePartitions: %v", err)
 	}
@@ -706,15 +706,15 @@ func TestAuditMigration_RetirePartitionsDeletesTheExpiredAndKeepsTheRest(t *test
 	}
 }
 
-func TestAuditMigration_RetirePartitionsIsRepeatable(t *testing.T) {
+func TestAuditMigration_DeleteExpiredPartitionsIsRepeatable(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	expired, _ := retentionPartitions(t, pool)
 
-	if _, err := repo.RetirePartitions(context.Background(), 18); err != nil {
+	if _, err := repo.DeleteExpiredPartitions(context.Background(), 18); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	again, err := repo.RetirePartitions(context.Background(), 18)
+	again, err := repo.DeleteExpiredPartitions(context.Background(), 18)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -724,13 +724,13 @@ func TestAuditMigration_RetirePartitionsIsRepeatable(t *testing.T) {
 }
 
 // A longer retention keeps what a shorter one deletes.
-func TestAuditMigration_RetirePartitionsFollowsTheRetentionPeriod(t *testing.T) {
+func TestAuditMigration_DeleteExpiredPartitionsFollowsTheRetentionPeriod(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	expired, _ := retentionPartitions(t, pool)
 
-	if got, err := repo.RetirePartitions(context.Background(), 24); err != nil {
-		t.Fatalf("RetirePartitions(24): %v", err)
+	if got, err := repo.DeleteExpiredPartitions(context.Background(), 24); err != nil {
+		t.Fatalf("DeleteExpiredPartitions(24): %v", err)
 	} else if strings.Contains(strings.Join(got, " "), expired) {
 		t.Errorf("a 24-month retention deleted %s, which ended 18 months ago", expired)
 	}
@@ -741,13 +741,13 @@ func TestAuditMigration_RetirePartitionsFollowsTheRetentionPeriod(t *testing.T) 
 
 // Zero or negative puts the cutoff in the future and would delete every
 // partition, so the function refuses it.
-func TestAuditMigration_RetirePartitionsRefusesAnUnsafeRetention(t *testing.T) {
+func TestAuditMigration_DeleteExpiredPartitionsRefusesAnUnsafeRetention(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	expired, recent := retentionPartitions(t, pool)
 
 	for _, months := range []int{0, -1} {
-		if _, err := repo.RetirePartitions(context.Background(), months); err == nil {
+		if _, err := repo.DeleteExpiredPartitions(context.Background(), months); err == nil {
 			t.Errorf("RetirePartitions(%d) succeeded, want an error", months)
 		}
 	}
@@ -789,7 +789,7 @@ func defaultRow(t *testing.T, pool *pgxpool.Pool, recordID string, monthsAgo int
 	    VALUES (now() - make_interval(months => $2), 'public', 'zz_default_purge', $1, 'f', 'UPDATE', 'tester', 'tester', 1)`, recordID, monthsAgo)
 }
 
-func TestAuditMigration_PurgeDefaultPartitionDeletesOnlyTheExpiredRows(t *testing.T) {
+func TestAuditMigration_DeleteExpiredDefaultRowsDeletesOnlyTheExpiredRows(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	resetDefaultPartition(t, pool)
@@ -797,7 +797,7 @@ func TestAuditMigration_PurgeDefaultPartitionDeletesOnlyTheExpiredRows(t *testin
 	defaultRow(t, pool, "old-2", 19)
 	defaultRow(t, pool, "young", 3)
 
-	deleted, err := repo.PurgeDefaultPartition(context.Background(), 18)
+	deleted, err := repo.DeleteExpiredDefaultRows(context.Background(), 18)
 	if err != nil {
 		t.Fatalf("PurgeDefaultPartition: %v", err)
 	}
@@ -814,14 +814,14 @@ func TestAuditMigration_PurgeDefaultPartitionDeletesOnlyTheExpiredRows(t *testin
 
 // The catch-all is replaced by a new table, so it must still be the attached
 // default partition, keep its TRUNCATE guard, and stay append-only.
-func TestAuditMigration_PurgeDefaultPartitionLeavesTheCatchAllIntact(t *testing.T) {
+func TestAuditMigration_DeleteExpiredDefaultRowsLeavesTheCatchAllIntact(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	resetDefaultPartition(t, pool)
 	defaultRow(t, pool, "old", 40)
 	defaultRow(t, pool, "young", 3)
 
-	if _, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil {
+	if _, err := repo.DeleteExpiredDefaultRows(context.Background(), 18); err != nil {
 		t.Fatalf("PurgeDefaultPartition: %v", err)
 	}
 
@@ -843,7 +843,7 @@ func TestAuditMigration_PurgeDefaultPartitionLeavesTheCatchAllIntact(t *testing.
 }
 
 // With nothing past retention it changes nothing and swaps nothing.
-func TestAuditMigration_PurgeDefaultPartitionWithNothingExpiredChangesNothing(t *testing.T) {
+func TestAuditMigration_DeleteExpiredDefaultRowsWithNothingExpiredChangesNothing(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	resetDefaultPartition(t, pool)
@@ -853,7 +853,7 @@ func TestAuditMigration_PurgeDefaultPartitionWithNothingExpiredChangesNothing(t 
 		t.Fatalf("oid: %v", err)
 	}
 
-	deleted, err := repo.PurgeDefaultPartition(context.Background(), 18)
+	deleted, err := repo.DeleteExpiredDefaultRows(context.Background(), 18)
 	if err != nil {
 		t.Fatalf("PurgeDefaultPartition: %v", err)
 	}
@@ -869,28 +869,28 @@ func TestAuditMigration_PurgeDefaultPartitionWithNothingExpiredChangesNothing(t 
 	}
 }
 
-func TestAuditMigration_PurgeDefaultPartitionIsRepeatable(t *testing.T) {
+func TestAuditMigration_DeleteExpiredDefaultRowsIsRepeatable(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	resetDefaultPartition(t, pool)
 	defaultRow(t, pool, "old", 40)
 
-	if deleted, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil || deleted != 1 {
+	if deleted, err := repo.DeleteExpiredDefaultRows(context.Background(), 18); err != nil || deleted != 1 {
 		t.Fatalf("first run = (%d, %v), want (1, nil)", deleted, err)
 	}
-	if deleted, err := repo.PurgeDefaultPartition(context.Background(), 18); err != nil || deleted != 0 {
+	if deleted, err := repo.DeleteExpiredDefaultRows(context.Background(), 18); err != nil || deleted != 0 {
 		t.Errorf("second run = (%d, %v), want (0, nil)", deleted, err)
 	}
 }
 
-func TestAuditMigration_PurgeDefaultPartitionRefusesAnUnsafeRetention(t *testing.T) {
+func TestAuditMigration_DeleteExpiredDefaultRowsRefusesAnUnsafeRetention(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
 	resetDefaultPartition(t, pool)
 	defaultRow(t, pool, "young", 3)
 
 	for _, months := range []int{0, -1} {
-		if _, err := repo.PurgeDefaultPartition(context.Background(), months); err == nil {
+		if _, err := repo.DeleteExpiredDefaultRows(context.Background(), months); err == nil {
 			t.Errorf("PurgeDefaultPartition(%d) succeeded, want an error", months)
 		}
 	}
@@ -997,8 +997,8 @@ func TestAuditMigration_DeletionGivesUpWhileAnotherRunHoldsTheLock(t *testing.T)
 	}
 
 	for _, call := range []string{
-		"SELECT audit_retire_partitions(18, '300ms')",
-		"SELECT audit_purge_default_partition(18, '300ms')",
+		"SELECT audit_delete_expired_partitions(18, '300ms')",
+		"SELECT audit_delete_expired_default_rows(18, '300ms')",
 	} {
 		t.Run(call, func(t *testing.T) {
 			// Far longer than the lock timeout: a call that ignores it only ends
