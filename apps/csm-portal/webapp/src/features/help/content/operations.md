@@ -343,7 +343,10 @@ From the detail page a CS engineer can:
   freely: **Solved (Work Around)**, **Solved (Permanently)**, **Not Solved
   (Not Reproducible)**, **False Alarm**, **Duplicate**, and **Not Actionable
   Alert** — use **Duplicate** when closing an incident as a duplicate of
-  another one.
+  another one. A New incident can only be moved to In Progress; Cancelled is
+  offered once work has started (In Progress or On Hold) and asks you to
+  confirm first, from the Change state menu, Edit and the list's bulk Edit
+  alike, since a cancelled incident can't be reopened.
 - **Escalate to specialist team**: reproduces the backing system's own
   "Escalate to Special Ops" action. Pick a reason (runbook unavailable, or
   the runbook didn't solve the incident) and, for a Choreo incident

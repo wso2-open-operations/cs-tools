@@ -26,7 +26,7 @@ import type { BeIncidentState } from "@api/backend/types";
 
 describe("getLegalNextIncidentStates", () => {
   it.each([
-    ["NEW", ["NEW", "IN_PROGRESS", "CANCELLED"]],
+    ["NEW", ["NEW", "IN_PROGRESS"]],
     ["IN_PROGRESS", ["IN_PROGRESS", "ON_HOLD", "RESOLVED", "CANCELLED"]],
     ["ON_HOLD", ["ON_HOLD", "IN_PROGRESS", "CANCELLED"]],
     ["RESOLVED", ["RESOLVED", "CLOSED", "IN_PROGRESS"]],

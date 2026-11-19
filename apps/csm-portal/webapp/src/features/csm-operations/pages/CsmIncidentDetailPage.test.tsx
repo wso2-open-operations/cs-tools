@@ -18,7 +18,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { JSX } from "react";
-import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type InitialEntry } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeIncidentDetail } from "@api/backend/types";
@@ -683,8 +683,8 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
   it("claims an unassigned incident for the signed-in engineer when starting work (-> IN_PROGRESS)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW", assignedTo: null } });
     renderPage();
-    openChangeState();
-    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    // NEW has one legal next state, so the bar is a single In Progress button.
+    fireEvent.click(screen.getByRole("button", { name: /in progress/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       {
         id: "inc-1",
@@ -706,12 +706,128 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
       },
     });
     renderPage();
-    openChangeState();
-    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
+    // NEW has one legal next state, so the bar is a single In Progress button.
+    fireEvent.click(screen.getByRole("button", { name: /in progress/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       { id: "inc-1", patch: { state: "IN_PROGRESS" } },
       expect.objectContaining({ onError: expect.any(Function) }),
     );
+  });
+
+  it("asks for confirmation before cancelling, and PATCHes only on confirm", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: /cancel this incident\?/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /go back/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel incident$/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "inc-1", patch: { state: "CANCELLED" } },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it("keeps the confirmation open and shows the backend's words when the cancel PATCH is refused", () => {
+    patchMutateMock.mockImplementationOnce(
+      (_vars: unknown, opts: { onError: (err: unknown) => void }) =>
+        opts.onError(new BackendApiError(400, "Invalid state transition.")),
+    );
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    renderPage();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel incident$/i }));
+
+    expect(showErrorMock).toHaveBeenCalledWith("Invalid state transition.", expect.any(BackendApiError));
+    // Still open, so a refused cancellation never looks finished.
+    expect(screen.getByRole("dialog", { name: /cancel this incident\?/i })).toBeInTheDocument();
+  });
+
+  it("asks for the same confirmation when the Edit dialog sets Cancelled, keeping its other edits", () => {
+    // Every field the Edit dialog requires before Save is enabled.
+    mockQueryResult({
+      data: {
+        ...BASE_INCIDENT,
+        state: "IN_PROGRESS",
+        category: "SERVICE_INTERRUPTION",
+        contactType: "PHONE",
+        impact: "MEDIUM",
+        urgency: "MEDIUM",
+      },
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    const edit = screen.getByRole("dialog");
+    fireEvent.change(within(edit).getByLabelText(/subject/i), { target: { value: "Duplicate of INC0000001" } });
+    fireEvent.mouseDown(within(edit).getByRole("combobox", { name: /state/i }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /cancelled/i }));
+    fireEvent.click(within(edit).getByRole("button", { name: /^save$/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+
+    // Go back returns to the Edit dialog with nothing sent.
+    fireEvent.click(screen.getByRole("button", { name: /go back/i }));
+    expect(screen.queryByRole("dialog", { name: /cancel this incident\?/i })).not.toBeInTheDocument();
+    expect(patchMutateMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(edit).getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel incident$/i }));
+    expect(patchMutateMock).toHaveBeenCalledTimes(1);
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      {
+        id: "inc-1",
+        patch: expect.objectContaining({ state: "CANCELLED", subject: "Duplicate of INC0000001" }),
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it("never sends a pending cancellation to another incident when the id changes under it", () => {
+    // With case tabs off the page stays mounted across an id change.
+    function GoToOtherIncident(): JSX.Element {
+      const navigate = useNavigate();
+      return <button type="button" data-testid="go-inc-2" onClick={() => navigate("/operations/incidents/inc-2")} />;
+    }
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/operations/incidents/inc-1"]}>
+          <Routes>
+            <Route
+              path="/operations/incidents/:id"
+              element={
+                <>
+                  <CsmIncidentDetailPage />
+                  <GoToOtherIncident />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    expect(screen.getByRole("dialog", { name: /cancel this incident\?/i })).toBeInTheDocument();
+
+    mockQueryResult({ data: { ...BASE_INCIDENT, id: "inc-2", number: "INC0099999", state: "IN_PROGRESS" } });
+    fireEvent.click(screen.getByTestId("go-inc-2"));
+
+    expect(screen.queryByRole("dialog", { name: /cancel this incident\?/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^cancel incident$/i })).not.toBeInTheDocument();
+    expect(patchMutateMock).not.toHaveBeenCalled();
+  });
+
+  it("offers no Cancelled on a NEW incident", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW" } });
+    renderPage();
+    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancelled/i })).not.toBeInTheDocument();
   });
 
   it("renders no state-transition buttons for a terminal incident (CLOSED)", () => {
@@ -848,9 +964,16 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     expect(label.parentElement, stage).toHaveTextContent(/^Channel\s*PHONE$/);
   };
 
-  const transition = (menuItem: RegExp): void => {
+  /** A state with exactly one legal next state (NEW) renders it as a single button. */
+  const clickSingleAction = (target: RegExp): void => {
+    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: target }));
+  };
+
+  /** A state with several legal next states renders them in the "Change state" menu. */
+  const chooseFromMenu = (target: RegExp): void => {
     fireEvent.click(screen.getByRole("button", { name: /change state/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
+    fireEvent.click(screen.getByRole("menuitem", { name: target }));
   };
 
   const submitResolutionDialog = (submit: RegExp): void => {
@@ -877,7 +1000,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("NEW") });
     const newStage = renderPage();
     expectChannelShown("NEW");
-    transition(/in progress/i);
+    clickSingleAction(/in progress/i);
     expect(lastPatch()).toEqual({ state: "IN_PROGRESS", assignedEngineerId: ME_ID });
     newStage.unmount();
 
@@ -885,7 +1008,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("IN_PROGRESS") });
     const inProgress = renderPage();
     expectChannelShown("IN_PROGRESS");
-    transition(/resolved/i);
+    chooseFromMenu(/resolved/i);
     submitResolutionDialog(/^move to resolved$/i);
     expect(lastPatch()).toEqual({ state: "RESOLVED", ...RESOLUTION });
     inProgress.unmount();
@@ -894,7 +1017,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("RESOLVED") });
     const resolved = renderPage();
     expectChannelShown("RESOLVED");
-    transition(/closed/i);
+    chooseFromMenu(/closed/i);
     submitResolutionDialog(/^move to closed$/i);
     expect(lastPatch()).toMatchObject({ state: "CLOSED" });
     resolved.unmount();

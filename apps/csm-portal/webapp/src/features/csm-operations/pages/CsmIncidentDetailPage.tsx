@@ -71,6 +71,7 @@ import IncidentRunbookSection from "@features/csm-operations/components/Incident
 import IncidentActionBar from "@features/csm-operations/components/IncidentActionBar";
 import IncidentCreateMenu from "@features/csm-operations/components/IncidentCreateMenu";
 import IncidentResolutionDialog from "@features/csm-operations/components/IncidentResolutionDialog";
+import CancelIncidentDialog from "@features/csm-operations/components/CancelIncidentDialog";
 import HandoffToSpecialistDialog from "@features/csm-operations/components/HandoffToSpecialistDialog";
 import { useSpecialistHandoffTeams } from "@features/csm-operations/api/useSpecialistHandoffTeams";
 import SpecialistHandoffBadge from "@features/csm-operations/components/SpecialistHandoffBadge";
@@ -168,6 +169,15 @@ function IncidentDescription({ text }: { text: string }): JSX.Element {
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
+}
+
+/**
+ * What to show when a write to this incident fails: the backend's own words for
+ * a 4xx (a caller-actionable refusal, e.g. an illegal transition or a bad id),
+ * else `fallback` (a 5xx message is not for people).
+ */
+function patchErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof BackendApiError && err.status < 500 && err.message ? err.message : fallback;
 }
 
 /**
@@ -321,6 +331,18 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const [resolutionTarget, setResolutionTarget] = useState<
     Extract<BeIncidentState, "RESOLVED" | "CLOSED"> | null
   >(null);
+  // Cancelled is terminal, so every path to it (the "Change state" menu and
+  // the Edit dialog's State select) opens a confirmation first. Holds the
+  // patch to send on confirm: `{ state: CANCELLED }` from the action bar, or
+  // the whole Edit dialog patch (its other edits go in the same request).
+  // Bound to the incident that raised it: with case tabs off this page stays
+  // mounted across an id change, and a request must never reach another one.
+  const [cancelRequest, setCancelRequest] = useState<{
+    incidentId: string;
+    patch: BeUpdateIncidentPayload;
+    fromEdit: boolean;
+  } | null>(null);
+  const activeCancelRequest = cancelRequest && cancelRequest.incidentId === id ? cancelRequest : null;
   const engineerName = useEngineerDisplayName();
   // Signed-in engineer's platform UUID (self-subscribe writes) and email
   // (matching a watch-list entry to "me"), same pair the case detail page
@@ -461,11 +483,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           onError: (err) => {
             // The watch-list 400s name the offending value (an unknown or
             // malformed user id), which is worth surfacing verbatim.
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the watch list. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the watch list. Please try again."), err);
           },
         },
       );
@@ -476,7 +494,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   /**
    * Dispatch a state transition from `IncidentActionBar`. `RESOLVED`/`CLOSED`
    * need the resolution dialog first (ServiceNow requires those fields — see
-   * the file-level doc comment); every other target PATCHes directly, same
+   * the file-level doc comment), `CANCELLED` needs a confirmation (it is
+   * terminal); every other target PATCHes directly, same
    * split of responsibility as `CaseActionBar` + `CsmCaseDetailPage.onAction`.
    */
   const onIncidentAction = useCallback(
@@ -484,6 +503,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       if (!id) return;
       if (target === "RESOLVED" || target === "CLOSED") {
         setResolutionTarget(target);
+        return;
+      }
+      if (target === "CANCELLED") {
+        setCancelRequest({ incidentId: id, patch: { state: "CANCELLED" }, fromEdit: false });
         return;
       }
       // Starting work on an unassigned incident implicitly claims it, same
@@ -502,11 +525,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         { id, patch: { state: target, ...claim } },
         {
           onError: (err) => {
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the incident's state. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the incident's state. Please try again."), err);
           },
         },
       );
@@ -522,17 +541,76 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         {
           onSuccess: () => setResolutionTarget(null),
           onError: (err) => {
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not update the incident's state. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not update the incident's state. Please try again."), err);
           },
         },
       );
     },
     [id, patchIncident, resolutionTarget, showError],
   );
+
+  /**
+   * Send the Edit dialog's patch; closes the dialog once it has saved. A
+   * dropped note keeps it open for a retry, unless the save made the incident
+   * terminal (Cancelled from Edit): there is nothing left to edit then.
+   */
+  const sendEdit = useCallback(
+    (patch: BeUpdateIncidentPayload, onSaved?: () => void) => {
+      if (!id) return;
+      patchIncident.mutate(
+        { id, patch },
+        {
+          onSuccess: (saved) => {
+            onSaved?.();
+            const droppedFields = checkSilentlyDroppedNotes(patch, saved.incident);
+            if (droppedFields.length > 0) {
+              showError(
+                `${droppedFields.join(" and ")} didn't save — the request was accepted but that ` +
+                  "change wasn't actually persisted. Any other fields in this edit were saved; please retry the note separately.",
+              );
+              if (!isIncidentTerminal(saved.incident.state)) return;
+            }
+            setEditOpen(false);
+          },
+          onError: (err) => {
+            // Real validation messages (e.g. an invalid UUID in one of the
+            // linking fields) are worth surfacing, same as CreateIncidentPage.
+            showError(patchErrorMessage(err, "Could not update the incident. Please try again."), err);
+          },
+        },
+      );
+    },
+    [id, patchIncident, showError],
+  );
+
+  /** An edit that moves the incident to Cancelled waits for the confirmation. */
+  const onEditSave = useCallback(
+    (patch: BeUpdateIncidentPayload) => {
+      if (patch.state === "CANCELLED") {
+        if (id) setCancelRequest({ incidentId: id, patch, fromEdit: true });
+        return;
+      }
+      sendEdit(patch);
+    },
+    [id, sendEdit],
+  );
+
+  const onCancelConfirm = useCallback(() => {
+    if (!id || !activeCancelRequest) return;
+    if (activeCancelRequest.fromEdit) {
+      sendEdit(activeCancelRequest.patch, () => setCancelRequest(null));
+      return;
+    }
+    patchIncident.mutate(
+      { id, patch: activeCancelRequest.patch },
+      {
+        onSuccess: () => setCancelRequest(null),
+        onError: (err) => {
+          showError(patchErrorMessage(err, "Could not update the incident's state. Please try again."), err);
+        },
+      },
+    );
+  }, [id, activeCancelRequest, patchIncident, sendEdit, showError]);
 
   /**
    * Submit the handoff. Deliberately not gated on the incident's service or
@@ -549,11 +627,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         {
           onSuccess: (response) => setHandoffResult(response.handoff),
           onError: (err) => {
-            const msg =
-              err instanceof BackendApiError && err.status < 500 && err.message
-                ? err.message
-                : "Could not hand off the incident. Please try again.";
-            showError(msg, err);
+            showError(patchErrorMessage(err, "Could not hand off the incident. Please try again."), err);
           },
         },
       );
@@ -1201,33 +1275,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           onClose={() => {
             if (!patchIncident.isPending) setEditOpen(false);
           }}
-          onSave={(patch) =>
-            patchIncident.mutate(
-              { id: incident.id as string, patch },
-              {
-                onSuccess: (data) => {
-                  const droppedFields = checkSilentlyDroppedNotes(patch, data.incident);
-                  if (droppedFields.length > 0) {
-                    showError(
-                      `${droppedFields.join(" and ")} didn't save — the request was accepted but that ` +
-                        "change wasn't actually persisted. Any other fields in this edit were saved; please retry the note separately.",
-                    );
-                    return;
-                  }
-                  setEditOpen(false);
-                },
-                onError: (err) => {
-                  // Real validation messages (e.g. an invalid UUID in one of the
-                  // linking fields) are worth surfacing, same as CreateIncidentPage.
-                  const msg =
-                    err instanceof BackendApiError && err.status < 500 && err.message
-                      ? err.message
-                      : "Could not update the incident. Please try again.";
-                  showError(msg, err);
-                },
-              },
-            )
-          }
+          onSave={onEditSave}
         />
       )}
 
@@ -1239,6 +1287,18 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             if (!patchIncident.isPending) setResolutionTarget(null);
           }}
           onSubmit={onResolutionSubmit}
+        />
+      )}
+
+      {/* Go back keeps the Edit dialog (and its edits) open underneath. */}
+      {activeCancelRequest && (
+        <CancelIncidentDialog
+          incidentNumber={data?.number}
+          isSubmitting={patchIncident.isPending}
+          onClose={() => {
+            if (!patchIncident.isPending) setCancelRequest(null);
+          }}
+          onConfirm={onCancelConfirm}
         />
       )}
 
