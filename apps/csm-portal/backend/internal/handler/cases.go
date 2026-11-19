@@ -1727,7 +1727,7 @@ var pendingVerificationPreviousStatus = map[string]string{
 func (h *CaseHandler) recordPendingVerificationEntry(ctx context.Context, user *middleware.UserInfo, caseID, previousState string) {
 	req := map[string]string{
 		"workItemId": caseID,
-		"note":       "Automatically added for verification — case closed by WSO2 Support.",
+		"note":       "Automatically added for verification — case closed by Choreo Labs Support.",
 	}
 	if status, ok := pendingVerificationPreviousStatus[previousState]; ok {
 		// previousStatus is its own structured field here, and the webapp
