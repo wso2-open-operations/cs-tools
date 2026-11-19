@@ -1856,6 +1856,78 @@ func TestScheduleIntegration_OnDutyAtExcludesSomebodyOnLeave(t *testing.T) {
 	}
 }
 
+// An overnight turn belongs to its rota day. Leave is granted against the day
+// a turn is rostered for, so leave that starts the next calendar day must not
+// take the holder off the turn's last hours after midnight -- a weekend
+// night's on-call earns the Monday off, and was dropped from the pager from
+// 00:00 to 06:00 that Monday. Leave on the rota day itself still covers the
+// whole turn, past midnight included.
+func TestScheduleIntegration_OnDutyAtAsksLeaveOfTheTurnsRotaDay(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	var code string
+	if err := pool.QueryRow(ctx, `SELECT code FROM team_schedule_shift
+		WHERE family::text = 'CRE' AND is_rotation AND is_active AND end_minute > 1440
+		  AND day_scope::text IN ('WEEKEND', 'ANY')
+		ORDER BY sort_order LIMIT 1`).Scan(&code); err != nil {
+		t.Fatalf("no CRE overnight weekend rotation: %v", err)
+	}
+	const sunday, monday = "2026-09-27", "2026-09-28"
+	if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: code, From: sunday, To: sunday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	var startsAt, endsAt time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT starts_at, ends_at FROM team_schedule_assignment WHERE user_id = $1::uuid AND rota_date = $2::date`,
+		schedMemberID, sunday).Scan(&startsAt, &endsAt); err != nil {
+		t.Fatalf("read the window back: %v", err)
+	}
+	beforeMidnight := startsAt.Add(30 * time.Minute)
+	afterMidnight := endsAt.Add(-30 * time.Minute) // Monday, in the shift's own zone
+	onDuty := func(at time.Time) bool {
+		t.Helper()
+		rows, err := repo.OnDutyAt(ctx, at, false)
+		if err != nil {
+			t.Fatalf("OnDutyAt: %v", err)
+		}
+		for _, a := range rows {
+			if a.Engineer.UserID == schedMemberID && a.RotaDate == sunday {
+				return true
+			}
+		}
+		return false
+	}
+	leave := absenceKind(t, pool, "LEAVE")
+	book := func(day string) {
+		t.Helper()
+		if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+			UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: leave, From: day, To: day,
+		}, schedLeadEmail); err != nil {
+			t.Fatalf("ApplyAbsence %s: %v", day, err)
+		}
+	}
+
+	if !onDuty(beforeMidnight) || !onDuty(afterMidnight) {
+		t.Fatal("the overnight turn's holder was not on duty for the whole turn")
+	}
+	book(monday)
+	if !onDuty(beforeMidnight) {
+		t.Fatal("leave the next day took the holder off the turn before midnight")
+	}
+	if !onDuty(afterMidnight) {
+		t.Fatal("leave the next day took the holder off the turn's hours after midnight")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM team_schedule_absence WHERE user_id = $1::uuid`, schedMemberID); err != nil {
+		t.Fatalf("clear the leave: %v", err)
+	}
+	book(sunday)
+	if onDuty(beforeMidnight) || onDuty(afterMidnight) {
+		t.Fatal("leave on the turn's own day did not take the holder off the whole turn")
+	}
+}
+
 // excludeAbsent asks the on-duty rule of a rota day: a reminder email must not
 // tell somebody on leave that they are working, and the rota views, which
 // leave it off, still see the assignment under the leave.
