@@ -225,7 +225,7 @@ func caseAlertPeople() *stubPagingRepo {
 		"cshead@wso2.com":   {Memberships: []repository.PagingCallerMembership{{TeamKey: "cre-leadership", Role: "cs_head"}}},
 		"portal@wso2.com":   {GlobalRoles: []string{"admin"}},
 		"crehead@wso2.com":  {Memberships: []repository.PagingCallerMembership{{TeamKey: "cre-leadership", Role: "cre_head"}}},
-		"lead@wso2.com":     {Memberships: []repository.PagingCallerMembership{{TeamKey: "apollo", Role: "lead"}}},
+		"lead@example.com":     {Memberships: []repository.PagingCallerMembership{{TeamKey: "apollo", Role: "lead"}}},
 		"eng@wso2.com":      {Memberships: []repository.PagingCallerMembership{{TeamKey: "apollo", Role: "engineer"}}},
 	}}
 }
@@ -274,7 +274,7 @@ func TestCaseAlertSettingsRights(t *testing.T) {
 		{"SME rota admin: SME's only", asPerson("sme.rota@wso2.com"), true, []string{"SME"}, []string{}, 0},
 		{"CRE head: CRE's, in full", asPerson("crehead@wso2.com"), true, []string{"CRE"}, []string{"CRE"}, 1},
 		{"CS head: all three families", asPerson("cshead@wso2.com"), true, []string{"CRE", "SRE", "SME"}, []string{"CRE", "SRE"}, 3},
-		{"team lead sees nothing", asPerson("lead@wso2.com"), false, []string{}, []string{}, 0},
+		{"team lead sees nothing", asPerson("lead@example.com"), false, []string{}, []string{}, 0},
 		{"engineer sees nothing", asPerson("eng@wso2.com"), false, []string{}, []string{}, 0},
 		{"admin role matched exactly", asPerson("eng@wso2.com", "CS_ADMIN"), false, []string{}, []string{}, 0},
 	}
@@ -324,7 +324,7 @@ func TestCaseAlertSaveRoom(t *testing.T) {
 		{"SRE rota admin, CRE room", asPerson("sre.rota@wso2.com"), domain.SaveCaseAlertRoomRequest{Ladder: "CRE", Label: "CRE"}, "forbidden"},
 		{"CRE head changes CRE", asPerson("crehead@wso2.com"), domain.SaveCaseAlertRoomRequest{Ladder: "CRE", Label: "CRE"}, ""},
 		{"CRE head changes nothing of SRE", asPerson("crehead@wso2.com"), domain.SaveCaseAlertRoomRequest{Ladder: "SRE", Label: "SRE"}, "forbidden"},
-		{"team lead changes nothing", asPerson("lead@wso2.com"), domain.SaveCaseAlertRoomRequest{Ladder: "SRE", Label: "SRE"}, "forbidden"},
+		{"team lead changes nothing", asPerson("lead@example.com"), domain.SaveCaseAlertRoomRequest{Ladder: "SRE", Label: "SRE"}, "forbidden"},
 		{"a CRE team room", asPerson("someone@wso2.com", "cs_admin"), domain.SaveCaseAlertRoomRequest{Ladder: "CRE", TeamKey: "vega", Label: "Vega"}, "invalid"},
 		{"a CRE team in an SRE room", asPerson("someone@wso2.com", "cs_admin"), domain.SaveCaseAlertRoomRequest{Ladder: "SRE", TeamKey: "vega", Label: "Vega"}, "invalid"},
 		{"an unknown team", asPerson("someone@wso2.com", "cs_admin"), domain.SaveCaseAlertRoomRequest{Ladder: "SRE", TeamKey: "nope", Label: "x"}, "invalid"},

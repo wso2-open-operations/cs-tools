@@ -46,7 +46,7 @@ func (f fakeTeamLeads) CaseTeamLeads(context.Context, string) ([]domain.Escalati
 }
 
 func TestSearchCaseEscalations_TeamLeads(t *testing.T) {
-	lead := "lead@wso2.com"
+	lead := "lead@example.com"
 	svc := WithCaseTeamLeads(NewCaseEscalationService(oneEscalationHistory{}, nil),
 		fakeTeamLeads{leads: []domain.EscalationNotifiedUser{{ID: "u-lead", Email: &lead}}})
 

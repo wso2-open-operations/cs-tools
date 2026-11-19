@@ -23,10 +23,12 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,6 +66,11 @@ func TestProductRepoMapping_BoardAndInternalFlagsRoundTrip(t *testing.T) {
 		INSERT INTO product_repo_mapping (created_by, updated_by, product_name, owner, repository, github_label)
 		VALUES ('test', 'test', $1, 'acme-org', 'prm-public', 'prm-plain')`, withoutBoard); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+
+	// Lead emails (migration 0310) are set by SQL and must never reach this route's answer.
+	if _, err := pool.Exec(ctx, `UPDATE product_repo_mapping SET lead_emails = ARRAY['lead@example.com'] WHERE product_name = $1`, withBoard); err != nil {
+		t.Fatalf("set lead_emails: %v", err)
 	}
 
 	repo := repository.NewProductRepoMappingRepository(pool)
@@ -108,6 +115,11 @@ func TestProductRepoMapping_BoardAndInternalFlagsRoundTrip(t *testing.T) {
 	b := get(withBoard + " 1.2.3")
 	if b["boardProjectNumber"] != float64(42) || b["isInternal"] != true || b["githubLabel"] != "prm-board" {
 		t.Errorf("handler body = %v, want boardProjectNumber 42, isInternal true", b)
+	}
+	for k, v := range b {
+		if strings.Contains(strings.ToLower(k), "lead") || strings.Contains(strings.ToLower(fmt.Sprint(v)), "lead@example.com") {
+			t.Errorf("handler body %v exposes lead emails", b)
+		}
 	}
 	p := get(withoutBoard)
 	if _, has := p["boardProjectNumber"]; has {

@@ -2883,6 +2883,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Write-back: queued for GitHub (202); the worker started in cmd/api delivers.
 		productIssueWriteHandler := handler.NewProductIssueWriteHandler(service.NewProductIssueWriteService(
 			repository.NewGitHubCommandRepository(repository.NewScoped(db)), accessSvc))
+		// Dashboard and reports for leads (phase 4): internal callers only, read-only.
+		// "/product-work-items/dashboard" is a literal, so it wins over "/product-work-items/{id}".
+		productDashboardHandler := handler.NewProductIssueDashboardHandler(service.NewProductIssueDashboardService(
+			repository.NewProductIssueDashboardRepository(repository.NewScoped(db)), nil))
+		mux.HandleFunc("GET /product-work-items/dashboard", internalOnly(accessSvc, productDashboardHandler.GetDashboard))
+		mux.HandleFunc("GET /reports/product-issues", internalOnly(accessSvc, productDashboardHandler.GetReport))
+		mux.HandleFunc("GET /reports/product-issues/recipients", internalOnly(accessSvc, productDashboardHandler.GetRecipients))
 		mux.HandleFunc("POST /product-work-items/{id}/comments", internalOnly(accessSvc, productIssueWriteHandler.AddComment))
 		mux.HandleFunc("POST /product-work-items/{id}/board-status", internalOnly(accessSvc, productIssueWriteHandler.SetBoardStatus))
 		mux.HandleFunc("POST /product-work-items/{id}/close", internalOnly(accessSvc, productIssueWriteHandler.CloseProductWorkItem))

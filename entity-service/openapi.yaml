@@ -9856,6 +9856,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /product-work-items/dashboard:
+    get:
+      summary: >-
+        Product issue dashboard for leads: backlog, SLA compliance, waiting on CS, blocked cases (internal
+        callers only; present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        Computed in Go from every product issue that has a GitHub link which is not DELETED, in the
+        Asia/Kolkata calendar. `open`, the waiting-on counts, `openBySla`, the ageing and the blocked cases
+        are as of `generatedOn`; `openedInPeriod`, `resolvedInPeriod`, `slaMet`, `slaBreached` and the trend
+        use the period [`from`, `to`). An issue's product is the `product_repo_mapping` row of its
+        repository (a shared repository prefers the row of the same board, then of a label the issue has,
+        then an active row, then the smallest name); none is `Unmapped` (`productName` null). Open means
+        not RESOLVED and not CLOSED (a GitHub reopen newer than the board's last move reopens a card still
+        on RESOLVED). A blocked case is a case that is not closed with an active link from an open issue
+        that waits on the product team. SLA compliance counts clocks that finished in the period:
+        met / (met + breached), one decimal, null when there are none. No caching.
+      operationId: getProductIssueDashboard
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: {type: string, format: date}
+          description: First day of the period, YYYY-MM-DD (Asia/Kolkata). Default the Monday 12 weeks before this week's Monday.
+        - name: to
+          in: query
+          required: false
+          schema: {type: string, format: date}
+          description: Day after the last day of the period (exclusive), YYYY-MM-DD. Default tomorrow. Must be after `from`; at most 400 days after it.
+        - name: bucket
+          in: query
+          required: false
+          schema: {type: string, enum: [week, month], default: week}
+          description: Trend bucket; weeks start on Monday.
+        - name: products
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: {type: string}
+          description: >-
+            Product names, comma-separated, matched case-insensitively. The literal `Unmapped` selects issues
+            with no product. Empty or omitted selects all.
+      responses:
+        "200":
+          description: The dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueDashboard'
+        "400":
+          description: A date is not YYYY-MM-DD, `to` is not after `from`, the period is over 400 days, or `bucket` is unknown.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /product-work-items/reconcile:
     post:
       summary: >-
@@ -14850,6 +14926,104 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not an internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/product-issues:
+    get:
+      summary: >-
+        Product issue report data for one week or month (internal callers only; present only when
+        GIT_INTERNALS_ENABLED=true).
+      description: >-
+        The same figures and response as `GET /product-work-items/dashboard` over one period: the week
+        (Monday to Monday) or calendar month containing `date` in Asia/Kolkata, or the previous full week
+        or month without it. `bucket` is `week` in the answer; a monthly report's weeks are clipped to the
+        month. Read by the scheduled tasks that email the weekly and monthly reports.
+      operationId: getProductIssueReport
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: {type: string, enum: [week, month]}
+        - name: date
+          in: query
+          required: false
+          schema: {type: string, format: date}
+          description: Any date inside the period reported, YYYY-MM-DD. Defaults to the previous full period.
+        - name: products
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: {type: string}
+          description: >-
+            Product names, comma-separated, matched case-insensitively. The literal `Unmapped` selects issues
+            with no product. Empty or omitted selects all.
+      responses:
+        "200":
+          description: The report data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueDashboard'
+        "400":
+          description: `period` is missing or unknown, or `date` is not YYYY-MM-DD.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/product-issues/recipients:
+    get:
+      summary: >-
+        Lead emails that receive the product issue report, with their products (internal callers only;
+        present only when GIT_INTERNALS_ENABLED=true).
+      description: >-
+        Every distinct lead email (lower-cased) of the active `product_repo_mapping` rows, with the product
+        names that list it, sorted by email then name. The column is set by SQL at deployment and is never
+        returned by `GET /products/github-repo`.
+      operationId: getProductIssueReportRecipients
+      responses:
+        "200":
+          description: The leads; empty when none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductIssueRecipients'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
           content:
             application/json:
               schema:
@@ -33987,6 +34161,212 @@ components:
       properties:
         id: {type: string, format: uuid}
         number: {type: string}
+
+    ProductIssueDashboardSLACounts:
+      type: object
+      description: Open issues by SLA state. `none` also holds an open issue whose newest clock is already finished.
+      required: [ok, atRisk, breached, paused, none]
+      properties:
+        ok: {type: integer}
+        atRisk: {type: integer}
+        breached: {type: integer}
+        paused: {type: integer}
+        none: {type: integer}
+
+    ProductIssueDashboardTotals:
+      type: object
+      required: [open, openedInPeriod, resolvedInPeriod, waitingOnCs, waitingOnProductTeam, unmatchedOpen, nonStandardColumnOpen, openBySla, slaMet, slaBreached, compliancePercentage]
+      properties:
+        open: {type: integer}
+        openedInPeriod: {type: integer}
+        resolvedInPeriod: {type: integer}
+        waitingOnCs: {type: integer}
+        waitingOnProductTeam: {type: integer}
+        unmatchedOpen: {type: integer, description: Open issues with no active link to a case.}
+        nonStandardColumnOpen: {type: integer, description: Open issues in a board column the portal does not map.}
+        openBySla:
+          $ref: '#/components/schemas/ProductIssueDashboardSLACounts'
+        slaMet: {type: integer, description: Clocks that finished in the period within budget.}
+        slaBreached: {type: integer, description: Clocks that finished in the period past budget.}
+        compliancePercentage: {type: number, nullable: true, description: "slaMet / (slaMet + slaBreached) x 100, one decimal; null when there are none."}
+
+    ProductIssueDashboardTrendPoint:
+      type: object
+      required: [start, end, opened, resolved]
+      properties:
+        start: {type: string, format: date-time}
+        end: {type: string, format: date-time}
+        opened: {type: integer}
+        resolved: {type: integer}
+
+    ProductIssueDashboardProduct:
+      type: object
+      description: The figures of one product, or of one repository that has no product (`productName` null).
+      required: [productName, owner, repository, open, openedInPeriod, resolvedInPeriod, waitingOnCs, waitingOnProductTeam, openBySla, slaMet, slaBreached, compliancePercentage]
+      properties:
+        productName: {type: string, nullable: true}
+        owner: {type: string}
+        repository: {type: string}
+        open: {type: integer}
+        openedInPeriod: {type: integer}
+        resolvedInPeriod: {type: integer}
+        waitingOnCs: {type: integer}
+        waitingOnProductTeam: {type: integer}
+        openBySla:
+          $ref: '#/components/schemas/ProductIssueDashboardSLACounts'
+        slaMet: {type: integer}
+        slaBreached: {type: integer}
+        compliancePercentage: {type: number, nullable: true}
+
+    ProductIssueDashboardItem:
+      type: object
+      required: [id, number, title, productName, owner, repository, issueNumber, htmlUrl, boardStatus, priority, openedOn, wocSince, case, openedByEmail, sla]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        title: {type: string}
+        productName: {type: string, nullable: true}
+        owner: {type: string}
+        repository: {type: string}
+        issueNumber: {type: integer}
+        htmlUrl: {type: string, nullable: true}
+        boardStatus:
+          type: string
+          nullable: true
+          enum: [OPEN, IN_PROGRESS, WAITING_ON_PRODUCT_TEAM, WAITING_ON_CS, REOPENED, RESOLVED, CLOSED, OTHER]
+        priority: {type: string, nullable: true}
+        openedOn: {type: string, format: date-time}
+        wocSince: {type: string, format: date-time, nullable: true, description: When the open issue began waiting on CS; null otherwise.}
+        case:
+          $ref: '#/components/schemas/ProductIssueCaseRef'
+        openedByEmail: {type: string, nullable: true}
+        sla:
+          $ref: '#/components/schemas/ProductIssueSla'
+
+    ProductIssueDashboardAgeBucket:
+      type: object
+      required: [label, count]
+      properties:
+        label: {type: string, enum: ["<1d", "1-3d", "3-7d", "7-14d", ">14d"]}
+        count: {type: integer}
+
+    ProductIssueDashboardAgeing:
+      type: object
+      description: Open issues waiting on CS, by calendar time since they began waiting, as of `generatedOn`.
+      required: [buckets, oldest]
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardAgeBucket'
+        oldest:
+          type: array
+          description: Up to 20, longest waiting first.
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardItem'
+
+    ProductIssueDashboardBlockingIssue:
+      type: object
+      required: [id, number, title, productName, boardStatus, openedOn]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        title: {type: string}
+        productName: {type: string, nullable: true}
+        boardStatus:
+          type: string
+          nullable: true
+          enum: [OPEN, IN_PROGRESS, WAITING_ON_PRODUCT_TEAM, WAITING_ON_CS, REOPENED, RESOLVED, CLOSED, OTHER]
+        openedOn: {type: string, format: date-time}
+
+    ProductIssueDashboardBlockedCase:
+      type: object
+      required: [caseId, caseNumber, subject, issues, oldestOpenedOn]
+      properties:
+        caseId: {type: string, format: uuid}
+        caseNumber: {type: string}
+        subject: {type: string}
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardBlockingIssue'
+        oldestOpenedOn: {type: string, format: date-time}
+
+    ProductIssueDashboardBlockedProduct:
+      type: object
+      required: [productName, owner, repository, cases]
+      properties:
+        productName: {type: string, nullable: true}
+        owner: {type: string}
+        repository: {type: string}
+        cases: {type: integer}
+
+    ProductIssueDashboardBlocked:
+      type: object
+      required: [total, byProduct, cases]
+      properties:
+        total: {type: integer, description: Distinct blocked cases (of the filtered products).}
+        byProduct:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardBlockedProduct'
+        cases:
+          type: array
+          description: Up to 50, the one blocked longest first.
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardBlockedCase'
+
+    ProductIssueDashboard:
+      type: object
+      required: [periodStart, periodEnd, generatedOn, bucket, products, totals, trend, byProduct, wocAgeing, blockedCases, breachedOpen]
+      properties:
+        periodStart: {type: string, format: date-time, description: Start of the period (Asia/Kolkata, inclusive).}
+        periodEnd: {type: string, format: date-time, description: End of the period (exclusive).}
+        generatedOn: {type: string, format: date-time}
+        bucket: {type: string, enum: [week, month]}
+        products:
+          type: array
+          description: The product filter as given; empty means all products.
+          items: {type: string}
+        totals:
+          $ref: '#/components/schemas/ProductIssueDashboardTotals'
+        trend:
+          type: array
+          description: One point per bucket of the period (the first and last clipped to it).
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardTrendPoint'
+        byProduct:
+          type: array
+          description: Sorted by product name (unmapped last), owner, repository.
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardProduct'
+        wocAgeing:
+          $ref: '#/components/schemas/ProductIssueDashboardAgeing'
+        blockedCases:
+          $ref: '#/components/schemas/ProductIssueDashboardBlocked'
+        breachedOpen:
+          type: array
+          description: Up to 20 open issues whose SLA is breached, highest SLA percentage first.
+          items:
+            $ref: '#/components/schemas/ProductIssueDashboardItem'
+
+    ProductIssueRecipient:
+      type: object
+      required: [email, productNames]
+      properties:
+        email: {type: string}
+        productNames:
+          type: array
+          items: {type: string}
+
+    ProductIssueRecipients:
+      type: object
+      required: [leads]
+      properties:
+        leads:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductIssueRecipient'
 
     ProductIssueSummary:
       type: object

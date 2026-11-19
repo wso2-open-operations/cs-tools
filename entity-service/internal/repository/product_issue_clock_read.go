@@ -43,6 +43,23 @@ func attachProductIssueClocks(ctx context.Context, db piDB, items []domain.Produ
 	for i := range items {
 		ids[i] = items[i].ID
 	}
+	byID, err := loadProductIssueClocks(ctx, db, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		items[i].Clock = byID[items[i].ID]
+	}
+	return nil
+}
+
+// loadProductIssueClocks returns the newest RESOLUTION clock row of each work item in
+// ids (by work item id); an item with no clock has no entry.
+func loadProductIssueClocks(ctx context.Context, db piDB, ids []string) (map[string]*domain.ProductIssueClock, error) {
+	byID := map[string]*domain.ProductIssueClock{}
+	if len(ids) == 0 {
+		return byID, nil
+	}
 	rows, err := db.Query(ctx, `
 		SELECT DISTINCT ON (s.work_item_id) s.work_item_id::TEXT, sp.name, COALESCE(s.schedule, sp.schedule, ''), s.stage::TEXT,
 		       s.start_on, s.paused_on, s.end_on,
@@ -54,17 +71,16 @@ func attachProductIssueClocks(ctx context.Context, db piDB, items []domain.Produ
 		 WHERE s.work_item_id = ANY($1::text[]::uuid[]) AND `+productIssueClockWhere+`
 		 ORDER BY s.work_item_id, `+productIssueClockRank, ids)
 	if err != nil {
-		return fmt.Errorf("load product issue clocks: %w", err)
+		return nil, fmt.Errorf("load product issue clocks: %w", err)
 	}
 	defer rows.Close()
-	byID := map[string]*domain.ProductIssueClock{}
 	for rows.Next() {
 		var id string
 		var c domain.ProductIssueClock
 		var stage *string
 		if err := rows.Scan(&id, &c.PolicyName, &c.Schedule, &stage, &c.StartOn, &c.PausedOn, &c.EndOn,
 			&c.BudgetSeconds, &c.BusinessPauseSeconds, &c.HasBreached, &c.StoredPercentage); err != nil {
-			return fmt.Errorf("scan product issue clock: %w", err)
+			return nil, fmt.Errorf("scan product issue clock: %w", err)
 		}
 		if stage != nil {
 			c.Stage = *stage
@@ -72,10 +88,7 @@ func attachProductIssueClocks(ctx context.Context, db piDB, items []domain.Produ
 		byID[id] = &c
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
-	for i := range items {
-		items[i].Clock = byID[items[i].ID]
-	}
-	return nil
+	return byID, nil
 }

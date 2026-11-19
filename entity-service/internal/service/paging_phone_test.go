@@ -220,7 +220,7 @@ func phoneFixture() (*stubPagingRepo, *stubContacts) {
 	repo := pagingFixture()
 	repo.callers["sreadmin@wso2.com"] = repository.PagingCaller{GlobalRoles: []string{"sre_rota_admin"}}
 	repo.callers["smeadmin@wso2.com"] = repository.PagingCaller{GlobalRoles: []string{"sme_rota_admin"}}
-	repo.callers["apollolead@wso2.com"] = repository.PagingCaller{Memberships: []repository.PagingCallerMembership{{TeamKey: "apollo", Role: "lead"}}}
+	repo.callers["apollolead@example.com"] = repository.PagingCaller{Memberships: []repository.PagingCallerMembership{{TeamKey: "apollo", Role: "lead"}}}
 	return repo, newStubContacts()
 }
 
@@ -236,9 +236,9 @@ func TestSetPagingPhone_PermissionTable(t *testing.T) {
 		caller, target string
 		allow          bool
 	}{
-		{"vegalead@wso2.com", uidVega, true},
-		{"vegalead@wso2.com", uidApollo, false},
-		{"apollolead@wso2.com", uidApollo, true},
+		{"vegalead@example.com", uidVega, true},
+		{"vegalead@example.com", uidApollo, false},
+		{"apollolead@example.com", uidApollo, true},
 		{"amhead@wso2.com", uidAmericas, true}, // americas_team_lead leads the team
 		{"amhead@wso2.com", uidVega, false},
 		{"rota@wso2.com", uidVega, true}, // cre_rota_admin, CRE team
@@ -308,10 +308,10 @@ func TestDeletePagingPhone(t *testing.T) {
 	if err := svc.DeletePagingPhone(pagingCaller("eng@wso2.com"), uidVega); !errors.As(err, &forbidden) || len(contacts.rows) != 1 {
 		t.Fatalf("engineer delete: %v", err)
 	}
-	if err := svc.DeletePagingPhone(pagingCaller("vegalead@wso2.com"), uidVega); err != nil || len(contacts.rows) != 0 || contacts.lastActor != "vegalead@wso2.com" {
+	if err := svc.DeletePagingPhone(pagingCaller("vegalead@example.com"), uidVega); err != nil || len(contacts.rows) != 0 || contacts.lastActor != "vegalead@example.com" {
 		t.Fatalf("lead delete: %v, rows %d, actor %q", err, len(contacts.rows), contacts.lastActor)
 	}
-	if err := svc.DeletePagingPhone(pagingCaller("vegalead@wso2.com"), uidVega); err != nil {
+	if err := svc.DeletePagingPhone(pagingCaller("vegalead@example.com"), uidVega); err != nil {
 		t.Errorf("deleting nothing is not an error: %v", err)
 	}
 }
@@ -365,7 +365,7 @@ func TestRequestTestCall(t *testing.T) {
 	}
 	_, _ = contacts.Upsert(context.Background(), "x", uidVega, "+94771234123")
 	var forbidden *apierror.ForbiddenError
-	for _, caller := range []string{"eng@wso2.com", "vegalead@wso2.com", "crehead@wso2.com"} {
+	for _, caller := range []string{"eng@wso2.com", "vegalead@example.com", "crehead@wso2.com"} {
 		if _, err := svc.RequestTestCall(pagingCaller(caller), uidVega); !errors.As(err, &forbidden) {
 			t.Fatalf("%s: %v, want 403", caller, err)
 		}
@@ -433,7 +433,7 @@ func TestRequestTestCall_PublishProblems(t *testing.T) {
 
 func TestListPagingContacts(t *testing.T) {
 	repo, contacts := phoneFixture()
-	_, _ = contacts.Upsert(context.Background(), "lead@wso2.com", uidVega, "+94771234123")
+	_, _ = contacts.Upsert(context.Background(), "lead@example.com", uidVega, "+94771234123")
 	svc := phoneService(repo, contacts, nil, time.Now())
 
 	// A service credential may read: it is what pages.
@@ -441,7 +441,7 @@ func TestListPagingContacts(t *testing.T) {
 	if err != nil || len(resp.Contacts) != 1 {
 		t.Fatalf("%+v %v", resp, err)
 	}
-	if c := resp.Contacts[0]; c.UserID != uidVega || c.Phone != "+94771234123" || c.SetBy != "lead@wso2.com" || c.SetAt != "2026-10-08T10:00:00Z" ||
+	if c := resp.Contacts[0]; c.UserID != uidVega || c.Phone != "+94771234123" || c.SetBy != "lead@example.com" || c.SetAt != "2026-10-08T10:00:00Z" ||
 		c.DialPhone != "+94771234123" || c.DialSource != "paging" || c.ProfilePhone != "" {
 		t.Errorf("contact %+v", c)
 	}
@@ -468,8 +468,8 @@ func TestListPagingContacts(t *testing.T) {
 func TestListPagingContacts_DialNumber(t *testing.T) {
 	repo, contacts := phoneFixture()
 	ctx := context.Background()
-	_, _ = contacts.Upsert(ctx, "lead@wso2.com", uidVega, "+94771234123")
-	_, _ = contacts.Upsert(ctx, "lead@wso2.com", uidApollo, "+94771234124")
+	_, _ = contacts.Upsert(ctx, "lead@example.com", uidVega, "+94771234123")
+	_, _ = contacts.Upsert(ctx, "lead@example.com", uidApollo, "+94771234124")
 	contacts.profiles[uidVega] = " +94770000001 "   // both: the profile wins
 	contacts.profiles[uidApollo] = "077 000 0002"   // not callable: the paging number
 	contacts.profiles[uidAsgardeo] = "+94770000003" // profile only
@@ -519,7 +519,7 @@ func TestRecordTestResult(t *testing.T) {
 	ok := domain.PagingTestResultRequest{UserID: uidVega, Status: "no-answer", TestedAt: "2026-10-08T10:01:30Z"}
 
 	var forbidden *apierror.ForbiddenError
-	if err := svc.RecordTestResult(pagingCaller("vegalead@wso2.com"), ok); !errors.As(err, &forbidden) {
+	if err := svc.RecordTestResult(pagingCaller("vegalead@example.com"), ok); !errors.As(err, &forbidden) {
 		t.Errorf("a person reported a result: %v", err)
 	}
 	var invalid *apierror.ValidationError
@@ -579,7 +579,7 @@ func TestGetPagingChain_PagingPhones(t *testing.T) {
 		return out
 	}
 
-	got := view(pagingCaller("vegalead@wso2.com"))
+	got := view(pagingCaller("vegalead@example.com"))
 	if m := got[idVegaEng]; !m.CanEditPhone || m.PagingPhone == nil || m.PagingPhone.Phone != "+94771234123" || m.PagingPhone.Masked != "+94•••••123" {
 		t.Errorf("vega lead on vega: %+v %+v", m, m.PagingPhone)
 	}
@@ -604,7 +604,7 @@ func TestGetPagingChain_PagingPhones(t *testing.T) {
 	// Whether each member has a callable number on their own profile.
 	contacts.profiles[uidVega] = "+94770000001"
 	contacts.profiles[uidAmericas] = "not a number"
-	got = view(pagingCaller("vegalead@wso2.com"))
+	got = view(pagingCaller("vegalead@example.com"))
 	for id, want := range map[string]bool{idVegaEng: true, idAmEng: false, idVegaLead: false} {
 		if m := got[id]; m.HasProfilePhone == nil || *m.HasProfilePhone != want {
 			t.Errorf("%s hasProfilePhone = %v, want %v", id, m.HasProfilePhone, want)
@@ -630,8 +630,8 @@ func TestRequestTestCall_PermissionTable(t *testing.T) {
 		{"sreadmin@wso2.com", uidVega, false},
 		{"smeadmin@wso2.com", uidAsgardeo, true},
 		{"smeadmin@wso2.com", uidVega, false},
-		{"vegalead@wso2.com", uidVega, false},
-		{"apollolead@wso2.com", uidApollo, false},
+		{"vegalead@example.com", uidVega, false},
+		{"apollolead@example.com", uidApollo, false},
 		{"amhead@wso2.com", uidAmericas, false},
 		{"crehead@wso2.com", uidVega, false},
 		{"eng@wso2.com", uidVega, false},
@@ -749,12 +749,12 @@ func TestGetPagingChain_TestCall(t *testing.T) {
 	}
 
 	// A team lead may edit a paging number but neither test it nor see testCall.
-	for id, m := range view("vegalead@wso2.com") {
+	for id, m := range view("vegalead@example.com") {
 		if m.CanTestCall || m.TestCall != nil {
 			t.Errorf("lead sees %s: canTestCall %v, testCall %+v", id, m.CanTestCall, m.TestCall)
 		}
 	}
-	raw, _ := json.Marshal(view("vegalead@wso2.com")[idVegaEng])
+	raw, _ := json.Marshal(view("vegalead@example.com")[idVegaEng])
 	if !strings.Contains(string(raw), `"canTestCall":false`) || strings.Contains(string(raw), `"testCall"`) {
 		t.Errorf("wire shape %s", raw)
 	}

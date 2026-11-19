@@ -13443,6 +13443,16 @@ work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active
 - **A new product issue's SLA clock is registered at creation** (`WithProductWorkItemSLA`, after the request is
   COMPLETED and before the s_dip rule; best effort, logged), back-dated to the issue's GitHub creation, so a board
   that does not auto-add new issues still has a clock before the first status event or reconciliation.
+- **Dashboard and report routes (phase 4, same gate, `internalOnly`):** `GET /product-work-items/dashboard`,
+  `GET /reports/product-issues` (same answer, `ProductIssueDashboard`, over one week or month) and
+  `GET /reports/product-issues/recipients`. Every definition (open, resolved on, waits on, WOC since, SLA outcome,
+  blocked case, product of an issue) is in one pure function, `BuildProductIssueDashboard`
+  (`service/product_issue_dashboard.go`), fed by `repository/product_issue_dashboard_repo.go` (one row per issue
+  with a non-DELETED link, newest clock via `loadProductIssueClocks`); calendar is Asia/Kolkata. An issue's product
+  is the `product_repo_mapping` row of its owner/repository, preferring board number, then label, then active, then
+  name; none is "Unmapped". `product_repo_mapping.lead_emails` (migration 0310, set by SQL) feeds only the
+  recipients route; it is deliberately not in `domain.ProductRepoMapping` or `GET /products/github-repo`, which has
+  no access check. Test: `product_issue_dashboard_test.go`, `..._integration_test.go`, `server/product_issue_dashboard_routes_test.go`.
 - **`s_dip` is maintained by entity-service** (`service/product_issue_case_tags.go`,
   `repository/product_issue_case_tag_repo.go`; wired only with git internals active). A case that has at least one
   AFFECTS link from a product issue carries `s_dip` exactly while one of its actively linked product issues is open

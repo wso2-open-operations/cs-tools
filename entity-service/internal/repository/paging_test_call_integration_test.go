@@ -119,7 +119,7 @@ func TestPagingTestCallIntegration(t *testing.T) {
 	if ok, err := repo.MarkProfileTestPending(ctx, "rota@wso2.com", pagingTestUserA, "+94770000001", t0, t0.Add(-cooldown)); err != nil || !ok {
 		t.Fatalf("first profile test: %v %v", ok, err)
 	}
-	if _, err := repo.Upsert(ctx, "lead@wso2.com", pagingTestUserA, "+94771234123"); err != nil {
+	if _, err := repo.Upsert(ctx, "lead@example.com", pagingTestUserA, "+94771234123"); err != nil {
 		t.Fatal(err)
 	}
 	t1 := t0.Add(time.Minute)

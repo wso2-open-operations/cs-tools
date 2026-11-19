@@ -122,7 +122,7 @@ func TestTeamService_GetTeamMembers_NotFound(t *testing.T) {
 
 func TestTeamService_GetTeamMembers_ReturnsRoster(t *testing.T) {
 	role := "lead"
-	email := "lead@wso2.com"
+	email := "lead@example.com"
 	repo := &fakeTeamRepo{
 		exists: true,
 		members: []repository.TeamMemberRow{

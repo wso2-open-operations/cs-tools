@@ -1,0 +1,21 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+-- Phase 4 (dashboards and reports): the people who lead a product team and receive
+-- the product issue report for that product. Set by SQL at deployment, like the board
+-- seed of 0304 (there is no write API). Never returned by GET /products/github-repo
+-- (that route has no access check); read only by the internal-only report routes.
+-- Idempotent.
+ALTER TABLE product_repo_mapping ADD COLUMN IF NOT EXISTS lead_emails TEXT[] NOT NULL DEFAULT '{}';

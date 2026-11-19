@@ -406,7 +406,7 @@ func escalationWithRecipients() *fakeEscalationRepoForService {
 		NotificationSentTo: []domain.EscalationNotifiedUser{
 			{ID: "u1", Email: escalationEmailPtr("Lead@WSO2.com ")},
 			{ID: "u2", Email: nil},
-			{ID: "u3", Email: escalationEmailPtr("lead@wso2.com")},
+			{ID: "u3", Email: escalationEmailPtr("lead@example.com")},
 			{ID: "u4", Email: escalationEmailPtr("tu@wso2.com")},
 		},
 	}}
@@ -459,7 +459,7 @@ func TestEscalationService_CreateEscalation_PublishesCaseEscalated(t *testing.T)
 		AccountName: "Acme", Product: "WSO2 Identity Server 7.1.0", Environment: "Production", AssignedEngineerEmail: "eng@wso2.com",
 		EscalationID: "22222222-2222-2222-2222-222222222222", PreviousLevel: 1, CurrentLevel: 2,
 		Reason: "production down for a day", ActorEmail: "engineer@example.com", EscalatedOn: "2026-10-08T09:03:17Z",
-		Recipients: []string{"lead@wso2.com", "tu@wso2.com"},
+		Recipients: []string{"lead@example.com", "tu@wso2.com"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("payload:\n got %+v\nwant %+v", got, want)
@@ -541,7 +541,7 @@ func TestEscalationService_CreateEscalation_CustomersNeverRecipients(t *testing.
 	if err := json.Unmarshal(pub.calls[0].payload, &got); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if want := []string{"lead@wso2.com", "tu@wso2.com"}; !reflect.DeepEqual(got.Recipients, want) {
+	if want := []string{"lead@example.com", "tu@wso2.com"}; !reflect.DeepEqual(got.Recipients, want) {
 		t.Errorf("recipients = %v, want only the WSO2 ones %v", got.Recipients, want)
 	}
 

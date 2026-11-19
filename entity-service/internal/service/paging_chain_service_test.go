@@ -102,8 +102,8 @@ func pagingFixture() *stubPagingRepo {
 		callers: map[string]repository.PagingCaller{
 			"rota@wso2.com":     {GlobalRoles: []string{"cre_rota_admin"}},
 			"admin@wso2.com":    {GlobalRoles: []string{"admin"}},
-			"vegalead@wso2.com": {Memberships: []repository.PagingCallerMembership{{TeamKey: "vega", Role: "lead"}}},
-			"amlead@wso2.com":   {Memberships: []repository.PagingCallerMembership{{TeamKey: "americas", Role: "lead"}}},
+			"vegalead@example.com": {Memberships: []repository.PagingCallerMembership{{TeamKey: "vega", Role: "lead"}}},
+			"amlead@example.com":   {Memberships: []repository.PagingCallerMembership{{TeamKey: "americas", Role: "lead"}}},
 			"amhead@wso2.com":   {Memberships: []repository.PagingCallerMembership{{TeamKey: "americas", Role: "americas_team_lead"}}},
 			"crehead@wso2.com":  {Memberships: []repository.PagingCallerMembership{{TeamKey: "cre-leadership", Role: "cre_head"}}},
 			"cshead@wso2.com":   {Memberships: []repository.PagingCallerMembership{{TeamKey: "cre-leadership", Role: "cs_head"}}},
@@ -137,11 +137,11 @@ func TestUpdatePagingMember_PermissionTable(t *testing.T) {
 	}{
 		// 1st-3rd responders: the team's lead, or its head where it has one, or
 		// whoever runs the whole CRE chain -- a CRE rota admin, the CRE head, the CS head.
-		{"vega lead picks vega responder", "vegalead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(2)}, true},
-		{"americas lead cannot pick vega responder", "amlead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(2)}, false},
+		{"vega lead picks vega responder", "vegalead@example.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(2)}, true},
+		{"americas lead cannot pick vega responder", "amlead@example.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(2)}, false},
 		{"rota admin picks any responder", "rota@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(1)}, true},
 		{"america lead picks americas responder", "amhead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idAmEng, ResponderRank: intp(1)}, true},
-		{"americas team lead cannot pick americas responder", "amlead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idAmEng, ResponderRank: intp(1)}, false},
+		{"americas team lead cannot pick americas responder", "amlead@example.com", domain.UpdatePagingMemberRequest{MembershipID: idAmEng, ResponderRank: intp(1)}, false},
 		{"engineer cannot pick responders", "eng@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(1)}, false},
 		{"portal admin alone cannot pick responders", "admin@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(1)}, false},
 		{"CRE head picks an ABT responder", "crehead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, ResponderRank: intp(1)}, true},
@@ -151,7 +151,7 @@ func TestUpdatePagingMember_PermissionTable(t *testing.T) {
 		// Team leads: the head for a team that has one, and whoever runs the whole
 		// CRE chain -- a CRE rota admin, the CRE head, the CS head -- for any team.
 		{"CRE head sets an ABT Team lead", "crehead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, Role: strp("lead")}, true},
-		{"vega lead cannot set vega Team leads", "vegalead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, Role: strp("lead")}, false},
+		{"vega lead cannot set vega Team leads", "vegalead@example.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, Role: strp("lead")}, false},
 		{"america lead sets an Americas Team lead", "amhead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idAmEng, Role: strp("lead")}, true},
 		{"CRE head sets an Americas Team lead", "crehead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idAmEng, Role: strp("lead")}, true},
 		{"CS head sets an ABT Team lead", "cshead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idVegaEng, Role: strp("lead")}, true},
@@ -167,7 +167,7 @@ func TestUpdatePagingMember_PermissionTable(t *testing.T) {
 		{"portal admin sets the CS head", "admin@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idLeaderPerson, Role: strp("cs_head")}, true},
 		{"CRE head sets the CS head", "crehead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idLeaderPerson, Role: strp("cs_head")}, true},
 		{"CS head sets the CRE head", "cshead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idLeaderPerson, Role: strp("cre_head")}, true},
-		{"an ABT lead still cannot set the CS head", "vegalead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idLeaderPerson, Role: strp("cs_head")}, false},
+		{"an ABT lead still cannot set the CS head", "vegalead@example.com", domain.UpdatePagingMemberRequest{MembershipID: idLeaderPerson, Role: strp("cs_head")}, false},
 		{"america lead cannot step themselves down", "amhead@wso2.com", domain.UpdatePagingMemberRequest{MembershipID: idAmHead, Role: strp("engineer")}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -240,7 +240,7 @@ func TestGetPagingChain_CanEditFollowsTheTable(t *testing.T) {
 		teamLeads    []string
 		headsAndHead bool
 	}{
-		{"vegalead@wso2.com", []string{"vega"}, []string{}, false},
+		{"vegalead@example.com", []string{"vega"}, []string{}, false},
 		{"amhead@wso2.com", []string{"americas"}, []string{"americas"}, false},
 		{"crehead@wso2.com", []string{"americas", "cre-leadership", "vega"}, []string{"americas", "cre-leadership", "vega"}, true},
 		{"cshead@wso2.com", []string{"americas", "cre-leadership", "vega"}, []string{"americas", "cre-leadership", "vega"}, true},
