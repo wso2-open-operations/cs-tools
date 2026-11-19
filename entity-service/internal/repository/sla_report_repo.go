@@ -24,8 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/businessdays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacalendar"
 )
 
 // SlaReportClockRow is one case opened in the report window, joined to at
@@ -210,8 +210,13 @@ func fillSlaReportFinishedElapsed(row *SlaReportClockRow, schedule *string, star
 		return
 	}
 	var elapsed time.Duration
-	if schedule != nil && *schedule == slaScheduleWSO2BusinessDays {
-		elapsed = businessdays.Elapsed(*startOn, *endOn)
+	var cal slacalendar.Calendar
+	isCalendar := false
+	if schedule != nil {
+		cal, isCalendar = slacalendar.NonFlat(*schedule)
+	}
+	if isCalendar {
+		elapsed = cal.Elapsed(*startOn, *endOn)
 		if businessPause != nil {
 			elapsed -= time.Duration(*businessPause * float64(time.Second))
 		}

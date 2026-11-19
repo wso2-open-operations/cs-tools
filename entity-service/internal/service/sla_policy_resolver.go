@@ -25,6 +25,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacalendar"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacondition"
 )
 
@@ -393,7 +394,7 @@ func (r *slaPolicyResolver) resolve(ctx context.Context, target string, facts re
 			skippedNonCase = append(skippedNonCase, candidate.Name)
 			continue
 		}
-		if candidate.Schedule != "" && candidate.Schedule != "24 x 7" && candidate.Schedule != slaScheduleWSO2BusinessDaysLabel {
+		if _, known := slacalendar.For(candidate.Schedule); !known {
 			slog.WarnContext(ctx, "sla policy resolver: unsupported schedule, evaluating with flat wall-clock time anyway",
 				"policy", candidate.Name, "schedule", candidate.Schedule)
 		}
@@ -463,7 +464,7 @@ func (r *slaPolicyResolver) resolveIncident(ctx context.Context, target string, 
 			skippedNonIncident = append(skippedNonIncident, candidate.Name)
 			continue
 		}
-		if candidate.Schedule != "" && candidate.Schedule != "24 x 7" && candidate.Schedule != slaScheduleWSO2BusinessDaysLabel {
+		if _, known := slacalendar.For(candidate.Schedule); !known {
 			slog.WarnContext(ctx, "sla policy resolver: unsupported schedule, evaluating with flat wall-clock time anyway",
 				"policy", candidate.Name, "schedule", candidate.Schedule)
 		}
@@ -495,9 +496,3 @@ func (r *slaPolicyResolver) resolveIncident(ctx context.Context, target string, 
 	}
 	return matches, nil
 }
-
-// slaScheduleWSO2BusinessDaysLabel mirrors
-// repository.slaScheduleWSO2BusinessDays (unexported in that package) --
-// kept as a separate literal here rather than exporting that constant
-// purely for one string comparison in a warning log.
-const slaScheduleWSO2BusinessDaysLabel = "WSO2 Business days"

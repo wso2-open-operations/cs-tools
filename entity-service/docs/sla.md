@@ -44,7 +44,9 @@ Resume rule (`when_to_resume`): `RESUME_CONDITIONS_ARE_MET` (default) resumes wh
 
 Pausing sets `stage = PAUSED` and `paused_on`. Resuming adds the finished segment to `pause_duration` and clears
 `paused_on`, so elapsed time = wall-clock since `start_on` minus pauses. Business-day clocks do the same
-arithmetic on the business calendar (`internal/businessdays`, `America/New_York`).
+arithmetic on the business calendar (`internal/businessdays`, `America/New_York`). Which calendar a
+schedule uses is decided in one place, `internal/slacalendar` (`For`, `NonFlat`); any schedule it does not
+know is flat wall-clock time.
 
 ## Breach
 
