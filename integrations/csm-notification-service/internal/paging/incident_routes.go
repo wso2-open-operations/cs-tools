@@ -138,8 +138,10 @@ func SRETeamsForGroup(l LadderConfig, group string) []string {
 	if key == "" {
 		return nil
 	}
+	// A group aliased to a default group is one too, as KnownSRETeam has it.
+	resolved := sreTeamKeyIn(l, group)
 	for _, g := range l.Teams.DefaultGroups {
-		if teamKeyFor(g) == key {
+		if teamKeyFor(g) == key || (resolved != "" && teamKeyFor(g) == resolved) {
 			var teams []string
 			for _, t := range l.TeamlessChats {
 				if k := teamKeyFor(t); k != "" && !contains(teams, k) {

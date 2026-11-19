@@ -320,6 +320,11 @@ type Engine struct {
 	// in that gap could find no space for a group that only the mapping
 	// routes. Cases never wait on it. False unless HoldIncidentTiersUntilRoutingReady.
 	incidentRoutingPending atomic.Bool
+	// incidentSpacesPending holds them the same way until the teams' SLA
+	// spaces (team.chat_webhook_url by key) have loaded once: a tier sent
+	// before that would find no space and send no card, never retried.
+	// Released by IncidentSLASpacesLoaded; also false unless held.
+	incidentSpacesPending atomic.Bool
 }
 
 // WithIncidentSLATeams sets how an incident's SLA alert finds its SRE teams;
@@ -329,11 +334,20 @@ func (e *Engine) WithIncidentSLATeams(teams func(assignmentGroup string) []strin
 	return e
 }
 
-// HoldIncidentTiersUntilRoutingReady makes incident tiers wait for
-// IncidentRoutingReady; see Engine.incidentRoutingPending.
+// HoldIncidentTiersUntilRoutingReady makes incident tiers wait for both
+// IncidentRoutingReady and IncidentSLASpacesLoaded; see
+// Engine.incidentRoutingPending and Engine.incidentSpacesPending.
 func (e *Engine) HoldIncidentTiersUntilRoutingReady() *Engine {
 	e.incidentRoutingPending.Store(true)
+	e.incidentSpacesPending.Store(true)
 	return e
+}
+
+// IncidentSLASpacesLoaded releases the hold on the teams' SLA spaces:
+// cmd/server calls it after the first successful load (an empty one too),
+// or at once when there is no entity-service to load them from.
+func (e *Engine) IncidentSLASpacesLoaded() {
+	e.incidentSpacesPending.Store(false)
 }
 
 // IncidentRoutingReady releases the incident tiers held since
@@ -1051,7 +1065,7 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 	if meta.Paused {
 		return nil
 	}
-	if meta.CaseType == CaseTypeIncident && e.incidentRoutingPending.Load() {
+	if meta.CaseType == CaseTypeIncident && (e.incidentRoutingPending.Load() || e.incidentSpacesPending.Load()) {
 		// Left due and unclaimed, as a paused clock is: the next tick after
 		// routing is ready sends it.
 		return nil

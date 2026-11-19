@@ -426,8 +426,9 @@ func TestTick_IncidentBreach_ReassignedIncidentAlertsItsCurrentGroup(t *testing.
 	}
 }
 
-// Until cmd/server has set up incident routing, an incident tier stays due
-// and unclaimed (cases never wait on it); once ready, it is sent.
+// Until cmd/server has set up incident routing and loaded the teams' SLA
+// spaces, an incident tier stays due and unclaimed (cases never wait on it);
+// once both are ready, it is sent.
 func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
@@ -454,12 +455,25 @@ func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
 		t.Fatalf("AlertedTier = %d, want the held tier not marked alerted", meta.AlertedTier)
 	}
 
+	// Routing ready but the teams' SLA spaces not loaded yet: still held,
+	// rather than sent with no space and never retried.
 	e.IncidentRoutingReady()
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
 		t.Fatalf("Tick() error = %v", err)
 	}
+	if len(chat.incidentCalls) != 0 {
+		t.Fatalf("incident alert sent before the SLA spaces loaded: %+v", chat.incidentCalls)
+	}
+	if _, ok := st.wake[member]; !ok {
+		t.Fatal("the held tier's wake entry was removed before the SLA spaces loaded")
+	}
+
+	e.IncidentSLASpacesLoaded()
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
 	if len(chat.incidentCalls) != 1 {
-		t.Errorf("incident alerts after routing ready = %d, want 1", len(chat.incidentCalls))
+		t.Errorf("incident alerts once routing and spaces are ready = %d, want 1", len(chat.incidentCalls))
 	}
 }
 

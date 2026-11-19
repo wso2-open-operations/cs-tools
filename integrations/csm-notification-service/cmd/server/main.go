@@ -739,6 +739,11 @@ func main() {
 	// CUSTOMER_ENTITY_BASE_URL like every other optional entity-service
 	// feature — without it, a team simply has no Chat space unless one is
 	// still listed in GOOGLE_CHAT_SPACES.
+	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "" && slaEngine != nil {
+		// No entity-service: no team SLA space can ever load, so don't hold
+		// incident tiers for one.
+		slaEngine.IncidentSLASpacesLoaded()
+	}
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") != "" {
 		refreshTeamAudienceSpaces := func(ctx context.Context) error {
 			webhookCtx, cancelWebhooks := context.WithTimeout(ctx, 30*time.Second)
@@ -785,6 +790,8 @@ func main() {
 					slog.Error("slaengine: failed to refresh SRE team incident SLA chat spaces from entity-service; keeping the previous set", "err", byKeyErr)
 				} else {
 					googleChatClient.SetIncidentSLATeamSpaces(byKey)
+					// Held incident SLA tiers may go once the spaces are in.
+					slaEngine.IncidentSLASpacesLoaded()
 				}
 			}
 

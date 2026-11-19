@@ -25,7 +25,7 @@ func TestSRETeamsForGroup(t *testing.T) {
 	l := LadderConfig{
 		Teams: TeamKeys{
 			ABTs:          []string{"apollo", "artemis", "iaas"},
-			Aliases:       map[string]string{"Apollo SRE Group": "apollo", "Artemis SRE Group": "artemis", "WSO2 IaaS Team": "iaas"},
+			Aliases:       map[string]string{"Apollo SRE Group": "apollo", "Artemis SRE Group": "artemis", "WSO2 IaaS Team": "iaas", "Monitoring Alerts": "Default"},
 			DefaultGroups: []string{"default", "MS/PC SRE Group", "Default SRE Group"},
 		},
 		TeamlessChats: []string{"apollo", "Artemis"},
@@ -40,6 +40,8 @@ func TestSRETeamsForGroup(t *testing.T) {
 		{"apollo", []string{"apollo"}},
 		{"Default SRE Group", []string{"apollo", "artemis"}},
 		{"ms/pc sre group", []string{"apollo", "artemis"}},
+		// Aliased to a default group: a default group too, as paging has it.
+		{"Monitoring Alerts", []string{"apollo", "artemis"}},
 		{"Choreo Runtime Group", nil},
 		{"", nil},
 	} {
