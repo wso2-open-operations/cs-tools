@@ -227,24 +227,21 @@ func main() {
 		os.Exit(1)
 	}
 	mux.Handle("/alertz", auth.RequireWakeToken(wakeToken, base.With("component", "auth"))(http.HandlerFunc(h.ServeAlert)))
-	// The CSM portal backend reads which incidents each alert mute rule muted, with its own shared token.
-	apiToken := strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN"))
-	switch {
-	case apiToken == "":
-		logger.Warn("ALERT_CORE_API_TOKEN not set; the read API rejects every call, so the CSM portal cannot list muted alerts")
-	case len(apiToken) < auth.MinWakeTokenLen:
-		logger.Error("ALERT_CORE_API_TOKEN is too short; generate one with openssl rand -hex 32", "min_length", auth.MinWakeTokenLen)
-		os.Exit(1)
-	case apiToken == wakeToken:
-		// Alert senders hold the wake token; the same value would also open the read API to them.
-		logger.Error("ALERT_CORE_API_TOKEN must differ from ALERT_CORE_WAKE_TOKEN; generate a separate one with openssl rand -hex 32")
-		os.Exit(1)
+	// The CSM portal backend (and csm-integration-service) read which incidents each alert mute rule muted, through
+	// the Choreo gateway: each calls with an OAuth2 client-credentials token of an app subscribed to this API, the
+	// gateway checks it and forwards x-jwt-assertion, and only the client ids listed here are let in.
+	readClientIDs := auth.SplitClientIDs(os.Getenv("ALERT_CORE_READ_CLIENT_IDS"))
+	if len(readClientIDs) == 0 {
+		logger.Warn("ALERT_CORE_READ_CLIENT_IDS not set; the read API rejects every call, so the CSM portal cannot list muted alerts")
+	}
+	if strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")) != "" {
+		logger.Warn("ALERT_CORE_API_TOKEN is no longer used; callers authenticate through the Choreo gateway (ALERT_CORE_READ_CLIENT_IDS). Remove it")
 	}
 	apiHandler := api.New(base.With("component", "api"), incidents)
-	requireAPIToken := auth.RequireToken(apiToken, "api token", base.With("component", "auth"))
-	mux.Handle("GET /alert-mute-rules/{id}/muted-incidents", requireAPIToken(http.HandlerFunc(apiHandler.MutedIncidents)))
-	mux.Handle("GET /alert-field-values", requireAPIToken(http.HandlerFunc(apiHandler.FieldValues)))
-	mux.Handle("GET /alert-mute-rules/muted-counts", requireAPIToken(http.HandlerFunc(apiHandler.MutedCounts)))
+	requireReadClient := auth.RequireClientID(readClientIDs, base.With("component", "auth"))
+	mux.Handle("GET /alert-mute-rules/{id}/muted-incidents", requireReadClient(http.HandlerFunc(apiHandler.MutedIncidents)))
+	mux.Handle("GET /alert-field-values", requireReadClient(http.HandlerFunc(apiHandler.FieldValues)))
+	mux.Handle("GET /alert-mute-rules/muted-counts", requireReadClient(http.HandlerFunc(apiHandler.MutedCounts)))
 
 	port := os.Getenv("PORT")
 	if port == "" {
