@@ -54,7 +54,7 @@ func NewAuditLogMaintenanceService(repo repository.AuditLogRepository, monthsAhe
 func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain.AuditLogMaintenanceResponse, error) {
 	// Empty slices, not nil, so the JSON shows [] and not null.
 	resp := domain.AuditLogMaintenanceResponse{
-		PartitionsRetired:  []string{},
+		PartitionsDeleted:  []string{},
 		HealthProblems:     []string{},
 		RepairedTriggers:   []domain.AuditTriggerProblem{},
 		UnresolvedTriggers: []domain.AuditTriggerProblem{},
@@ -74,27 +74,7 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 	resp.RepairedTriggers = append(resp.RepairedTriggers, repaired...)
 	resp.UnresolvedTriggers = append(resp.UnresolvedTriggers, unresolved...)
 
-	// Last, so a failure here never hides what the steps above found. Dropping
-	// is irreversible, so the names are logged.
-	retired, err := s.repo.RetirePartitions(ctx, s.retentionMonths)
-	if err != nil {
-		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not delete expired partitions", err))
-	}
-	resp.PartitionsRetired = append(resp.PartitionsRetired, retired...)
-	if len(retired) > 0 {
-		slog.InfoContext(ctx, "audit log: deleted expired partitions", "partitions", retired, "retentionMonths", s.retentionMonths)
-	}
-
-	// The catch-all partition is outside the partition ranges above, so its
-	// expired rows are deleted on their own.
-	purged, err := s.repo.PurgeDefaultPartition(ctx, s.retentionMonths)
-	if err != nil {
-		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not delete expired rows from the catch-all partition", err))
-	}
-	resp.DefaultRowsDeleted = purged
-	if purged > 0 {
-		slog.InfoContext(ctx, "audit log: deleted expired rows from the catch-all partition", "rows", purged, "retentionMonths", s.retentionMonths)
-	}
+	s.deleteExpired(ctx, &resp)
 
 	// Read-only, and last so it reports the state this run leaves: a partition
 	// created above counts, and so does one it failed to create.
@@ -105,10 +85,34 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 	resp.HealthProblems = append(resp.HealthProblems, healthProblems...)
 
 	slog.InfoContext(ctx, "audit log: maintenance run finished",
-		"partitionsCreated", resp.PartitionsCreated, "partitionsRetired", len(resp.PartitionsRetired), "defaultRowsDeleted", resp.DefaultRowsDeleted, "healthProblems", len(resp.HealthProblems),
+		"partitionsCreated", resp.PartitionsCreated, "partitionsDeleted", len(resp.PartitionsDeleted),
+		"defaultRowsDeleted", resp.DefaultRowsDeleted, "healthProblems", len(resp.HealthProblems),
 		"repairedTriggers", len(resp.RepairedTriggers), "unresolvedTriggers", len(resp.UnresolvedTriggers),
 		"failedSteps", len(resp.StepErrors))
 	return resp, ctx.Err()
+}
+
+// deleteExpired removes what is past retention: old partitions first, then old
+// rows in the catch-all partition. Names and counts are logged because dropping
+// is irreversible.
+func (s *auditLogMaintenanceService) deleteExpired(ctx context.Context, resp *domain.AuditLogMaintenanceResponse) {
+	partitions, err := s.repo.DeleteExpiredPartitions(ctx, s.retentionMonths)
+	if err != nil {
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not delete expired partitions", err))
+	}
+	resp.PartitionsDeleted = append(resp.PartitionsDeleted, partitions...)
+	if len(partitions) > 0 {
+		slog.InfoContext(ctx, "audit log: deleted expired partitions", "partitions", partitions)
+	}
+
+	rows, err := s.repo.DeleteExpiredDefaultRows(ctx, s.retentionMonths)
+	if err != nil {
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not delete expired rows from the catch-all partition", err))
+	}
+	resp.DefaultRowsDeleted = rows
+	if rows > 0 {
+		slog.InfoContext(ctx, "audit log: deleted expired rows from the catch-all partition", "rows", rows)
+	}
 }
 
 // stepFailed logs a step's full error and returns the short, detail-free text

@@ -14,23 +14,21 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- Field-level audit log, foundation. One row per changed field, written by an
--- AFTER row trigger in the same transaction as the change, only for tables listed
--- in audit_config. Registers no business table: each one calls register_audit().
+-- Field-level audit log. An AFTER UPDATE/DELETE row trigger writes one row per
+-- changed field into csm_audit_log, in the same transaction as the change, for the
+-- tables listed in audit_config. Each business table calls register_audit().
 --
--- Updates and deletes only: an INSERT is not audited. A row already says who
--- created it and when (created_by, created_on), and inserts were most of the
--- log's cost, one row for every non-NULL column of every new row. An update logs
--- each changed field, a delete logs the whole row. No table is audited on insert,
--- the registry (audit_config) included. The trigger function still handles INSERT
--- and the action check still allows 'INSERT', but no trigger uses either.
+-- Inserts are not audited: a row's own created_by and created_on already say who
+-- added it. updated_on and updated_by are never logged either: every log row
+-- already has the actor and the time, and jobs that rewrite them on every run
+-- would only add noise. The trigger function still accepts INSERT and the action
+-- check still allows 'INSERT', so a database with older triggers keeps working.
 -- Requires PostgreSQL 18 (uuidv7()). Safe to re-run.
 --
--- Everything is created in the schema this migration runs in (current_schema(),
--- like every other migration). The SECURITY DEFINER functions are installed
--- through the DO blocks below, which fill that schema into their search path and
--- table names (__SCHEMA__ and __SCHEMA_LIT__ are replaced by it), so the file
--- works the same in public and in a schema of its own.
+-- Everything is created in the schema this migration runs in. The SECURITY DEFINER
+-- functions are installed through the DO blocks below, which replace __SCHEMA__ and
+-- __SCHEMA_LIT__ with that schema, so the file works in public or in a schema of
+-- its own.
 
 -- Registry: what is audited.
 CREATE TABLE IF NOT EXISTS audit_config (
@@ -153,7 +151,9 @@ SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     max_value_bytes CONSTANT INT := 8192;
     key_columns      TEXT[] := string_to_array(TG_ARGV[0], ',');
-    excluded_columns TEXT[] := COALESCE(string_to_array(NULLIF(TG_ARGV[1], ''), ','), '{}');
+    -- updated_on and updated_by are always left out, whatever the table registered.
+    excluded_columns TEXT[] := COALESCE(string_to_array(NULLIF(TG_ARGV[1], ''), ','), '{}')
+                               || ARRAY['updated_on', 'updated_by'];
     masked_columns   TEXT[] := COALESCE(string_to_array(NULLIF(TG_ARGV[2], ''), ','), '{}');
     old_row    JSONB  := CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) END;
     new_row    JSONB  := CASE WHEN TG_OP <> 'DELETE' THEN to_jsonb(NEW) END;
@@ -362,10 +362,8 @@ DECLARE
     partition_name TEXT;
     created_count  INT := 0;
 BEGIN
-    -- Creating a partition needs a strong lock on the audit table. Waiting for it
-    -- would hold up every audit write queued behind it, so give up instead; the
-    -- caller retries. Set before the advisory lock, so the timeout covers waiting
-    -- for that lock too.
+    -- Give up instead of queueing behind audit writes (the caller retries). Set
+    -- before the advisory lock so it covers that wait too.
     PERFORM set_config('lock_timeout', '2s', true);
     PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
 
@@ -375,8 +373,8 @@ BEGIN
         partition_name := 'csm_audit_log_' || to_char(month_start, 'YYYY_MM');
 
         IF to_regclass(format('%I.%I', __SCHEMA_LIT__, partition_name)) IS NULL THEN
-            -- Creating the partition would fail while rows for that month sit in the
-            -- catch-all, and that failure would stop every later month too.
+            -- Rows for this month in the catch-all would make the CREATE fail and stop
+            -- the later months too.
             IF EXISTS (SELECT 1 FROM csm_audit_log_default
                         WHERE created_on >= month_start::timestamp AT TIME ZONE 'UTC'
                           AND created_on <  month_end::timestamp AT TIME ZONE 'UTC') THEN
@@ -403,34 +401,36 @@ $fn$,
         '__SCHEMA_LIT__', quote_literal(current_schema()));
 END $install$;
 
--- Delete partitions that end before the retention cutoff (18 months by default),
--- and return their names. Each is detached and dropped in the same transaction, so
--- a failed drop puts the partition back, and the data is gone from disk once it
--- commits: audit data past retention is not archived.
--- Detaching briefly locks csm_audit_log (the catch-all partition rules out
--- CONCURRENTLY), so lock_timeout makes it give up instead of blocking writes; the
--- daily run then tries again. The catch-all partition is never touched here.
+-- First month to keep: anything that ended before it is past retention. Refuses a
+-- retention below 1 month, which would delete everything.
+CREATE OR REPLACE FUNCTION audit_retention_cutoff(p_retention_months INT) RETURNS TIMESTAMPTZ
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    IF p_retention_months IS NULL OR p_retention_months < 1 THEN
+        RAISE EXCEPTION 'audit: retention must be at least 1 month, got %', p_retention_months;
+    END IF;
+    RETURN (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
+END $$;
+
+-- Delete the monthly partitions that ended before the retention cutoff and return
+-- their names. Each is detached and dropped in one transaction, so a failed drop puts
+-- it back. Nothing is archived. The detach locks csm_audit_log briefly; lock_timeout
+-- makes it give up instead of blocking writes, and the daily run tries again.
+DROP FUNCTION IF EXISTS audit_retire_partitions(INT, TEXT);
 DO $install$
 BEGIN
     EXECUTE replace(replace($fn$
-CREATE OR REPLACE FUNCTION audit_retire_partitions(
+CREATE OR REPLACE FUNCTION audit_delete_expired_partitions(
     p_retention_months INT  DEFAULT 18,
     p_lock_timeout     TEXT DEFAULT '2s'
 ) RETURNS SETOF TEXT
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
-    cutoff TIMESTAMPTZ :=
-        (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
+    cutoff        TIMESTAMPTZ := audit_retention_cutoff(p_retention_months);
     old_partition TEXT;
 BEGIN
-    -- A zero or negative retention puts the cutoff in the future and would delete
-    -- everything, so refuse it.
-    IF p_retention_months IS NULL OR p_retention_months < 1 THEN
-        RAISE EXCEPTION 'audit_retire_partitions: retention must be at least 1 month, got %', p_retention_months;
-    END IF;
-
-    -- The timeout is set first so it covers waiting for the advisory lock as well.
+    -- Set before the advisory lock, so the timeout covers waiting for it too.
     PERFORM set_config('lock_timeout', p_lock_timeout, true);
     PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
 
@@ -453,40 +453,29 @@ $fn$,
         '__SCHEMA_LIT__', quote_literal(current_schema()));
 END $install$;
 
--- Delete the rows in the catch-all partition that are older than the retention
--- cutoff, and return how many. Dropping whole partitions (above) cannot reach them,
--- and the log is append-only, so a DELETE is refused: instead the catch-all is
--- detached, a fresh one takes its place, the younger rows are copied across, and
--- the old table is dropped, all in one transaction. The row counts must add up
--- before it commits, or it rolls back and nothing changes. The advisory lock comes
--- first, so the check for expired rows and the swap are one decision: two runs at
--- once cannot both swap for the same rows. When no row is past retention, which is
--- the usual case, it returns after that check and takes no table lock.
--- While it swaps, audit writes wait on the table lock; the catch-all should hold
--- almost nothing, so that is short, and lock_timeout makes it give up if it is busy.
+-- Delete the catch-all partition's rows that are past retention and return how many.
+-- The log is append-only, so a DELETE is refused: the catch-all is swapped instead.
+-- Detach it, create a fresh one, copy the younger rows back with one INSERT ... SELECT
+-- and drop the old table, in one transaction. If the counts do not add up it rolls
+-- back. With nothing expired, the usual case, it takes no table lock.
+DROP FUNCTION IF EXISTS audit_purge_default_partition(INT, TEXT);
 DO $install$
 BEGIN
     EXECUTE replace(replace($fn$
-CREATE OR REPLACE FUNCTION audit_purge_default_partition(
+CREATE OR REPLACE FUNCTION audit_delete_expired_default_rows(
     p_retention_months INT  DEFAULT 18,
     p_lock_timeout     TEXT DEFAULT '2s'
 ) RETURNS BIGINT
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
-    cutoff TIMESTAMPTZ :=
-        (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => p_retention_months)) AT TIME ZONE 'UTC';
+    cutoff       TIMESTAMPTZ := audit_retention_cutoff(p_retention_months);
     total_rows   BIGINT;
     expired_rows BIGINT;
     kept_rows    BIGINT;
 BEGIN
-    IF p_retention_months IS NULL OR p_retention_months < 1 THEN
-        RAISE EXCEPTION 'audit_purge_default_partition: retention must be at least 1 month, got %', p_retention_months;
-    END IF;
-
-    -- The timeout is set first so it covers waiting for the advisory lock as well.
-    -- The lock still comes before the check, so the check and the swap are one
-    -- decision.
+    -- Timeout first, so it covers the advisory lock wait. Lock before the check, so
+    -- the check and the swap are one decision.
     PERFORM set_config('lock_timeout', p_lock_timeout, true);
     PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
 
@@ -510,7 +499,7 @@ BEGIN
     GET DIAGNOSTICS kept_rows = ROW_COUNT;
 
     IF kept_rows + expired_rows <> total_rows THEN
-        RAISE EXCEPTION 'audit_purge_default_partition: % rows kept and % expired do not add up to %, rolled back',
+        RAISE EXCEPTION 'audit_delete_expired_default_rows: % rows kept and % expired do not add up to %, rolled back',
             kept_rows, expired_rows, total_rows;
     END IF;
 
@@ -522,14 +511,11 @@ $fn$,
         '__SCHEMA_LIT__', quote_literal(current_schema()));
 END $install$;
 
--- Empty result = healthy. Reports, one message each:
---   * rows in the catch-all partition (a monthly partition was missing);
---   * any of the next p_months_ahead months with no monthly partition, checked
---     month by month, so a partition that failed to be created is noticed the day
---     it is missed, even if a partition further out exists (the daily run creates
---     that many ahead; the monitoring call with no arguments checks 2).
--- Data past retention is not reported here: the daily run deletes it, and a
--- deletion that fails is reported by the run itself.
+-- Empty result = healthy. Reports rows in the catch-all partition, and any of the
+-- next p_months_ahead months with no monthly partition, checked month by month so a
+-- missed month is reported the day it happens. Data past retention is not reported:
+-- a failed deletion is already an error in the daily run. With no arguments it
+-- checks 2 months ahead.
 DROP FUNCTION IF EXISTS audit_partition_health();
 DROP FUNCTION IF EXISTS audit_partition_health(INT, INT);
 DO $install$
@@ -647,8 +633,8 @@ REVOKE ALL ON FUNCTION unregister_audit(TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION exclude_from_audit(TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_partition_health(INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_create_partitions(INT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION audit_retire_partitions(INT, TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION audit_purge_default_partition(INT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_delete_expired_partitions(INT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_delete_expired_default_rows(INT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_reconcile(BOOLEAN) FROM PUBLIC;
 
 -- New-table alert. Attaches nothing; only warns when a new table is neither

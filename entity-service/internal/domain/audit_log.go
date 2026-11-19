@@ -29,9 +29,9 @@ type AuditTriggerProblem struct {
 type AuditLogMaintenanceResponse struct {
 	// PartitionsCreated is how many monthly partitions this run created.
 	PartitionsCreated int `json:"partitionsCreated"`
-	// PartitionsRetired are the names of the monthly partitions this run deleted
-	// because they ended at least the retention period ago.
-	PartitionsRetired []string `json:"partitionsRetired"`
+	// PartitionsDeleted are the monthly partitions this run dropped because they
+	// ended at least the retention period ago.
+	PartitionsDeleted []string `json:"partitionsDeleted"`
 	// DefaultRowsDeleted is how many rows older than the retention period this
 	// run deleted from the catch-all partition.
 	DefaultRowsDeleted int64 `json:"defaultRowsDeleted"`

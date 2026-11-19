@@ -22,18 +22,20 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
+// lockTimeout is how long a deletion waits for a lock before giving up. The next
+// daily run tries again.
+const lockTimeout = "2s"
+
 // AuditLogRepository runs the audit log's upkeep functions (migration 0295).
 // They are SECURITY DEFINER, so the application role needs EXECUTE on them and
 // nothing else on the audit tables.
 type AuditLogRepository interface {
-	// RetirePartitions deletes the monthly partitions that ended at least
-	// retentionMonths ago (detached, then dropped) and returns their names. The
-	// catch-all partition is never touched.
-	RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error)
-	// PurgeDefaultPartition deletes the rows in the catch-all partition that are
-	// older than retentionMonths, which whole-partition deletion cannot reach, and
-	// returns how many it deleted.
-	PurgeDefaultPartition(ctx context.Context, retentionMonths int) (int64, error)
+	// DeleteExpiredPartitions drops the monthly partitions that ended at least
+	// retentionMonths ago and returns their names.
+	DeleteExpiredPartitions(ctx context.Context, retentionMonths int) ([]string, error)
+	// DeleteExpiredDefaultRows deletes the catch-all partition's rows older than
+	// retentionMonths, which dropping partitions cannot reach, and returns how many.
+	DeleteExpiredDefaultRows(ctx context.Context, retentionMonths int) (int64, error)
 	// CreatePartitions creates the missing monthly partitions and returns how
 	// many it created.
 	CreatePartitions(ctx context.Context, monthsAhead int) (int, error)
@@ -65,34 +67,34 @@ func (r *auditLogRepository) CreatePartitions(ctx context.Context, monthsAhead i
 	return created, nil
 }
 
-// RetirePartitions implements AuditLogRepository.
-func (r *auditLogRepository) RetirePartitions(ctx context.Context, retentionMonths int) ([]string, error) {
-	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT audit_retire_partitions($1, '2s')`, retentionMonths)
+// DeleteExpiredPartitions implements AuditLogRepository.
+func (r *auditLogRepository) DeleteExpiredPartitions(ctx context.Context, retentionMonths int) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT audit_delete_expired_partitions($1, $2)`, retentionMonths, lockTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
+		return nil, fmt.Errorf("audit log: delete expired partitions: %w", err)
 	}
 	defer rows.Close()
 
-	var retired []string
+	var deleted []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("audit log: scan retired partition: %w", err)
+			return nil, fmt.Errorf("audit log: scan deleted partition: %w", err)
 		}
-		retired = append(retired, name)
+		deleted = append(deleted, name)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("audit log: retire partitions: %w", err)
+		return nil, fmt.Errorf("audit log: delete expired partitions: %w", err)
 	}
-	return retired, nil
+	return deleted, nil
 }
 
-// PurgeDefaultPartition implements AuditLogRepository.
-func (r *auditLogRepository) PurgeDefaultPartition(ctx context.Context, retentionMonths int) (int64, error) {
+// DeleteExpiredDefaultRows implements AuditLogRepository.
+func (r *auditLogRepository) DeleteExpiredDefaultRows(ctx context.Context, retentionMonths int) (int64, error) {
 	var deleted int64
-	err := r.db.QueryRow(WithSystemIdentity(ctx), `SELECT audit_purge_default_partition($1, '2s')`, retentionMonths).Scan(&deleted)
+	err := r.db.QueryRow(WithSystemIdentity(ctx), `SELECT audit_delete_expired_default_rows($1, $2)`, retentionMonths, lockTimeout).Scan(&deleted)
 	if err != nil {
-		return 0, fmt.Errorf("audit log: purge default partition: %w", err)
+		return 0, fmt.Errorf("audit log: delete expired default rows: %w", err)
 	}
 	return deleted, nil
 }
