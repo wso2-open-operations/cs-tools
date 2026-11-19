@@ -31,17 +31,17 @@ import (
 type fakeAuditLogRepo struct {
 	calls []string
 
-	created         int
-	createErr       error
-	retired         []string
-	retireErr       error
-	purged          int64
-	purgeErr        error
-	healthProblems  []string
-	repairedFound   []domain.AuditTriggerProblem // returned when repair is on
-	stillUnresolved []domain.AuditTriggerProblem // returned when repair is off
-	reconcileErr    error
-	verifyErr       error // returned only by the second (repair off) reconcile
+	created             int
+	createErr           error
+	deletedPartitions   []string
+	deletePartitionsErr error
+	deletedRows         int64
+	deleteRowsErr       error
+	healthProblems      []string
+	repairedFound       []domain.AuditTriggerProblem // returned when repair is on
+	stillUnresolved     []domain.AuditTriggerProblem // returned when repair is off
+	reconcileErr        error
+	verifyErr           error // returned only by the second (repair off) reconcile
 }
 
 func (f *fakeAuditLogRepo) CreatePartitions(_ context.Context, monthsAhead int) (int, error) {
@@ -49,14 +49,14 @@ func (f *fakeAuditLogRepo) CreatePartitions(_ context.Context, monthsAhead int) 
 	return f.created, f.createErr
 }
 
-func (f *fakeAuditLogRepo) RetirePartitions(_ context.Context, retentionMonths int) ([]string, error) {
-	f.calls = append(f.calls, fmt.Sprintf("retire(%d)", retentionMonths))
-	return f.retired, f.retireErr
+func (f *fakeAuditLogRepo) DeleteExpiredPartitions(_ context.Context, retentionMonths int) ([]string, error) {
+	f.calls = append(f.calls, fmt.Sprintf("delete_partitions(%d)", retentionMonths))
+	return f.deletedPartitions, f.deletePartitionsErr
 }
 
-func (f *fakeAuditLogRepo) PurgeDefaultPartition(_ context.Context, retentionMonths int) (int64, error) {
-	f.calls = append(f.calls, fmt.Sprintf("purge(%d)", retentionMonths))
-	return f.purged, f.purgeErr
+func (f *fakeAuditLogRepo) DeleteExpiredDefaultRows(_ context.Context, retentionMonths int) (int64, error) {
+	f.calls = append(f.calls, fmt.Sprintf("delete_rows(%d)", retentionMonths))
+	return f.deletedRows, f.deleteRowsErr
 }
 
 func (f *fakeAuditLogRepo) PartitionHealth(_ context.Context, monthsAhead int) ([]string, error) {
@@ -90,7 +90,7 @@ func TestAuditLogMaintenance_RunsEveryStepInOrder(t *testing.T) {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
 
-	want := "create(3) reconcile(true) reconcile(false) retire(18) purge(18) health(3)"
+	want := "create(3) reconcile(true) reconcile(false) delete_partitions(18) delete_rows(18) health(3)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
@@ -100,14 +100,14 @@ func TestAuditLogMaintenance_RunsEveryStepInOrder(t *testing.T) {
 }
 
 func TestAuditLogMaintenance_ReportsTheExpiredPartitionsItDeleted(t *testing.T) {
-	repo := &fakeAuditLogRepo{retired: []string{"csm_audit_log_2025_01", "csm_audit_log_2025_02"}}
+	repo := &fakeAuditLogRepo{deletedPartitions: []string{"csm_audit_log_2025_01", "csm_audit_log_2025_02"}}
 
 	resp, err := NewAuditLogMaintenanceService(repo, 3, 18).RunMaintenance(context.Background())
 	if err != nil {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
-	if got := strings.Join(resp.PartitionsRetired, " "); got != "csm_audit_log_2025_01 csm_audit_log_2025_02" {
-		t.Errorf("PartitionsRetired = %q", got)
+	if got := strings.Join(resp.PartitionsDeleted, " "); got != "csm_audit_log_2025_01 csm_audit_log_2025_02" {
+		t.Errorf("PartitionsDeleted = %q", got)
 	}
 }
 
@@ -118,8 +118,8 @@ func TestAuditLogMaintenance_UsesTheConfiguredRetention(t *testing.T) {
 	if _, err := NewAuditLogMaintenanceService(repo, 3, 24).RunMaintenance(context.Background()); err != nil {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
-	if got := strings.Join(repo.calls, " "); !strings.Contains(got, "retire(24) purge(24) health(3)") {
-		t.Errorf("calls = %q, want retire(24)", got)
+	if got := strings.Join(repo.calls, " "); !strings.Contains(got, "delete_partitions(24) delete_rows(24) health(3)") {
+		t.Errorf("calls = %q, want delete_partitions(24)", got)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestAuditLogMaintenance_UsesTheConfiguredRetention(t *testing.T) {
 // trigger results found before it.
 func TestAuditLogMaintenance_FailedDeleteIsReportedWithoutDetail(t *testing.T) {
 	repo := &fakeAuditLogRepo{
-		retireErr:      errors.New("lock timeout on relation csm_audit_log_2025_01 held by secret_role"),
-		healthProblems: []string{"too few future months"},
+		deletePartitionsErr: errors.New("lock timeout on relation csm_audit_log_2025_01 held by secret_role"),
+		healthProblems:      []string{"too few future months"},
 	}
 
 	resp, err := NewAuditLogMaintenanceService(repo, 3, 18).RunMaintenance(context.Background())
@@ -141,13 +141,13 @@ func TestAuditLogMaintenance_FailedDeleteIsReportedWithoutDetail(t *testing.T) {
 	if strings.Contains(resp.StepErrors[0], "secret_role") || strings.Contains(resp.StepErrors[0], "csm_audit_log_2025") {
 		t.Errorf("step error leaks database detail: %q", resp.StepErrors[0])
 	}
-	if len(resp.PartitionsRetired) != 0 {
-		t.Errorf("PartitionsRetired = %v, want none after a failed delete", resp.PartitionsRetired)
+	if len(resp.PartitionsDeleted) != 0 {
+		t.Errorf("PartitionsDeleted = %v, want none after a failed delete", resp.PartitionsDeleted)
 	}
 }
 
 func TestAuditLogMaintenance_ReportsTheExpiredRowsItDeletedFromTheCatchAll(t *testing.T) {
-	repo := &fakeAuditLogRepo{purged: 7}
+	repo := &fakeAuditLogRepo{deletedRows: 7}
 
 	resp, err := NewAuditLogMaintenanceService(repo, 3, 18).RunMaintenance(context.Background())
 	if err != nil {
@@ -158,26 +158,26 @@ func TestAuditLogMaintenance_ReportsTheExpiredRowsItDeletedFromTheCatchAll(t *te
 	}
 }
 
-// A failed catch-all purge is a step error with no database detail, and the
+// A failed catch-all deletion is a step error with no database detail, and the
 // partition deletion before it is still reported.
-func TestAuditLogMaintenance_FailedCatchAllPurgeIsReportedAndKeepsEarlierResults(t *testing.T) {
+func TestAuditLogMaintenance_FailedCatchAllDeletionIsReportedAndKeepsEarlierResults(t *testing.T) {
 	repo := &fakeAuditLogRepo{
-		retired:  []string{"csm_audit_log_2025_01"},
-		purgeErr: errors.New("rows kept 3 and expired 2 do not add up to 6 in csm_audit_log_default_purge"),
+		deletedPartitions: []string{"csm_audit_log_2025_01"},
+		deleteRowsErr:     errors.New("rows kept 3 and expired 2 do not add up to 6 in csm_audit_log_default_purge"),
 	}
 
 	resp, err := NewAuditLogMaintenanceService(repo, 3, 18).RunMaintenance(context.Background())
 	if err != nil {
 		t.Fatalf("a failed step must be reported in the response, not as an error: %v", err)
 	}
-	if len(resp.StepErrors) != 1 || len(resp.PartitionsRetired) != 1 {
-		t.Errorf("stepErrors = %v, partitionsRetired = %v; want the failure and the earlier result both kept", resp.StepErrors, resp.PartitionsRetired)
+	if len(resp.StepErrors) != 1 || len(resp.PartitionsDeleted) != 1 {
+		t.Errorf("stepErrors = %v, partitionsDeleted = %v; want the failure and the earlier result both kept", resp.StepErrors, resp.PartitionsDeleted)
 	}
 	if strings.Contains(resp.StepErrors[0], "csm_audit_log_default_purge") || strings.Contains(resp.StepErrors[0], "do not add up") {
 		t.Errorf("step error leaks database detail: %q", resp.StepErrors[0])
 	}
 	if resp.DefaultRowsDeleted != 0 {
-		t.Errorf("DefaultRowsDeleted = %d, want 0 after a failed purge", resp.DefaultRowsDeleted)
+		t.Errorf("DefaultRowsDeleted = %d, want 0 after a failed deletion", resp.DefaultRowsDeleted)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestAuditLogMaintenance_NothingWrongGivesEmptyLists(t *testing.T) {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
 
-	if resp.PartitionsRetired == nil || resp.HealthProblems == nil || resp.RepairedTriggers == nil || resp.UnresolvedTriggers == nil || resp.StepErrors == nil {
+	if resp.PartitionsDeleted == nil || resp.HealthProblems == nil || resp.RepairedTriggers == nil || resp.UnresolvedTriggers == nil || resp.StepErrors == nil {
 		t.Error("lists must be empty, not nil, so the JSON shows [] and not null")
 	}
 	if len(resp.HealthProblems)+len(resp.RepairedTriggers)+len(resp.UnresolvedTriggers) != 0 {
@@ -215,7 +215,7 @@ func TestAuditLogMaintenance_FailedStepIsReportedAndDoesNotStopTheOthers(t *test
 		t.Fatalf("a failed step must be reported in the response, not as an error: %v", err)
 	}
 
-	want := "create(3) reconcile(true) reconcile(false) retire(18) purge(18) health(3)"
+	want := "create(3) reconcile(true) reconcile(false) delete_partitions(18) delete_rows(18) health(3)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
