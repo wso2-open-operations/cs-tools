@@ -22,11 +22,14 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
@@ -973,5 +976,43 @@ func TestAuditMigration_HealthReportsAMissingMonthDespiteADistantPartition(t *te
 	got := auditHealth(t, repo, 3)
 	if !strings.Contains(got, "missing future monthly partition") || !strings.Contains(got, strings.TrimPrefix(next, "csm_audit_log_")) {
 		t.Errorf("health = %q, want the missing month %s reported although a distant partition exists", got, next)
+	}
+}
+
+// Deleting waits on the same advisory lock as creating partitions. The lock
+// timeout has to cover that wait too: with the timeout set after the lock, a run
+// queued behind another one waits as long as the other holds it.
+func TestAuditMigration_DeletionGivesUpWhileAnotherRunHoldsTheLock(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	ctx := context.Background()
+
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0))"); err != nil {
+		t.Fatalf("take the lock: %v", err)
+	}
+
+	for _, call := range []string{
+		"SELECT audit_retire_partitions(18, '300ms')",
+		"SELECT audit_purge_default_partition(18, '300ms')",
+	} {
+		t.Run(call, func(t *testing.T) {
+			// Far longer than the lock timeout: a call that ignores it only ends
+			// when this deadline cancels it, with a different error.
+			callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			started := time.Now()
+			_, err := pool.Exec(callCtx, call)
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+				t.Fatalf("%s = %v, want a lock timeout (55P03)", call, err)
+			}
+			if took := time.Since(started); took > 3*time.Second {
+				t.Errorf("%s gave up after %s, want about the 300ms timeout", call, took)
+			}
+		})
 	}
 }

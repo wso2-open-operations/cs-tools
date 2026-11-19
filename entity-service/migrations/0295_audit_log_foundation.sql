@@ -362,11 +362,12 @@ DECLARE
     partition_name TEXT;
     created_count  INT := 0;
 BEGIN
-    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
     -- Creating a partition needs a strong lock on the audit table. Waiting for it
     -- would hold up every audit write queued behind it, so give up instead; the
-    -- caller retries.
+    -- caller retries. Set before the advisory lock, so the timeout covers waiting
+    -- for that lock too.
     PERFORM set_config('lock_timeout', '2s', true);
+    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
 
     FOR i IN 0..p_months_ahead LOOP
         month_start    := (this_month + make_interval(months => i))::date;
@@ -429,8 +430,9 @@ BEGIN
         RAISE EXCEPTION 'audit_retire_partitions: retention must be at least 1 month, got %', p_retention_months;
     END IF;
 
-    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
+    -- The timeout is set first so it covers waiting for the advisory lock as well.
     PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
 
     -- The end of each partition is read from its real range, not its name.
     FOR old_partition IN
@@ -482,13 +484,15 @@ BEGIN
         RAISE EXCEPTION 'audit_purge_default_partition: retention must be at least 1 month, got %', p_retention_months;
     END IF;
 
+    -- The timeout is set first so it covers waiting for the advisory lock as well.
+    -- The lock still comes before the check, so the check and the swap are one
+    -- decision.
+    PERFORM set_config('lock_timeout', p_lock_timeout, true);
     PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
 
     IF NOT EXISTS (SELECT 1 FROM csm_audit_log_default WHERE created_on < cutoff) THEN
         RETURN 0;
     END IF;
-
-    PERFORM set_config('lock_timeout', p_lock_timeout, true);
 
     EXECUTE format('ALTER TABLE %1$I.csm_audit_log DETACH PARTITION %1$I.csm_audit_log_default', __SCHEMA_LIT__);
     EXECUTE format('ALTER TABLE %1$I.csm_audit_log_default RENAME TO csm_audit_log_default_purge', __SCHEMA_LIT__);
