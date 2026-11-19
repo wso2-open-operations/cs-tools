@@ -4673,22 +4673,25 @@ changed.
 
   **The case's own creator is always added as a watcher on create, on
   every data source and every case-like type** (`subscribeCreatorToWatchList`,
-  called from `CreateCase`'s plain-Postgres branch, right alongside
-  `addRequestedWatchers`) — via `CaseRepository.AddCaseWatcherIfAbsent`, the
-  same targeted, idempotent single-row insert `subscribeCommenterToWatchList`
-  already uses for a commenter, not `SetCaseWatchList`'s full replace, so it
-  never disturbs whatever `req.WatchList` itself already wrote. On
-  `createCaseSNFirst`, `c.CreatedBy` is NOT a platform user id the way the
-  plain path's is — it's whatever raw actor string (in practice, an email)
-  ServiceNow's own create response names, forwarded as-is into the VARCHAR
-  `work_item.created_by` column with no lookup — so that path instead calls
-  `subscribeSNCreatorToWatchList`, which goes through the sibling
-  `CaseRepository.AddCaseWatcherByEmailIfAbsent`: email-to-id resolution
-  folded into the same insert statement (a join, not a prior lookup), so an
-  email matching no platform user simply inserts nothing rather than
-  guessing or binding an email into the real UUID `user_id` column (a gap
-  caught on review before it merged). Unconditional either way: the creator
-  is added whether or not they named themselves (or anyone else) in
+  called from both `CreateCase`'s plain-Postgres branch and
+  `createCaseSNFirst`, right alongside `addRequestedWatchers`) — via
+  `CaseRepository.AddCaseWatcherByEmailIfAbsent`, a single insert statement
+  that matches `"user"` by EITHER id (as text) or email, whichever
+  `c.CreatedBy` turns out to hold. It can't be assumed to already be a
+  resolved platform id the way `subscribeCommenterToWatchList`'s own
+  `AddCaseWatcherIfAbsent` call can (that one always has a real id, from its
+  own `userRepo.GetUserByEmail` call): on `createCaseSNFirst`, `c.CreatedBy`
+  is ServiceNow's own raw actor string, forwarded as-is into the VARCHAR
+  `work_item.created_by` column with no lookup; on the plain-Postgres path it
+  is normally `req.CreatedBy` resolved from the caller's token, but a real
+  staging case showed the same column holding an email there too — this
+  isn't reliably one shape across every create path or deployment. Matching
+  either way in one statement means an identity that resolves to no platform
+  user simply inserts nothing rather than guessing or failing on a type
+  mismatch against the real UUID `user_id` column (caught on review, then
+  found live for the plain path too, before this shipped as one robust
+  method rather than two shape-specific ones). Unconditional either way: the
+  creator is added whether or not they named themselves (or anyone else) in
   `watchList`, and regardless of whether they are internal or external —
   that distinction has no bearing on whether they're a watcher at all (it
   only changes which portal link csm-notification-service embeds in the
