@@ -50,6 +50,24 @@ arithmetic on the business calendar (`internal/businessdays`, `America/New_York`
 schedule uses is decided in one place, `internal/slacalendar` (`For`, `NonFlat`); any schedule it does not
 know is flat wall-clock time.
 
+## Product issues
+
+`PRODUCT_ISSUE` work items (internal GitHub issues raised from a case) run on the same engine through their own
+subject (`internal/service/sla_product_issue.go`, repository `sla_product_issue_repo.go`). Their policies are the
+three rows of migration `0307` (`applies_to = 'PRODUCT_ISSUE'`, source `CSM`): one RESOLUTION clock, P1 24h on
+`CS 24x7`, P2 24h and P3 48h on `CS 12x5 IST` (Mon-Fri 09:00-21:00 Asia/Kolkata); no priority, no clock. Facts:
+`priority`, `state` (CLOSED when the GitHub issue is closed; REOPENED when a GitHub reopen is newer than the board's
+last move to Resolved/Closed; else the board status; OPEN when not on a board), `waits_on` (CS only for
+WAITING_ON_CS), `github_state`, `category`. Only WAITING_ON_CS pauses; RESOLVED or CLOSED stops.
+
+- Status changes come from GitHub, so every write happens at the **event's** time (`*At` repository methods; the
+  case paths still use the current time). A newest event is applied inline and then the clock is rebuilt; an older
+  one only rebuilds. A rebuild replays `work_item_status_event` from the issue's creation (`github_created_on`) and
+  ends with the link's current state when the history lacks it (backfill writes no close events).
+- A reopen gets a new clock back-dated to creation; resolved/closed time does not count. A priority change cancels
+  the old clock and back-dates the new one. Rebuilds are serialised per work item (advisory lock).
+- Product-issue clocks are never published and never reach `/sla-status` (case-like types only).
+
 ## Breach
 
 A clock is breached when elapsed time reaches `duration` (`has_breached`, stage `BREACHED`). `BREACHED` stays

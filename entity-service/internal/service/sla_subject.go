@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -298,17 +299,7 @@ func (s *slaEngineService) reevaluateClocks(ctx context.Context, subj slaSubject
 	lg := subj.logs()
 	f := subj.Facts()
 
-	for _, clockType := range slaTargetOrder {
-		target := slaClockTypeTarget[clockType]
-		policies, err := s.repo.ActiveClockPolicies(ctx, subj.ID(), target)
-		if err != nil {
-			slog.ErrorContext(ctx, lg.activeLookupFailed, lg.idKey, subj.ID(), "clockType", target, "err", err)
-			continue
-		}
-		for _, policy := range policies {
-			s.applyEffectsForPolicy(ctx, subj, target, policy)
-		}
-	}
+	_ = s.applyEffectsToOpenClocks(ctx, subj)
 
 	// A policy whose cancel condition is ALSO true for these facts is skipped:
 	// otherwise it would be cancelled above and immediately re-registered,
@@ -325,36 +316,100 @@ func (s *slaEngineService) reevaluateClocks(ctx context.Context, subj slaSubject
 	}
 }
 
+// applyEffectsToOpenClocks runs applyEffectsForPolicy for every open clock of
+// subj, per target. It is the first half of reevaluateClocks, also used on its
+// own by the product-issue engine, which registers newly applicable clocks
+// itself. Failures are logged as before and also returned (joined); the
+// reevaluate callers ignore the return.
+func (s *slaEngineService) applyEffectsToOpenClocks(ctx context.Context, subj slaSubject) error {
+	lg := subj.logs()
+	var errs []error
+	for _, clockType := range slaTargetOrder {
+		target := slaClockTypeTarget[clockType]
+		policies, err := s.repo.ActiveClockPolicies(ctx, subj.ID(), target)
+		if err != nil {
+			slog.ErrorContext(ctx, lg.activeLookupFailed, lg.idKey, subj.ID(), "clockType", target, "err", err)
+			errs = append(errs, err)
+			continue
+		}
+		for _, policy := range policies {
+			if err := s.applyEffectsForPolicy(ctx, subj, target, policy); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// slaEventTimedSubject is implemented by a subject whose state changes carry
+// their own time (a product issue's status events). applyEffectsForPolicy then
+// calls the repository's explicit-time *At methods with it instead of the
+// database NOW() ones. Case and incident subjects do not implement it, so they
+// keep calling the non-At methods exactly as before.
+type slaEventTimedSubject interface {
+	EventTime() time.Time
+}
+
 // applyEffectsForPolicy evaluates one open clock's own bound policy
 // conditions: stop -> complete, cancel -> cancel, pause -> pause, resume ->
 // resume (first match wins), then the terminal safety net: a clock not already
 // settled is completed when subj.TerminalNow(), whatever its stop_condition
 // says. CompleteClock/CancelClock are idempotent against a clock that is not
 // open, so `settled` only avoids a pointless second query.
-func (s *slaEngineService) applyEffectsForPolicy(ctx context.Context, subj slaSubject, target string, policy repository.SLAPolicyRef) {
+func (s *slaEngineService) applyEffectsForPolicy(ctx context.Context, subj slaSubject, target string, policy repository.SLAPolicyRef) error {
 	lg := subj.logs()
+	var errs []error
 	id := subj.ID()
 	f := subj.Facts()
 	text := subj.ConditionText
 	settled := false
+	// at is the event's own time for a subject that has one; the repository
+	// calls below then use the *At methods. nil keeps today's NOW() methods.
+	var at *time.Time
+	if timed, ok := subj.(slaEventTimedSubject); ok {
+		t := timed.EventTime()
+		at = &t
+	}
+	complete := func() (bool, error) {
+		if at != nil {
+			return s.repo.CompleteClockByPolicyAt(ctx, id, target, policy.ID, *at)
+		}
+		return s.repo.CompleteClockByPolicy(ctx, id, target, policy.ID)
+	}
+	cancel := func() (bool, error) {
+		if at != nil {
+			return s.repo.CancelClockByPolicyAt(ctx, id, target, policy.ID, *at)
+		}
+		return s.repo.CancelClockByPolicy(ctx, id, target, policy.ID)
+	}
+	setPaused := func(paused bool) (bool, error) {
+		if at != nil {
+			return s.repo.SetPausedByPolicyAt(ctx, id, target, policy.ID, paused, *at)
+		}
+		return s.repo.SetPausedByPolicy(ctx, id, target, policy.ID, paused)
+	}
 	switch {
 	case policy.StopCondition != "" && slacondition.Parse(text(policy, policy.StopCondition)).Evaluate(f):
-		if _, err := s.repo.CompleteClockByPolicy(ctx, id, target, policy.ID); err != nil {
+		if _, err := complete(); err != nil {
 			slog.ErrorContext(ctx, lg.effectsPrefix+": complete clock failed", lg.idKey, id, "clockType", target, "policy", policy.Name, "err", err)
+			errs = append(errs, err)
 		}
 		settled = true
 	case slaPolicyShouldCancelFor(policy, f, text):
-		if _, err := s.repo.CancelClockByPolicy(ctx, id, target, policy.ID); err != nil {
+		if _, err := cancel(); err != nil {
 			slog.ErrorContext(ctx, lg.effectsPrefix+": cancel clock failed", lg.idKey, id, "clockType", target, "policy", policy.Name, "err", err)
+			errs = append(errs, err)
 		}
 		settled = true
 	case policy.PauseCondition != "" && slacondition.Parse(text(policy, policy.PauseCondition)).Evaluate(f):
-		if _, err := s.repo.SetPausedByPolicy(ctx, id, target, policy.ID, true); err != nil {
+		if _, err := setPaused(true); err != nil {
 			slog.ErrorContext(ctx, lg.effectsPrefix+": pause clock failed", lg.idKey, id, "clockType", target, "policy", policy.Name, "err", err)
+			errs = append(errs, err)
 		}
 	case slaPolicyShouldResumeFor(policy, f, text):
-		if _, err := s.repo.SetPausedByPolicy(ctx, id, target, policy.ID, false); err != nil {
+		if _, err := setPaused(false); err != nil {
 			slog.ErrorContext(ctx, lg.effectsPrefix+": resume clock failed", lg.idKey, id, "clockType", target, "policy", policy.Name, "err", err)
+			errs = append(errs, err)
 		}
 	default:
 		// Neither pause nor resume applies: the clock is left exactly as it is.
@@ -363,8 +418,10 @@ func (s *slaEngineService) applyEffectsForPolicy(ctx context.Context, subj slaSu
 	if !settled && subj.TerminalNow() {
 		if _, err := s.repo.CompleteClockByPolicy(ctx, id, target, policy.ID); err != nil {
 			slog.ErrorContext(ctx, lg.effectsPrefix+": safety-net complete clock on CLOSED failed", lg.idKey, id, "clockType", target, "policy", policy.Name, "err", err)
+			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // compile-time checks

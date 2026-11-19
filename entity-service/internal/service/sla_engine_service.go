@@ -247,12 +247,40 @@ type SLAEngineService interface {
 type slaEngineService struct {
 	resolver *slaPolicyResolver
 	repo     repository.SLAEngineRepository
+	// pi is the product-issue half of the storage; nil when repo does not
+	// implement it (a fake), which makes the WorkItemSLAEngine methods return
+	// errProductIssueSLAUnsupported.
+	pi repository.ProductIssueSLARepository
+	// now is the clock the product-issue rebuild measures "now" with; nil means
+	// time.Now. Tests inject a fixed one.
+	now func() time.Time
+}
+
+// clock returns the current time from the injectable clock.
+func (s *slaEngineService) clock() time.Time {
+	if s.now != nil {
+		return s.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // NewSLAEngineService constructs an SLAEngineService backed by the given
 // repository.
 func NewSLAEngineService(repo repository.SLAEngineRepository) SLAEngineService {
-	return &slaEngineService{resolver: newSLAPolicyResolver(repo), repo: repo}
+	return newSLAEngineService(repo, nil)
+}
+
+// newSLAEngineService is NewSLAEngineService with an injectable clock.
+func newSLAEngineService(repo repository.SLAEngineRepository, now func() time.Time) *slaEngineService {
+	pi, _ := repo.(repository.ProductIssueSLARepository)
+	return &slaEngineService{resolver: newSLAPolicyResolver(repo), repo: repo, pi: pi, now: now}
+}
+
+// NewWorkItemSLAEngine constructs the product-issue SLA engine on repo (which
+// must also implement repository.ProductIssueSLARepository, as the Postgres
+// repository does). It is the same engine as NewSLAEngineService returns.
+func NewWorkItemSLAEngine(repo repository.SLAEngineRepository) WorkItemSLAEngine {
+	return newSLAEngineService(repo, nil)
 }
 
 // loadCaseFacts reads caseID's current CaseFacts fresh from Postgres and

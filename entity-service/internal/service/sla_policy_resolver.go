@@ -434,7 +434,13 @@ func (r *slaPolicyResolver) resolveSubject(ctx context.Context, target string, s
 
 	switch len(matches) {
 	case 0:
-		slog.InfoContext(ctx, "sla policy resolver: no "+kind+" policy matched", "target", target)
+		if family != "" && len(candidates) == 0 {
+			// A family with no policy at all for this target (a product issue has no
+			// RESPONSE or WORKAROUND policy): not worth an info line per resolve.
+			slog.DebugContext(ctx, "sla policy resolver: no "+kind+" policy matched", "target", target)
+		} else {
+			slog.InfoContext(ctx, "sla policy resolver: no "+kind+" policy matched", "target", target)
+		}
 	case 1:
 	default:
 		names := make([]string, len(matches))
