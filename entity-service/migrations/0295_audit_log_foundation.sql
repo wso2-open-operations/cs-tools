@@ -24,6 +24,10 @@
 -- each changed field, a delete logs the whole row. No table is audited on insert,
 -- the registry (audit_config) included. The trigger function still handles INSERT
 -- and the action check still allows 'INSERT', but no trigger uses either.
+-- updated_on and updated_by are never logged, on any table: every log row already
+-- says who changed the record and when (created_by, created_on), so they would only
+-- repeat it, and the jobs that rewrite them on every run (the Salesforce ingest)
+-- would add rows that say nothing.
 -- Requires PostgreSQL 18 (uuidv7()). Safe to re-run.
 --
 -- Everything is created in the schema this migration runs in (current_schema(),
@@ -153,7 +157,9 @@ SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     max_value_bytes CONSTANT INT := 8192;
     key_columns      TEXT[] := string_to_array(TG_ARGV[0], ',');
-    excluded_columns TEXT[] := COALESCE(string_to_array(NULLIF(TG_ARGV[1], ''), ','), '{}');
+    -- updated_on and updated_by are always left out, whatever the table registered.
+    excluded_columns TEXT[] := COALESCE(string_to_array(NULLIF(TG_ARGV[1], ''), ','), '{}')
+                               || ARRAY['updated_on', 'updated_by'];
     masked_columns   TEXT[] := COALESCE(string_to_array(NULLIF(TG_ARGV[2], ''), ','), '{}');
     old_row    JSONB  := CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) END;
     new_row    JSONB  := CASE WHEN TG_OP <> 'DELETE' THEN to_jsonb(NEW) END;
