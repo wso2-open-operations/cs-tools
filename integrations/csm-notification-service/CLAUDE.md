@@ -288,11 +288,13 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
 - **Startup:** `HoldIncidentTiersUntilRoutingReady` keeps incident tiers due
   and unclaimed until cmd/server has finished setting up incident routing
   (`IncidentRoutingReady`, after `applyIncidentRoutes`, whether or not a
-  mapping was applied) **and** the teams' SLA spaces have loaded once
-  (`IncidentSLASpacesLoaded`, after the first successful by-key fetch, or at
+  mapping was applied) **and** both team lookups have loaded once -- the
+  teams' SLA spaces (by-key webhook fetch) and group emails
+  (`IncidentTeamLookupsLoaded`, via `incidentTeamLookups` in cmd/server, or at
   once with no `CUSTOMER_ENTITY_BASE_URL`); the ticker starts first. A held
-  tier goes out late rather than with no space. Cases never wait, and the
-  case team-space startup retry is unchanged.
+  tier goes out late rather than with no card or team email. Only incident
+  SLA tiers wait: the incident card, calls, paging and clock registration
+  don't, cases never do, and the case team-space startup retry is unchanged.
 - **Routing, the same way as a case:** a case's alert reaches its account
   CRE team; an incident's reaches the team that holds it **now**, SRE or SME
   (an incident starts with SRE and may be escalated to an SME team; only the

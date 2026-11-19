@@ -740,11 +740,18 @@ func main() {
 	// feature — without it, a team simply has no Chat space unless one is
 	// still listed in GOOGLE_CHAT_SPACES.
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "" && slaEngine != nil {
-		// No entity-service: no team SLA space can ever load, so don't hold
-		// incident tiers for one.
-		slaEngine.IncidentSLASpacesLoaded()
+		// No entity-service: no team SLA space or group email can ever load,
+		// so don't hold incident tiers for them.
+		slaEngine.IncidentTeamLookupsLoaded()
 	}
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") != "" {
+		// Releases the incident SLA tier hold once both team lookups an
+		// incident alert needs have loaded; never releases with no engine.
+		incidentLookups := newIncidentTeamLookups(func() {
+			if slaEngine != nil {
+				slaEngine.IncidentTeamLookupsLoaded()
+			}
+		})
 		refreshTeamAudienceSpaces := func(ctx context.Context) error {
 			webhookCtx, cancelWebhooks := context.WithTimeout(ctx, 30*time.Second)
 			webhooks, webhooksErr := customerEntityClient.GetTeamChatWebhooks(webhookCtx)
@@ -777,6 +784,7 @@ func main() {
 					slog.Error("slaengine: failed to refresh team group emails from entity-service; keeping the previous set", "err", emailsErr)
 				} else {
 					slaEngine.SetTeamGroupEmails(groupEmails)
+					incidentLookups.groupEmailsLoaded()
 				}
 
 				// The SRE teams' incident SLA spaces: the same
@@ -790,8 +798,7 @@ func main() {
 					slog.Error("slaengine: failed to refresh SRE team incident SLA chat spaces from entity-service; keeping the previous set", "err", byKeyErr)
 				} else {
 					googleChatClient.SetIncidentSLATeamSpaces(byKey)
-					// Held incident SLA tiers may go once the spaces are in.
-					slaEngine.IncidentSLASpacesLoaded()
+					incidentLookups.slaSpacesLoaded()
 				}
 			}
 

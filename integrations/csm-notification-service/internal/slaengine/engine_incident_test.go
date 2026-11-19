@@ -455,20 +455,20 @@ func TestTick_IncidentTierWaitsForRoutingReady(t *testing.T) {
 		t.Fatalf("AlertedTier = %d, want the held tier not marked alerted", meta.AlertedTier)
 	}
 
-	// Routing ready but the teams' SLA spaces not loaded yet: still held,
-	// rather than sent with no space and never retried.
+	// Routing ready but the team lookups (SLA spaces, group emails) not loaded
+	// yet: still held, rather than sent with no space or email, never retried.
 	e.IncidentRoutingReady()
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
 		t.Fatalf("Tick() error = %v", err)
 	}
 	if len(chat.incidentCalls) != 0 {
-		t.Fatalf("incident alert sent before the SLA spaces loaded: %+v", chat.incidentCalls)
+		t.Fatalf("incident alert sent before the team lookups loaded: %+v", chat.incidentCalls)
 	}
 	if _, ok := st.wake[member]; !ok {
-		t.Fatal("the held tier's wake entry was removed before the SLA spaces loaded")
+		t.Fatal("the held tier's wake entry was removed before the team lookups loaded")
 	}
 
-	e.IncidentSLASpacesLoaded()
+	e.IncidentTeamLookupsLoaded()
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
 		t.Fatalf("Tick() error = %v", err)
 	}

@@ -320,10 +320,11 @@ type Engine struct {
 	// in that gap could find no space for a group that only the mapping
 	// routes. Cases never wait on it. False unless HoldIncidentTiersUntilRoutingReady.
 	incidentRoutingPending atomic.Bool
-	// incidentSpacesPending holds them the same way until the teams' SLA
-	// spaces (team.chat_webhook_url by key) have loaded once: a tier sent
-	// before that would find no space and send no card, never retried.
-	// Released by IncidentSLASpacesLoaded; also false unless held.
+	// incidentSpacesPending holds them the same way until the team lookups an
+	// incident alert needs -- the teams' SLA spaces (team.chat_webhook_url by
+	// key) and group emails (team.group_email) -- have both loaded once: a
+	// tier sent before that would send no card or no team email, never
+	// retried. Released by IncidentTeamLookupsLoaded; also false unless held.
 	incidentSpacesPending atomic.Bool
 }
 
@@ -335,7 +336,7 @@ func (e *Engine) WithIncidentSLATeams(teams func(assignmentGroup string) []strin
 }
 
 // HoldIncidentTiersUntilRoutingReady makes incident tiers wait for both
-// IncidentRoutingReady and IncidentSLASpacesLoaded; see
+// IncidentRoutingReady and IncidentTeamLookupsLoaded; see
 // Engine.incidentRoutingPending and Engine.incidentSpacesPending.
 func (e *Engine) HoldIncidentTiersUntilRoutingReady() *Engine {
 	e.incidentRoutingPending.Store(true)
@@ -343,10 +344,11 @@ func (e *Engine) HoldIncidentTiersUntilRoutingReady() *Engine {
 	return e
 }
 
-// IncidentSLASpacesLoaded releases the hold on the teams' SLA spaces:
-// cmd/server calls it after the first successful load (an empty one too),
-// or at once when there is no entity-service to load them from.
-func (e *Engine) IncidentSLASpacesLoaded() {
+// IncidentTeamLookupsLoaded releases the hold on the team lookups: cmd/server
+// calls it once the teams' SLA spaces and group emails have each loaded
+// successfully (an empty result too), or at once when there is no
+// entity-service to load them from.
+func (e *Engine) IncidentTeamLookupsLoaded() {
 	e.incidentSpacesPending.Store(false)
 }
 
