@@ -180,7 +180,7 @@ func (r *teamRepo) SearchTeams(ctx context.Context, searchQuery string, limit, o
 // ListChatWebhooks implements TeamRepository.
 func (r *teamRepo) ListChatWebhooks(ctx context.Context) ([]domain.TeamChatWebhook, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT name, chat_webhook_url FROM team
+		`SELECT name, chat_webhook_url, COALESCE(key, '') FROM team
 		 WHERE chat_webhook_url IS NOT NULL AND chat_webhook_url <> ''
 		 ORDER BY name`,
 	)
@@ -192,7 +192,7 @@ func (r *teamRepo) ListChatWebhooks(ctx context.Context) ([]domain.TeamChatWebho
 	webhooks := []domain.TeamChatWebhook{}
 	for rows.Next() {
 		var w domain.TeamChatWebhook
-		if err := rows.Scan(&w.Name, &w.ChatWebhookURL); err != nil {
+		if err := rows.Scan(&w.Name, &w.ChatWebhookURL, &w.Key); err != nil {
 			return nil, fmt.Errorf("scan team chat webhook: %w", err)
 		}
 		webhooks = append(webhooks, w)

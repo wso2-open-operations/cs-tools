@@ -276,9 +276,23 @@ func (s *fakeStore) DeleteClockIfMatch(_ context.Context, caseID, clockType, sla
 
 // fakeChat is a chatSender test double.
 type fakeChat struct {
-	calls   []fakeChatCall
-	failFor map[string]bool // audience -> fail
-	spaces  map[string]bool
+	calls         []fakeChatCall
+	incidentCalls []fakeIncidentChatCall
+	failFor       map[string]bool // audience -> fail
+	spaces        map[string]bool
+}
+
+type fakeIncidentChatCall struct {
+	audience string
+	alert    notifications.IncidentSLAAlert
+}
+
+func (f *fakeChat) SendIncidentSLAAlert(_ context.Context, audience string, a notifications.IncidentSLAAlert) error {
+	f.incidentCalls = append(f.incidentCalls, fakeIncidentChatCall{audience, a})
+	if f.failFor != nil && f.failFor[audience] {
+		return errors.New("chat send failed")
+	}
+	return nil
 }
 
 type fakeChatCall struct {
@@ -331,6 +345,10 @@ func (p *fakePublisher) Publish(_ context.Context, _, _ []byte) error {
 type fakeLinks struct{}
 
 func (fakeLinks) CSMLink(caseID string) string { return "https://csm.example.com/cases/" + caseID }
+
+func (fakeLinks) IncidentLink(incidentID string) string {
+	return "https://csm.example.com/incidents/" + incidentID
+}
 
 // weekdayDaytime is a Wednesday at 11:00 IST, outside both the Americas
 // (21:00-06:00 IST) and weekend coverage windows, so chataudience.Resolve
