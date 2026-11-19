@@ -438,8 +438,6 @@ func (h *holdingSLA) PauseWorkaroundClock(context.Context, string) error { retur
 func (h *holdingSLA) RecalculateFromEntity(context.Context) error        { return nil }
 func (h *holdingSLA) ReviseClocks(context.Context, string, string, string, string, string, string, string, string, string) {
 }
-func (h *holdingSLA) RegisterIncidentClocks(context.Context, string, string, time.Time, string, string, string, string) {
-}
 
 // A redelivery of the same record while the first call is still in flight
 // (a rebalance) must not release the SRE room card's key: the record is
