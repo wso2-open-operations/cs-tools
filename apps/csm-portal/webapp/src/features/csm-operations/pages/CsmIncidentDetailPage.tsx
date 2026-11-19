@@ -322,9 +322,14 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const [resolutionTarget, setResolutionTarget] = useState<
     Extract<BeIncidentState, "RESOLVED" | "CLOSED"> | null
   >(null);
-  // Cancelled is terminal, so picking it from the "Change state" menu opens a
-  // confirmation instead of PATCHing on the first click.
-  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  // Cancelled is terminal, so every path to it (the "Change state" menu and
+  // the Edit dialog's State select) opens a confirmation first. Holds the
+  // patch to send on confirm: `{ state: CANCELLED }` from the action bar, or
+  // the whole Edit dialog patch (its other edits go in the same request).
+  const [cancelRequest, setCancelRequest] = useState<{
+    patch: BeUpdateIncidentPayload;
+    fromEdit: boolean;
+  } | null>(null);
   const engineerName = useEngineerDisplayName();
   // Signed-in engineer's platform UUID (self-subscribe writes) and email
   // (matching a watch-list entry to "me"), same pair the case detail page
@@ -492,7 +497,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         return;
       }
       if (target === "CANCELLED") {
-        setCancelConfirmOpen(true);
+        setCancelRequest({ patch: { state: "CANCELLED" }, fromEdit: false });
         return;
       }
       // Starting work on an unassigned incident implicitly claims it, same
@@ -543,12 +548,62 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     [id, patchIncident, resolutionTarget, showError],
   );
 
+  /** Send the Edit dialog's patch; closes the dialog once it has saved. */
+  const sendEdit = useCallback(
+    (patch: BeUpdateIncidentPayload, onSettled?: () => void) => {
+      if (!id) return;
+      patchIncident.mutate(
+        { id, patch },
+        {
+          onSuccess: (saved) => {
+            onSettled?.();
+            const droppedFields = checkSilentlyDroppedNotes(patch, saved.incident);
+            if (droppedFields.length > 0) {
+              showError(
+                `${droppedFields.join(" and ")} didn't save — the request was accepted but that ` +
+                  "change wasn't actually persisted. Any other fields in this edit were saved; please retry the note separately.",
+              );
+              return;
+            }
+            setEditOpen(false);
+          },
+          onError: (err) => {
+            // Real validation messages (e.g. an invalid UUID in one of the
+            // linking fields) are worth surfacing, same as CreateIncidentPage.
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not update the incident. Please try again.";
+            showError(msg, err);
+          },
+        },
+      );
+    },
+    [id, patchIncident, showError],
+  );
+
+  /** An edit that moves the incident to Cancelled waits for the confirmation. */
+  const onEditSave = useCallback(
+    (patch: BeUpdateIncidentPayload) => {
+      if (patch.state === "CANCELLED") {
+        setCancelRequest({ patch, fromEdit: true });
+        return;
+      }
+      sendEdit(patch);
+    },
+    [sendEdit],
+  );
+
   const onCancelConfirm = useCallback(() => {
-    if (!id) return;
+    if (!id || !cancelRequest) return;
+    if (cancelRequest.fromEdit) {
+      sendEdit(cancelRequest.patch, () => setCancelRequest(null));
+      return;
+    }
     patchIncident.mutate(
-      { id, patch: { state: "CANCELLED" } },
+      { id, patch: cancelRequest.patch },
       {
-        onSuccess: () => setCancelConfirmOpen(false),
+        onSuccess: () => setCancelRequest(null),
         onError: (err) => {
           const msg =
             err instanceof BackendApiError && err.status < 500 && err.message
@@ -558,7 +613,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         },
       },
     );
-  }, [id, patchIncident, showError]);
+  }, [id, cancelRequest, patchIncident, sendEdit, showError]);
 
   /**
    * Submit the handoff. Deliberately not gated on the incident's service or
@@ -1227,33 +1282,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           onClose={() => {
             if (!patchIncident.isPending) setEditOpen(false);
           }}
-          onSave={(patch) =>
-            patchIncident.mutate(
-              { id: incident.id as string, patch },
-              {
-                onSuccess: (data) => {
-                  const droppedFields = checkSilentlyDroppedNotes(patch, data.incident);
-                  if (droppedFields.length > 0) {
-                    showError(
-                      `${droppedFields.join(" and ")} didn't save — the request was accepted but that ` +
-                        "change wasn't actually persisted. Any other fields in this edit were saved; please retry the note separately.",
-                    );
-                    return;
-                  }
-                  setEditOpen(false);
-                },
-                onError: (err) => {
-                  // Real validation messages (e.g. an invalid UUID in one of the
-                  // linking fields) are worth surfacing, same as CreateIncidentPage.
-                  const msg =
-                    err instanceof BackendApiError && err.status < 500 && err.message
-                      ? err.message
-                      : "Could not update the incident. Please try again.";
-                  showError(msg, err);
-                },
-              },
-            )
-          }
+          onSave={onEditSave}
         />
       )}
 
@@ -1268,12 +1297,13 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         />
       )}
 
-      {cancelConfirmOpen && (
+      {/* Go back keeps the Edit dialog (and its edits) open underneath. */}
+      {cancelRequest && (
         <CancelIncidentDialog
           incidentNumber={data?.number}
           isSubmitting={patchIncident.isPending}
           onClose={() => {
-            if (!patchIncident.isPending) setCancelConfirmOpen(false);
+            if (!patchIncident.isPending) setCancelRequest(null);
           }}
           onConfirm={onCancelConfirm}
         />

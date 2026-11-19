@@ -733,6 +733,44 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
     );
   });
 
+  it("asks for the same confirmation when the Edit dialog sets Cancelled, keeping its other edits", () => {
+    // Every field the Edit dialog requires before Save is enabled.
+    mockQueryResult({
+      data: {
+        ...BASE_INCIDENT,
+        state: "IN_PROGRESS",
+        category: "SERVICE_INTERRUPTION",
+        contactType: "PHONE",
+        impact: "MEDIUM",
+        urgency: "MEDIUM",
+      },
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    const edit = screen.getByRole("dialog");
+    fireEvent.change(within(edit).getByLabelText(/subject/i), { target: { value: "Duplicate of INC0000001" } });
+    fireEvent.mouseDown(within(edit).getByRole("combobox", { name: /state/i }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /cancelled/i }));
+    fireEvent.click(within(edit).getByRole("button", { name: /^save$/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+
+    // Go back returns to the Edit dialog with nothing sent.
+    fireEvent.click(screen.getByRole("button", { name: /go back/i }));
+    expect(screen.queryByRole("dialog", { name: /cancel this incident\?/i })).not.toBeInTheDocument();
+    expect(patchMutateMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(edit).getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel incident$/i }));
+    expect(patchMutateMock).toHaveBeenCalledTimes(1);
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      {
+        id: "inc-1",
+        patch: expect.objectContaining({ state: "CANCELLED", subject: "Duplicate of INC0000001" }),
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
   it("offers no Cancelled on a NEW incident", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW" } });
     renderPage();
