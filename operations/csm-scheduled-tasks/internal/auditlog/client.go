@@ -13,7 +13,7 @@
 // KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations
 // under the License.
-// Package auditlog is the daily upkeep of entity-service's field-level audit
+// Package auditlog is the weekly upkeep of entity-service's field-level audit
 // log: it asks entity-service to create the coming monthly partitions, check the
 // log's health and put back audit triggers that went missing, and turns what
 // entity-service found into a task failure, so the engine retries and mails it.

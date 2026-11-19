@@ -20928,7 +20928,7 @@ paths:
       description: |
         Registered only when CSM_AUDIT_LOG_ENABLED=true; otherwise the route does not exist and answers 404.
 
-        Called daily by csm-scheduled-tasks. Creates the coming monthly partitions of the audit log,
+        Called by csm-scheduled-tasks, weekly by default (its schedule can be overridden). Creates the coming monthly partitions of the audit log,
         checks the log's health, puts back audit triggers that are missing or disabled on registered
         tables, and deletes the monthly partitions that ended at least CSM_AUDIT_LOG_RETENTION_MONTHS
         (default 18) ago, dropped for good and not archived, and deletes the rows that old from the catch-all
