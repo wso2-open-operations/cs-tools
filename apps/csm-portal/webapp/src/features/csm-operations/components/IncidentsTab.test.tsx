@@ -390,21 +390,26 @@ describe("IncidentsTab — export", () => {
       "Updated",
     ]);
 
+    // Hide a default column and add two optional ones.
     fireEvent.click(screen.getByRole("button", { name: "Customise incident columns" }));
-    const checkboxes = screen.getAllByRole("checkbox");
-    fireEvent.click(checkboxes[0]); // Category
-    fireEvent.click(checkboxes[1]); // Assignment group
+    toggleColumn("Caller");
+    toggleColumn("Category");
+    toggleColumn("Assignment group");
 
     const { header, toRow } = exportProps.current!;
-    expect(header.slice(-2)).toEqual(["Category", "Assignment group"]);
+    expect(header).not.toContain("Caller");
+    expect(header).toContain("Category");
+    expect(header).toContain("Assignment group");
     const row = toRow(INCIDENT as never);
     expect(row).toHaveLength(header.length);
-    expect(row.slice(-2)).toEqual(["SERVICE_INTERRUPTION", "Platform CRE"]);
+    expect(row[header.indexOf("Category")]).toBe("SERVICE_INTERRUPTION");
+    expect(row[header.indexOf("Assignment group")]).toBe("Platform CRE");
     // An unassigned incident reads "Unassigned" in the export, as in the table.
-    fireEvent.click(checkboxes[2]); // Assigned to
-    expect(exportProps.current!.toRow({ ...INCIDENT, assignedTo: null } as never).at(-1)).toBe(
-      "Unassigned",
-    );
+    toggleColumn("Assigned to");
+    const after = exportProps.current!;
+    expect(
+      after.toRow({ ...INCIDENT, assignedTo: null } as never)[after.header.indexOf("Assigned to")],
+    ).toBe("Unassigned");
   });
 });
 
