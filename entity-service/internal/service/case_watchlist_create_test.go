@@ -58,6 +58,13 @@ type wlHarness struct {
 	contactsCalls int
 	userSearches  int
 	lastFilters   domain.SearchUsersFilters
+
+	// addWatcherCalls/addWatcherCaseID/addWatcherUserID record
+	// AddCaseWatcherIfAbsent's own, separate call -- subscribeCreatorToWatchList's,
+	// not SetCaseWatchList's (setCalled/setIDs above).
+	addWatcherCalls  int
+	addWatcherCaseID string
+	addWatcherUserID string
 }
 
 func (h *wlHarness) run(t *testing.T, watchList []string) error {
@@ -83,6 +90,11 @@ func (h *wlHarness) run(t *testing.T, watchList []string) error {
 		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
 			sev := domain.CaseSeverityHigh
 			return domain.CaseView{ID: caseID, ProjectDetails: &domain.EntityRef{ID: "proj-1"}, Severity: &sev}, nil
+		},
+		addCaseWatcherIfAbsent: func(_ context.Context, caseID, userID string) error {
+			h.addWatcherCalls++
+			h.addWatcherCaseID, h.addWatcherUserID = caseID, userID
+			return nil
 		},
 	}
 	users := stubUserRepo{
@@ -451,5 +463,61 @@ func TestDescriptionImagesApply(t *testing.T) {
 				t.Errorf("descriptionImagesApply = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// subscribeCreatorToWatchList: the case's own creator is always added as a
+// watcher on create -- on every data source -- whether or not they also
+// named themselves (or anyone else) in watchList. See that method's own doc
+// comment for why internal/external doesn't gate this at all.
+
+func TestCaseService_CreateCase_PlainPostgres_CreatorAutoSubscribedToWatchList(t *testing.T) {
+	var addCalls int
+	var addCaseID, addUserID string
+	repo := &stubCaseRepo{
+		createCase: func(_ context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
+			return domain.Case{ID: "case-1", CreatedBy: "creator-1", CreatedOn: time.Now()}, nil
+		},
+		createCaseCommentAsSystem: func(context.Context, domain.CreateCaseCommentRequest, *time.Time) (domain.CaseComment, error) {
+			return domain.CaseComment{}, nil
+		},
+		addCaseWatcherIfAbsent: func(_ context.Context, caseID, userID string) error {
+			addCalls++
+			addCaseID, addUserID = caseID, userID
+			return nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	req := validCreateCaseRequest()
+	req.CreatedBy = "creator-1"
+	if _, err := svc.CreateCase(context.Background(), req); err != nil {
+		t.Fatalf("CreateCase: %v", err)
+	}
+	if addCalls != 1 {
+		t.Fatalf("AddCaseWatcherIfAbsent calls = %d, want 1", addCalls)
+	}
+	if addCaseID != "case-1" || addUserID != "creator-1" {
+		t.Errorf("AddCaseWatcherIfAbsent(%q, %q), want (case-1, creator-1)", addCaseID, addUserID)
+	}
+}
+
+func TestCreateCase_SNMirror_CreatorAutoSubscribedToWatchList(t *testing.T) {
+	h := &wlHarness{callerType: domain.UserTypeInternal, callerToken: true,
+		contacts: fixedContacts(registeredContact("jane.doe@example.com", wlContactID)),
+		users:    []domain.User{{ID: wlStaffID, Email: "staff@example.com", UserType: domain.UserTypeInternal}}}
+	// An explicit watchList (naming someone other than the creator) must not
+	// crowd out the creator's own auto-add: the two are separate repository
+	// calls (SetCaseWatchList vs. AddCaseWatcherIfAbsent).
+	if err := h.run(t, []string{wlStaffID}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.addWatcherCalls != 1 {
+		t.Fatalf("AddCaseWatcherIfAbsent calls = %d, want 1", h.addWatcherCalls)
+	}
+	if h.addWatcherCaseID != "55555555-5555-5555-5555-555555555555" || h.addWatcherUserID != "jane.doe@example.com" {
+		t.Errorf("AddCaseWatcherIfAbsent(%q, %q), want (caseID, the case's own CreatedBy)", h.addWatcherCaseID, h.addWatcherUserID)
+	}
+	if !h.setCalled || len(h.setIDs) != 1 || h.setIDs[0] != wlStaffID {
+		t.Errorf("the explicit watchList must still be written: setCalled=%v setIDs=%v", h.setCalled, h.setIDs)
 	}
 }

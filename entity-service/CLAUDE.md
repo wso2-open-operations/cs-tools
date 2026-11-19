@@ -4671,6 +4671,26 @@ changed.
   way, this addition is purely about what the Postgres mirror also
   guarantees.
 
+  **The case's own creator is always added as a watcher on create, on
+  every data source and every case-like type** (`subscribeCreatorToWatchList`,
+  called from `CreateCase`'s plain-Postgres branch and from
+  `createCaseSNFirst`, right alongside `addRequestedWatchers`) — via
+  `CaseRepository.AddCaseWatcherIfAbsent`, the same targeted, idempotent
+  single-row insert `subscribeCommenterToWatchList` already uses for a
+  commenter, not `SetCaseWatchList`'s full replace, so it never disturbs
+  whatever `req.WatchList` itself already wrote. Unconditional: the
+  creator is added whether or not they named themselves (or anyone else)
+  in `watchList`, and regardless of whether they are internal or external
+  — that distinction only decides which of the two email templates a
+  watcher gets at send time (csm-notification-service), not whether the
+  creator belongs on the watch list at all. Because this writes a real
+  `work_item_watcher` row, it flows through `fetchCaseWatchers` below like
+  any other watcher — including that CTE's own `EXTERNAL`-watcher caveat:
+  an external creator shows up on the case's "Watchers" list only while
+  they are still a live, non-`DEACTIVATED` `project_contact` of that
+  project (true at creation time, since they just acted on it, but not
+  guaranteed to stay true forever).
+
   **The account's four named stakeholders are never persisted into
   `work_item_watcher` at all, on either the create or the update path —
   they're resolved fresh, straight from the account row, every time a
