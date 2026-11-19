@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1014,5 +1015,49 @@ func TestAuditMigration_DeletionGivesUpWhileAnotherRunHoldsTheLock(t *testing.T)
 				t.Errorf("%s gave up after %s, want about the 300ms timeout", call, took)
 			}
 		})
+	}
+}
+
+// updated_on and updated_by are never logged, on any table: the log row already
+// says who changed the record and when, so they would only repeat it.
+func TestAuditMigration_UpdatedOnAndUpdatedByAreNeverLogged(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	// The audit log is append-only, so a name used by an earlier run would still
+	// have its rows here: every run gets its own.
+	table := "zz_audit_test_updated_cols_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+` (id int PRIMARY KEY, note text, updated_on timestamptz, updated_by text)`)
+	// Registered with no exclusions of its own: the function leaves them out anyway.
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"')")
+	auditExec(t, pool, "INSERT INTO "+table+" VALUES (1, 'a', now(), 'someone')")
+
+	fields := func(action string) string {
+		t.Helper()
+		var got string
+		if err := pool.QueryRow(context.Background(),
+			`SELECT COALESCE(string_agg(field_name, ',' ORDER BY field_name), '') FROM csm_audit_log WHERE table_name = $1 AND action = $2`,
+			table, action).Scan(&got); err != nil {
+			t.Fatalf("fields: %v", err)
+		}
+		return got
+	}
+
+	// A change to the business column and to both stamps logs the business column only.
+	auditExec(t, pool, "UPDATE "+table+" SET note = 'b', updated_on = now() + interval '1 day', updated_by = 'other' WHERE id = 1")
+	if got := fields("UPDATE"); got != "note" {
+		t.Errorf("update logged %q, want only note", got)
+	}
+
+	// A change that touches only the stamps logs nothing at all.
+	before := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table)
+	auditExec(t, pool, "UPDATE "+table+" SET updated_on = now() + interval '2 days', updated_by = 'third' WHERE id = 1")
+	if n := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table) - before; n != 0 {
+		t.Errorf("a stamps-only update wrote %d audit rows, want 0", n)
+	}
+
+	// A delete logs every non-NULL column except the stamps.
+	auditExec(t, pool, "DELETE FROM "+table+" WHERE id = 1")
+	if got := fields("DELETE"); got != "id,note" {
+		t.Errorf("delete logged %q, want id,note", got)
 	}
 }
