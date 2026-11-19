@@ -53,7 +53,7 @@ type alertCoreMutedClient interface {
 
 // AlertMuteRuleMutedAlertsHandler serves GET /alert-mute-rules/{id}/muted-alerts. The muted alerts live in alert-core's
 // database (incidents_processed rows tagged with the rule's id), so this asks alert-core rather than entity-service.
-// A nil client means ALERT_CORE_BASE_URL / ALERT_CORE_API_TOKEN are unset; the route then answers 503.
+// A nil client means ALERT_CORE_BASE_URL is unset; the route then answers 503.
 type AlertMuteRuleMutedAlertsHandler struct {
 	alertCore alertCoreMutedClient
 }

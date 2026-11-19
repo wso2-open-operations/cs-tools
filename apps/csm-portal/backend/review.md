@@ -68,6 +68,9 @@ failure class turns up during review that isn't on this list, add it here in the
 - [ ] A new upstream error path uses `mapUpstreamErrorGeneric` by default; only use `mapUpstreamError`
       (which echoes the upstream message) for the handful of PATCH/lifecycle endpoints where the
       upstream 4xx reason is genuinely caller-actionable.
+- [ ] An upstream client built on `clientcredentials` (`oauth2.Transport`) sets `CheckRedirect` to stop at the
+      first redirect: the transport adds the token to every hop, so a followed redirect hands it to the target
+      (found moving the alert-core client off its shared token).
 - [ ] A filter/search param added to a handler is verified against a real, locally-run upstream
       service — not just a hand-written fake — before trusting that it actually narrows results.
       A fake proves the Go code calls the client correctly; it never proves the filter works.
