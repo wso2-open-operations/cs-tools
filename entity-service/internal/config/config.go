@@ -347,10 +347,10 @@ type Config struct {
 	AuditLogEnabled bool
 	// AuditLogMonthsAhead is how many months past the current one get a
 	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
-	// the audit log's own health check reports a problem every day.
+	// the audit log's own health check reports a problem on every run.
 	AuditLogMonthsAhead int
 	// AuditLogRetentionMonths is how long audit rows are kept
-	// (CSM_AUDIT_LOG_RETENTION_MONTHS, default 18, from 12 to 120). Each daily
+	// (CSM_AUDIT_LOG_RETENTION_MONTHS, default 18, from 12 to 120). Each weekly
 	// maintenance run deletes the monthly partitions that ended at least this
 	// many months ago; the data is not archived. The floor stops a typo from
 	// deleting recent history.

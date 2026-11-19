@@ -415,7 +415,7 @@ END $$;
 -- Delete the monthly partitions that ended before the retention cutoff and return
 -- their names. Each is detached and dropped in one transaction, so a failed drop puts
 -- it back. Nothing is archived. The detach locks csm_audit_log briefly; lock_timeout
--- makes it give up instead of blocking writes, and the daily run tries again.
+-- makes it give up instead of blocking writes, and the next run tries again.
 DROP FUNCTION IF EXISTS audit_retire_partitions(INT, TEXT);
 DO $install$
 BEGIN
@@ -514,7 +514,7 @@ END $install$;
 -- Empty result = healthy. Reports rows in the catch-all partition, and any of the
 -- next p_months_ahead months with no monthly partition, checked month by month so a
 -- missed month is reported the day it happens. Data past retention is not reported:
--- a failed deletion is already an error in the daily run. With no arguments it
+-- a failed deletion is already an error in the weekly run. With no arguments it
 -- checks 2 months ahead.
 DROP FUNCTION IF EXISTS audit_partition_health();
 DROP FUNCTION IF EXISTS audit_partition_health(INT, INT);
