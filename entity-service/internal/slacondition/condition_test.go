@@ -336,3 +336,45 @@ func TestRealPauseResumeConditions(t *testing.T) {
 		t.Fatal("expected pause to match once a workaround has been provided, regardless of state")
 	}
 }
+
+func TestWaitsOnAndGithubStateAreKnownFields(t *testing.T) {
+	for _, raw := range []string{"waits_on=CS", "waits_on!=CUSTOMER", "waits_onINCS,PRODUCT_TEAM", "github_state=OPEN", "github_stateINOPEN,CLOSED"} {
+		cond := Parse(raw)
+		if u := cond.UnknownClauses(); len(u) != 0 {
+			t.Errorf("%q: unexpected unknown clauses %v", raw, u)
+		}
+	}
+
+	f := newFacts()
+	f.fields["waits_on"] = "CUSTOMER"
+	f.fields["github_state"] = "OPEN"
+
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{"waits_on=CUSTOMER", true},
+		{"waits_on=CS", false},
+		{"waits_on!=CUSTOMER", false},
+		{"waits_on!=CS", true},
+		{"waits_onINCS,CUSTOMER", true},
+		{"waits_onINCS,NOBODY", false},
+		{"github_state=OPEN", true},
+		{"github_state=CLOSED", false},
+		{"github_stateINOPEN,CLOSED", true},
+		{"waits_on=CUSTOMER^github_state=OPEN", true},
+		{"waits_on=CS^ORgithub_state=OPEN", true},
+		{"waits_on=CS^github_state=OPEN", false},
+		{"waits_on=CS^NQgithub_state=OPEN", true},
+	}
+	for _, c := range cases {
+		if got := Parse(c.raw).Evaluate(f); got != c.want {
+			t.Errorf("%q: got %v want %v", c.raw, got, c.want)
+		}
+	}
+
+	// A fact source that does not report the field: = never matches.
+	if Parse("waits_on=CS").Evaluate(newFacts()) {
+		t.Error("missing waits_on must not match =")
+	}
+}

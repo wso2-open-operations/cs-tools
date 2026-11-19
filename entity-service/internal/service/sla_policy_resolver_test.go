@@ -244,3 +244,16 @@ func TestSLAPolicyResolver_Resolve_BothMatchesReturned(t *testing.T) {
 		t.Errorf("resolve() = [%q, %q], want [a-hosting-qt, b-query-open-source] (ListCandidatePolicies' own id order)", got1[0].ID, got1[1].ID)
 	}
 }
+
+func (f *fakeCandidatePolicyRepo) CancelClockByPolicyAt(context.Context, string, string, string, time.Time) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) CompleteClockByPolicyAt(context.Context, string, string, string, time.Time) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) SetPausedByPolicyAt(context.Context, string, string, string, bool, time.Time) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) RegisterWorkItemClock(context.Context, string, repository.SLAPolicyRef, time.Time) (bool, error) {
+	panic("not implemented")
+}

@@ -20,7 +20,8 @@
 // Calendar here instead of comparing schedule names itself.
 //
 // Known schedules: "" and "24 x 7" (flat wall-clock time) and "WSO2 Business
-// days" (internal/businessdays.Elapsed). Any other schedule name is unknown;
+// days" (internal/businessdays.Elapsed), plus the non-flat "CS 12x5 IST" and
+// "CS 24x7". Any other schedule name is unknown;
 // callers keep treating it as flat wall-clock time, exactly as before this
 // package existed.
 package slacalendar
@@ -37,6 +38,12 @@ const (
 	Flat24x7 = "24 x 7"
 	// WSO2BusinessDays is Monday-Friday, America/New_York.
 	WSO2BusinessDays = "WSO2 Business days"
+	// CS12x5IST is Monday-Friday 09:00-21:00 Asia/Kolkata, no holidays.
+	CS12x5IST = "CS 12x5 IST"
+	// CS24x7 is wall-clock time, registered as non-flat on purpose: non-flat
+	// clocks are computed in Go and can be given an explicit event time,
+	// while the flat SQL paths use the database NOW().
+	CS24x7 = "CS 24x7"
 )
 
 // Calendar measures how much of the interval [start, end) counts on a
@@ -55,6 +62,50 @@ func (wso2BusinessDaysCalendar) Elapsed(start, end time.Time) time.Duration {
 	return businessdays.Elapsed(start, end)
 }
 
+// istZone is Asia/Kolkata: a fixed +05:30 offset, India has no DST, so no
+// tzdata lookup is needed.
+var istZone = time.FixedZone("Asia/Kolkata", 5*3600+30*60)
+
+type cs12x5ISTCalendar struct{}
+
+// Elapsed is the part of [start, end) inside Monday-Friday 09:00-21:00 IST.
+func (cs12x5ISTCalendar) Elapsed(start, end time.Time) time.Duration {
+	if !end.After(start) {
+		return 0
+	}
+	s, e := start.In(istZone), end.In(istZone)
+	day := time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, istZone)
+	var total time.Duration
+	for ; day.Before(e); day = time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, istZone) {
+		if wd := day.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			continue
+		}
+		open := day.Add(9 * time.Hour)
+		closeAt := day.Add(21 * time.Hour)
+		lo, hi := open, closeAt
+		if s.After(lo) {
+			lo = s
+		}
+		if e.Before(hi) {
+			hi = e
+		}
+		if hi.After(lo) {
+			total += hi.Sub(lo)
+		}
+	}
+	return total
+}
+
+type cs24x7Calendar struct{}
+
+// Elapsed is end-start floored at zero, like the flat calendar.
+func (cs24x7Calendar) Elapsed(start, end time.Time) time.Duration {
+	if d := end.Sub(start); d > 0 {
+		return d
+	}
+	return 0
+}
+
 type entry struct {
 	cal Calendar
 	// flat reports that the schedule is plain wall-clock time, which the
@@ -66,11 +117,13 @@ var registry = map[string]entry{
 	"":               {cal: flatCalendar{}, flat: true},
 	Flat24x7:         {cal: flatCalendar{}, flat: true},
 	WSO2BusinessDays: {cal: wso2BusinessDaysCalendar{}},
+	CS12x5IST:        {cal: cs12x5ISTCalendar{}},
+	CS24x7:           {cal: cs24x7Calendar{}},
 }
 
 // nonFlat lists, in a stable order, the schedule names whose calendar is not
 // flat.
-var nonFlat = []string{WSO2BusinessDays}
+var nonFlat = []string{WSO2BusinessDays, CS12x5IST, CS24x7}
 
 // Flat is the flat wall-clock calendar.
 func Flat() Calendar { return flatCalendar{} }

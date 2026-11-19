@@ -745,3 +745,19 @@ func TestSLAEngineService_ReviseCaseClocks_AbortsOnPolicyLookupFailure(t *testin
 		t.Errorf("registered = %v, want none -- a policy lookup failure must abort before ReviseClocks is ever called", repo.registered)
 	}
 }
+
+func (r *fakeFullSLAEngineRepo) CancelClockByPolicyAt(context.Context, string, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeFullSLAEngineRepo) CompleteClockByPolicyAt(context.Context, string, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeFullSLAEngineRepo) SetPausedByPolicyAt(context.Context, string, string, string, bool, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeFullSLAEngineRepo) RegisterWorkItemClock(context.Context, string, repository.SLAPolicyRef, time.Time) (bool, error) {
+	return false, nil
+}
