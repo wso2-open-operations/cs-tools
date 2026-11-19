@@ -984,3 +984,53 @@ func TestWindowTextNamesBothDaysAcrossMidnight(t *testing.T) {
 		t.Errorf("same-day windowText = %q, want %q", got, want)
 	}
 }
+
+// After the SaaS weekend moves to Day/Night (SRE_WE_DAY 06:00-18:00, SRE_WE_NIGHT
+// 18:00-06:00 IST) the summary lists those turns the same way, under the same
+// group names, with their own hours.
+func TestWeekendNotice_ListsTheSREDayNightWeekendTurns(t *testing.T) {
+	var sre []teamschedule.Assignment
+	for _, a := range sreWeekend() {
+		switch a.ShiftCode {
+		case "SRE_WE_TZ1":
+			a.ShiftCode = "SRE_WE_DAY"
+			a = assignmentAt(a, "06:00", "18:00", false)
+		case "SRE_TZ3":
+			a.ShiftCode = "SRE_WE_NIGHT"
+			a = assignmentAt(a, "18:00", "06:00", true)
+		}
+		sre = append(sre, a)
+	}
+	rota := &fakeRota{assignments: fullWeekend(), other: map[string][]teamschedule.Assignment{"SRE": sre}}
+	mail := &fakeEmail{}
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
+	cfg.Support = SREWeekendSupport()
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation")
+	for _, want := range []string{"Kim (L1)", "Lee (L2)", "Oli (L2)", "Max (L1)", "SRE Weekend", "SRE Night", "06:00 PM &#8211; 06:00 AM IST"} {
+		if !strings.Contains(summary.body, want) {
+			t.Errorf("summary lacks %q:\n%s", want, summary.body)
+		}
+	}
+	for _, unwanted := range []string{"Pat", "(Day)", "(Weekend Night)"} {
+		if strings.Contains(summary.body, unwanted) {
+			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
+		}
+	}
+}
+
+// assignmentAt moves a to the window [from, to) IST on its own rota day,
+// with to on the next day when overnight.
+func assignmentAt(a teamschedule.Assignment, from, to string, overnight bool) teamschedule.Assignment {
+	day := a.RotaDate
+	next := day
+	if overnight {
+		d, _ := time.Parse("2006-01-02", day)
+		next = d.AddDate(0, 0, 1).Format("2006-01-02")
+	}
+	b := assignment(a.Engineer.Name, a.Engineer.Email, a.TeamKey, a.ShiftCode, day, day+" "+from, next+" "+to)
+	b.Tier = a.Tier
+	return b
+}

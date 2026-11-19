@@ -29,7 +29,9 @@ import {
 import { useMemo, type JSX } from "react";
 import type { GeneratedRotaTurn, GenerateRotaResult } from "../api/useGenerateRota";
 
-/** The zone a generated turn is on. The weekend window covers TZ1 and TZ2. */
+/** The zone a generated turn is on. The weekend day window covers TZ1 and
+ *  TZ2: SRE_WE_TZ1 (06:00-21:00), or SRE_WE_DAY (06:00-18:00) once the weekend
+ *  is Day/Night, when SRE_WE_NIGHT (18:00-06:00) takes TZ3's place. */
 const ZONE_OF: Record<string, "TZ1" | "TZ2" | "TZ3" | "WE"> = {
   SRE_TZ1_L1: "TZ1",
   SRE_TZ1: "TZ1",
@@ -37,7 +39,12 @@ const ZONE_OF: Record<string, "TZ1" | "TZ2" | "TZ3" | "WE"> = {
   SRE_TZ2: "TZ2",
   SRE_TZ3: "TZ3",
   SRE_WE_TZ1: "WE",
+  SRE_WE_DAY: "WE",
+  SRE_WE_NIGHT: "TZ3",
 };
+
+/** The weekend Day/Night windows, whose cells are named Day and Night. */
+const DAY_NIGHT = new Set(["SRE_WE_DAY", "SRE_WE_NIGHT"]);
 
 const TIERS = ["L1", "L2", "L3"] as const;
 
@@ -45,6 +52,8 @@ interface DayRow {
   date: string;
   teamKey: string;
   zones: Partial<Record<"TZ1" | "TZ2" | "TZ3" | "WE", Partial<Record<(typeof TIERS)[number], string>>>>;
+  /** A Day/Night weekend: its day cell reads "Day", its night cell "Night". */
+  dayNight?: boolean;
 }
 
 function dayLabel(iso: string): string {
@@ -83,6 +92,7 @@ export default function GeneratedRotaPreview({ result, teamNames = {} }: Generat
       }
       const zone = ZONE_OF[t.shiftCode];
       row.zones[zone] = { ...row.zones[zone], [t.tier]: t.name || t.userId };
+      if (DAY_NIGHT.has(t.shiftCode)) row.dayNight = true;
     }
     return [...byKey.values()].sort((a, b) => a.date.localeCompare(b.date) || a.teamKey.localeCompare(b.teamKey));
   }, [result.turns]);
@@ -110,14 +120,19 @@ export default function GeneratedRotaPreview({ result, teamNames = {} }: Generat
                   <TableCell sx={{ whiteSpace: "nowrap" }}>{dayLabel(r.date)}</TableCell>
                   <TableCell>{team(r.teamKey)}</TableCell>
                   {r.zones.WE ? (
-                    <TableCell colSpan={2}>Weekend day: {cellText(r.zones.WE)}</TableCell>
+                    <TableCell colSpan={2}>
+                      {r.dayNight ? "Day" : "Weekend day"}: {cellText(r.zones.WE)}
+                    </TableCell>
                   ) : (
                     <>
                       <TableCell>{cellText(r.zones.TZ1)}</TableCell>
                       <TableCell>{cellText(r.zones.TZ2)}</TableCell>
                     </>
                   )}
-                  <TableCell>{cellText(r.zones.TZ3)}</TableCell>
+                  <TableCell>
+                    {r.dayNight && r.zones.TZ3 ? "Night: " : ""}
+                    {cellText(r.zones.TZ3)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

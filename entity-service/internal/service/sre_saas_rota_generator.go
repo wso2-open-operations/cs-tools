@@ -40,6 +40,15 @@ import (
 //	TZ3 L1 / L2 / L3, every night      SRE_TZ3, tier L1 / L2 / L3: ONE crew for
 //	                                   the whole rota, not one per team
 //
+// Weekends have a second shape, Day/Night (06:00-18:00 and 18:00-06:00 IST):
+// the same people on SRE_WE_DAY instead of SRE_WE_TZ1, and the night crew on
+// SRE_WE_NIGHT instead of SRE_TZ3. Only the hours differ, so only the codes a
+// weekend is written on change (saasWeekendShifts). Which shape a run uses is
+// saasRotaInput.WeekendDayNight, which the service reads off the catalogue:
+// the two Day/Night windows are seeded inactive (migration 0305) and switched
+// on, with SRE_WE_TZ1 retired and SRE_TZ3 made weekday-only, in the week
+// before the first Day/Night weekend. Weekdays are the same in both shapes.
+//
 // TZ3 is the night cover. Its three people answer an Apollo and an Artemis
 // incident alike -- the pager calls whoever holds the tier when the
 // incident's own team holds none -- so a night has one L1, one L2 and one
@@ -51,26 +60,54 @@ import (
 // of the L1 rotation, exactly as the sheet did. Nobody is written as RnD
 // either: a weekday with nothing on it is a working day already.
 const (
-	saasShiftTZ1L1      = "SRE_TZ1_L1"
-	saasShiftTZ1        = "SRE_TZ1"
-	saasShiftTZ2L1      = "SRE_TZ2_L1"
-	saasShiftTZ2        = "SRE_TZ2"
-	saasShiftTZ3        = "SRE_TZ3"
-	saasShiftWeekend    = "SRE_WE_TZ1"
-	saasShiftTZ3Regular = "SRE_TZ3_REGULAR"
-	saasShiftTZ1Regular = "SRE_TZ1_REGULAR"
-	saasShiftTZ2Regular = "SRE_TZ2_REGULAR"
+	saasShiftTZ1L1        = "SRE_TZ1_L1"
+	saasShiftTZ1          = "SRE_TZ1"
+	saasShiftTZ2L1        = "SRE_TZ2_L1"
+	saasShiftTZ2          = "SRE_TZ2"
+	saasShiftTZ3          = "SRE_TZ3"
+	saasShiftWeekend      = "SRE_WE_TZ1"
+	saasShiftWeekendDay   = "SRE_WE_DAY"
+	saasShiftWeekendNight = "SRE_WE_NIGHT"
+	saasShiftTZ3Regular   = "SRE_TZ3_REGULAR"
+	saasShiftTZ1Regular   = "SRE_TZ1_REGULAR"
+	saasShiftTZ2Regular   = "SRE_TZ2_REGULAR"
 
 	saasTierL1 = "L1"
 	saasTierL2 = "L2"
 	saasTierL3 = "L3"
 )
 
-// saasRotaShiftCodes is every shift the generator writes or reads, so the
-// service can refuse to run against a catalogue that lacks one.
+// saasRotaShiftCodes is every shift the generator writes or reads on either
+// weekend shape, so the service can refuse to run against a catalogue that
+// lacks one. The weekend's own codes are checked apart (saasWeekendShapes):
+// the catalogue holds one shape or the other, never needs both.
 var saasRotaShiftCodes = []string{
 	saasShiftTZ1L1, saasShiftTZ1, saasShiftTZ2L1, saasShiftTZ2,
-	saasShiftTZ3, saasShiftWeekend, saasShiftTZ3Regular, saasShiftTZ1Regular, saasShiftTZ2Regular,
+	saasShiftTZ3, saasShiftTZ3Regular, saasShiftTZ1Regular, saasShiftTZ2Regular,
+}
+
+// saasWeekendShifts is what one weekend shape is written on: the day crew's
+// window and the night crew's, with the zone names its warnings use.
+type saasWeekendShifts struct {
+	day, night         string // shift codes
+	dayZone, nightZone string // names in warnings: "TZ1+2" / "TZ3 weekend", or "Day" / "Night"
+}
+
+var (
+	saasWeekendTZ = saasWeekendShifts{
+		day: saasShiftWeekend, night: saasShiftTZ3, dayZone: "TZ1+2", nightZone: "TZ3 weekend",
+	}
+	saasWeekendDayNight = saasWeekendShifts{
+		day: saasShiftWeekendDay, night: saasShiftWeekendNight, dayZone: "Day", nightZone: "Night",
+	}
+)
+
+// saasSharedShift is whether each tier of the shift is one person for the
+// whole rota (the night crew), not one per team: TZ3, and the weekend Night
+// that takes its place at the weekend (both shared_across_teams in the
+// catalogue).
+func saasSharedShift(code string) bool {
+	return code == saasShiftTZ3 || code == saasShiftWeekendNight
 }
 
 // saasRotaEpoch is the script's week zero, Monday 1 January 2024. Week
@@ -129,6 +166,9 @@ type saasRotaInput struct {
 	NightTeam map[string]map[string]string
 	// Windows is shift code -> [start, end) minute of the day, from the catalogue.
 	Windows map[string][2]int
+	// WeekendDayNight writes weekends on SRE_WE_DAY / SRE_WE_NIGHT instead of
+	// SRE_WE_TZ1 / SRE_TZ3. The people are the same either way.
+	WeekendDayNight bool
 }
 
 // saasPlannedTurn is one turn the month should hold.
@@ -193,6 +233,7 @@ type saasGenerator struct {
 	nightWeeks   map[int][]string // week -> its night people, when rotating
 	crew         []string         // the chosen TZ3 people, every team's, members only
 	inCrew       map[string]bool  // user id -> on the chosen TZ3 crew
+	we           saasWeekendShifts
 }
 
 // generateSRESaaSRota works out one month of the SaaS rota.
@@ -225,6 +266,10 @@ func newSaasGenerator(in saasRotaInput) *saasGenerator {
 		lieuSeen:   map[string]bool{},
 		lieuDays:   map[string][]string{},
 		nightWeeks: map[int][]string{},
+		we:         saasWeekendTZ,
+	}
+	if in.WeekendDayNight {
+		g.we = saasWeekendDayNight
 	}
 	members := append([]saasRotaMember(nil), in.Members...)
 	sort.SliceStable(members, func(i, j int) bool {
@@ -488,10 +533,10 @@ func (g *saasGenerator) weekend(d time.Time, emit bool) {
 	iso := saasISO(d)
 	taken := map[string]bool{} // everyone on a weekend turn today
 	for _, team := range g.teams {
-		oncall, esc := g.weekendCrew(team, "TZ1+2", g.dayPool(team, satWeek), sat, satWeek, nil)
+		oncall, esc := g.weekendCrew(team, g.we.dayZone, g.dayPool(team, satWeek), sat, satWeek, nil)
 		if emit {
-			g.turn(oncall, team, saasShiftWeekend, saasTierL1, iso, fmt.Sprintf("%s weekend on-call", team))
-			g.turn(esc, team, saasShiftWeekend, saasTierL2, iso, fmt.Sprintf("%s weekend escalation", team))
+			g.turn(oncall, team, g.we.day, saasTierL1, iso, fmt.Sprintf("%s weekend on-call", team))
+			g.turn(esc, team, g.we.day, saasTierL2, iso, fmt.Sprintf("%s weekend escalation", team))
 		}
 		g.lieuFor(oncall, sat, emit)
 		for _, p := range []string{oncall, esc} {
@@ -505,7 +550,7 @@ func (g *saasGenerator) weekend(d time.Time, emit bool) {
 	// night's on-call and earns the lieu.
 	nights := g.weekendNights(sat, satWeek, taken)
 	if len(g.crew) > 0 && len(nights) < saasNightTiers && emit {
-		g.warnCrewShort(iso, "TZ3 weekend", len(nights))
+		g.warnCrewShort(iso, g.we.nightZone, len(nights))
 	}
 	for i, tier := range []string{saasTierL1, saasTierL2, saasTierL3} {
 		p := saasAt(nights, i)
@@ -513,7 +558,7 @@ func (g *saasGenerator) weekend(d time.Time, emit bool) {
 			taken[p] = true
 		}
 		if emit {
-			g.turn(p, "", saasShiftTZ3, tier, iso, g.nightSlot("TZ3 weekend "+tier))
+			g.turn(p, "", g.we.night, tier, iso, g.nightSlot(g.we.nightZone+" "+tier))
 		}
 	}
 	g.lieuFor(saasAt(nights, 0), sat, emit)
@@ -522,7 +567,7 @@ func (g *saasGenerator) weekend(d time.Time, emit bool) {
 	}
 	for _, team := range g.teams {
 		g.l3(team, []saasL3Zone{
-			{saasShiftWeekend, "TZ1+2", g.dayPool(team, satWeek)},
+			{g.we.day, g.we.dayZone, g.dayPool(team, satWeek)},
 		}, g.nightPool(satWeek), satWeek, iso, taken, map[string]string{})
 	}
 }
