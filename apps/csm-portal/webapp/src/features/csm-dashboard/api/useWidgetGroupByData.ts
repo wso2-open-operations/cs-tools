@@ -38,6 +38,7 @@ import {
   withWidgetFetchSlot,
 } from "@features/csm-dashboard/utils/widgetFetchConcurrency";
 import { formatDayLabel } from "@features/csm-dashboard/utils/timeCardTotals";
+import { hasStaffNameMarker, stripStaffNameMarker } from "@utils/staffNameMarker";
 import { usesCaseFieldFilterDsl } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
 import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/useWidgetPieData";
 
@@ -315,7 +316,10 @@ export function useWidgetGroupByData(
 
   const dayLabels = resourceType === "time_card" && groupBy?.field === "day";
   const slices: PieSliceResult[] = buckets.map((bucket) => ({
-    label: dayLabels ? formatDayLabel(bucket.label) : bucket.label,
+    // A person's name (an owner, an assignee, a time card's user) can carry
+    // the circled-W staff marker: drawn without it, with the staff badge.
+    label: dayLabels ? formatDayLabel(bucket.label) : stripStaffNameMarker(bucket.label) || bucket.label,
+    ...(!dayLabels && hasStaffNameMarker(bucket.label) ? { isStaff: true } : {}),
     // Scopes this slice's own click-through to exactly this bucket (see
     // `bucketQuery`'s own doc comment) — an empty `query` here would merge
     // to the widget's unfiltered base result set instead of this bucket's,
