@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
@@ -93,7 +94,7 @@ type salesforceProjectIDLookup interface {
 // row lock after stored-state checks and before the UPDATE. Satisfied by
 // *repository.projectRepo.
 type projectUpdateBeforeCommit interface {
-	UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context) error) (domain.ProjectUpdateResult, error)
+	UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error)
 }
 
 // NewProjectUpdateService constructs a ProjectUpdateService backed by
@@ -176,8 +177,11 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	// repository the Salesforce call sits inside the update transaction,
 	// after the stored-state checks and before the UPDATE.
 	var wroteSalesforce bool
-	suspend := func(ctx context.Context) error {
-		if err := s.suspendInSalesforce(ctx, id, req); err != nil {
+	// sfID is the project's Salesforce id. The Postgres path passes the value
+	// read on the update transaction's own connection. The fallback path looks
+	// it up before opening that transaction.
+	writeStatus := func(ctx context.Context, sfID string) error {
+		if err := s.suspendInSalesforce(ctx, sfID, req); err != nil {
 			return err
 		}
 		if s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
@@ -188,9 +192,20 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 
 	var result domain.ProjectUpdateResult
 	if hook, ok := s.repo.(projectUpdateBeforeCommit); ok && s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
-		result, err = hook.UpdateProjectBeforeCommit(ctx, id, req, updatedBy, suspend)
+		result, err = hook.UpdateProjectBeforeCommit(ctx, id, req, updatedBy, writeStatus)
 	} else {
-		if err = suspend(ctx); err != nil {
+		sfID := ""
+		if s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
+			lookup, ok := s.repo.(salesforceProjectIDLookup)
+			if !ok {
+				return domain.ProjectUpdateResponse{}, fmt.Errorf("update project: salesforce status write has no project id lookup")
+			}
+			sfID, err = lookup.SalesforceProjectID(ctx, id)
+			if err != nil {
+				return domain.ProjectUpdateResponse{}, err
+			}
+		}
+		if err = writeStatus(ctx, sfID); err != nil {
 			return domain.ProjectUpdateResponse{}, err
 		}
 		result, err = s.repo.UpdateProject(ctx, id, req, updatedBy)
@@ -238,18 +253,11 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 // value, and a service with no client, is a no-op. A project with no
 // Salesforce id is refused before the CSM write: there is nowhere to put the
 // status the admin asked Salesforce to show.
-func (s *pgProjectUpdateService) suspendInSalesforce(ctx context.Context, id string, req domain.ProjectUpdateRequest) error {
+func (s *pgProjectUpdateService) suspendInSalesforce(ctx context.Context, sfID string, req domain.ProjectUpdateRequest) error {
 	if s.salesEntity == nil || !closureOverrideSuspends(req.ClosureState) {
 		return nil
 	}
-	lookup, ok := s.repo.(salesforceProjectIDLookup)
-	if !ok {
-		return fmt.Errorf("update project: salesforce status write has no project id lookup")
-	}
-	sfID, err := lookup.SalesforceProjectID(ctx, id)
-	if err != nil {
-		return err
-	}
+	sfID = strings.TrimSpace(sfID)
 	if sfID == "" {
 		return &apierror.ValidationError{Msg: "project has no Salesforce id, so its Salesforce status cannot be set to Suspended"}
 	}

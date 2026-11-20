@@ -93,16 +93,17 @@ type fakeProjectStatusWriter struct {
 type hookedProjectUpdateRepo struct {
 	stubProjectUpdateRepo
 	reject            error
+	salesforceID      string
 	beforeCommitCalls int
 }
 
-func (r *hookedProjectUpdateRepo) UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, before func(context.Context) error) (domain.ProjectUpdateResult, error) {
+func (r *hookedProjectUpdateRepo) UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, before func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
 	if r.reject != nil {
 		return domain.ProjectUpdateResult{}, r.reject
 	}
 	if before != nil {
 		r.beforeCommitCalls++
-		if err := before(ctx); err != nil {
+		if err := before(ctx, r.salesforceID); err != nil {
 			return domain.ProjectUpdateResult{}, err
 		}
 	}
@@ -856,6 +857,18 @@ func TestPgProjectUpdateService_AdminSuspendWritesSalesforceFirst(t *testing.T) 
 		}
 		if sf.calls != 0 || repo.beforeCommitCalls != 0 {
 			t.Fatalf("salesforce calls = %d, beforeCommit calls = %d", sf.calls, repo.beforeCommitCalls)
+		}
+	})
+
+	t.Run("transaction path uses the id read with the row", func(t *testing.T) {
+		repo := &hookedProjectUpdateRepo{salesforceID: "a0dFromRow"}
+		sf := &fakeProjectStatusWriter{}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended}); err != nil {
+			t.Fatalf("UpdateProject: %v", err)
+		}
+		if sf.calls != 1 || sf.gotID != "a0dFromRow" {
+			t.Fatalf("salesforce calls = %d id %q", sf.calls, sf.gotID)
 		}
 	})
 

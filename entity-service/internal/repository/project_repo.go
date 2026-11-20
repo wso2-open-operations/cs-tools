@@ -757,14 +757,15 @@ func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.P
 
 // UpdateProjectBeforeCommit is UpdateProject with a call that runs inside the
 // row lock, after the account, onboarding-owner, and stored-date checks, and
-// before the UPDATE. A failure from beforeCommit rolls the transaction back
-// with nothing written. The project update service uses it to set Salesforce
-// State__c only once those checks have passed.
-func (r *projectRepo) UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context) error) (domain.ProjectUpdateResult, error) {
+// before the UPDATE. The call receives the project's Salesforce id as read on
+// this transaction's connection. A failure from beforeCommit rolls the
+// transaction back with nothing written. The project update service uses it
+// to set Salesforce State__c only once those checks have passed.
+func (r *projectRepo) UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
 	return r.updateProject(ctx, id, req, updatedBy, beforeCommit)
 }
 
-func (r *projectRepo) updateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context) error) (domain.ProjectUpdateResult, error) {
+func (r *projectRepo) updateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
 	if err := ValidateProjectUpdate(req); err != nil {
 		return domain.ProjectUpdateResult{}, err
 	}
@@ -788,17 +789,17 @@ func firstDate(a, b *time.Time) *time.Time {
 }
 
 // updateProjectTx is UpdateProject's body, run inside tx.
-func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context) error) (domain.ProjectUpdateResult, error) {
+func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
 	// Lock the row first (mirrors CaseRepository.UpdateCase's own
 	// lock-before-read reasoning) so the account_id this reads is accurate
 	// even under a concurrent update to the same project, and so a
 	// nonexistent id is caught as NotFoundError before either UPDATE below
 	// runs.
-	var accountID *string
+	var accountID, salesforceID *string
 	var stored OnboardingDates
 	err := tx.QueryRow(ctx, `SELECT account_id, onboarding_start_date, onboarding_go_live_plan_date, onboarding_go_live_date, onboarding_expiry_date,
-		onboarding_production_readiness_completion_date
-		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry, &stored.ProductionReadiness)
+		onboarding_production_readiness_completion_date, sf_id
+		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry, &stored.ProductionReadiness, &salesforceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProjectUpdateResult{}, &apierror.NotFoundError{Msg: "project not found"}
 	}
@@ -863,10 +864,16 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		return domain.ProjectUpdateResult{}, err
 	}
 
-	// After every check that can reject the request from stored state. A
-	// failure here aborts the transaction with no project row change.
+	// After every check that can reject the request from stored state. The
+	// Salesforce id is the one just read on this transaction's connection, so
+	// the callback does not take a second pool connection while this one is
+	// held. A failure here aborts the transaction with no project row change.
 	if beforeCommit != nil {
-		if err := beforeCommit(ctx); err != nil {
+		sfID := ""
+		if salesforceID != nil {
+			sfID = strings.TrimSpace(*salesforceID)
+		}
+		if err := beforeCommit(ctx, sfID); err != nil {
 			return domain.ProjectUpdateResult{}, err
 		}
 	}
