@@ -1,0 +1,21 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- A Product Issue is a work item of its own (PI number, product_issue, migration
+-- 0304): the support case's internal counterpart, backed by one GitHub issue in a
+-- product team's repository. Kept in its own file: ALTER TYPE ... ADD VALUE
+-- can't run in the same transaction as a statement that uses the new value.
+ALTER TYPE work_item_type_enum ADD VALUE IF NOT EXISTS 'PRODUCT_ISSUE';

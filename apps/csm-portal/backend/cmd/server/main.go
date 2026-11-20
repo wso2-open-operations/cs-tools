@@ -145,6 +145,12 @@ func main() {
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
+	// Optional: GIT_INTERNALS_ENABLED=true makes POST /cases/{id}/github-issues
+	// forward to the entity service's product-work-items endpoint, and registers
+	// the product work item read and link routes. Off (the default) leaves the
+	// engineering and entity-service paths below exactly as they were.
+	gitInternalsOn := loadGitInternalsEnabled()
+	caseHandler.WithGitInternals(gitInternalsOn)
 	// Optional: with the engineering entity service configured, "Open Git issue"
 	// (POST /cases/{id}/github-issues) files the issue through it rather than
 	// forwarding to the entity service. It authenticates as the same shared
@@ -535,6 +541,17 @@ func main() {
 	route("POST /call-requests/search", handler.PermView, caseHandler.SearchAllCallRequests)
 	route("PATCH /cases/{caseId}/call-requests/{callRequestId}", handler.PermWrite, caseHandler.PatchCallRequest)
 	route("POST /cases/{id}/github-issues", handler.PermWrite, caseHandler.CreateCaseGithubIssue)
+	// Product work items (git internals): registered only with
+	// GIT_INTERNALS_ENABLED=true, so with it off these paths 404 like any unknown
+	// one. The entity service re-checks that the caller is internal.
+	if gitInternalsOn {
+		productWorkItemHandler := handler.NewProductWorkItemHandler(customerEntityClient).WithAccessGuard(accessGuard)
+		route("GET /cases/{id}/product-work-items", handler.PermView, productWorkItemHandler.ListCaseProductWorkItems)
+		route("POST /cases/{id}/product-work-items/links", handler.PermWrite, productWorkItemHandler.LinkCaseProductWorkItem)
+		route("DELETE /cases/{id}/product-work-items/{workItemId}/link", handler.PermWrite, productWorkItemHandler.UnlinkCaseProductWorkItem)
+		route("GET /product-work-items/{id}", handler.PermView, productWorkItemHandler.GetProductWorkItem)
+		route("POST /product-work-items/search", handler.PermView, productWorkItemHandler.SearchProductWorkItems)
+	}
 	route("POST /cases/{id}/tags", handler.PermWrite, caseHandler.AddCaseTag)
 	route("DELETE /cases/{id}/tags/{tagId}", handler.PermWrite, caseHandler.RemoveCaseTag)
 	route("POST /tags/search", handler.PermView, caseHandler.SearchTags)
@@ -1499,6 +1516,25 @@ func validateAnnouncementDataSourceCompatibility(dataSource string, excludedProj
 		slog.Error(err.Error())
 		os.Exit(1)
 	}
+}
+
+// gitInternalsFlag is the env var for the git-internals feature.
+const gitInternalsFlag = "GIT_INTERNALS_ENABLED"
+
+// gitInternalsEnabled is the pure parse behind loadGitInternalsEnabled: exactly
+// "true" (after trimming whitespace) is on; unset, empty or anything else
+// ("TRUE", "1", "yes") is off, like the other cutover flags.
+func gitInternalsEnabled(raw string) bool {
+	return strings.TrimSpace(raw) == "true"
+}
+
+// loadGitInternalsEnabled reads GIT_INTERNALS_ENABLED. Off by default.
+func loadGitInternalsEnabled() bool {
+	enabled := gitInternalsEnabled(os.Getenv(gitInternalsFlag))
+	if enabled {
+		slog.Info(gitInternalsFlag + " is on: POST /cases/{id}/github-issues forwards to the entity service's product-work-items endpoint and the product work item routes are registered")
+	}
+	return enabled
 }
 
 // onboardingStatusFlag is the env var gating GET /projects/{id}/onboarding-steps.

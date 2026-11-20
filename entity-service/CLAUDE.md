@@ -19,7 +19,7 @@ Handler → Service → Repository → PostgreSQL (pgx/v5)
 
 All wiring happens explicitly in `internal/server/routes.go` (no DI framework). The full dependency graph is built there: `NewRepository(db) → NewService(repo) → NewHandler(svc)`, then registered on a `net/http.ServeMux`.
 
-Middleware chain wraps the mux: **CorrelationID → Recovery → Logger → UserIDToken → auth.Middleware → Timeout** (10 s per request; `auth.Middleware` was missing from this list before — see "Token validation and caller-scoped access" below for what it does).
+Middleware chain wraps the mux: **CorrelationID → Recovery → Logger → UserIDToken → auth.Middleware → Timeout** (`REQUEST_TIMEOUT`, default 60 s per request; `auth.Middleware` was missing from this list before — see "Token validation and caller-scoped access" below for what it does).
 
 `CorrelationID` reads the `X-CSM-Correlation-ID` request header forwarded by the portal BFF, or generates a UUID v4 if absent. The ID is stored in the request context and echoed in the response header. All access log lines and panic logs include the correlation ID for end-to-end request tracing.
 
@@ -65,6 +65,13 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
+| `GIT_INTERNALS_ENABLED` | no | `false` | Must be `"true"` to register the git-internals routes (`POST /cases/{id}/product-work-items`, internal only). Also needs a pool and `ENGINEERING_ENTITY_BASE_URL`. Off means the routes are **not registered at all** |
+| `GIT_INTERNALS_BOT_LOGINS` | no | — | Comma-separated GitHub logins of the portal's own accounts. A comment they post on a linked product issue is not mirrored back (comments only; their issue and board events are applied). **No login is ignored unless listed: set it to the bot account(s) the engineering entity writes as, or the comments the portal posts to GitHub are mirrored back as new comments** (startup logs a WARN while it is empty and git internals is active). `github-project-automation[bot]` is never ignored even if listed. Entries with spaces or `<>"'@/\` refuse to start |
+| `ENGINEERING_ENTITY_BASE_URL` | no* | — | WSO2 engineering entity service base URL. *Required when the gate is on or any `ENGINEERING_ENTITY_*` var is set |
+| `ENGINEERING_ENTITY_TOKEN_URL` | no* | — | OAuth2 token endpoint. Token URL, client id and client secret are all-or-none; with none set the client sends no `Authorization` header (local use) and startup logs a WARN |
+| `ENGINEERING_ENTITY_CLIENT_ID` | no* | — | OAuth2 client id |
+| `ENGINEERING_ENTITY_CLIENT_SECRET` | no* | — | OAuth2 client secret. Secret |
+| `ENGINEERING_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes |
 | `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
@@ -13503,3 +13510,153 @@ and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for
 `NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
 clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
 `/cases/search` only: aggregate, announcement-registry and every other search ignore it.
+
+## Product issues (internal GitHub issues raised from a case)
+
+Work item type `PRODUCT_ISSUE` (number series `PI`, migrations 0303-0305 and 100029): an
+issue in a product team's internal repository, raised from a support case. Tables:
+`product_issue` (extension), `github_issue_link` (the GitHub side, one row per GitHub-backed
+work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active per issue),
+`work_item_status_event` (status history, `dedupe_key` unique), `comment_github_ref`,
+`board_status_map` (one global map of board column → normalised status) and
+`work_item_creation_request` (idempotency of the create endpoint).
+
+- **Internal only.** Every new table is internal-only under RLS. Product issues copy the
+  case's `project_id`, so `work_item` has a RESTRICTIVE policy, `work_item_internal_only_types`,
+  that hides the types listed in `work_item_type_is_internal_only()` from non-internal
+  sessions; child tables follow through their own `work_item` subqueries. A later
+  internal-only type is added to that one function. `sla`, `work_item_feedback` and
+  `case_autoclosure_event` have no RLS at all: never write product-issue rows there without
+  checking every customer-facing reader.
+- **Never set `work_item.github_*`** on a product issue or its case: the comment trigger
+  (0206) would send the case's comments to that repository. The GitHub side lives in
+  `github_issue_link` only.
+- `product_repo_mapping.board_project_number` / `is_internal` say which board tracks a
+  product's issues and whether its repository is internal; rows are maintained by hand.
+- **Create endpoint** `POST /cases/{id}/product-work-items` (`GIT_INTERNALS_ENABLED=true`, an
+  `ENGINEERING_ENTITY_*` base URL and a Postgres pool, else not registered; `internalOnly`). Files
+  the issue through `internal/engineeringentity` (Choreo OAuth2 client credentials; no token
+  settings = no `Authorization` header, for a local engineering entity) in the repository mapped
+  to the case's product, then registers the product issue, link and case link in one
+  transaction. `Type/Patch` registers no work item (kind `UNTRACKED_PATCH`). After that commit
+  the `patch` case tag (patch only) and the "GitHub issue filed" work note are written through
+  the case service (`AddCaseTagAs`, `CreateCaseCommentAs`), so its follow-ups run as for any
+  note (comment event, ServiceNow mirror in dual-write); the request stays GITHUB_CREATED until
+  both succeed, and a retry redoes them (a duplicate note is possible only if the final
+  COMPLETED write fails after the note). Idempotent on `(case, idempotencyKey)` in
+  `work_item_creation_request`: PENDING → GITHUB_CREATED (recorded straight after the create) →
+  COMPLETED; an ambiguous failure (timeout, 5xx, 408/409/425/429, a failed GITHUB_CREATED write;
+  only 400/401/403/404/422 are definite, `engineeringentity.Error.Definite`) leaves PENDING with a
+  note and the retry searches the repository's recent `Origin/CS` issues for the earlier attempt's
+  (same title, footer lines `WSO2 case id` and `Opened by`) before creating again. A row
+  that is in flight (no note) is leased 2 minutes, an ambiguous one 60 seconds since its last write
+  (`productRequestLease`, `productAmbiguousLease`; 409 `request_in_progress` meanwhile). Only a
+  row this attempt inserted or retried after FAILED is ever marked FAILED; a refusal on an
+  inherited PENDING row keeps it PENDING. Footer and labels are in
+  `service/product_issue_github_body.go` (the footer is parsed by workflows in the product
+  repositories: keep its seven lines; O19 labels `Type/Patch` only, `Affected/Onboarding`).
+- **Internal-only types on the case routes.** `repository.InternalOnlyWorkItemTypes` (a denylist,
+  kept in step with `work_item_type_is_internal_only()`; an integration test compares them) is
+  refused with the route's normal 404 on `PATCH /cases/{id}`, `POST /cases/{id}/comments`,
+  `POST /cases/{id}/comments/search`, `POST /cases/{id}/tags`, `DELETE /cases/{id}/tags/{tagId}`,
+  `GET /cases/{id}/escalations` and `POST /cases/{id}/sla/recalculate`
+  (`guardCaseID` / `refuseInternalOnlyWorkItem` in `internal/server`, one lookup per request).
+  The guard is wired **only when git internals is active** (`GIT_INTERNALS_ENABLED`, base URL, a
+  pool, not the ServiceNow data source): with the flag off these routes are not wrapped. It
+  **fails open**: a database error in the lookup logs a WARN with the work item id and passes the
+  request on to the route. The other id-addressed case routes already refuse a product issue by
+  their own SQL (case-like type filter or a join to `"case"`). `POST /attachments/search`
+  for a case (`SearchCaseAttachments`) and the stored-attachment parent lookup.
+- **Inbound webhook branch** (`service/product_issue_webhook.go`, `repository/product_issue_sync_repo.go`,
+  wired by `server/github_delivery_wiring.go`). `POST /github/deliveries` is registered when the customer
+  sync is on **or** git internals is active (`newGithubDeliveryService`; the service-request routes still need
+  the customer sync). With git internals off nothing is wrapped: the route and the code are as before.
+  With it on, `productIssueFrontDoor` offers each `issues` / `issue_comment` / `projects_v2_item` delivery to
+  `ProductIssueDeliveries` first (the handler passes the body as `Delivery.Raw`; a richer struct is decoded
+  from it). A delivery is the branch's when its issue (owner/repository/number, case-insensitive) or its board
+  item's `content_node_id` has a `github_issue_link`; otherwise it goes to the customer path unchanged (and is
+  skipped when that sync is off). Only a delivery that will write is claimed (`ClaimDelivery`; released on
+  failure, so GitHub's retry runs; ignored ones leave no claim). Each delivery is one transaction under the
+  system identity. Per event: `issues` opened/edited/labeled/unlabeled/closed/reopened apply the whole issue
+  (subject cut to 255, `labels`, state, reason, closed date, priority and category from the labels), skipped as
+  stale when older than `github_updated_on`; closed/reopened also write a status event (`CLOSED` / `REOPENED`,
+  keyed by the delivery id); the issue body is not stored (no column); `deleted` -> link `DELETED`;
+  `transferred` -> link `TRANSFERRED` + WARN (no fixture of the payload, so no re-pointing). A non-ACTIVE link
+  ignores later events. `issue_comment` created/edited/deleted mirror into `comment` as a **WORK_NOTE**
+  (`trg_github_outbound_comment` acts on type COMMENT only, and a product issue has no `github_*`) with
+  `created_by` = the GitHub login, plus `comment_github_ref` (origin GITHUB); an id already in the ref is not
+  inserted again; an edit keeps the old text in `comment_edit_history`; a delete sets `comment.deleted_at` and
+  `comment_github_ref.deleted_on`. `projects_v2_item` edited with `field_name == "Status"` is applied only when
+  `changes.field_value.project_number` (the payload carries it) is the `board_project_number` of a
+  `product_repo_mapping` row for the link's repository (and the payload's organisation is the link's owner):
+  raw name -> `board_status_map` (OTHER when unknown), `board_status_*` and `board_item_id` (the numeric item id)
+  on the link, and an event (source WEBHOOK, dedupe key = delivery id, `occurred_at` = the item's `updated_at`,
+  from = the link's previous board status); an older move is kept as history without moving the link. Item
+  `created` carries no project number, so it records the item only for a project node id a Status edit already
+  taught this process (in-memory cache); the Status edit records the item id anyway. `InsertStatusEvent`,
+  `InsertGitHubComment` and `ResolveBoardStatus` take a transaction for reconciliation and backfill to reuse.
+- **Read and link routes** (same gate and `internalOnly`; `service/product_issue_service.go`, all reads under the
+  system identity, database only, no GitHub call on read). `GET /cases/{id}/product-work-items` lists the issues
+  with an active `AFFECTS` link to a case-like work item (an untracked patch has no work item, so it is not
+  listed); `GET /product-work-items/{id}` is one issue (404 for any other type) with its latest 200 non-deleted
+  comments (`conversationTruncated`, origin and GitHub comment id from `comment_github_ref`) and its status
+  events; `POST /product-work-items/search` filters on case, GitHub state, board statuses, owner/repository,
+  `unmatched` (no active link, P-37) and `query` (PI number or title, `%`/`_` literal; digits also match the
+  issue number), newest first. `POST /cases/{id}/product-work-items/links` takes `workItemId` or
+  `owner/repository/issueNumber`: a closed case is 409; a known issue is linked with source MANUAL (already linked
+  to this case: 200, to another: 409 `already_linked`); an unknown one must be in `product_repo_mapping` (any row),
+  is read once through `GetIssueDetail` (patch labels and pull requests refused) and registered in one transaction
+  through the same insert as create (priority/category from labels, opener/ABT team/public URL from the body footer
+  via `ParseProductIssueFooter`, last line wins; the footer email is stored in `opened_by_email` but
+  never resolved to `opened_by_user_id`, since the body is user-editable), a unique-index violation being
+  re-read, not a 500. An issue that a case's create request (PENDING or GITHUB_CREATED) already claims is
+  409 `request_in_progress` ("being registered from a case"), so a manual link cannot steal it. No work note,
+  no GitHub write. `DELETE /cases/{id}/product-work-items/{workItemId}/link` sets the active link inactive (404 if
+  none, 204 otherwise), leaving the issue unmatched.
+- **Reconciliation and backfill** (`service/product_issue_reconcile.go`, `repository/product_issue_reconcile_repo.go`;
+  same gate, `serviceOnly`: an internal service credential, a user token is refused). Both reuse the webhook branch's
+  repository functions with the sources `RECONCILE` / `BACKFILL`, work against the request's deadline less a reserve of min(15 s, a quarter of the time left at the start; a 30 s budget with the full 15 s when there is no deadline) (a
+  call always does at least one unit, then returns `nextCursor` + `more`), and stop at once on an engineering 429
+  with `retryAfterSeconds`. The cursor is opaque base64 JSON; call again with it until `more` is false.
+  - `POST /product-work-items/reconcile` `{cursor?, limit?}` (default 200, max 500 units a call; the scheduled task
+    `product_issue_reconcile` calls it daily). Per distinct `(owner, board_project_number)` of `product_repo_mapping` it
+    pages `items-with-content` and, for each item with an ACTIVE link (content node id, else owner/repo/number; the
+    repository must map to that board), refreshes title/labels/priority/category/state (not if the item is older than
+    what is stored: the engineering entity may serve a minute-old read) and, when the Status differs from the stored
+    raw status, reads `GetProjectStatusHistory` and records the board's changes as events (key = the timeline event
+    node id; an existing event for the same column within a minute is the same move, so a webhook's is not doubled),
+    then sets the link's board columns from the history's current status; if no recorded event ends in that column it
+    writes one stamped now with key `reconcile:<work item>:<to status>:<UTC date>`. A link on another board of a shared
+    repository keeps that board's status. ACTIVE links of the board's repositories that the listing did not show
+    (archived off the board, never on it) are refreshed with `GetIssueDetail` (404 -> `INACCESSIBLE`) and counted in
+    `notOnBoard`; "seen" is `last_synced_on >= run start` (the run start is read from the database clock and carried
+    in the cursor), so **a pass with nothing to change still writes `last_synced_on`**, nothing else. A CLOSED
+    unlisted link is only rechecked when last synced over 7 days before the run, an OPEN one every run. No CLOSED /
+    REOPENED events are written here (the webhook writes those). Whether `items-with-content` returns archived items is not
+    in the engineering code (it calls GitHub's REST project-items list with only `per_page`, `fields`, `after`, `q`), hence the
+    not-seen pass. A webhook board move that arrives after a reconciliation already recorded a synthetic event for the
+    same column (source `RECONCILE`, key `reconcile:...`, stamped later than the move and within 24 h) corrects that event's
+    time (and `from_status`) instead of adding a second one.
+  - **Known limits.** A board item whose history read failed is counted in `failed` and its link is rechecked in the
+    missing phase, where it counts as not on the board for that run. Items added to or removed from a board between
+    two calls can shift the page offset, so a status correction may wait for the next day's run. The REST board
+    listing does not return archived items (checked live: also not with `q=is:archived`), so an archived item is covered
+    only by the missing phase, which refreshes its issue fields, not its board status.
+  - `POST /product-work-items/backfill` `{owner, repository, dryRun, cursor?, maxIssues?, sinceDays?}` is an operator's
+    tool (no scheduled task): call it with `dryRun: true` first, then without, repeating with the answer's `nextCursor`
+    while `more` is true (default 25 issues a call, max 100; `sinceDays` default 180, fixed by the first call). The
+    repository must be in `product_repo_mapping` (400 otherwise). Considered: `Origin/CS` issues, every open one and
+    closed ones closed within `sinceDays` (the cursor is `open` then `closed` phase, page, offset; the listing leaves pull
+    requests out, so only an empty page ends a phase). `Type/Patch` / `patch` issues and pull requests are skipped and
+    counted. An issue with a link only has its missing comments (by GitHub comment id) and board events filled in; the
+    link's board status is set only while it has none. Comments by the `GIT_INTERNALS_BOT_LOGINS` accounts are not
+    filled in (as the webhook does not mirror them; `github-project-automation[bot]` is never one). A new one is matched by the footer: `WSO2 case id` = a case-like
+    work item's `wso2_id`, `Case number` = its `number`; both lines must be present, each resolve to exactly one case,
+    and name the same case; anything else leaves it unmatched (registered with `Unmatched`, no account, project or
+    AFFECTS link: the unmatched list; the create path and manual registration refuse an empty case id). A known issue
+    with no active AFFECTS link gets the same match re-attempted: on a match the link (source `BACKFILL`) and the
+    case's account and project on the work item are written.
+    Created in one transaction with source `BACKFILL` for the link, all comments (origin GITHUB) and the history on
+    the repository's board (the unarchived board entry with the lowest number when a shared repository has several);
+    the footer email is stored, never resolved to a user. A failed read of one issue is counted in `failed` /
+    `failedIssueNumbers` and the issue is retried by the next run; a 429 stops the call with the cursor on that issue.

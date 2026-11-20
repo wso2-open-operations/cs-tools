@@ -108,7 +108,7 @@ func (h *GithubDeliveryHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// reason: it had no user token either, because GitHub cannot present one.
 	// Carried across deliberately rather than rediscovered.
 	outcome, err := h.svc.HandleWebhook(repository.WithSystemIdentity(r.Context()), service.Delivery{
-		ID: req.ID, Event: req.Event, Payload: payload,
+		ID: req.ID, Event: req.Event, Payload: payload, Raw: req.Payload,
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrDeliverySeen) {

@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -54,6 +55,9 @@ type Delivery struct {
 	ID      string
 	Event   string
 	Payload IssuePayload
+	// Raw is the delivery's body as forwarded, for the product issue branch, which
+	// reads fields Payload does not carry. Empty in tests that build a Delivery by hand.
+	Raw json.RawMessage
 }
 
 // Outcome says what a delivery did, for the response and the log.

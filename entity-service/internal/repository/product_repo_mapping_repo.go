@@ -36,7 +36,8 @@ func NewProductRepoMappingRepository(db *pgxpool.Pool) *ProductRepoMappingReposi
 // ListActive returns every active mapping. The table is a small catalogue.
 func (r *ProductRepoMappingRepository) ListActive(ctx context.Context) ([]domain.ProductRepoMapping, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT product_name, abbreviation, owner, repository, github_label
+		SELECT product_name, abbreviation, owner, repository, github_label,
+		       board_project_number, is_internal
 		FROM product_repo_mapping
 		WHERE is_active = TRUE
 	`)
@@ -48,7 +49,8 @@ func (r *ProductRepoMappingRepository) ListActive(ctx context.Context) ([]domain
 	var out []domain.ProductRepoMapping
 	for rows.Next() {
 		var m domain.ProductRepoMapping
-		if err := rows.Scan(&m.ProductName, &m.Abbreviation, &m.Owner, &m.Repository, &m.GithubLabel); err != nil {
+		if err := rows.Scan(&m.ProductName, &m.Abbreviation, &m.Owner, &m.Repository, &m.GithubLabel,
+			&m.BoardProjectNumber, &m.IsInternal); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

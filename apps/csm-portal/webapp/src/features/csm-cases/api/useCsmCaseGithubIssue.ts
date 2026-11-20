@@ -29,6 +29,9 @@ import type {
 export interface PostCaseGithubIssueInput extends BeCreateCaseGithubIssuePayload {
   /** UUID of the case the issue is filed against (path param, not body). */
   caseId: string;
+  /** Sent as the `Idempotency-Key` header (never in the body), so a repeated
+   * submit of the same open dialog files at most one issue. */
+  idempotencyKey?: string;
 }
 
 /**
@@ -57,16 +60,24 @@ export function usePostCaseGithubIssue(): UseMutationResult<
   >({
     mutationFn: async ({
       caseId,
+      idempotencyKey,
       ...payload
     }): Promise<BeCreateCaseGithubIssueResponse> => {
       return api.post<
         BeCreateCaseGithubIssuePayload,
         BeCreateCaseGithubIssueResponse
-      >(`/cases/${encodeURIComponent(caseId)}/github-issues`, payload);
+      >(`/cases/${encodeURIComponent(caseId)}/github-issues`,
+        payload,
+        idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
+      );
     },
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, variables.caseId],
+      });
+      // The new issue is registered as a product work item linked to the case.
+      void queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CSM_CASE_PRODUCT_WORK_ITEMS, variables.caseId],
       });
     },
   });
