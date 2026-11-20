@@ -96,9 +96,10 @@ describe("useWidgetGroupByData", () => {
       groups: [
         { key: "u-1", label: "Jane Doe Ⓦ", count: 3 },
         { key: "u-2", label: "Sam Customer", count: 1 },
+        { key: "u-3", label: "Ⓦ", count: 2 },
       ],
       othersCount: 0,
-      totalRecords: 4,
+      totalRecords: 6,
     });
 
     const { result } = renderHook(
@@ -111,6 +112,8 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.slices.map(({ label, isStaff }) => ({ label, isStaff }))).toEqual([
       { label: "Jane Doe", isStaff: true },
       { label: "Sam Customer", isStaff: undefined },
+      // A name that is only the marker: a neutral label, still marked as staff.
+      { label: "Unnamed", isStaff: true },
     ]);
   });
 
