@@ -831,7 +831,8 @@ func validateProjectDateRange(name, from, to string) error {
 // rejectPostgresOnlyProjectSearch rejects, rather than silently ignores, the
 // project search filters and sort fields only the Postgres data source
 // supports: closureStates, regions, onboardingOwnerIds, onboardingOwnerEmails,
-// the onboarding date ranges and every sortBy but endDate.
+// onboardingOwnerTeamIds, the onboarding date ranges and every sortBy but
+// endDate.
 func rejectPostgresOnlyProjectSearch(req domain.SearchProjectsRequest) error {
 	if len(req.ClosureStates) > 0 {
 		return &apierror.ValidationError{Msg: errProjectSearchUnsupported("closureStates")}
@@ -844,6 +845,9 @@ func rejectPostgresOnlyProjectSearch(req domain.SearchProjectsRequest) error {
 	}
 	if len(req.OnboardingOwnerEmails) > 0 {
 		return &apierror.ValidationError{Msg: errProjectSearchUnsupported("onboardingOwnerEmails")}
+	}
+	if len(req.OnboardingOwnerTeamIDs) > 0 {
+		return &apierror.ValidationError{Msg: errProjectSearchUnsupported("onboardingOwnerTeamIds")}
 	}
 	for _, r := range projectDateRanges(req) {
 		if r.from != "" || r.to != "" {
@@ -984,6 +988,9 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 	}
 	// The repository binds these as uuid[], so a non-UUID would be a 500.
 	if err := validateUUIDs("onboardingOwnerIds", req.OnboardingOwnerIDs); err != nil {
+		return err
+	}
+	if err := validateUUIDs("onboardingOwnerTeamIds", req.OnboardingOwnerTeamIDs); err != nil {
 		return err
 	}
 	for _, e := range req.OnboardingOwnerEmails {

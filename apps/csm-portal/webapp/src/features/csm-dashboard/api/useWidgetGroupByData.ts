@@ -147,6 +147,19 @@ function bucketQuery(
         return { teamIds: [key] };
     }
   }
+  // A project bucket opens the projects with that onboarding owner, status
+  // or region (the search matches a region ignoring case, so the bucket's
+  // lower-cased key is enough).
+  if (resourceType === "project") {
+    switch (field) {
+      case "onboardingOwner":
+        return { onboardingOwnerIds: [key] };
+      case "onboardingStatus":
+        return { onboardingStatus: [key] };
+      case "region":
+        return { regions: [key] };
+    }
+  }
   // A PLG organisation owner bucket opens that owner's organisations; the
   // aggregate's "unowned" bucket opens the ones with no owner.
   if (resourceType === "plg_organization" && field === "owner") {

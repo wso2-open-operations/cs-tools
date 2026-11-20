@@ -694,6 +694,29 @@ function projectFreeListsCanOpenList(filters: Record<string, unknown>): boolean 
   });
 }
 
+/**
+ * A project widget's filters as `POST /projects/search` (and the aggregate's
+ * `filters`) take them. The preview page's URL round-trip decodes every filter
+ * value as a comma-split array; the endpoint's single-valued string fields
+ * reject that shape, so they are unwrapped back to scalars (a no-op for a
+ * tile-level fetch, whose filters never went through that round-trip).
+ */
+function projectSearchFilters(filters: Record<string, unknown>): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...filters };
+  for (const key of [
+    "searchQuery",
+    "closureStatus",
+    "accountId",
+    "arrTodayGte",
+    "subRegion",
+    ...PROJECT_DATE_FILTER_KEYS.flatMap((k) => [`${k}From`, `${k}To`]),
+  ]) {
+    const v = body[key];
+    if (Array.isArray(v)) body[key] = v[0];
+  }
+  return body;
+}
+
 /** A widget's `project` filters as the projects list's own filter state. */
 function translateProjectDashboardFilters(filters: Record<string, unknown>): ProjectFilters {
   const out: ProjectFilters = { ...EMPTY_PROJECT_FILTERS };
@@ -1144,22 +1167,7 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     // rejects any unknown top-level field — including a `filters` wrapper,
     // even an empty one — so the default `{filters, pagination}` body 400s.
     buildSearchRequestBody: ({ filters, offset, limit, sortBy }) => {
-      // The preview page's URL round-trip decodes every filter value as a
-      // comma-split array; the endpoint's single-valued string fields reject
-      // that shape, so unwrap them back to scalars (a no-op for a tile-level
-      // fetch, whose filters never went through that round-trip).
-      const body: Record<string, unknown> = { ...filters };
-      for (const key of [
-        "searchQuery",
-        "closureStatus",
-        "accountId",
-        "arrTodayGte",
-        "subRegion",
-        ...PROJECT_DATE_FILTER_KEYS.flatMap((k) => [`${k}From`, `${k}To`]),
-      ]) {
-        const v = body[key];
-        if (Array.isArray(v)) body[key] = v[0];
-      }
+      const body = projectSearchFilters(filters);
       // The endpoint takes `sortBy`/`sortOrder` as plain strings and only
       // accepts the dates in `PROJECT_SORT_FIELDS`; a widget's `{field, order}`
       // sort is flattened to that, and anything else is dropped rather than
@@ -1170,6 +1178,10 @@ export const WIDGET_RESOURCE_CONFIG: Record<
       }
       return { ...body, pagination: { offset, limit } };
     },
+    // `POST /projects/aggregate` groups by onboarding owner, onboarding status
+    // or region; it takes the search's own filters under `filters`.
+    groupByEndpoint: "/projects/aggregate",
+    buildGroupByBody: (filters) => ({ filters: projectSearchFilters(filters) }),
     // Opens the projects list with the tile's filters in the URL, in the
     // list's own scheme (`projectFilters.ts`, the same names as the tile's
     // query: `onboardingStatus`, `closureStates`, the `<date>From`/`To` ranges,

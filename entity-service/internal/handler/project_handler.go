@@ -50,6 +50,32 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// ProjectAggregateHandler handles POST /projects/aggregate (Postgres data
+// sources only; routes.go does not register it otherwise).
+type ProjectAggregateHandler struct {
+	svc service.ProjectAggregateService
+}
+
+// NewProjectAggregateHandler constructs a ProjectAggregateHandler.
+func NewProjectAggregateHandler(svc service.ProjectAggregateService) *ProjectAggregateHandler {
+	return &ProjectAggregateHandler{svc: svc}
+}
+
+// AggregateProjects handles POST /projects/aggregate.
+func (h *ProjectAggregateHandler) AggregateProjects(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateProjectsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.AggregateProjects(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // GetProject handles GET /projects/{id}.
 func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

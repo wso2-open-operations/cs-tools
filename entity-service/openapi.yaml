@@ -5405,6 +5405,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/aggregate:
+    post:
+      summary: >-
+        Count projects per onboarding owner, onboarding status or region
+        (Postgres data sources only).
+      description: >-
+        Counts exactly the projects POST /projects/search matches for the same
+        filters, scoped to the caller the same way. A project with no value for
+        the grouping counts in othersCount, never in a bucket. Not registered
+        on the legacy data source.
+      operationId: aggregateProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateProjectsRequest'
+      responses:
+        "200":
+          description: Project counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /projects/search:
     post:
       summary: Search projects by name, key, or subscription type.
@@ -23104,6 +23146,26 @@ components:
         offset:
           type: integer
 
+    AggregateProjectsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          description: The project search filters (pagination and sort are not used).
+          allOf:
+            - $ref: '#/components/schemas/SearchProjectsRequest'
+        groupBy:
+          type: string
+          enum: [onboardingOwner, onboardingStatus, region]
+          description: >-
+            onboardingOwner buckets by the owner's user id (label: their name,
+            else email); onboardingStatus by the status label; region by the
+            account region, ignoring case and surrounding spaces.
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: Largest buckets returned (default 10); the rest fold into othersCount.
     SearchProjectsRequest:
       type: object
       properties:
@@ -23169,6 +23231,15 @@ components:
             Only projects whose onboarding owner's email is any of these
             (case-insensitive); ANDed with onboardingOwnerIds. Postgres only; a
             400 on any other data source.
+        onboardingOwnerTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only projects whose onboarding owner is a current member of any of
+            these teams (team ids, as time cards' teamIds). A non-UUID returns
+            400. Postgres only; a 400 on any other data source.
         arrTodayGte:
           type: string
           description: >-

@@ -347,6 +347,14 @@ func buildProjectSearchWhere(req domain.SearchProjectsRequest, scope SearchScope
 		argIdx++
 	}
 
+	// onboardingOwnerTeamIds: the owner is a current member of one of these
+	// teams, as time cards' teamIds (UUIDs, validated by the service).
+	if len(req.OnboardingOwnerTeamIDs) > 0 {
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM team_member tm WHERE tm.user_id = p.onboarding_owner_id AND tm.team_id = ANY($%d::uuid[]))", argIdx)
+		filterArgs = append(filterArgs, req.OnboardingOwnerTeamIDs)
+		argIdx++
+	}
+
 	return where, filterArgs, argIdx, nil
 }
 
