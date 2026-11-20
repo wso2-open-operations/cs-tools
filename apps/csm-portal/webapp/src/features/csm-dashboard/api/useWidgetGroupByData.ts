@@ -86,6 +86,17 @@ const CASE_GROUP_BY_FILTER_FIELD: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * The incident search's filter field for an incident groupBy field whose
+ * bucket key it takes under another name: a business service bucket is keyed
+ * by the service's id, which incident search filters as `businessServiceId`
+ * (`incidentFilterFieldSet` in entity-service has no `businessService`), so
+ * the bucket's list would otherwise fail with "unsupported field".
+ */
+const INCIDENT_GROUP_BY_FILTER_FIELD: ReadonlyMap<string, string> = new Map([
+  ["businessService", "businessServiceId"],
+]);
+
+/**
  * Builds a named bucket's own click-through `query` — the same shape
  * `DashboardWidgetTile`'s slice navigation merges under the widget's base
  * `query` via `mergeWidgetFilters`. The entity-service's search contract for
@@ -125,7 +136,8 @@ function bucketQuery(
     return { filters: [{ field: CASE_GROUP_BY_FILTER_FIELD.get(field) ?? field, op: "in", values: [key] }] };
   }
   if (GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES.has(resourceType)) {
-    return { filters: [{ field, op: "in", values: [key] }] };
+    const filterField = resourceType === "incident" ? (INCIDENT_GROUP_BY_FILTER_FIELD.get(field) ?? field) : field;
+    return { filters: [{ field: filterField, op: "in", values: [key] }] };
   }
   if (resourceType === "change_request" && field === "state") {
     return { states: [key] };

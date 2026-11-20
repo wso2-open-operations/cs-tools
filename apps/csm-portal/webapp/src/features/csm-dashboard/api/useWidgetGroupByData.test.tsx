@@ -134,6 +134,26 @@ describe("useWidgetGroupByData", () => {
     ]);
   });
 
+  it("scopes an incident's business service bucket to the businessServiceId filter incident search takes", async () => {
+    const serviceId = "6a0e1b52-0000-4000-8000-0000000000aa";
+    postMock.mockResolvedValue({
+      groups: [{ key: serviceId, label: "payments api", count: 3 }],
+      othersCount: 0,
+      totalRecords: 3,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "incident", {}, { field: "businessService" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices[0].query).toEqual({
+      filters: [{ field: "businessServiceId", op: "in", values: [serviceId] }],
+    });
+  });
+
   it("scopes a problem's state bucket to the nested filter-array shape with op 'in', not a flat key", async () => {
     postMock.mockResolvedValue({
       groups: [{ key: "NEW", label: "New", count: 2 }],
