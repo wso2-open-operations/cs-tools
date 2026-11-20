@@ -189,3 +189,33 @@ func (c *EngineeringEntityClient) CreateGitIssue(ctx context.Context, orgName, o
 	}
 	return issue, nil
 }
+
+// repositoryDispatchRequest is the body of
+// POST /orgs/{orgName}/repos/{owner}/{repoName}/dispatches.
+type repositoryDispatchRequest struct {
+	EventType     string         `json:"eventType"`
+	ClientPayload map[string]any `json:"clientPayload,omitempty"`
+}
+
+// DispatchRepositoryEvent sends a GitHub repository_dispatch event through the
+// engineering entity service. It does not retry: after a timeout the workflow
+// may already have started, so retrying is the caller's decision.
+func (c *EngineeringEntityClient) DispatchRepositoryEvent(ctx context.Context, orgName, owner, repoName, eventType string, payload map[string]any) error {
+	if orgName == "" || owner == "" || repoName == "" {
+		return fmt.Errorf("engineering entity: orgName, owner, and repoName are required")
+	}
+	if eventType == "" {
+		return fmt.Errorf("engineering entity: eventType is required")
+	}
+
+	reqBody, err := json.Marshal(repositoryDispatchRequest{EventType: eventType, ClientPayload: payload})
+	if err != nil {
+		return fmt.Errorf("engineering entity: encode repository dispatch request: %w", err)
+	}
+
+	path := fmt.Sprintf("/orgs/%s/repos/%s/%s/dispatches",
+		url.PathEscape(orgName), url.PathEscape(owner), url.PathEscape(repoName))
+
+	_, err = c.do(ctx, http.MethodPost, path, reqBody)
+	return err
+}

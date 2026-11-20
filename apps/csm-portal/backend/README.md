@@ -473,6 +473,9 @@ differ.
 | `SCIM_SCOPES` | No | none | Comma list of OAuth2 scopes for the SCIM service | `scim.read` |
 | `ENGINEERING_ENTITY_BASE_URL` | No | unset | Base URL of the engineering entity service. When set, `POST /cases/{id}/github-issues` files issues through it instead of the entity-service, and `GET /health/dependencies` checks it. Must be `https` (a path is allowed; userinfo, query and fragment are not), else startup fails | `https://engineering.example.com/v1` |
 | `ENGINEERING_ENTITY_SCOPES` | No | none | Comma list of OAuth2 scopes for it | `engineering.write` |
+| `LOG_COLLECTION_CATALOG_ITEM_ID` | No | unset | The "Component Log Request" catalog item id. When set, creating a service request from it starts the log collection pipeline (see notes). Needs `ENGINEERING_ENTITY_BASE_URL`; must be a UUID, else startup fails | `9d48f18f-0ae3-466b-b0ab-fdd14038864b` |
+| `LOG_COLLECTION_REPO` | When the item id is set | unset | The pipeline's repository, `owner/repo`. The owner is also the organisation the engineering service picks its GitHub token by | `wso2-cs/saas-sre-automations` |
+| `LOG_COLLECTION_TEAM` | No | unset | Sent to the pipeline as its notification team | `sre` |
 | `CSM_NOTIFICATION_SERVICE_BASE_URL` | No | unset | Notification service, used only by `GET /health/dependencies` today. `https` base URL; unset reports `not_configured` | `https://notify.example.com` |
 | `CSM_NOTIFICATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `notify.read` |
 | `CSM_INTEGRATION_SERVICE_BASE_URL` | No | unset | Integration service, used only by `GET /health/dependencies` today. `https` base URL | `https://integration.example.com` |
@@ -501,6 +504,14 @@ Notes:
   the entity-service's product-to-repository mapping (`GET /products/github-repo`), a request
   `repoOverride` is ignored, an unmapped product gets `400`, and a work note with the issue URL is
   added to the case best-effort.
+- When `LOG_COLLECTION_CATALOG_ITEM_ID` is set, a service request created from that item starts the
+  log collection pipeline: after the create succeeds (the response does not wait), the backend sends
+  a `request_logs` repository dispatch to `LOG_COLLECTION_REPO` through the engineering entity
+  service. The answers are matched by question id and sent as the payload, with the case id, the
+  case number as `request_id`, and the signed-in user's email as `requested_by`. A network error,
+  timeout, `429` or `5xx` is retried, up to 3 attempts about 2s and 8s apart; a `4xx` is not. A work
+  note on the case says whether the collection started. Shutdown waits for a start still retrying,
+  within the shutdown window.
 
 ### Feature flags
 
