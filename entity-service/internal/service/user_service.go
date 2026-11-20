@@ -281,8 +281,31 @@ func (s *userService) GetUser(ctx context.Context, id string) (domain.UserDetail
 	return u, nil
 }
 
+// maxContactLookupEmails caps how many addresses a non-internal caller may
+// resolve in one request.
+const maxContactLookupEmails = 50
+
 // SearchUsers implements UserService.
+//
+// Internal callers (an internal client credential, or an internal user) search
+// the whole directory with every filter. Anyone else is limited to looking up
+// co-members by email: see searchCoMembers.
 func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchUsersResponse, error) {
+	if s.access == nil {
+		// No access service means no way to tell who is asking; never fall back
+		// to an unscoped directory.
+		return domain.SearchUsersResponse{}, &apierror.ForbiddenError{Msg: "user search is not available"}
+	}
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.SearchUsersResponse{}, err
+	}
+	if !scope.Unrestricted {
+		return s.searchCoMembers(ctx, scope, req)
+	}
+	if err := validateUserTypeFilter(req.Filters.UserType); err != nil {
+		return domain.SearchUsersResponse{}, err
+	}
 	if err := normalizeUserPagination(&req.Pagination); err != nil {
 		return domain.SearchUsersResponse{}, err
 	}
@@ -328,6 +351,65 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 		Limit:   req.Pagination.Limit,
 		Offset:  req.Pagination.Offset,
 		HasMore: req.Pagination.Offset+len(users) < total,
+	}, nil
+}
+
+// validateUserTypeFilter accepts the empty filter and the user types the
+// repository can map to a stored value.
+func validateUserTypeFilter(t domain.UserType) error {
+	switch t {
+	case "", domain.UserTypeInternal, domain.UserTypeCustomer, domain.UserTypeSystem, domain.UserTypeExternal:
+		return nil
+	}
+	return &apierror.ValidationError{Msg: "userType contains invalid value: " + string(t)}
+}
+
+// searchCoMembers is the user search for a non-internal caller. The directory is
+// not theirs to browse, so the only thing allowed is resolving up to 50 known
+// email addresses to users who share at least one project with the caller (the
+// caller's REGISTERED projects, as AccessService.ResolveScope reports them), and
+// each match is reduced to id, email and display name. An address that is not a
+// co-member yields no row, so the answer never tells "exists elsewhere" from
+// "does not exist". Every other filter is refused rather than ignored, so a
+// caller cannot mistake a narrowed result for the one it asked for.
+func (s *userService) searchCoMembers(ctx context.Context, scope AccessScope, req domain.SearchUsersRequest) (domain.SearchUsersResponse, error) {
+	f := req.Filters
+	if f.SearchQuery != "" || len(f.RoleIDs) > 0 || len(f.UserNames) > 0 || len(f.UserIDs) > 0 ||
+		len(f.GroupIDs) > 0 || len(f.TeamIDs) > 0 || len(f.GroupNames) > 0 ||
+		f.Active != nil || f.UserType != "" {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "non-internal callers may only look up users by email: supply filters.emails and no other filter"}
+	}
+	if len(f.Emails) == 0 {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "filters.emails is required"}
+	}
+	if len(f.Emails) > maxContactLookupEmails {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "emails cannot contain more than 50 values"}
+	}
+	if err := normalizeUserPagination(&req.Pagination); err != nil {
+		return domain.SearchUsersResponse{}, err
+	}
+	emails := make([]string, 0, len(f.Emails))
+	for _, e := range f.Emails {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "emails must not contain empty values"}
+		}
+		emails = append(emails, e)
+	}
+
+	contacts, err := s.repo.SearchUserContactsByEmail(ctx, emails, scope.ProjectIDs)
+	if err != nil {
+		return domain.SearchUsersResponse{}, err
+	}
+	total := len(contacts)
+	start := min(req.Pagination.Offset, total)
+	end := min(start+req.Pagination.Limit, total)
+	return domain.SearchUsersResponse{
+		Contacts: append([]domain.UserContact{}, contacts[start:end]...),
+		Total:    total,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+		HasMore:  end < total,
 	}, nil
 }
 

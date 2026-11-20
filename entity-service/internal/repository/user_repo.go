@@ -43,6 +43,12 @@ type UserRepository interface {
 	// connections, so total may differ by at most one write from the page —
 	// this is acceptable for search-style pagination.
 	SearchUsers(ctx context.Context, req domain.SearchUsersRequest) ([]domain.User, int, error)
+	// SearchUserContactsByEmail returns id, email and display name for every user
+	// whose email is one of emails (case-insensitive) AND who is a REGISTERED
+	// contact of at least one of projectIDs, in one query. It is the only read a
+	// non-internal caller gets of the user directory: an email that is not a
+	// co-member of those projects yields no row, the same as an unknown email.
+	SearchUserContactsByEmail(ctx context.Context, emails, projectIDs []string) ([]domain.UserContact, error)
 	// GetUserByEmail returns the user with the given email address, or a
 	// NotFoundError if no matching user exists.
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
@@ -137,6 +143,17 @@ const prefixUserColumns = `u.id, u.user_name, u.first_name, u.last_name, u.email
 // underlying concept. NOT_AVAILABLE (recompute_user_type's fallback when a
 // user holds no role at all) has no domain equivalent and is left "" (the
 // zero value), same as a NULL user_type.
+// userTypeToEnum is userTypeFromEnum's inverse, for the userType search filter.
+// external is the other data source's name for the same concept as customer
+// (see domain.UserTypeExternal) and is accepted as an alias so a caller need
+// not know which source answers.
+var userTypeToEnum = map[domain.UserType]string{
+	domain.UserTypeSystem:   "SYSTEM",
+	domain.UserTypeInternal: "INTERNAL",
+	domain.UserTypeCustomer: "EXTERNAL",
+	domain.UserTypeExternal: "EXTERNAL",
+}
+
 var userTypeFromEnum = map[string]domain.UserType{
 	"SYSTEM":   domain.UserTypeSystem,
 	"INTERNAL": domain.UserTypeInternal,
@@ -315,6 +332,17 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 		argIdx++
 	}
 
+	if req.Filters.UserType != "" {
+		label, ok := userTypeToEnum[req.Filters.UserType]
+		if !ok {
+			return nil, 0, &apierror.ValidationError{Msg: "userType contains invalid value: " + string(req.Filters.UserType)}
+		}
+		// Compared as the column's own enum type so no cast defeats an index.
+		where += fmt.Sprintf(" AND u.user_type = $%d::user_type_enum", argIdx)
+		filterArgs = append(filterArgs, label)
+		argIdx++
+	}
+
 	if req.Filters.Active != nil {
 		// "user".is_active is nullable; a NULL row counts as active, the same
 		// convention AccessService.ResolveScope already uses for this exact
@@ -382,6 +410,59 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 	}
 
 	return users, total, nil
+}
+
+// maxUserContactRows bounds SearchUserContactsByEmail's result. The caller caps
+// emails at 50, so only duplicate-email rows can push past that; the bound keeps
+// the single un-paged query safe regardless.
+const maxUserContactRows = 500
+
+// searchUserContactsSQL: lower(u.email) = ANY($1) uses idx_user_email_lower
+// (migration 0192) and the EXISTS probes project_contact through
+// idx_project_contact_project_id_email on (project_id, LOWER(email)) -- one
+// statement, no per-email lookups. The project list is the caller's own
+// REGISTERED projects (AccessService.ResolveScope), so "shares a project" is the
+// same rule that decides what a customer may see everywhere else. The display
+// name falls back exactly as the user search's name sort does.
+const searchUserContactsSQL = `SELECT u.id::TEXT, COALESCE(u.email, ''),
+		COALESCE(NULLIF(u.name, ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.user_name, '')
+	FROM "user" u
+	WHERE LOWER(u.email) = ANY($1::text[])
+	  AND EXISTS (
+		SELECT 1 FROM project_contact pc
+		WHERE pc.project_id = ANY($2::uuid[])
+		  AND LOWER(pc.email) = LOWER(u.email)
+		  AND pc.state = $3::project_contact_state_enum
+	  )
+	ORDER BY 3, u.id
+	LIMIT $4`
+
+// SearchUserContactsByEmail implements UserRepository.
+func (r *userRepo) SearchUserContactsByEmail(ctx context.Context, emails, projectIDs []string) ([]domain.UserContact, error) {
+	if len(emails) == 0 || len(projectIDs) == 0 {
+		return []domain.UserContact{}, nil
+	}
+	lowered := make([]string, len(emails))
+	for i, e := range emails {
+		lowered[i] = strings.ToLower(e)
+	}
+	rows, err := r.db.Query(ctx, searchUserContactsSQL, lowered, projectIDs, registeredContactState, maxUserContactRows)
+	if err != nil {
+		return nil, fmt.Errorf("search user contacts: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.UserContact{}
+	for rows.Next() {
+		var c domain.UserContact
+		if err := rows.Scan(&c.ID, &c.Email, &c.Name); err != nil {
+			return nil, fmt.Errorf("scan user contact: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user contacts: %w", err)
+	}
+	return out, nil
 }
 
 // GetUsersByIDs returns every user matching the given ids, in Postgres

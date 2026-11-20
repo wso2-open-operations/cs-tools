@@ -120,6 +120,11 @@ type SearchUsersFilters struct {
 	// carries an id at all.
 	GroupNames []string `json:"groupNames"`
 	Active     *bool    `json:"active"`
+	// UserType restricts the search to users of one type (internal, customer,
+	// system; external is accepted as an alias of customer). Empty means no
+	// restriction. Postgres data source only, and available to internal callers
+	// only: it is how a picker is limited to staff.
+	UserType UserType `json:"userType,omitempty"`
 }
 
 // UserSortBy specifies the sort field and direction for a user search.
@@ -161,14 +166,43 @@ type SearchUsersRequest struct {
 	SortBy     UserSortBy         `json:"sortBy"`
 }
 
+// UserContact is the reduced view of a user returned to a non-internal caller
+// of a user search: identity and display name only, nothing else about the
+// person (no phone, timezone, roles or type).
+type UserContact struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
 // SearchUsersResponse is the paginated result of a postgres user search.
 // HasMore is true when additional pages are available beyond the current offset.
+//
+// A non-internal caller gets Contacts instead of Users; MarshalJSON writes
+// whichever one is set under the same "users" key, so the envelope is identical
+// for every caller and only the shape of each element differs.
 type SearchUsersResponse struct {
-	Users   []User `json:"users"`
-	Total   int    `json:"total"`
-	Limit   int    `json:"limit"`
-	Offset  int    `json:"offset"`
-	HasMore bool   `json:"hasMore"`
+	Users    []User        `json:"users"`
+	Contacts []UserContact `json:"-"`
+	Total    int           `json:"total"`
+	Limit    int           `json:"limit"`
+	Offset   int           `json:"offset"`
+	HasMore  bool          `json:"hasMore"`
+}
+
+// MarshalJSON implements json.Marshaler; see SearchUsersResponse.
+func (r SearchUsersResponse) MarshalJSON() ([]byte, error) {
+	var users any = r.Users
+	if r.Contacts != nil {
+		users = r.Contacts
+	}
+	return json.Marshal(struct {
+		Users   any  `json:"users"`
+		Total   int  `json:"total"`
+		Limit   int  `json:"limit"`
+		Offset  int  `json:"offset"`
+		HasMore bool `json:"hasMore"`
+	}{users, r.Total, r.Limit, r.Offset, r.HasMore})
 }
 
 // SavedFilterListKey identifies which CSM list a filter belongs to.

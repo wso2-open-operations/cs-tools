@@ -90,6 +90,10 @@ func (f *fakeUserRepoForEscalationService) GetUserRoles(context.Context, string)
 func (f *fakeUserRepoForEscalationService) GetUserDetail(context.Context, string) (domain.UserDetail, error) {
 	panic("fakeUserRepoForEscalationService.GetUserDetail: not expected to be called by these tests")
 }
+func (f *fakeUserRepoForEscalationService) SearchUserContactsByEmail(context.Context, []string, []string) ([]domain.UserContact, error) {
+	panic("fakeUserRepoForEscalationService.SearchUserContactsByEmail: not expected to be called by these tests")
+}
+
 func (f *fakeUserRepoForEscalationService) GetUserProjectAccess(context.Context, string) ([]domain.UserContactAccess, error) {
 	panic("fakeUserRepoForEscalationService.GetUserProjectAccess: not expected to be called by these tests")
 }
