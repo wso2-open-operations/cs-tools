@@ -18,12 +18,15 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
 )
 
 // pgProjectUpdateService implements ProjectUpdateService against Postgres,
@@ -67,12 +70,45 @@ type pgProjectUpdateService struct {
 	// variant was needed here.
 	snWriteback *SNWritebackDispatcher
 	snMirror    ProjectUpdateService
+	// salesEntity, when set, writes Salesforce State__c before an admin
+	// closureState of SUSPENDED is stored. nil (sales-entity not configured)
+	// leaves that override in Postgres only.
+	salesEntity ProjectStatusWriter
+}
+
+// ProjectStatusWriter sets a Salesforce project's State__c. Satisfied by
+// *salesentity.Client.
+type ProjectStatusWriter interface {
+	UpdateProjectStatus(ctx context.Context, projectID, status string) error
+}
+
+// salesforceProjectIDLookup is the project read UpdateProject needs to find
+// the Salesforce id before it suspends the project there. Satisfied by
+// *repository.projectRepo; not part of ProjectRepository because every other
+// caller of that interface has no use for it.
+type salesforceProjectIDLookup interface {
+	SalesforceProjectID(ctx context.Context, id string) (string, error)
+}
+
+// projectUpdateBeforeCommit is UpdateProject with a call that runs inside the
+// row lock after stored-state checks and before the UPDATE. Satisfied by
+// *repository.projectRepo.
+type projectUpdateBeforeCommit interface {
+	UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error)
 }
 
 // NewProjectUpdateService constructs a ProjectUpdateService backed by
 // Postgres alone (DATA_SOURCE=postgres) -- it never touches ServiceNow.
 func NewProjectUpdateService(repo repository.ProjectRepository, userRepo repository.UserRepository, access AccessService) ProjectUpdateService {
 	return &pgProjectUpdateService{repo: repo, userRepo: userRepo, access: access}
+}
+
+// NewProjectUpdateServiceWithSalesEntity is NewProjectUpdateService plus the
+// sales-entity client that sets State__c to Suspended when an admin override
+// sets closureState to SUSPENDED. A nil writer behaves as
+// NewProjectUpdateService.
+func NewProjectUpdateServiceWithSalesEntity(repo repository.ProjectRepository, userRepo repository.UserRepository, access AccessService, sales ProjectStatusWriter) ProjectUpdateService {
+	return &pgProjectUpdateService{repo: repo, userRepo: userRepo, access: access, salesEntity: sales}
 }
 
 // NewProjectUpdateServiceWithSNWriteback is NewProjectUpdateService plus the
@@ -83,8 +119,8 @@ func NewProjectUpdateService(repo repository.ProjectRepository, userRepo reposit
 // otherwise made the active path -- reads stay on Postgres in this mode, the
 // same as every other dual-write pilot (case/incident/change_request/
 // problem).
-func NewProjectUpdateServiceWithSNWriteback(repo repository.ProjectRepository, userRepo repository.UserRepository, access AccessService, dispatcher *SNWritebackDispatcher, mirror ProjectUpdateService) ProjectUpdateService {
-	return &pgProjectUpdateService{repo: repo, userRepo: userRepo, access: access, snWriteback: dispatcher, snMirror: mirror}
+func NewProjectUpdateServiceWithSNWriteback(repo repository.ProjectRepository, userRepo repository.UserRepository, access AccessService, dispatcher *SNWritebackDispatcher, mirror ProjectUpdateService, sales ProjectStatusWriter) ProjectUpdateService {
+	return &pgProjectUpdateService{repo: repo, userRepo: userRepo, access: access, snWriteback: dispatcher, snMirror: mirror, salesEntity: sales}
 }
 
 // UpdateProject implements ProjectUpdateService.
@@ -127,8 +163,57 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		return domain.ProjectUpdateResponse{}, err
 	}
 
-	result, err := s.repo.UpdateProject(ctx, id, req, updatedBy)
+	// Reject a bad request before Salesforce. UpdateProject repeats this, and
+	// also checks stored account, owner, and date order inside its transaction.
+	if closureOverrideSuspends(req.ClosureState) {
+		if err := repository.ValidateProjectUpdate(req); err != nil {
+			return domain.ProjectUpdateResponse{}, err
+		}
+	}
+
+	// Salesforce, then the CSM write, for the same reason ACP suspends that
+	// way: a failed Salesforce write must leave CSM unchanged. Setting
+	// State__c to Suspended again on a retry is harmless. On the Postgres
+	// repository the Salesforce call sits inside the update transaction,
+	// after the stored-state checks and before the UPDATE.
+	var wroteSalesforce bool
+	// sfID is the project's Salesforce id. The Postgres path passes the value
+	// read on the update transaction's own connection. The fallback path looks
+	// it up before opening that transaction.
+	writeStatus := func(ctx context.Context, sfID string) error {
+		if err := s.suspendInSalesforce(ctx, sfID, req); err != nil {
+			return err
+		}
+		if s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
+			wroteSalesforce = true
+		}
+		return nil
+	}
+
+	var result domain.ProjectUpdateResult
+	if hook, ok := s.repo.(projectUpdateBeforeCommit); ok && s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
+		result, err = hook.UpdateProjectBeforeCommit(ctx, id, req, updatedBy, writeStatus)
+	} else {
+		sfID := ""
+		if s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
+			lookup, ok := s.repo.(salesforceProjectIDLookup)
+			if !ok {
+				return domain.ProjectUpdateResponse{}, fmt.Errorf("update project: salesforce status write has no project id lookup")
+			}
+			sfID, err = lookup.SalesforceProjectID(ctx, id)
+			if err != nil {
+				return domain.ProjectUpdateResponse{}, err
+			}
+		}
+		if err = writeStatus(ctx, sfID); err != nil {
+			return domain.ProjectUpdateResponse{}, err
+		}
+		result, err = s.repo.UpdateProject(ctx, id, req, updatedBy)
+	}
 	if err != nil {
+		if wroteSalesforce {
+			return domain.ProjectUpdateResponse{}, fmt.Errorf("Salesforce State__c set to Suspended, but updating the CSM project failed: %w", err)
+		}
 		return domain.ProjectUpdateResponse{}, err
 	}
 
@@ -161,6 +246,35 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		Message: "Project updated successfully",
 		Project: result,
 	}, nil
+}
+
+// suspendInSalesforce sets State__c to Suspended when an admin override asks
+// for SUSPENDED and a sales-entity client is configured. Every other closure
+// value, and a service with no client, is a no-op. A project with no
+// Salesforce id is refused before the CSM write: there is nowhere to put the
+// status the admin asked Salesforce to show.
+func (s *pgProjectUpdateService) suspendInSalesforce(ctx context.Context, sfID string, req domain.ProjectUpdateRequest) error {
+	if s.salesEntity == nil || !closureOverrideSuspends(req.ClosureState) {
+		return nil
+	}
+	sfID = strings.TrimSpace(sfID)
+	if sfID == "" {
+		return &apierror.ValidationError{Msg: "project has no Salesforce id, so its Salesforce status cannot be set to Suspended"}
+	}
+	// Same bound ACP uses when it writes State__c inside a project-row lock.
+	writeCtx, cancel := context.WithTimeout(ctx, acpReopenSalesforceWriteTimeout)
+	defer cancel()
+	if err := s.salesEntity.UpdateProjectStatus(writeCtx, sfID, salesentity.ProjectStatusSuspended); err != nil {
+		return fmt.Errorf("setting Salesforce State__c to Suspended failed, CSM left unchanged: %w", err)
+	}
+	return nil
+}
+
+// closureOverrideSuspends reports whether an admin closureState override
+// normalizes to SUSPENDED, using the same label rule the repository stores.
+func closureOverrideSuspends(v *string) bool {
+	label := repository.NormalizeClosureLabel(v)
+	return label != nil && *label == "SUSPENDED"
 }
 
 // resolveUpdatedBy returns the user-token caller's email, or, with no user token,
