@@ -640,6 +640,7 @@ func main() {
 	route("GET /projects/{id}", handler.PermViewSharedEntity, projectHandler.GetProject)
 	route("GET /projects/{id}/metadata", handler.PermView, projectHandler.GetProjectMetadata)
 	route("POST /projects/search", handler.PermViewSharedEntity, projectHandler.SearchProjects)
+	route("POST /projects/aggregate", handler.PermViewSharedEntity, projectHandler.AggregateProjects)
 	route("POST /announcements/audience/search", handler.PermView, announcementHandler.SearchCustomerAnnouncementAudience)
 	route("GET /announcements/audience/excluded-project-keys", handler.PermView, announcementHandler.GetExcludedProjectKeys)
 	routeAll("POST /announcement-requests", announcementRequestHandler.CreateAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
