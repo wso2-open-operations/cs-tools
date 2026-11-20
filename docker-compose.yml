@@ -90,6 +90,15 @@ services:
       timeout: 3s
       retries: 10
 
+  # Azure Blob Storage emulator: the CSM portal backend keeps attachments in a
+  # blob container and refuses to start without one. Azurite's account and key
+  # are its fixed, publicly documented development values, not a secret.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck", "--loose"]
+    ports:
+      - "127.0.0.1:10000:10000"
+
   # One-shot: applies entity-service's raw SQL migrations (it doesn't wire
   # up a migration tool) and loads dummy seed data. Every service that reads
   # from Postgres waits on this completing.
@@ -340,7 +349,12 @@ services:
       - entity-service
       - mock-oidc
       - csm-ai-integration-service
+      - azurite
     environment:
+      # Attachments: the Azurite container above, created at startup.
+      AZURE_STORAGE_CONTAINER: csm-attachments
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CREATE_CONTAINER: "true"
       OAUTH2_CLIENT_ID: csm-portal-backend-dev-client
       OAUTH2_CLIENT_SECRET: dev-secret
       OAUTH2_TOKEN_URL: http://mock-oidc:9100/oauth2/token
