@@ -442,7 +442,7 @@ values are case-sensitive exactly as written.
 | `regions` | a list of the project's account regions, e.g. `["APAC", "EU"]` (case is ignored); a project whose account has no region never matches |
 | `onboardingOwnerIds` | **only** `["__current_user__"]`: the projects whose onboarding the viewer owns ("my onboarding projects") |
 | `onboardingOwnerEmails` | a list of onboarding owners' email addresses, **only those the request gives** ("onboarded by person@example.com"); a project with no onboarding owner never matches |
-| `onboardingOwnerTeamIds` | the projects whose onboarding owner is a member of these teams: team **keys** from the Teams section (e.g. the onboarding team's key, `["customer_onboarding"]`). Never `__current_team__`: "my team's" projects name the team |
+| `onboardingOwnerTeamIds` | the projects whose onboarding owner is a member of these teams: team **keys** from the Teams section (e.g. the onboarding team's key, `["customer_onboarding"]`). Never `__current_team__`, and never a guessed team: "my team's" projects with no team named are asked about (section 8) |
 | `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date (section 5) |
 | `onboardingStartDateFrom`, `onboardingStartDateTo` | the onboarding start date, from / to (inclusive): one date (section 5) |
 | `goLivePlanDateFrom`, `goLivePlanDateTo` | the planned go-live date, from / to (inclusive): one date (section 5) |
@@ -858,7 +858,8 @@ Never set both `slices` and `groupBy`.
 | "accounts with EOL products" / "not live yet" / "no cases in 6 months" / "with recent escalations" | `risks` `["hasEolProduct"]` / `["hasNoGoLive"]` / `["noSupportCases6mo"]` / `["hasRecentEscalations"]` |
 | "projects", "subscriptions" | `resourceType: "project"` (section 5c) |
 | "projects in onboarding" / "onboarding not started" / "onboarded" | `onboardingStatus` `["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
-| "the onboarding team's projects", "projects handled by <team>" / "... by onboarding owner" | project `onboardingOwnerTeamIds ["<team key>"]` (add `onboardingStatus` when asked for projects in onboarding) / that plus `groupBy` `onboardingOwner` on a `bar`. "My team's" names no team: use the team the request is about (onboarding: `customer_onboarding`), else ask which team in a `note` |
+| "the onboarding team's projects", "projects handled by <team>" / "... by onboarding owner" | project `onboardingOwnerTeamIds ["<team key>"]` (add `onboardingStatus` when asked for projects in onboarding) / that plus `groupBy` `onboardingOwner` on a `bar` |
+| "my team's projects", "my team's onboarding projects" (no team named) | not expressible as asked: never guess the team; reply with `{"error": ...}` asking which team, e.g. `{"error": "Which team's projects? Name the team, for example the onboarding team."}` |
 | "my onboarding projects" / "projects onboarded by person@example.com" / "onboarding projects in APAC" | project `onboardingOwnerIds ["__current_user__"]` / `onboardingOwnerEmails ["person@example.com"]` / `regions ["APAC"]` (with `onboardingStatus` when asked for projects in onboarding); one project slice per owner or region for a pie / bar |
 | "projects by onboarding status" | a `pie` with one slice each for Not started, In progress, Completed |
 | "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStates ["Suspended"]` / `["Restricted"]` (or `closureStatus`); "suspended or restricted": `closureStates ["Suspended", "Restricted"]` |
