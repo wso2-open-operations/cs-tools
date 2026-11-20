@@ -85,6 +85,8 @@ import { vulnerabilityPriorityColor } from "@features/csm-security-center/utils/
 import ProductVulnerabilityPreviewDrawer from "@features/csm-security-center/components/ProductVulnerabilityPreviewDrawer";
 import type { BeProductVulnerabilityView } from "@api/backend/types";
 import type { BeCallRequestView } from "@api/backend/types";
+import StaffName from "@components/StaffName";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /** Raw item shape a dashboard widget's `/search` response resolves to —
  * matches `WidgetItem` in `widgetResourceConfig.ts` (kept loose there since
@@ -554,9 +556,7 @@ function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
                   —
                 </Typography>
               ),
-              <Typography key="assignedTo" variant="body2" noWrap>
-                {problem.assignedTo?.name || "—"}
-              </Typography>,
+              <StaffName key="assignedTo" name={problem.assignedTo?.name} />,
             ],
           };
         })}
@@ -614,9 +614,7 @@ function IncidentTaskWidgetList({ items, isLoading }: WidgetListRendererProps): 
             <Typography key="assignmentGroup" variant="body2" noWrap>
               {task.assignmentGroup?.name || "—"}
             </Typography>,
-            <Typography key="assignedTo" variant="body2" noWrap>
-              {task.assignedTo?.name || "—"}
-            </Typography>,
+            <StaffName key="assignedTo" name={task.assignedTo?.name} />,
           ],
         };
       })}
@@ -732,7 +730,7 @@ function UserWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
           // is already the link (with state), matching every sibling widget's
           // "name" cell (see AccountWidgetList/ProjectWidgetList above).
           cells: [
-            previewCell(u.name || u.userName, () => setPreviewUser(u)),
+            previewCell(stripStaffNameMarker(u.name) || u.userName, () => setPreviewUser(u)),
             <Typography key="user" variant="body2" noWrap>
               {u.userName}
             </Typography>,
@@ -792,9 +790,7 @@ function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps
             ))}
           </Box>,
           org.owner ? (
-            <Typography key="owner" variant="body2" noWrap>
-              {org.owner.name}
-            </Typography>
+            <StaffName key="owner" name={org.owner.name} />
           ) : (
             <Typography key="owner" variant="body2" color="warning.main">
               Unassigned
@@ -849,9 +845,7 @@ function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps
           </Typography>,
           <StatusChip key="stage" value={r.lifecycleStage} kind="lifecycle" />,
           r.owner ? (
-            <Typography key="owner" variant="body2" noWrap>
-              {r.owner.name}
-            </Typography>
+            <StaffName key="owner" name={r.owner.name} />
           ) : (
             <Typography key="owner" variant="body2" color="warning.main">
               Unassigned
@@ -964,9 +958,7 @@ function TaskWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
                 —
               </Typography>
             ),
-            <Typography key="assignedTo" variant="body2" noWrap>
-              {task.assignedTo?.name || "—"}
-            </Typography>,
+            <StaffName key="assignedTo" name={task.assignedTo?.name} />,
             <Typography key="updated" variant="caption" color="text.secondary" noWrap>
               {formatDate(task.updatedOn)}
             </Typography>,
