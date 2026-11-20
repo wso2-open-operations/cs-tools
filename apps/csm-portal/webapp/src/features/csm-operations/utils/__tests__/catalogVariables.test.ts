@@ -20,8 +20,12 @@ import {
   getFirstFieldExceedingMaxLength,
   getFirstFieldFailingValidation,
   getUserEditableVariables,
+  isListCollectorField,
+  isMultiLineField,
   isVariableRequired,
   isVariableRequiredOnForm,
+  joinListCollectorValue,
+  splitListCollectorValue,
 } from "@features/csm-operations/utils/catalogVariables";
 import type { BeCatalogItemVariable } from "@api/backend/types";
 
@@ -173,5 +177,39 @@ describe("getFirstFieldFailingValidation", () => {
     ];
     expect(() => getFirstFieldFailingValidation(vars, { v1: "anything" })).not.toThrow();
     expect(getFirstFieldFailingValidation(vars, { v1: "anything" })).toBeNull();
+  });
+});
+
+describe("List Collector", () => {
+  it("is recognised by its type, case-insensitively", () => {
+    expect(isListCollectorField(textVariable({ type: "List Collector" }))).toBe(true);
+    expect(isListCollectorField(textVariable({ type: " list collector " }))).toBe(true);
+    expect(isListCollectorField(textVariable({ type: "Single Line Text" }))).toBe(false);
+  });
+
+  it("is not mistaken for multi-line text", () => {
+    expect(isMultiLineField(textVariable({ type: "List Collector" }))).toBe(false);
+  });
+
+  it("keeps a List Collector question on the form", () => {
+    const people = textVariable({ type: "List Collector", questionText: "People Who Need Access" });
+    expect(getUserEditableVariables([people])).toEqual([people]);
+  });
+
+  it("joins emails with a comma and splits them back", () => {
+    const value = joinListCollectorValue(["a@wso2.com", "b@wso2.com"]);
+    expect(value).toBe("a@wso2.com, b@wso2.com");
+    expect(splitListCollectorValue(value)).toEqual(["a@wso2.com", "b@wso2.com"]);
+  });
+
+  it("ignores blanks and stray spaces when splitting", () => {
+    expect(splitListCollectorValue("")).toEqual([]);
+    expect(splitListCollectorValue(" a@wso2.com ,, b@wso2.com,")).toEqual(["a@wso2.com", "b@wso2.com"]);
+  });
+
+  it("counts as empty for the required check until someone is picked", () => {
+    const people = textVariable({ type: "List Collector", questionText: "People", mandatory: true });
+    expect(getFirstEmptyRequiredField([people], { v1: joinListCollectorValue([]) })).toBe("People");
+    expect(getFirstEmptyRequiredField([people], { v1: joinListCollectorValue(["a@wso2.com"]) })).toBeNull();
   });
 });

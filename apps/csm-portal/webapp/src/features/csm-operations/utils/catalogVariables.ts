@@ -34,6 +34,10 @@ export const VARIABLE_TYPE_MULTI_LINE = "Multi Line Text";
 export const VARIABLE_TYPE_SELECT = "Select Box";
 export const VARIABLE_TYPE_CHECKBOX = "Checkbox";
 export const VARIABLE_TYPE_RADIO = "Radio Buttons";
+export const VARIABLE_TYPE_LIST_COLLECTOR = "List Collector";
+
+/** Separator between the emails a List Collector field submits. */
+const LIST_COLLECTOR_SEPARATOR = ", ";
 
 /**
  * A choice whose `value` can actually be submitted, paired with the label to
@@ -73,6 +77,26 @@ export function isChoiceField(variable: BeCatalogItemVariable): boolean {
     t === VARIABLE_TYPE_RADIO.toLowerCase() ||
     t === VARIABLE_TYPE_CHECKBOX.toLowerCase()
   );
+}
+
+/** A pick-several-people field: a multi-select of internal users whose value
+ *  is their emails, comma-separated. */
+export function isListCollectorField(variable: BeCatalogItemVariable): boolean {
+  const t = (variable.type ?? "").trim().toLowerCase();
+  return t === VARIABLE_TYPE_LIST_COLLECTOR.toLowerCase();
+}
+
+/** The emails held in a List Collector value. */
+export function splitListCollectorValue(value: string): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((email) => email.trim())
+    .filter((email) => email !== "");
+}
+
+/** The List Collector value for a set of emails. */
+export function joinListCollectorValue(emails: string[]): string {
+  return emails.join(LIST_COLLECTOR_SEPARATOR);
 }
 
 /** Multi-line free text (but not the Description field, which is rich text). */

@@ -30,15 +30,20 @@ import { type JSX } from "react";
 import RequiredMark from "@components/RequiredMark";
 import Editor from "@components/rich-text-editor/Editor";
 import type { BeCatalogItemVariable } from "@api/backend/types";
+import AsyncCreatedByMultiSelect from "@features/csm-cases/components/AsyncCreatedByMultiSelect";
 import {
   isChoiceField,
   isDateTimeField,
   isDescriptionField,
+  isListCollectorField,
   isMultiLineField,
   isVariableRequiredOnForm,
+  joinListCollectorValue,
+  splitListCollectorValue,
   usableChoices,
   variableLabel,
 } from "@features/csm-operations/utils/catalogVariables";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import { formatDateTimeLocal, parseDateTimeLocal } from "@utils/dateTime";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
@@ -54,9 +59,10 @@ interface CatalogVariableFieldsProps {
  * Renders a catalog item's user-editable variables, one input per variable.
  * A variable that carries a usable choice list becomes a real select over
  * those options; otherwise the control comes from the variable `type`/label:
- * Yes/No select, multi-line text, datetime picker, rich-text Description, or
- * single-line text. File Copy Path fields are optional; attachment fields are
- * handled by the page's shared attachments section and are not rendered here.
+ * people picker (List Collector), Yes/No select, multi-line text, datetime
+ * picker, rich-text Description, or single-line text. File Copy Path fields
+ * are optional; attachment fields are handled by the page's shared
+ * attachments section and are not rendered here.
  *
  * Respects the additive per-variable metadata from
  * `CHANGES-sr-variable-metadata.md` (`BeCatalogItemVariable`): required-ness
@@ -100,6 +106,25 @@ export default function CatalogVariableFields({
             } catch {
               // Malformed backend regex — don't let it block the field.
             }
+          }
+
+          // Active internal users only: these are the people a request is
+          // raised for, never customer contacts.
+          if (isListCollectorField(v)) {
+            return (
+              <Grid key={v.id} size={{ xs: 12 }}>
+                <AsyncCreatedByMultiSelect
+                  id={`sr-var-${v.id}`}
+                  label={label}
+                  required={required}
+                  disabled={readOnly}
+                  roleIds={INTERNAL_USER_ROLES}
+                  active
+                  values={splitListCollectorValue(value)}
+                  onChange={(emails) => onChange(v.id, joinListCollectorValue(emails))}
+                />
+              </Grid>
+            );
           }
 
           // A supplied choice list wins over every type heuristic below: it

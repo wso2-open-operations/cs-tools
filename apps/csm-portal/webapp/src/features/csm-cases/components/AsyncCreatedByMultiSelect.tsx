@@ -38,6 +38,11 @@ interface AsyncCreatedByMultiSelectProps {
   roleIds?: string[];
   /** See {@link roleIds}; restrict to active accounts only. */
   active?: boolean;
+  /** Defaults suit the advanced-filter row; a form field passes its own. */
+  id?: string;
+  label?: string;
+  required?: boolean;
+  disabled?: boolean;
 }
 
 /**
@@ -54,6 +59,10 @@ export default function AsyncCreatedByMultiSelect({
   onChange,
   roleIds,
   active,
+  id = "advanced-filter-created-by",
+  label = "Value(s)",
+  required = false,
+  disabled = false,
 }: AsyncCreatedByMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -100,7 +109,7 @@ export default function AsyncCreatedByMultiSelect({
     <Autocomplete<CreatedByOption, true>
       multiple
       size="small"
-      id="advanced-filter-created-by"
+      id={id}
       options={options}
       value={selectedOptions}
       open={open}
@@ -108,6 +117,7 @@ export default function AsyncCreatedByMultiSelect({
       onClose={() => setOpen(false)}
       loading={isFetching && users.length === 0}
       disableCloseOnSelect
+      disabled={disabled}
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.name}
       isOptionEqualToValue={(opt, val) => opt.email === val.email}
@@ -166,7 +176,8 @@ export default function AsyncCreatedByMultiSelect({
       renderInput={(params) => (
         <TextField
           {...params}
-          label="Value(s)"
+          label={label}
+          required={required}
           placeholder={values.length ? undefined : "Search people…"}
         />
       )}

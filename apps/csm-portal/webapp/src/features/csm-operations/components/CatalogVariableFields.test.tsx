@@ -28,8 +28,24 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
   ),
 }));
 
+vi.mock("@features/csm-cases/api/useUserSearch", () => ({
+  useInfiniteUserSearch: vi.fn(() => ({
+    users: [
+      { name: "Alice Perera", email: "alice@wso2.com" },
+      { name: "Bob Silva", email: "bob@wso2.com" },
+    ],
+    isFetching: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    isError: false,
+    fetchNextPage: vi.fn(),
+  })),
+}));
+
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
 import { getFirstEmptyRequiredField } from "@features/csm-operations/utils/catalogVariables";
+import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 
 /** Opens a MUI select by its accessible name and returns its option list. */
 function openSelect(name: RegExp | string): HTMLElement {
@@ -365,5 +381,55 @@ describe("CatalogVariableFields — read-only variables", () => {
     // The only field that blocks is the one that carries the mark.
     expect(getFirstEmptyRequiredField(variables, {})).toBe("Editable notes");
     expect(getFirstEmptyRequiredField(variables, { "rw-text": "filled" })).toBeNull();
+  });
+});
+
+describe("CatalogVariableFields — List Collector", () => {
+  const PEOPLE: BeCatalogItemVariable = {
+    id: "33333333-3333-3333-3333-333333333333",
+    questionText: "People Who Need Access",
+    order: 700,
+    type: "List Collector",
+    mandatory: true,
+  };
+
+  it("renders a people picker, not a text box", () => {
+    renderFields([PEOPLE]);
+
+    const input = screen.getByRole("combobox", { name: /people who need access/i });
+    expect(input).toBeRequired();
+    expect(input).not.toHaveAttribute("readonly");
+  });
+
+  it("searches active internal users only", () => {
+    renderFields([PEOPLE]);
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /people who need access/i }));
+
+    expect(vi.mocked(useInfiniteUserSearch)).toHaveBeenLastCalledWith("", true, {
+      roleIds: INTERNAL_USER_ROLES,
+      active: true,
+    });
+  });
+
+  it("adds a picked person's email to the comma-separated value", () => {
+    const { onChange } = renderFields([PEOPLE], { [PEOPLE.id]: "alice@wso2.com" });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /people who need access/i }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByText("Bob Silva"));
+
+    expect(onChange).toHaveBeenCalledWith(PEOPLE.id, "alice@wso2.com, bob@wso2.com");
+  });
+
+  it("shows the people already picked by name", () => {
+    renderFields([PEOPLE], { [PEOPLE.id]: "alice@wso2.com, bob@wso2.com" });
+
+    expect(screen.getByText("Alice Perera, Bob Silva")).toBeInTheDocument();
+  });
+
+  it("is disabled when the question is read-only", () => {
+    renderFields([{ ...PEOPLE, readOnly: true }]);
+
+    expect(screen.getByRole("combobox", { name: /people who need access/i })).toBeDisabled();
   });
 });
