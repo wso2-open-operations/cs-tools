@@ -63,12 +63,15 @@ type AlertConsumerConfig struct {
 	Concurrency int
 	// PriorityWeight is how many priority alerts may be processed in a row while a standard alert waits.
 	PriorityWeight int
+	// RIAEnabled routes alerts that ask for the RIA Creator to the ria pipeline; off, every alert is stored on the core pipeline.
+	RIAEnabled bool
 }
 
 // Message properties the alerting gateway sets on every message.
 const (
 	alertPropertySource     = "source"
 	alertPropertyReceivedAt = "received_at"
+	alertPropertyRIA        = "ria"
 )
 
 // Dead-letter reasons, shown on the dead-letter card so a person can tell why an alert was not stored.
@@ -143,6 +146,7 @@ type AlertConsumer struct {
 	lanes           map[domain.AlertTier]*alertLane
 	scheduler       *priorityScheduler[queuedMessage]
 	workers         int
+	riaEnabled      bool
 	now             func() time.Time
 	sleep           func(ctx context.Context, d time.Duration) bool
 	lockRenewMargin time.Duration
@@ -166,6 +170,7 @@ func NewAlertConsumer(
 		lanes:           lanes,
 		scheduler:       newPriorityScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
 		workers:         workers,
+		riaEnabled:      cfg.RIAEnabled,
 		now:             time.Now,
 		sleep:           sleepContext,
 		lockRenewMargin: defaultLockRenewMargin,
@@ -322,7 +327,8 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 
-	rows, err := c.buildRows(source, tier, message, alerts, ids)
+	pipelines := c.pipelines(ctx, source, message, len(alerts))
+	rows, err := c.buildRows(source, tier, message, alerts, ids, pipelines)
 	if err != nil {
 		return alertDeadLetterDecision(alertDeadLetterTransformFailed, err.Error())
 	}
@@ -348,7 +354,7 @@ func safeTransform(transform alertsource.Transform, body []byte) (alerts []model
 }
 
 // buildRows gives each alert its id and fingerprint the way alert-ingestion does: an alert with no identifier takes its own id.
-func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
+func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string, pipelines []domain.AlertPipeline) ([]domain.NewAlert, error) {
 	receivedOn := c.receivedOn(message)
 	rows := make([]domain.NewAlert, len(alerts))
 	for i, alert := range alerts {
@@ -365,12 +371,49 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message 
 			Alert:        body,
 			Fingerprint:  model.Fingerprint(alert),
 			Tier:         tier,
+			Pipeline:     pipelines[i],
 			MessageID:    message.ID,
 			MessageIndex: i,
 			ReceivedOn:   receivedOn,
 		}
 	}
 	return rows, nil
+}
+
+// pipelines decides each alert's pipeline from its own ria label, then the message's ria property, else core.
+func (c *AlertConsumer) pipelines(ctx context.Context, source string, message *domain.AlertQueueMessage, n int) []domain.AlertPipeline {
+	pipelines := make([]domain.AlertPipeline, n)
+	if !c.riaEnabled {
+		for i := range pipelines {
+			pipelines[i] = domain.AlertPipelineCore
+		}
+		return pipelines
+	}
+	requested := alertsource.ParseRIAFlag(message.Properties[alertPropertyRIA])
+	labels := alertsource.RIALabels(source, message.Body)
+	if labels != nil && len(labels) != n {
+		slog.WarnContext(ctx, "alert consumer: ria labels do not line up with the alerts, using the message property only", "messageId", message.ID, "labels", len(labels), "alerts", n)
+		labels = nil
+	}
+	for i := range pipelines {
+		label := alertsource.RIAUnset
+		if labels != nil {
+			label = labels[i]
+		}
+		pipelines[i] = alertPipeline(label, requested)
+	}
+	return pipelines
+}
+
+// alertPipeline sends an alert to the RIA Creator when its own label asks, or when it has none and the message asks.
+func alertPipeline(label, requested alertsource.RIAFlag) domain.AlertPipeline {
+	if label == alertsource.RIAUnset {
+		label = requested
+	}
+	if label == alertsource.RIAOn {
+		return domain.AlertPipelineRIA
+	}
+	return domain.AlertPipelineCore
 }
 
 // receivedOn is when the gateway accepted the request, falling back to when the queue stored the message.

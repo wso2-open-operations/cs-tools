@@ -28,7 +28,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Runs against a database with migrations 0292 and 100029 applied, and only when ENTITY_TEST_DATABASE_URL is set.
+// Runs against a database with migrations 0292, 0306 and 100029 applied, and only when ENTITY_TEST_DATABASE_URL is set.
 func newAlertIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
@@ -129,5 +129,31 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 	}
 	if rows != 0 {
 		t.Fatalf("a non-internal caller saw %d alert rows, want 0", rows)
+	}
+}
+
+func TestAlertRepositoryIntegration_StoresThePipeline(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	repo := NewAlertRepository(NewScoped(pool))
+	ctx := WithSystemIdentity(context.Background())
+
+	ids, err := repo.ReserveAlertIDs(ctx, 2)
+	if err != nil {
+		t.Fatalf("ReserveAlertIDs: %v", err)
+	}
+	ria := integrationAlert(ids[0], "it-alert-pipeline", 0)
+	ria.Pipeline = domain.AlertPipelineRIA
+	unset := integrationAlert(ids[1], "it-alert-pipeline", 1)
+	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{ria, unset}); err != nil {
+		t.Fatalf("InsertAlerts: %v", err)
+	}
+	for id, want := range map[string]string{ids[0]: "ria", ids[1]: "core"} {
+		var got string
+		if err := NewScoped(pool).QueryRow(ctx, `SELECT pipeline FROM alert WHERE id = $1`, id).Scan(&got); err != nil {
+			t.Fatalf("read pipeline: %v", err)
+		}
+		if got != want {
+			t.Errorf("alert %s pipeline = %q, want %q", id, got, want)
+		}
 	}
 }

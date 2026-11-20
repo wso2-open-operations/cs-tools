@@ -1919,3 +1919,43 @@ func TestConfig_AlertingVersionV1IgnoresIncompleteQueueSettings(t *testing.T) {
 		t.Fatalf("validateAlertConsumer() = %v, want v1 to leave queue settings alone", err)
 	}
 }
+
+func TestConfig_Validate_RIAMode(t *testing.T) {
+	tests := []struct {
+		mode    RIAMode
+		version AlertingVersion
+		enabled bool
+		wantErr bool
+	}{
+		{mode: "", version: AlertingVersionV1},
+		{mode: RIAModeOff, version: AlertingVersionHybrid},
+		{mode: RIAModeShadow, version: AlertingVersionV2, enabled: true},
+		{mode: RIAModeOn, version: AlertingVersionV2, enabled: true},
+		{mode: RIAModeOn, version: AlertingVersionHybrid, enabled: true, wantErr: true},
+		{mode: RIAModeShadow, version: AlertingVersionV1, enabled: true, wantErr: true},
+		{mode: "maybe", version: AlertingVersionV2, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.mode)+"/"+string(tt.version), func(t *testing.T) {
+			c := alertConsumerConfig()
+			c.RIAMode, c.AlertingVersion = tt.mode, tt.version
+			if got := c.RIAEnabled(); got != tt.enabled {
+				t.Errorf("RIAEnabled() = %v, want %v", got, tt.enabled)
+			}
+			if err := c.validateAlertConsumer(); tt.wantErr != (err != nil) {
+				t.Errorf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_RIAModeDefaultsOffAndIgnoresCase(t *testing.T) {
+	t.Setenv("RIA_MODE", "")
+	if c := Load(); c.RIAMode != RIAModeOff || c.RIAEnabled() {
+		t.Errorf("RIA_MODE = %q enabled %v by default, want off", c.RIAMode, c.RIAEnabled())
+	}
+	t.Setenv("RIA_MODE", " Shadow ")
+	if c := Load(); c.RIAMode != RIAModeShadow {
+		t.Errorf("RIA_MODE = %q, want shadow", c.RIAMode)
+	}
+}

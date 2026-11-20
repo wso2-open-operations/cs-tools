@@ -10835,6 +10835,15 @@ const (
 	AlertTierDefault AlertTier = "default"
 )
 
+// AlertPipeline is the processor that turns a stored alert into incidents: the core fingerprint fold or the RIA Creator.
+type AlertPipeline string
+
+// Alert pipelines; core is the default, so an alert goes to the RIA Creator only when something asks for it.
+const (
+	AlertPipelineCore AlertPipeline = "core"
+	AlertPipelineRIA  AlertPipeline = "ria"
+)
+
 // NewAlert is one normalised SRE alert the Service Bus consumer stores in the alert table.
 type NewAlert struct {
 	ID           string
@@ -10842,6 +10851,7 @@ type NewAlert struct {
 	Alert        json.RawMessage
 	Fingerprint  string
 	Tier         AlertTier
+	Pipeline     AlertPipeline
 	MessageID    string
 	MessageIndex int
 	ReceivedOn   time.Time

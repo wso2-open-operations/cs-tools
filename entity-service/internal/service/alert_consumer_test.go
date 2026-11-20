@@ -499,3 +499,64 @@ func TestAlertConsumerSettle_DeadLettersWithTheReason(t *testing.T) {
 		t.Fatalf("dead-lettered = %v, want m-1 with %s", priority.deadLettered, alertDeadLetterUnknownSource)
 	}
 }
+
+func riaConsumer(t *testing.T, repo AlertStore, enabled bool) *AlertConsumer {
+	t.Helper()
+	c := NewAlertConsumer(repo, mustRegistry(t), []AlertQueue{newFakeAlertQueue("priority")}, []AlertQueue{newFakeAlertQueue("standard")}, AlertConsumerConfig{Concurrency: 1, PriorityWeight: 4, RIAEnabled: enabled})
+	c.sleep = func(ctx context.Context, _ time.Duration) bool { return ctx.Err() == nil }
+	return c
+}
+
+func TestAlertConsumerProcess_RoutesEachAlertByItsRIALabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		enabled   bool
+		property  string
+		source    string
+		body      string
+		pipelines []domain.AlertPipeline
+	}{
+		{"off keeps every alert on core", false, "true", "servicenow", `{"service":"s","metric_name":"m","ria":"true"}`, []domain.AlertPipeline{domain.AlertPipelineCore}},
+		{"label asks for ria", true, "", "servicenow", `{"service":"s","metric_name":"m","ria":"true"}`, []domain.AlertPipeline{domain.AlertPipelineRIA}},
+		{"no label and no property stays core", true, "", "servicenow", `{"service":"s","metric_name":"m"}`, []domain.AlertPipeline{domain.AlertPipelineCore}},
+		{"property asks for ria", true, "true", "servicenow", `{"service":"s","metric_name":"m"}`, []domain.AlertPipeline{domain.AlertPipelineRIA}},
+		{"label false beats the property", true, "true", "servicenow", `{"service":"s","metric_name":"m","ria":"false"}`, []domain.AlertPipeline{domain.AlertPipelineCore}},
+		{"label true beats a false property", true, "false", "servicenow", `{"service":"s","metric_name":"m","ria":"true"}`, []domain.AlertPipeline{domain.AlertPipelineRIA}},
+		{"each alert of a batch on its own", true, "", "prometheus", `{"receiver":"r","status":"firing","alerts":[{"labels":{"alertname":"a","ria":"true"}},{"labels":{"alertname":"b"}}]}`, []domain.AlertPipeline{domain.AlertPipelineRIA, domain.AlertPipelineCore}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newFakeAlertRepo()
+			c := riaConsumer(t, repo, tt.enabled)
+			message := alertMessage("m-1", tt.source, tt.body)
+			if tt.property != "" {
+				message.Properties["ria"] = tt.property
+			}
+			if decision := c.process(context.Background(), domain.AlertTierDefault, message); decision.settlement != alertComplete {
+				t.Fatalf("decision = %+v, want complete", decision)
+			}
+			for i, want := range tt.pipelines {
+				if got := repo.rows[fmt.Sprintf("m-1/%d", i)].Pipeline; got != want {
+					t.Errorf("alert %d pipeline = %q, want %q", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAlertPipeline(t *testing.T) {
+	for _, tt := range []struct {
+		label, requested alertsource.RIAFlag
+		want             domain.AlertPipeline
+	}{
+		{alertsource.RIAUnset, alertsource.RIAUnset, domain.AlertPipelineCore},
+		{alertsource.RIAUnset, alertsource.RIAOn, domain.AlertPipelineRIA},
+		{alertsource.RIAUnset, alertsource.RIAOff, domain.AlertPipelineCore},
+		{alertsource.RIAOn, alertsource.RIAOff, domain.AlertPipelineRIA},
+		{alertsource.RIAOff, alertsource.RIAOn, domain.AlertPipelineCore},
+	} {
+		if got := alertPipeline(tt.label, tt.requested); got != tt.want {
+			t.Errorf("alertPipeline(%v, %v) = %q, want %q", tt.label, tt.requested, got, tt.want)
+		}
+	}
+}

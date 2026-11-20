@@ -400,7 +400,7 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		repository.NewAlertRepository(repository.NewScoped(pool)),
 		transforms,
 		priorityQueues, standardQueues,
-		service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight},
+		service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight, RIAEnabled: cfg.RIAEnabled()},
 	)
 	// The system identity, because the alert table is internal only and there is no caller.
 	ctx, cancel := context.WithCancel(repository.WithSystemIdentity(context.Background()))

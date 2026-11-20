@@ -746,6 +746,8 @@ type Config struct {
 
 	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, v2 the queue consumer, hybrid both.
 	AlertingVersion AlertingVersion
+	// RIAMode turns on routing alerts to the RIA Creator (RIA_MODE): off, shadow or on; anything but off needs ALERTING_VERSION v2.
+	RIAMode RIAMode
 	// AlertServiceBusNamespace is the Azure Service Bus namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_NAMESPACE); empty leaves Azure out.
 	AlertServiceBusNamespace string
 	// AlertServiceBusTenantID, AlertServiceBusClientID and AlertServiceBusClientSecret are the Entra ID application that receives from the queues.
@@ -1126,6 +1128,7 @@ func Load() *Config {
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
 		IncidentReportPollInterval:                    envDuration("INCIDENT_REPORT_POLL_INTERVAL", 5*time.Second),
 		AlertingVersion:                               AlertingVersion(strings.ToLower(getEnvOrDefault("ALERTING_VERSION", string(AlertingVersionV1)))),
+		RIAMode:                                       RIAMode(strings.ToLower(strings.TrimSpace(getEnvOrDefault("RIA_MODE", string(RIAModeOff))))),
 		AlertServiceBusNamespace:                      strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_NAMESPACE")),
 		AlertServiceBusTenantID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_TENANT_ID")),
 		AlertServiceBusClientID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CLIENT_ID")),
@@ -1992,6 +1995,36 @@ const (
 	AlertingVersionHybrid AlertingVersion = "hybrid"
 )
 
+// RIAMode is how far the RIA Creator is rolled out; the consumer stores each alert's pipeline in shadow and on alike.
+type RIAMode string
+
+// RIA modes; off is the default, so every alert stays on the core pipeline until a deployment opts in.
+const (
+	RIAModeOff    RIAMode = "off"
+	RIAModeShadow RIAMode = "shadow"
+	RIAModeOn     RIAMode = "on"
+)
+
+// RIAEnabled reports whether alerts that ask for the RIA Creator are routed to it, which they are in shadow and on.
+func (c *Config) RIAEnabled() bool {
+	return c.RIAMode == RIAModeShadow || c.RIAMode == RIAModeOn
+}
+
+// validateRIAMode rejects an unknown mode, and RIA under any alerting version but v2, where alert-core would raise the same incident again.
+func (c *Config) validateRIAMode() error {
+	switch c.RIAMode {
+	case "", RIAModeOff:
+		return nil
+	case RIAModeShadow, RIAModeOn:
+	default:
+		return fmt.Errorf("RIA_MODE must be off, shadow or on, got %q", c.RIAMode)
+	}
+	if c.AlertingVersion != AlertingVersionV2 {
+		return fmt.Errorf("RIA_MODE %s needs ALERTING_VERSION v2, got %q", c.RIAMode, c.AlertingVersion)
+	}
+	return nil
+}
+
 // AlertConsumerEnabled reports whether the queue consumer runs, which it does in v2 and hybrid.
 func (c *Config) AlertConsumerEnabled() bool {
 	return c.AlertingVersion == AlertingVersionV2 || c.AlertingVersion == AlertingVersionHybrid
@@ -2031,6 +2064,9 @@ func SQSRegionFromQueueURL(queueURL string) (string, error) {
 
 // validateAlertConsumer rejects an enabled alert consumer that could never receive or store an alert.
 func (c *Config) validateAlertConsumer() error {
+	if err := c.validateRIAMode(); err != nil {
+		return err
+	}
 	switch c.AlertingVersion {
 	case "", AlertingVersionV1:
 		return nil

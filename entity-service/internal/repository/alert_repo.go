@@ -17,6 +17,7 @@
 package repository
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -42,8 +43,8 @@ const (
 
 const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1, $1)`
 
-const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, received_on)
-SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::timestamptz[])
+const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, received_on, pipeline)
+SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::timestamptz[], $9::text[])
 ON CONFLICT (message_id, message_index) DO NOTHING`
 
 type alertRepository struct {
@@ -94,6 +95,7 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 	messageIDs := make([]string, len(alerts))
 	indexes := make([]int32, len(alerts))
 	receivedOn := make([]time.Time, len(alerts))
+	pipelines := make([]string, len(alerts))
 	for i, a := range alerts {
 		ids[i] = a.ID
 		sources[i] = a.Source
@@ -103,8 +105,9 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 		messageIDs[i] = a.MessageID
 		indexes[i] = int32(a.MessageIndex) // #nosec G115 -- the consumer caps alerts per message far below MaxInt32
 		receivedOn[i] = a.ReceivedOn
+		pipelines[i] = string(cmp.Or(a.Pipeline, domain.AlertPipelineCore))
 	}
-	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, receivedOn)
+	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, receivedOn, pipelines)
 	if err != nil {
 		return 0, fmt.Errorf("insert alerts: %w", err)
 	}
