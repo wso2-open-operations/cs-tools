@@ -124,12 +124,14 @@ type eventPublisher interface {
 // see Engine.sendBreachAlert's own doc comment.
 type chatSender interface {
 	SendSLABreachAlert(ctx context.Context, audience, clockType, tier, caseNumber, wso2CaseID, caseTitle, caseType, productName, team, teamLeadName, severity, state, openedAt, caseLink string) error
+	SendIncidentSLAAlert(ctx context.Context, audience string, a notifications.IncidentSLAAlert) error
 	HasAudienceSpace(audience string) bool
 }
 
-// linkResolver abstracts recipientlinks.Resolver's CSMLink for testability.
+// linkResolver abstracts recipientlinks.Resolver's CSMLink/IncidentLink for testability.
 type linkResolver interface {
 	CSMLink(caseID string) string
+	IncidentLink(incidentID string) string
 }
 
 // emailSender abstracts notifications.EmailClient's SendEmail for
@@ -307,6 +309,70 @@ type Engine struct {
 	// concurrency shape as GoogleChatClient.teamAudienceSpaces.
 	teamGroupEmailsMu sync.RWMutex
 	teamGroupEmails   map[string]string
+	// incidentSLAAlerts is INCIDENT_SLA_ALERTS_ENABLED (WithIncidentSLAAlerts).
+	// False, the default: RegisterIncidentClocks registers nothing and a due
+	// tier of an incident clock already in Redis sends nothing (claimed and
+	// advanced like a case tier under SLA_EMAIL_SENDING_ENABLED=false), so a
+	// deployment with the switch off tracks and alerts cases exactly as one
+	// without incident SLA alerts at all. It is turned on once the SRE and
+	// SME teams' team.chat_webhook_url/group_email rows are in place.
+	incidentSLAAlerts bool
+	// incidentSLATeams resolves an incident's assignment group to its SRE
+	// team keys (notifications.IncidentRoutes.SRETeams, set by
+	// WithIncidentSLATeams). nil: an incident's SLA alert reaches only its
+	// assignee.
+	incidentSLATeams func(assignmentGroup string) []string
+	// incidentRoutingPending holds every incident tier back (left due, not
+	// claimed) until cmd/server has set up incident routing: the ticker
+	// starts before the Alert Settings mapping is applied, and a tier sent
+	// in that gap could find no space for a group that only the mapping
+	// routes. Cases never wait on it. False unless HoldIncidentTiersUntilRoutingReady.
+	incidentRoutingPending atomic.Bool
+	// incidentSpacesPending holds them the same way until the team lookups an
+	// incident alert needs -- the teams' SLA spaces (team.chat_webhook_url by
+	// key) and group emails (team.group_email) -- have both loaded once: a
+	// tier sent before that would send no card or no team email, never
+	// retried. Released by IncidentTeamLookupsLoaded; also false unless held.
+	incidentSpacesPending atomic.Bool
+}
+
+// WithIncidentSLAAlerts turns incident SLA clock registration and alerting on
+// or off; see Engine.incidentSLAAlerts. Case clocks are unaffected either way.
+func (e *Engine) WithIncidentSLAAlerts(enabled bool) *Engine {
+	e.incidentSLAAlerts = enabled
+	return e
+}
+
+// WithIncidentSLATeams sets how an incident's SLA alert finds its SRE teams;
+// see Engine.incidentSLATeams.
+func (e *Engine) WithIncidentSLATeams(teams func(assignmentGroup string) []string) *Engine {
+	e.incidentSLATeams = teams
+	return e
+}
+
+// HoldIncidentTiersUntilRoutingReady makes incident tiers wait for both
+// IncidentRoutingReady and IncidentTeamLookupsLoaded; see
+// Engine.incidentRoutingPending and Engine.incidentSpacesPending.
+func (e *Engine) HoldIncidentTiersUntilRoutingReady() *Engine {
+	e.incidentRoutingPending.Store(true)
+	e.incidentSpacesPending.Store(true)
+	return e
+}
+
+// IncidentTeamLookupsLoaded releases the hold on the team lookups: cmd/server
+// calls it once the teams' SLA spaces and group emails have each loaded
+// successfully (an empty result too), or at once when there is no
+// entity-service to load them from.
+func (e *Engine) IncidentTeamLookupsLoaded() {
+	e.incidentSpacesPending.Store(false)
+}
+
+// IncidentRoutingReady releases the incident tiers held since
+// HoldIncidentTiersUntilRoutingReady. cmd/server calls it once routing setup
+// has finished, whether or not it applied a mapping, so a deployment
+// without one is not held forever.
+func (e *Engine) IncidentRoutingReady() {
+	e.incidentRoutingPending.Store(false)
 }
 
 // clock returns e.now(), or time.Now() when no clock is set.
@@ -517,6 +583,56 @@ func parseWakeMember(member string) (caseID, clockType string, tier int, ok bool
 // one-off script reading existing cases and calling this per case would
 // close that, not built here.
 func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, engagementType, product, team string) {
+	e.registerClocks(ctx, caseID, createdAt, ClockMeta{
+		CaseNumber:     caseNumber,
+		WSO2CaseID:     wso2CaseID,
+		CaseTitle:      caseTitle,
+		CaseType:       caseType,
+		EngagementType: engagementType,
+		Product:        product,
+		Team:           team,
+		Priority:       priority,
+	}, false)
+}
+
+// CaseTypeIncident is the ClockMeta.CaseType of an incident's clock. Its
+// Team is the incident's assignment group and its Product the incident's
+// service; sendBreachAlert routes it to the incident SLA spaces
+// (sendIncidentBreachAlert) instead of the case audiences.
+const CaseTypeIncident = "INCIDENT"
+
+// RegisterIncidentClocks schedules an incident's SLA clocks the way
+// RegisterClocks does a case's: called from dispatch on incident.created and
+// again on incident.priority_elevated, since raising an incident's priority
+// can start a clock (entity-service's incident policy starts on Critical/
+// High). Re-registering the same clock is a no-op (SetClock keeps the
+// alerted tier of the same incarnation). A clock entity-service already
+// ended (a priority lowered before this ran) is skipped rather than
+// scheduled, so a cancelled-after-breach clock never alerts.
+func (e *Engine) RegisterIncidentClocks(ctx context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string) {
+	if !e.incidentSLAAlerts {
+		slog.DebugContext(ctx, "slaengine: INCIDENT_SLA_ALERTS_ENABLED=false, incident sla clocks not registered", "incidentId", incidentID)
+		return
+	}
+	e.registerClocks(ctx, incidentID, createdAt, ClockMeta{
+		CaseNumber: number,
+		CaseTitle:  title,
+		CaseType:   CaseTypeIncident,
+		Product:    service,
+		Team:       assignmentGroup,
+		Priority:   priority,
+	}, true)
+}
+
+// registerClocks is RegisterClocks' body: base carries every display field,
+// StartedAt/Schedule are filled from entity-service per clock type.
+// incident (RegisterIncidentClocks) leaves out a clock entity-service already
+// reports ended, and keeps the stored service, title, group and number when
+// base has none -- incident.priority_elevated carries no service and may omit
+// the others, so re-registering from it must not blank what incident.created
+// stored. A case's registration is
+// unaffected by either.
+func (e *Engine) registerClocks(ctx context.Context, caseID string, createdAt time.Time, base ClockMeta, incident bool) {
 	if e.entity == nil {
 		slog.WarnContext(ctx, "slaengine: no entity-service client configured, sla clocks not registered", "caseId", caseID)
 		return
@@ -531,27 +647,38 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 		if !state.Found || state.DurationSeconds <= 0 {
 			continue
 		}
+		if incident && isTerminalSLAStage(state.Stage) {
+			slog.InfoContext(ctx, "slaengine: clock already ended in entity-service, not registering it", "caseId", caseID, "clockType", clockType, "stage", state.Stage)
+			continue
+		}
 
 		startedAt := createdAt
 		if state.StartedOn != nil {
 			startedAt = *state.StartedOn
 		}
 		duration := time.Duration(state.DurationSeconds) * time.Second
-		resolutionAvoidWeekend := clockType == ClockResolution && strings.EqualFold(priority, "MEDIUM")
+		resolutionAvoidWeekend := clockType == ClockResolution && strings.EqualFold(base.Priority, "MEDIUM")
 		dueAt, tierDuration := dueAtAndTierDuration(startedAt, duration, state.Schedule, resolutionAvoidWeekend)
 
-		meta := ClockMeta{
-			CaseNumber:     caseNumber,
-			WSO2CaseID:     wso2CaseID,
-			CaseTitle:      caseTitle,
-			CaseType:       caseType,
-			EngagementType: engagementType,
-			Product:        product,
-			Team:           team,
-			Priority:       priority,
-			StartedAt:      startedAt,
-			Schedule:       state.Schedule,
-			SLAID:          state.ID,
+		meta := base
+		meta.StartedAt = startedAt
+		meta.Schedule = state.Schedule
+		meta.SLAID = state.ID
+		if incident && (meta.Product == "" || meta.CaseTitle == "" || meta.Team == "" || meta.CaseNumber == "") {
+			if stored, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+				if meta.Product == "" {
+					meta.Product = stored.Product
+				}
+				if meta.CaseTitle == "" {
+					meta.CaseTitle = stored.CaseTitle
+				}
+				if meta.Team == "" {
+					meta.Team = stored.Team
+				}
+				if meta.CaseNumber == "" {
+					meta.CaseNumber = stored.CaseNumber
+				}
+			}
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
@@ -957,6 +1084,11 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 		return e.store.RemoveWake(ctx, member)
 	}
 	if meta.Paused {
+		return nil
+	}
+	if meta.CaseType == CaseTypeIncident && (e.incidentRoutingPending.Load() || e.incidentSpacesPending.Load()) {
+		// Left due and unclaimed, as a paused clock is: the next tick after
+		// routing is ready sends it.
 		return nil
 	}
 
@@ -1405,6 +1537,18 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		return
 	}
 
+	if meta.CaseType == CaseTypeIncident {
+		if !e.incidentSLAAlerts {
+			// A clock registered while the switch was on: skipped the same
+			// way as a gated-off case tier above, so it counts as alerted and
+			// turning the switch on later does not replay it.
+			slog.InfoContext(ctx, "slaengine: INCIDENT_SLA_ALERTS_ENABLED=false, skipping incident sla alert", "incidentId", caseID, "clockType", clockType, "tier", tier)
+			return
+		}
+		e.sendIncidentBreachAlert(ctx, meta, caseID, clockType, tier, state)
+		return
+	}
+
 	// Service requests breach their SLA against the account's default CRE
 	// team, not whichever team (often a different SRE group) is actually
 	// working the SR -- a real, reported false-signal problem. Rather than
@@ -1472,6 +1616,81 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 	e.sendBreachEmails(ctx, meta, caseID, clockType, tier, caseNumber, openedAt, caseLink, state, isAmericas)
 }
 
+// sendIncidentBreachAlert is sendBreachAlert for an incident's clock, the way
+// a case's reaches its CRE team: the incident's current assignment group is
+// resolved to its team -- an SME team entity-service names (an escalation to
+// SME), else its SRE team(s) (incidentSLATeams -- the SRE ladder's own
+// group->team mapping, so a default group is every teamless team) -- and each
+// team's own team.chat_webhook_url (its incident SLA space) gets the card and
+// its team.group_email the team email, beside the assignee's. A team with no
+// space gets no card; there is no shared fallback room, no Americas or
+// onboarding copy (CRE coverage), and never a call. A failed send to one
+// space is logged and not retried, as for a case.
+func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, incidentID, clockType string, tier int, state clockState) {
+	number := meta.CaseNumber
+	if number == "" {
+		number = incidentID
+	}
+	var openedAt string
+	if !meta.StartedAt.IsZero() {
+		openedAt = meta.StartedAt.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
+	}
+	link := e.links.IncidentLink(incidentID)
+
+	// The group as it is now, so a reassigned incident alerts its new
+	// group's team(s). An empty name keeps the registration-time group on
+	// purpose, whichever of the two it means: an entity-service that
+	// predates the field, or an incident with no group right now. Either
+	// way the last owning SRE team is still alerted, rather than nobody.
+	if state.AssignmentGroupName != "" {
+		meta.Team = state.AssignmentGroupName
+	}
+
+	// The current group's own team: an SME team entity-service names for it
+	// (escalated to an SME team), else the SRE team(s) the ladder maps the
+	// group to. Whichever team holds the incident now gets the alert.
+	var teams []string
+	if key := strings.ToLower(strings.TrimSpace(state.AssignmentGroupTeamKey)); key != "" {
+		teams = []string{key}
+	} else if e.incidentSLATeams != nil {
+		teams = e.incidentSLATeams(meta.Team)
+	}
+	var audiences, teamEmails []string
+	for _, team := range teams {
+		if audience := notifications.IncidentSLAAudience(team); e.chat.HasAudienceSpace(audience) && !slices.Contains(audiences, audience) {
+			audiences = append(audiences, audience)
+		}
+		if email, ok := e.teamGroupEmail(team); ok {
+			teamEmails = append(teamEmails, email)
+		}
+	}
+	if len(audiences) == 0 {
+		slog.InfoContext(ctx, "slaengine: incident's SRE team has no incident SLA chat space, no chat alert", "incidentId", incidentID, "clockType", clockType, "tier", tier, "assignmentGroup", meta.Team, "sreTeams", teams)
+	}
+	alert := notifications.IncidentSLAAlert{
+		ClockType:       clockType,
+		Tier:            tierLabel(tier),
+		Number:          number,
+		Title:           meta.CaseTitle,
+		AssignmentGroup: meta.Team,
+		Priority:        meta.Priority,
+		Service:         meta.Product,
+		OpenedAt:        openedAt,
+		IncidentLink:    link,
+	}
+	for _, audience := range audiences {
+		if err := e.chat.SendIncidentSLAAlert(ctx, audience, alert); err != nil {
+			slog.ErrorContext(ctx, "slaengine: failed to send incident sla alert to chat space, not retrying", "incidentId", incidentID, "clockType", clockType, "tier", tier, "chatSpace", audience, "err", err)
+		}
+	}
+
+	// GetClockState's TeamEmail/TeamLeadName are the account CRE team's; an
+	// incident's team email goes to its SRE team(s) instead, with no lead.
+	state.TeamEmail, state.TeamLeadName = "", ""
+	state.incidentTeamEmails = teamEmails
+	e.sendBreachEmails(ctx, meta, incidentID, clockType, tier, number, openedAt, link, state, false)
+}
+
 // sendBreachEmails sends the same tier crossing sendBreachAlert just posted
 // to Chat as two or three separate emails — one to the case's assigned
 // engineer, one to the case's team email group(s), and, when isAmericas is
@@ -1529,6 +1748,11 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		State:        meta.State,
 		OpenedAt:     openedAt,
 		CaseLink:     caseLink,
+		Incident:     meta.CaseType == CaseTypeIncident,
+	}
+	if data.Incident {
+		// "Incident ID" already says what it is; a "Type : INCIDENT" row adds nothing.
+		data.CaseType = ""
 	}
 	subject := notifications.SLABreachEmailSubject(clockType, data.Tier, meta.Priority, caseNumber, meta.WSO2CaseID)
 
@@ -1598,7 +1822,13 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	// stay the CRE team's own throughout -- the email never claims the
 	// onboarding team's lead leads the team actually working the case (a
 	// CodeRabbit-caught gap in an earlier version of this fix).
+	//
 	teamEmails := nonEmptyUnique(state.TeamEmail, state.OnboardingTeamEmail)
+	if meta.CaseType == CaseTypeIncident {
+		// Its SRE team(s)' group emails (sendIncidentBreachAlert), never the
+		// account CRE or onboarding team's.
+		teamEmails = nonEmptyUnique(state.incidentTeamEmails...)
+	}
 	send("team", teamEmails, meta.Team, func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
