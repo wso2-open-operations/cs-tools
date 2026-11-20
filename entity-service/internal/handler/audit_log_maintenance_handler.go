@@ -65,11 +65,11 @@ func decodeNoOptions(w http.ResponseWriter, r *http.Request) bool {
 		if errors.Is(err, io.EOF) {
 			return true
 		}
-		apierror.WriteJSON(w, http.StatusBadRequest, decodeErrMsg(err))
+		writeServiceError(w, r, &apierror.ValidationError{Msg: decodeErrMsg(err)})
 		return false
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		apierror.WriteJSON(w, http.StatusBadRequest, "request body must contain a single JSON object")
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "request body must contain a single JSON object"})
 		return false
 	}
 	return true
