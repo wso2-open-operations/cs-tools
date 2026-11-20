@@ -89,6 +89,13 @@ type salesforceProjectIDLookup interface {
 	SalesforceProjectID(ctx context.Context, id string) (string, error)
 }
 
+// projectUpdateBeforeCommit is UpdateProject with a call that runs inside the
+// row lock after stored-state checks and before the UPDATE. Satisfied by
+// *repository.projectRepo.
+type projectUpdateBeforeCommit interface {
+	UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context) error) (domain.ProjectUpdateResult, error)
+}
+
 // NewProjectUpdateService constructs a ProjectUpdateService backed by
 // Postgres alone (DATA_SOURCE=postgres) -- it never touches ServiceNow.
 func NewProjectUpdateService(repo repository.ProjectRepository, userRepo repository.UserRepository, access AccessService) ProjectUpdateService {
@@ -155,18 +162,41 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		return domain.ProjectUpdateResponse{}, err
 	}
 
-	// Salesforce first, then CSM, for the same reason ACP suspends that way:
-	// a failed Salesforce write must leave CSM unchanged. Written the other
-	// way around, CSM would already say Suspended while Salesforce stayed
-	// Open, and the admin's retry is the only thing that can finish the pair.
-	// Setting State__c to Suspended again on that retry is harmless.
-	if err := s.suspendInSalesforce(ctx, id, req); err != nil {
-		return domain.ProjectUpdateResponse{}, err
+	// Reject a bad request before Salesforce. UpdateProject repeats this, and
+	// also checks stored account, owner, and date order inside its transaction.
+	if closureOverrideSuspends(req.ClosureState) {
+		if err := repository.ValidateProjectUpdate(req); err != nil {
+			return domain.ProjectUpdateResponse{}, err
+		}
 	}
 
-	result, err := s.repo.UpdateProject(ctx, id, req, updatedBy)
-	if err != nil {
+	// Salesforce, then the CSM write, for the same reason ACP suspends that
+	// way: a failed Salesforce write must leave CSM unchanged. Setting
+	// State__c to Suspended again on a retry is harmless. On the Postgres
+	// repository the Salesforce call sits inside the update transaction,
+	// after the stored-state checks and before the UPDATE.
+	var wroteSalesforce bool
+	suspend := func(ctx context.Context) error {
+		if err := s.suspendInSalesforce(ctx, id, req); err != nil {
+			return err
+		}
 		if s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
+			wroteSalesforce = true
+		}
+		return nil
+	}
+
+	var result domain.ProjectUpdateResult
+	if hook, ok := s.repo.(projectUpdateBeforeCommit); ok && s.salesEntity != nil && closureOverrideSuspends(req.ClosureState) {
+		result, err = hook.UpdateProjectBeforeCommit(ctx, id, req, updatedBy, suspend)
+	} else {
+		if err = suspend(ctx); err != nil {
+			return domain.ProjectUpdateResponse{}, err
+		}
+		result, err = s.repo.UpdateProject(ctx, id, req, updatedBy)
+	}
+	if err != nil {
+		if wroteSalesforce {
 			return domain.ProjectUpdateResponse{}, fmt.Errorf("Salesforce State__c set to Suspended, but updating the CSM project failed: %w", err)
 		}
 		return domain.ProjectUpdateResponse{}, err
@@ -223,7 +253,10 @@ func (s *pgProjectUpdateService) suspendInSalesforce(ctx context.Context, id str
 	if sfID == "" {
 		return &apierror.ValidationError{Msg: "project has no Salesforce id, so its Salesforce status cannot be set to Suspended"}
 	}
-	if err := s.salesEntity.UpdateProjectStatus(ctx, sfID, salesentity.ProjectStatusSuspended); err != nil {
+	// Same bound ACP uses when it writes State__c inside a project-row lock.
+	writeCtx, cancel := context.WithTimeout(ctx, acpReopenSalesforceWriteTimeout)
+	defer cancel()
+	if err := s.salesEntity.UpdateProjectStatus(writeCtx, sfID, salesentity.ProjectStatusSuspended); err != nil {
 		return fmt.Errorf("setting Salesforce State__c to Suspended failed, CSM left unchanged: %w", err)
 	}
 	return nil

@@ -87,6 +87,28 @@ type fakeProjectStatusWriter struct {
 	repoAlreadyUsed bool
 }
 
+// hookedProjectUpdateRepo is a stub that can refuse inside
+// UpdateProjectBeforeCommit before the Salesforce callback, standing in for
+// the repository's stored-state checks.
+type hookedProjectUpdateRepo struct {
+	stubProjectUpdateRepo
+	reject            error
+	beforeCommitCalls int
+}
+
+func (r *hookedProjectUpdateRepo) UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, before func(context.Context) error) (domain.ProjectUpdateResult, error) {
+	if r.reject != nil {
+		return domain.ProjectUpdateResult{}, r.reject
+	}
+	if before != nil {
+		r.beforeCommitCalls++
+		if err := before(ctx); err != nil {
+			return domain.ProjectUpdateResult{}, err
+		}
+	}
+	return r.stubProjectUpdateRepo.UpdateProject(ctx, id, req, updatedBy)
+}
+
 func (f *fakeProjectStatusWriter) UpdateProjectStatus(_ context.Context, id, status string) error {
 	f.calls++
 	f.gotID = id
@@ -805,6 +827,35 @@ func TestPgProjectUpdateService_AdminSuspendWritesSalesforceFirst(t *testing.T) 
 		svc := NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
 		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended}); err != nil || !repo.called {
 			t.Fatalf("err = %v, repo called = %v", err, repo.called)
+		}
+	})
+
+	t.Run("invalid companion field does not touch salesforce", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{sfID: "a0dSF"}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		bad := "not-a-state"
+		_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended, EndDateClosureState: &bad})
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("err = %v, want ValidationError", err)
+		}
+		if sf.calls != 0 || repo.called {
+			t.Fatalf("salesforce calls = %d, repo called = %v", sf.calls, repo.called)
+		}
+	})
+
+	t.Run("stored-state rejection runs before salesforce", func(t *testing.T) {
+		repo := &hookedProjectUpdateRepo{reject: &apierror.ConflictError{Msg: "project has no linked account"}}
+		sf := &fakeProjectStatusWriter{}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended})
+		var ce *apierror.ConflictError
+		if !errors.As(err, &ce) {
+			t.Fatalf("err = %v, want ConflictError", err)
+		}
+		if sf.calls != 0 || repo.beforeCommitCalls != 0 {
+			t.Fatalf("salesforce calls = %d, beforeCommit calls = %d", sf.calls, repo.beforeCommitCalls)
 		}
 	})
 
