@@ -30,7 +30,7 @@ export interface UserReference {
   email: string;
   name: string;
   /** True when the backend resolved the person to an INTERNAL-type user
-   * (WSO2 staff). Only comment authors carry it today; absent means "not
+   * (WSO2 staff). Comment authors and case watchers carry it; absent means "not
    * known to be internal", never "known external". */
   isInternal?: boolean;
 }

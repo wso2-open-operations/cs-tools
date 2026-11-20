@@ -264,6 +264,7 @@ export type EscalationSearchResponse = {
 
 // Response type for detailed case information.
 export type CaseDetails = AuditMetadata & {
+  createdByIsInternal?: boolean;
   id: string;
   internalId: string;
   number: string | null;
@@ -299,6 +300,7 @@ export type CaseDetails = AuditMetadata & {
   findingsResolved: number | null;
   findingsTotal: number | null;
   watchList?: Array<{
+    isInternal?: boolean;
     id?: string;
     userName?: string;
     name?: string;

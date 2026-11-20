@@ -3104,9 +3104,10 @@ type UserReference struct {
 	Email string  `json:"email"`
 	Name  string  `json:"name"`
 	// IsInternal is true when the person resolved to an INTERNAL-type user
-	// (WSO2 staff). Only comment authors set it today; everywhere else it is
-	// omitted, so absent means "not known to be internal", never "known
-	// external".
+	// (WSO2 staff). Comment authors, and the creator and watch-list users of a
+	// case read from PostgreSQL, set it; the ServiceNow data source has no
+	// user_type on its case payload and omits it. Absent means "not known to be
+	// internal", never "known external".
 	IsInternal bool `json:"isInternal,omitempty"`
 }
 
