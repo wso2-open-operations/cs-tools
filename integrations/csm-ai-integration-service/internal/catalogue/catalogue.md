@@ -1038,8 +1038,10 @@ If two readings are plausible and the table does not settle it, pick the one abo
     values** of section 5b; change request state in the flat `states`, never in `filters`; `groupBy` by
     `state` only; a problem list has no `sortBy`; no ids, no `anyOf`, no `line`.
 11. An `account` / `project` widget: a flat `query` with only the keys of section 5c; single values as
-    one string, booleans as `true` / `false`, `abtTeam` a team key; no `groupBy`; an account list has
-    no `sortBy`, a project list sorts by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or
+    one string, booleans as `true` / `false`, `abtTeam` a team key; an account widget has no `groupBy`, a
+    project `pie` / `bar` may group by `onboardingOwner`, `onboardingStatus` or `region` (`maxGroups` at most 50);
+    `onboardingOwnerTeamIds` holds team keys, never `__current_team__`; an account list has no `sortBy`,
+    a project list sorts by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or
     `productionReadinessCompletionDate` only.
 12. A `case_feedback` widget: a flat `query` with only `rating` (a number 1-5); no `dateFrom` / `dateTo`;
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
