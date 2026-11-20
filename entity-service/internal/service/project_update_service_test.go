@@ -34,6 +34,9 @@ import (
 type stubProjectUpdateRepo struct {
 	updateProject func(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error)
 
+	sfID  string
+	sfErr error
+
 	called    bool
 	gotID     string
 	gotReq    domain.ProjectUpdateRequest
@@ -65,6 +68,33 @@ func (r *stubProjectUpdateRepo) GetProjectConsumptionStatus(context.Context, str
 
 func (r *stubProjectUpdateRepo) UpdateProjectConsumption(context.Context, string, domain.ProjectConsumptionUpdateRequest, string) error {
 	panic("UpdateProjectConsumption: not exercised by these tests")
+}
+
+func (r *stubProjectUpdateRepo) SalesforceProjectID(context.Context, string) (string, error) {
+	if r.sfErr != nil {
+		return "", r.sfErr
+	}
+	return r.sfID, nil
+}
+
+// fakeProjectStatusWriter records Salesforce State__c writes.
+type fakeProjectStatusWriter struct {
+	err             error
+	calls           int
+	gotID           string
+	gotStatus       string
+	repo            *stubProjectUpdateRepo
+	repoAlreadyUsed bool
+}
+
+func (f *fakeProjectStatusWriter) UpdateProjectStatus(_ context.Context, id, status string) error {
+	f.calls++
+	f.gotID = id
+	f.gotStatus = status
+	if f.repo != nil {
+		f.repoAlreadyUsed = f.repo.called
+	}
+	return f.err
 }
 
 // stubProjectMirror is a ProjectUpdateService whose UpdateProject records the
@@ -332,7 +362,7 @@ func TestPgProjectUpdateService_ClosureStateOnlyNeverDispatchesSNMirror(t *testi
 	mirror := &stubProjectMirror{}
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
-	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror)
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	if _, err := svc.UpdateProject(ctx, "11111111-1111-1111-1111-111111111111", domain.ProjectUpdateRequest{ClosureState: &closureState}); err != nil {
@@ -362,7 +392,7 @@ func TestPgProjectUpdateService_VerificationEnabledOnlyNeverDispatchesSNMirror(t
 	mirror := &stubProjectMirror{}
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
-	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror)
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	if _, err := svc.UpdateProject(ctx, "11111111-1111-1111-1111-111111111111", domain.ProjectUpdateRequest{VerificationEnabled: &verificationEnabled}); err != nil {
@@ -393,7 +423,7 @@ func TestPgProjectUpdateService_DualWriteDispatchesExactlyOneMirrorCallOnSuccess
 	mirror := &stubProjectMirror{err: errors.New("sn unreachable")}
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
-	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror)
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	id := "11111111-1111-1111-1111-111111111111"
@@ -428,7 +458,7 @@ func TestPgProjectUpdateService_MirrorDropsOnboardingFieldsFromMixedRequest(t *t
 	repo := &stubProjectUpdateRepo{}
 	mirror := &stubProjectMirror{}
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
-	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror)
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	req := domain.ProjectUpdateRequest{
@@ -465,7 +495,7 @@ func TestPgProjectUpdateService_AcceptsOnboardingFields(t *testing.T) {
 	repo := &stubProjectUpdateRepo{}
 	mirror := &stubProjectMirror{}
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
-	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror)
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, dispatcher, mirror, nil)
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	req := domain.ProjectUpdateRequest{OnboardingStatus: &status, OnboardingOwner: &owner}
@@ -630,7 +660,7 @@ func TestPgProjectUpdateService_SuspensionProcessOverriddenNeverReachesMirror(t 
 
 	repo := &stubProjectUpdateRepo{}
 	mirror := &stubProjectMirror{}
-	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror)
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror, nil)
 	if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{SuspensionProcessOverridden: &overridden}); err != nil {
 		t.Fatalf("flag only: UpdateProject() error = %v, want success", err)
 	}
@@ -641,7 +671,7 @@ func TestPgProjectUpdateService_SuspensionProcessOverriddenNeverReachesMirror(t 
 
 	repo2 := &stubProjectUpdateRepo{}
 	mirror2 := &stubProjectMirror{}
-	svc2 := NewProjectUpdateServiceWithSNWriteback(repo2, testProjectUserRepo(), alwaysUnrestrictedAccess{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror2)
+	svc2 := NewProjectUpdateServiceWithSNWriteback(repo2, testProjectUserRepo(), alwaysUnrestrictedAccess{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror2, nil)
 	if _, err := svc2.UpdateProject(ctx, id, domain.ProjectUpdateRequest{SuspensionProcessOverridden: &overridden, HasAgent: &hasAgent}); err != nil {
 		t.Fatalf("mixed: UpdateProject() error = %v, want success", err)
 	}
@@ -672,4 +702,125 @@ func TestSNProjectUpdateService_RejectsSuspensionProcessOverridden(t *testing.T)
 			}
 		})
 	}
+}
+
+// TestPgProjectUpdateService_AdminSuspendWritesSalesforceFirst pins that an
+// admin closureState of SUSPENDED sets Salesforce State__c to Suspended
+// before the CSM row is updated, and that a Salesforce failure or a missing
+// Salesforce id leaves CSM untouched. Other closure values never call
+// Salesforce. With no sales-entity client the override stays Postgres-only.
+func TestPgProjectUpdateService_AdminSuspendWritesSalesforceFirst(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	const id = "11111111-1111-1111-1111-111111111111"
+	suspended := "SUSPENDED"
+	spaced := " suspended "
+	open := "OPEN"
+
+	t.Run("suspended writes salesforce then csm", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{sfID: "a0d000000000001AAA"}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended}); err != nil {
+			t.Fatalf("UpdateProject: %v", err)
+		}
+		if sf.calls != 1 || sf.gotID != repo.sfID || sf.gotStatus != "Suspended" {
+			t.Fatalf("salesforce call = %d id %q status %q", sf.calls, sf.gotID, sf.gotStatus)
+		}
+		if sf.repoAlreadyUsed {
+			t.Fatal("Salesforce was written after CSM")
+		}
+		if !repo.called {
+			t.Fatal("CSM update was not called")
+		}
+	})
+
+	t.Run("spaced suspended still suspends salesforce", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{sfID: "a0dSF"}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &spaced}); err != nil {
+			t.Fatalf("UpdateProject: %v", err)
+		}
+		if sf.calls != 1 || sf.gotStatus != "Suspended" {
+			t.Fatalf("salesforce calls = %d status %q", sf.calls, sf.gotStatus)
+		}
+	})
+
+	t.Run("salesforce failure leaves csm unchanged", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{sfID: "a0dSF"}
+		sf := &fakeProjectStatusWriter{repo: repo, err: &apierror.ServiceUnavailableError{Msg: "salesentity down"}}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended})
+		var sue *apierror.ServiceUnavailableError
+		if !errors.As(err, &sue) {
+			t.Fatalf("err = %v, want ServiceUnavailableError", err)
+		}
+		if repo.called {
+			t.Fatal("CSM update ran after Salesforce failed")
+		}
+	})
+
+	t.Run("missing salesforce id is refused", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended})
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("err = %v, want ValidationError", err)
+		}
+		if sf.calls != 0 || repo.called {
+			t.Fatalf("salesforce calls = %d, repo called = %v", sf.calls, repo.called)
+		}
+	})
+
+	t.Run("unknown project is not written", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{sfErr: &apierror.NotFoundError{Msg: "project not found"}}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended})
+		var nfe *apierror.NotFoundError
+		if !errors.As(err, &nfe) {
+			t.Fatalf("err = %v, want NotFoundError", err)
+		}
+		if sf.calls != 0 || repo.called {
+			t.Fatalf("salesforce calls = %d, repo called = %v", sf.calls, repo.called)
+		}
+	})
+
+	t.Run("open does not touch salesforce", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{sfID: "a0dSF"}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &open}); err != nil {
+			t.Fatalf("UpdateProject: %v", err)
+		}
+		if sf.calls != 0 || !repo.called {
+			t.Fatalf("salesforce calls = %d, repo called = %v", sf.calls, repo.called)
+		}
+	})
+
+	t.Run("no sales client keeps the postgres-only override", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{}
+		svc := NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
+		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended}); err != nil || !repo.called {
+			t.Fatalf("err = %v, repo called = %v", err, repo.called)
+		}
+	})
+
+	t.Run("csm failure after salesforce reports both", func(t *testing.T) {
+		repo := &stubProjectUpdateRepo{
+			sfID: "a0dSF",
+			updateProject: func(context.Context, string, domain.ProjectUpdateRequest, string) (domain.ProjectUpdateResult, error) {
+				return domain.ProjectUpdateResult{}, &apierror.NotFoundError{Msg: "project not found"}
+			},
+		}
+		sf := &fakeProjectStatusWriter{repo: repo}
+		svc := NewProjectUpdateServiceWithSalesEntity(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, sf)
+		_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{ClosureState: &suspended})
+		var nfe *apierror.NotFoundError
+		if !errors.As(err, &nfe) || sf.calls != 1 {
+			t.Fatalf("err = %v, salesforce calls = %d", err, sf.calls)
+		}
+	})
 }

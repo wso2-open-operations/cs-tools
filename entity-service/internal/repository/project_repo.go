@@ -707,6 +707,32 @@ func absHours(h *float64) *float64 {
 	return &a
 }
 
+// SalesforceProjectID returns the project's Salesforce id (project.sf_id).
+// An empty string means the row exists but has no Salesforce id. A missing
+// row is a NotFoundError.
+func (r *projectRepo) SalesforceProjectID(ctx context.Context, id string) (string, error) {
+	ctx = WithSystemIdentity(ctx)
+	var sfID *string
+	err := r.db.QueryRow(ctx, `SELECT sf_id FROM project WHERE id = $1::uuid`, id).Scan(&sfID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", &apierror.NotFoundError{Msg: "project not found"}
+	}
+	if err != nil {
+		return "", fmt.Errorf("project salesforce id: %w", err)
+	}
+	if sfID == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*sfID), nil
+}
+
+// NormalizeClosureLabel maps a closure value to its enum label
+// ("Pending Notified" -> PENDING_NOTIFIED), the same normalization
+// UpdateProject stores. nil in, nil out.
+func NormalizeClosureLabel(v *string) *string {
+	return closureEnumLabel(v)
+}
+
 // UpdateProject implements ProjectRepository.
 func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error) {
 	if err := validateClosureFields(req); err != nil {
