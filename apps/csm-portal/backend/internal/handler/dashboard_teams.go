@@ -157,9 +157,8 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 		}
 		where := fmt.Sprintf("widgets[%d]", i)
 		resourceType, _ := widget["resourceType"].(string)
-		timeCard := resourceType == string(dashboard.ResourceTimeCard)
-		mttr := resourceType == string(dashboard.ResourceMTTR)
-		c, err := t.resolveQuery(widget["query"], where, timeCard, mttr)
+		rt := dashboard.ResourceType(resourceType)
+		c, err := t.resolveQuery(widget["query"], where, rt)
 		if err != nil {
 			return nil, err
 		}
@@ -170,7 +169,7 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 			if !ok {
 				continue
 			}
-			c, err := t.resolveQuery(slice["query"], fmt.Sprintf("%s.slices[%d]", where, j), timeCard, mttr)
+			c, err := t.resolveQuery(slice["query"], fmt.Sprintf("%s.slices[%d]", where, j), rt)
 			if err != nil {
 				return nil, err
 			}
@@ -190,10 +189,10 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 }
 
 // resolveQuery handles one query object; changed reports whether a value was
-// swapped. timeCard is whether the widget is a time card widget: only its
-// teamIds is a list of teams. mttr is whether it is an MTTR widget: only its
-// creTeamIds is.
-func (t dashboardTeams) resolveQuery(q any, where string, timeCard, mttr bool) (changed bool, err error) {
+// swapped. rt is the widget's resourceType: only a time card widget's teamIds,
+// a project widget's onboardingOwnerTeamIds and an MTTR widget's creTeamIds
+// are lists of teams.
+func (t dashboardTeams) resolveQuery(q any, where string, rt dashboard.ResourceType) (changed bool, err error) {
 	query, ok := q.(map[string]any)
 	if !ok {
 		return false, nil
@@ -214,14 +213,25 @@ func (t dashboardTeams) resolveQuery(q any, where string, timeCard, mttr bool) (
 			changed = true
 		}
 	}
-	if v, ok := query["teamIds"]; ok && timeCard {
-		c, err := t.resolveTimeCardTeams(v, where)
+	if v, ok := query["teamIds"]; ok && rt == dashboard.ResourceTimeCard {
+		c, err := t.resolveMemberTeams(v, where, "time cards", true)
 		if err != nil {
 			return false, err
 		}
 		changed = changed || c
 	}
-	if v, ok := query["creTeamIds"]; ok && mttr {
+	// A project widget's onboardingOwnerTeamIds is matched through team
+	// membership exactly as time cards' teamIds is, so it takes the same ids.
+	// "My team" is refused: it resolves only on a team-based dashboard with a
+	// team picker, and on any other it would quietly count nothing.
+	if v, ok := query["onboardingOwnerTeamIds"]; ok && rt == dashboard.ResourceProject {
+		c, err := t.resolveMemberTeams(v, where, "onboarding projects", false)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || c
+	}
+	if v, ok := query["creTeamIds"]; ok && rt == dashboard.ResourceMTTR {
 		c, err := t.resolveMTTRTeams(v, where)
 		if err != nil {
 			return false, err
@@ -249,17 +259,23 @@ func (t dashboardTeams) resolveQuery(q any, where string, timeCard, mttr bool) (
 	return changed, nil
 }
 
-// resolveTimeCardTeams swaps the team keys or names in a time card query's
-// teamIds for the teams' group ids, in place: a CRE team's CRE group id, an
-// SRE team's SRE group id, which is the Team Schedule's team id that
-// entity-service's time card teamIds filter matches. "__current_team__"
-// passes through. ParseGenerated has checked the list's shape.
-func (t dashboardTeams) resolveTimeCardTeams(v any, where string) (bool, error) {
+// resolveMemberTeams swaps the team keys or names in a list of teams matched
+// through team membership (a time card query's teamIds, a project query's
+// onboardingOwnerTeamIds) for the teams' group ids, in place: a CRE team's CRE
+// group id, an SRE team's SRE group id, which is the Team Schedule's team id
+// entity-service matches team_member on. "__current_team__" passes through.
+// what names the members' records in the error for a team with no group;
+// allowCurrent false refuses "__current_team__" (the team must be named).
+// ParseGenerated has checked the list's shape.
+func (t dashboardTeams) resolveMemberTeams(v any, where, what string, allowCurrent bool) (bool, error) {
 	values, _ := v.([]any)
 	changed := false
 	for k, value := range values {
 		name, _ := value.(string)
 		if name == currentTeamPlaceholder {
+			if !allowCurrent {
+				return false, fmt.Errorf("%w: %s: name the team (for example the onboarding team) instead of \"my team\" for %s", errDashboardTeam, where, what)
+			}
 			continue
 		}
 		team, ok, err := t.named(name, where)
@@ -273,7 +289,7 @@ func (t dashboardTeams) resolveTimeCardTeams(v any, where string) (bool, error) 
 			return false, fmt.Errorf("%w: %s: unknown team %q (known teams: %s)", errDashboardTeam, where, name, t.knownTeams())
 		}
 		if team.GroupID == "" {
-			return false, fmt.Errorf("%w: %s: team %s has no group configured, so its members' time cards cannot be found", errDashboardTeam, where, team.Name)
+			return false, fmt.Errorf("%w: %s: team %s has no group configured, so its members' %s cannot be found", errDashboardTeam, where, team.Name, what)
 		}
 		if name != team.GroupID {
 			values[k] = team.GroupID
@@ -379,13 +395,11 @@ func (t dashboardTeams) resolveDashboard(d *dashboard.Dashboard) error {
 	for i := range d.Widgets {
 		w := &d.Widgets[i]
 		where := fmt.Sprintf("widgets[%d]", i)
-		timeCard := w.ResourceType == dashboard.ResourceTimeCard
-		mttr := w.ResourceType == dashboard.ResourceMTTR
-		if _, err := t.resolveQuery(w.Query, where, timeCard, mttr); err != nil {
+		if _, err := t.resolveQuery(w.Query, where, w.ResourceType); err != nil {
 			return err
 		}
 		for j := range w.Slices {
-			if _, err := t.resolveQuery(w.Slices[j].Query, fmt.Sprintf("%s.slices[%d]", where, j), timeCard, mttr); err != nil {
+			if _, err := t.resolveQuery(w.Slices[j].Query, fmt.Sprintf("%s.slices[%d]", where, j), w.ResourceType); err != nil {
 				return err
 			}
 		}
