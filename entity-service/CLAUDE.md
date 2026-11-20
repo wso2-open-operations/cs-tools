@@ -1716,6 +1716,19 @@ revisited.
   reaction `publishCommentAddedEvent` exists to drive must never be blocked
   by this enrichment failing.
 
+- **`case.created`, `case.acknowledged` and `case.severity_changed` carry
+  `IsEvaluationAccount` too**, from the same `ProjectOnboardingInfo` lookup,
+  through `caseIsEvaluationAccount` (`sn_case_service.go`), which every
+  publisher of the three calls (`publishCaseCreatedEvent`,
+  `publishSeverityChangedEvent`, and both `publishCaseAcknowledged`s). It
+  exists so `csm-notification-service` posts an Evaluation Subscription
+  case's Chat cards to the Evaluation space instead of Incident Monitor (that
+  service's `chataudience.CaseCardAudience`). Best-effort like the comment
+  enrichment above: no project, no resolver, or a failed lookup reads as
+  `false`, logged at WARN, and the card goes to Incident Monitor. Safe in
+  either deploy order: the consumer has declared the field since the
+  September routing revert, and ignores it until its own build reads it.
+
 - **`snIncidentService.UpdateIncident`** publishes the two signals that
   start and stop a call escalation, via `publishEscalationSignals`:
   `incident.acknowledged` when the incident genuinely **leaves NEW** (the

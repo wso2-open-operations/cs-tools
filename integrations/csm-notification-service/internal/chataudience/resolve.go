@@ -16,13 +16,14 @@
 
 // Package chataudience decides which Google Chat audience(s) a case's team,
 // evaluation-account status, onboarding status, and the current time
-// resolve to — shared by internal/slaengine (SLA breach alerts) and, in
-// the future, a customer-frustration-detector alert, per explicit product
-// direction: those are the only two Chat-sending event types that route by
-// team/audience. Every other Chat-sending event (case.created/
-// case.acknowledged/case.severity_changed/incident.created) routes by
-// product instead, to a single configured default space, and has no need
-// of this package.
+// resolve to — shared by internal/slaengine (SLA breach alerts) and the
+// customer-frustration-detector alert, per explicit product direction:
+// those are the only two Chat-sending event types that route by
+// team/audience (Resolve). The case.created/case.acknowledged/
+// case.severity_changed cards do not route by team: they go to the single
+// Incident Monitor space, except that an Evaluation Subscription case goes
+// to the Evaluation space instead (CaseCardAudience). incident.created
+// routes on its own (notifications.IncidentAudiences).
 package chataudience
 
 import (
@@ -104,6 +105,23 @@ func isWeekendCoverageWindow(ist time.Time) bool {
 	default:
 		return false
 	}
+}
+
+// CaseCardAudience is the one Chat audience a case's case.created,
+// case.acknowledged or case.severity_changed card posts to: Evaluation for an
+// Evaluation Subscription case, so those cases stay out of the Incident
+// Monitor space, and Incident Monitor for every other case.
+//
+// An Evaluation case still goes to Incident Monitor when the Evaluation
+// audience has no configured space (hasAudience false): posting to an
+// unconfigured audience is a silent no-op, and the card must not be lost
+// because of a missing GOOGLE_CHAT_SPACES entry. Unlike Resolve, no team,
+// onboarding, Americas or weekend rule applies here.
+func CaseCardAudience(isEvaluationAccount bool, hasAudience func(string) bool) string {
+	if isEvaluationAccount && hasAudience(Evaluation) {
+		return Evaluation
+	}
+	return IncidentMonitor
 }
 
 // Resolve decides which Chat audience(s) an alert should post to, from the

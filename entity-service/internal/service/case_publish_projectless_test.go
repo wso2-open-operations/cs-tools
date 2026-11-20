@@ -65,7 +65,7 @@ func TestPublishCaseCreatedEvent_ProjectlessCaseSkipsPublish(t *testing.T) {
 	cv := projectlessCase()
 	getCase := func(context.Context, string) (domain.CaseView, error) { return cv, nil }
 
-	publishCaseCreatedEvent(context.Background(), pub, getCase, nil, nil, nil, domain.CreateCaseRequest{Type: "service_request"}, cv.ID)
+	publishCaseCreatedEvent(context.Background(), pub, getCase, nil, nil, nil, nil, domain.CreateCaseRequest{Type: "service_request"}, cv.ID)
 
 	if len(pub.calls) != 0 {
 		t.Fatalf("published %v for a case with no project, want nothing", publishedTypes(pub.calls))
