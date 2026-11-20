@@ -86,12 +86,23 @@ wants.
 #### 2.1.2 Case-level alerts (fixed routing — no team awareness at all)
 
 A case being created, a case being acknowledged, and a case's severity
-changing all post to **one fixed, general monitoring audience**, every
-time, with absolutely no team lookup involved — not even as a fallback,
-because there is nothing to fall back from. This applies regardless of the
-case's product or team. A case of the "security report analysis" type gets
-its own distinct card layout, but it still goes to the same fixed
-monitoring audience as every other case-created alert.
+changing all post to **one fixed, general monitoring audience**, with
+absolutely no team lookup involved — not even as a fallback, because there
+is nothing to fall back from. This applies regardless of the case's product
+or team. A case of the "security report analysis" type gets its own
+distinct card layout, but it still goes to the same audience as every other
+case-created alert.
+
+**The one exception: an evaluation-account case.** When the case belongs to
+an evaluation-subscription project, these three alerts go to the dedicated
+"Evaluation" audience instead (the same one SLA and frustration alerts use,
+section 2.1.3), so evaluation cases stay out of the general monitoring
+space. If no "Evaluation" space is configured, they fall back to the general
+monitoring audience rather than being dropped. The case service decides
+whether a case is an evaluation-account case when it publishes the event; if
+that lookup fails, the case is treated as an ordinary one. The acknowledged
+and severity-changed alerts land in the same space as the case's created
+alert, so the acknowledgement still threads under it.
 
 #### 2.1.3 Team-aware alerts: SLA warnings/breaches and customer-frustration alerts
 
@@ -485,8 +496,9 @@ by subject area.
 
 ### 3.1 Case activity
 
-The case-created/acknowledged/severity-changed chat entries below always use
-the fixed monitoring audience with no team lookup at all (section 2.1.2).
+The case-created/acknowledged/severity-changed chat entries below use the
+fixed monitoring audience with no team lookup at all, except that an
+evaluation-account case goes to the Evaluation space (section 2.1.2).
 The frustration alert is the one case-activity notification that is
 team-aware (section 2.1.3), with its own migration-case override
 (section 2.1.4). "The case's recipient list" in the table below means the
@@ -495,13 +507,13 @@ unless noted otherwise.
 
 | Notification | What triggers it | Channel(s) | Who receives it |
 |---|---|---|---|
-| Case created | A new case is opened | Email, and chat unless the case is low severity or one of a few case types that are email-only | The case's recipient list; chat goes to a fixed monitoring space |
+| Case created | A new case is opened | Email, and chat unless the case is low severity or one of a few case types that are email-only | The case's recipient list; chat goes to a fixed monitoring space (the Evaluation space for an evaluation-account case) |
 | Announcement created | An announcement case is created for a project | Email only, never chat | Every registered portal user on the project — or, for a security announcement, only that project's designated security contacts (section 2.2.3) |
 | Comment added | A comment is posted on a case | Email, with a different layout for an internal-only note | The case's recipient list, narrowed to WSO2 addresses only for an internal note (section 2.2.2) |
 | Status changed | A case's status changes | Email | The case's recipient list; customers see Work In Progress and Waiting On WSO2 as "In Progress" and are not emailed for a move between them (section 2.2.5) |
 | Case assigned | A case gets a new assignee | Email | The case's recipient list |
-| Case acknowledged | A case is claimed for the first time | Chat only, as a reply under the creation alert | A fixed monitoring space |
-| Severity changed | A case's severity changes | Email and chat | The case's recipient list, and a fixed monitoring space |
+| Case acknowledged | A case is claimed for the first time | Chat only, as a reply under the creation alert | The same space as the creation alert |
+| Severity changed | A case's severity changes | Email and chat | The case's recipient list, and the same space as the creation alert |
 | Workaround recorded | A workaround is marked as provided | None — this is an internal tracking signal only | — |
 | Case escalated | A case moves to a higher escalation level | Email | A cumulative, level-by-level internal staff list, always narrowed to WSO2 addresses (section 2.2.4) |
 

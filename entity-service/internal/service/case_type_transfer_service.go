@@ -345,7 +345,7 @@ func (s *caseService) transferCaseType(ctx context.Context, req domain.UpdateCas
 	// the only type never otherwise reached for a case whose source
 	// severity never got a creation alert.
 	if result.Type == "security_report_analysis" {
-		publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, domain.CreateCaseRequest{Type: "security_report_analysis"}, req.ID)
+		publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, s.ProjectOnboardingInfo, domain.CreateCaseRequest{Type: "security_report_analysis"}, req.ID)
 	}
 
 	resp := domain.UpdateCaseResponse{

@@ -190,6 +190,27 @@ func caseSRETeam(ctx context.Context, resolve accountSRETeamResolver, cv domain.
 	return id, name
 }
 
+// projectOnboardingInfoResolver looks up a project's onboarding status and
+// whether it is an Evaluation Subscription (CaseService.ProjectOnboardingInfo).
+type projectOnboardingInfoResolver func(ctx context.Context, projectID string) (onboardingStatus string, isEvaluationAccount bool, err error)
+
+// caseIsEvaluationAccount reports whether the case's project is an Evaluation
+// Subscription, so csm-notification-service posts the case's Chat card to the
+// Evaluation space instead of Incident Monitor. Best-effort, like
+// caseSRETeam: a failed lookup is logged and reads as false, so the card
+// still goes to Incident Monitor rather than the event being dropped.
+func caseIsEvaluationAccount(ctx context.Context, resolve projectOnboardingInfoResolver, cv domain.CaseView, logContext string) bool {
+	if resolve == nil || cv.ProjectDetails == nil {
+		return false
+	}
+	_, isEvaluationAccount, err := resolve(ctx, cv.ProjectDetails.ID)
+	if err != nil {
+		slog.WarnContext(ctx, logContext+": resolving project evaluation status failed", "error", err)
+		return false
+	}
+	return isEvaluationAccount
+}
+
 // wso2EmailDomain is WSO2's own corporate domain — mirrors
 // apps/csm-portal/backend's own wso2EmailDomain constant (see that
 // package's user_external_account.go).
@@ -1190,7 +1211,7 @@ func registerCaseSLAClocksEvent(ctx context.Context, slaEngine SLAEngineService,
 // reasoning — this is now a thin wrapper around it, same shape as
 // snIncidentService.publishIncidentCreated/publishIncidentCreatedEvent.
 func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.CreateCaseRequest, caseID string) {
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, caseID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, s.ProjectOnboardingInfo, req, caseID)
 }
 
 // publishCaseCreatedEvent is publishCaseCreated's actual body, factored out
@@ -1271,6 +1292,7 @@ func publishCaseCreatedEvent(
 	resolveProjectContactEmailsByRole func(context.Context, string, string) ([]string, error),
 	resolveAccountDefaultWatcherEmails func(context.Context, string) ([]string, error),
 	resolveAccountSRETeam accountSRETeamResolver,
+	resolveProjectOnboardingInfo projectOnboardingInfoResolver,
 	req domain.CreateCaseRequest,
 	caseID string,
 ) {
@@ -1360,6 +1382,7 @@ func publishCaseCreatedEvent(
 		Description:          description,
 		DescriptionTruncated: descriptionTruncated,
 		Recipients:           recipients,
+		IsEvaluationAccount:  caseIsEvaluationAccount(ctx, resolveProjectOnboardingInfo, cv, "create case"),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "create case: encode case.created payload failed", "caseId", caseID, "error", err)
@@ -1957,7 +1980,7 @@ func publishStatusChangedEvent(ctx context.Context, publisher EventPublisherServ
 // wrapper around publishSeverityChangedEvent — see that function's own doc
 // comment for why.
 func (s *snCaseService) publishSeverityChanged(ctx context.Context, caseID, oldSeverity, newSeverity string, before domain.CaseView) {
-	publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, caseID, oldSeverity, newSeverity, before)
+	publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, s.ProjectOnboardingInfo, caseID, oldSeverity, newSeverity, before)
 }
 
 // publishSeverityChangedEvent is publishSeverityChanged's actual body,
@@ -1967,7 +1990,7 @@ func (s *snCaseService) publishSeverityChanged(ctx context.Context, caseID, oldS
 // plain severity strings (either case; upper-cased here) — the caller has
 // already confirmed they actually differ, not a caller re-PATCHing the
 // case's current severity.
-func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherService, resolveAccountDefaultWatcherEmails func(context.Context, string) ([]string, error), resolveAccountSRETeam accountSRETeamResolver, caseID, oldSeverity, newSeverity string, before domain.CaseView) {
+func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherService, resolveAccountDefaultWatcherEmails func(context.Context, string) ([]string, error), resolveAccountSRETeam accountSRETeamResolver, resolveProjectOnboardingInfo projectOnboardingInfoResolver, caseID, oldSeverity, newSeverity string, before domain.CaseView) {
 	if publisher == nil || newSeverity == "" {
 		return
 	}
@@ -1991,18 +2014,19 @@ func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherSe
 
 	sreTeamID, sreTeamName := caseSRETeam(ctx, resolveAccountSRETeam, before, "update case")
 	payload, err := json.Marshal(events.SeverityChangedPayload{
-		ProjectID:   projectID,
-		CaseID:      caseID,
-		CaseNumber:  before.Number,
-		WSO2CaseID:  before.InternalID,
-		CaseTitle:   before.Subject,
-		OldSeverity: strings.ToUpper(oldSeverity),
-		NewSeverity: strings.ToUpper(newSeverity),
-		Product:     caseProductName(before),
-		Team:        caseTeamName(before),
-		SRETeamID:   sreTeamID,
-		SRETeamName: sreTeamName,
-		Recipients:  recipients,
+		ProjectID:           projectID,
+		CaseID:              caseID,
+		CaseNumber:          before.Number,
+		WSO2CaseID:          before.InternalID,
+		CaseTitle:           before.Subject,
+		OldSeverity:         strings.ToUpper(oldSeverity),
+		NewSeverity:         strings.ToUpper(newSeverity),
+		Product:             caseProductName(before),
+		Team:                caseTeamName(before),
+		SRETeamID:           sreTeamID,
+		SRETeamName:         sreTeamName,
+		Recipients:          recipients,
+		IsEvaluationAccount: caseIsEvaluationAccount(ctx, resolveProjectOnboardingInfo, before, "update case"),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "update case: encode case.severity_changed payload failed", "caseId", caseID, "error", err)
@@ -2137,14 +2161,15 @@ func (s *snCaseService) publishCaseAcknowledged(ctx context.Context, caseID, ack
 	product := caseProductName(cv)
 
 	payload, err := json.Marshal(events.CaseAcknowledgedPayload{
-		CaseID:           caseID,
-		CaseNumber:       cv.Number,
-		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
-		Product:          product,
-		Team:             caseTeamName(cv),
-		AcknowledgerName: acknowledgerName,
-		CaseType:         strings.ToUpper(derefString(cv.Type)),
+		CaseID:              caseID,
+		CaseNumber:          cv.Number,
+		WSO2CaseID:          cv.InternalID,
+		Severity:            strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Product:             product,
+		Team:                caseTeamName(cv),
+		AcknowledgerName:    acknowledgerName,
+		CaseType:            strings.ToUpper(derefString(cv.Type)),
+		IsEvaluationAccount: caseIsEvaluationAccount(ctx, s.ProjectOnboardingInfo, cv, "sn update case"),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "sn update case: encode case.acknowledged payload failed", "caseId", caseID, "error", err)

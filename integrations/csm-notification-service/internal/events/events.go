@@ -289,18 +289,22 @@ type CaseCreatedPayload struct {
 	DescriptionTruncated      bool     `json:"descriptionTruncated,omitempty"`
 	IncidentImpactDescription string   `json:"incidentImpactDescription,omitempty"`
 	Recipients                []string `json:"recipients"`
-	// ProjectOnboardingStatus/IsEvaluationAccount are deprecated and unused
-	// — a since-reverted feature briefly routed this event's Chat alert by
-	// team/audience and needed these two facts; case.created is back to
-	// product-based routing (see Product above) and no longer reads
-	// either. Kept, accepting-but-ignoring the value, purely so
+	// ProjectOnboardingStatus is deprecated and unused — a since-reverted
+	// feature briefly routed this event's Chat alert by team/audience and
+	// needed it. Kept, accepting-but-ignoring the value, purely so
 	// events.Validate's strict decode doesn't reject a payload from an
-	// entity-service deployment that hasn't yet redeployed past that
-	// revert — entity-service and csm-notification-service are separate
-	// deployables with no atomic joint-deploy guarantee. Remove once both
-	// services are known to have deployed past the revert.
+	// entity-service deployment that still sends it — entity-service and
+	// csm-notification-service are separate deployables with no atomic
+	// joint-deploy guarantee.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
-	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// IsEvaluationAccount is true for a case on an Evaluation Subscription
+	// project. handleCaseCreated posts the Chat card to the Evaluation space
+	// instead of Incident Monitor when it is set
+	// (chataudience.CaseCardAudience). Absent reads as false, so a case from
+	// an entity-service build that does not send it still goes to Incident
+	// Monitor. The same field on CaseAcknowledgedPayload and
+	// SeverityChangedPayload routes those two cards the same way.
+	IsEvaluationAccount bool `json:"isEvaluationAccount,omitempty"`
 }
 
 // CommentAddedPayload is TypeCommentAdded's payload. See CaseCreatedPayload's
@@ -444,9 +448,9 @@ type CaseAcknowledgedPayload struct {
 	Product          string `json:"product,omitempty"`
 	Team             string `json:"team,omitempty"`
 	AcknowledgerName string `json:"acknowledgerName"`
-	// ProjectOnboardingStatus/IsEvaluationAccount are deprecated and
-	// unused — see CaseCreatedPayload's own doc comment for why this
-	// decode-compatibility pair exists.
+	// ProjectOnboardingStatus is deprecated and unused, and
+	// IsEvaluationAccount routes the card to the Evaluation space — see
+	// CaseCreatedPayload's own doc comment for both.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
 	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
 	// CaseType — see CaseCreatedPayload's own doc comment (the same
@@ -510,9 +514,9 @@ type SeverityChangedPayload struct {
 	// engine uses it to recognise a replay of a change it already handled.
 	// Empty from older publishers.
 	ChangedAt string `json:"changedAt,omitempty"`
-	// ProjectOnboardingStatus/IsEvaluationAccount are deprecated and
-	// unused — see CaseCreatedPayload's own doc comment for why this
-	// decode-compatibility pair exists.
+	// ProjectOnboardingStatus is deprecated and unused, and
+	// IsEvaluationAccount routes the card to the Evaluation space — see
+	// CaseCreatedPayload's own doc comment for both.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
 	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
 }
