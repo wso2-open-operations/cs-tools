@@ -130,6 +130,15 @@ type SavedFilterViewService interface {
 	Reorder(ctx context.Context, req domain.ReorderSavedFilterViewRequest) (domain.SavedFilterViewList, error)
 }
 
+// FeatureOverrideService is the shared per-page feature state (enabled or
+// preview) the CSM portal reads. Any internal caller may read it. A write
+// must come through csm-portal-backend for a signed-in person and upserts one
+// row. Rows are never deleted.
+type FeatureOverrideService interface {
+	List(ctx context.Context) (domain.FeatureOverrideList, error)
+	Put(ctx context.Context, req domain.SaveFeatureOverrideRequest) (domain.FeatureOverride, error)
+}
+
 // CustomDashboardService is the caller's own saved custom dashboards (CSM
 // portal My Dashboards). Postgres-only; the owner is always the authenticated
 // user resolved from x-user-id-token, never a client-supplied user id, and
