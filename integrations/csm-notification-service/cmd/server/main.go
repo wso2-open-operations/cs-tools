@@ -366,6 +366,18 @@ func main() {
 	if !slaEmailSendingEnabled {
 		slog.Warn("SLA_EMAIL_SENDING_ENABLED=false; SLA breach Google Chat alerts (and SLA emails) are suppressed")
 	}
+	// Incident SLA alerts are a separate, default-off switch (the cutover
+	// convention, not the killswitch one): they need every SRE and SME team's
+	// team.chat_webhook_url and group_email set first, and until they are an
+	// incident's alert would reach its assignee alone. Off, the engine
+	// registers no incident clock and sends nothing for one; cases are
+	// tracked and alerted exactly as before either way.
+	incidentSLAAlertsEnabled := envBool("INCIDENT_SLA_ALERTS_ENABLED", false)
+	if incidentSLAAlertsEnabled {
+		slog.Info("INCIDENT_SLA_ALERTS_ENABLED=true; incident SLA clocks are tracked and alerted to the holding team's space and group email")
+	} else {
+		slog.Info("INCIDENT_SLA_ALERTS_ENABLED is not true; incident SLA clocks are not tracked (case SLA alerts are unaffected)")
+	}
 
 	// Fallback on-call number (incident.created's call only) for when a
 	// publisher (e.g. entity-service) can't determine which on-call number
@@ -681,13 +693,19 @@ func main() {
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
 		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients).
-			// An incident's SLA alert reaches its SRE team(s), resolved by the
-			// SRE ladder's group mapping, as a case's reaches its CRE team.
-			WithIncidentSLATeams(incidentRoutes.SRETeams).
-			// The ticker below starts before the Alert Settings mapping is
-			// applied (applyIncidentRoutes, further down); incident tiers wait
-			// for it. Released by IncidentRoutingReady once that setup ends.
-			HoldIncidentTiersUntilRoutingReady()
+			WithIncidentSLAAlerts(incidentSLAAlertsEnabled)
+		if incidentSLAAlertsEnabled {
+			slaEngine = slaEngine.
+				// An incident's SLA alert reaches its SRE team(s), resolved by the
+				// SRE ladder's group mapping, as a case's reaches its CRE team.
+				WithIncidentSLATeams(incidentRoutes.SRETeams).
+				// The ticker below starts before the Alert Settings mapping is
+				// applied (applyIncidentRoutes, further down); incident tiers wait
+				// for it. Released by IncidentRoutingReady once that setup ends.
+				// With the switch off no incident tier is ever sent, so there is
+				// nothing to hold.
+				HoldIncidentTiersUntilRoutingReady()
+		}
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's

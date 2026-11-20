@@ -356,7 +356,7 @@ func (fakeLinks) IncidentLink(incidentID string) string {
 var weekdayDaytime = time.Date(2026, time.October, 14, 5, 30, 0, 0, time.UTC)
 
 func newTestEngine(st store, chat *fakeChat, pub *fakePublisher) *Engine {
-	return &Engine{store: st, pub: pub, chat: chat, links: fakeLinks{}, slaEmailSendingEnabled: true,
+	return &Engine{store: st, pub: pub, chat: chat, links: fakeLinks{}, slaEmailSendingEnabled: true, incidentSLAAlerts: true,
 		now: func() time.Time { return weekdayDaytime }}
 }
 

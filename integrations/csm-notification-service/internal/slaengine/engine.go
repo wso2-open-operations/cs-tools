@@ -309,6 +309,14 @@ type Engine struct {
 	// concurrency shape as GoogleChatClient.teamAudienceSpaces.
 	teamGroupEmailsMu sync.RWMutex
 	teamGroupEmails   map[string]string
+	// incidentSLAAlerts is INCIDENT_SLA_ALERTS_ENABLED (WithIncidentSLAAlerts).
+	// False, the default: RegisterIncidentClocks registers nothing and a due
+	// tier of an incident clock already in Redis sends nothing (claimed and
+	// advanced like a case tier under SLA_EMAIL_SENDING_ENABLED=false), so a
+	// deployment with the switch off tracks and alerts cases exactly as one
+	// without incident SLA alerts at all. It is turned on once the SRE and
+	// SME teams' team.chat_webhook_url/group_email rows are in place.
+	incidentSLAAlerts bool
 	// incidentSLATeams resolves an incident's assignment group to its SRE
 	// team keys (notifications.IncidentRoutes.SRETeams, set by
 	// WithIncidentSLATeams). nil: an incident's SLA alert reaches only its
@@ -326,6 +334,13 @@ type Engine struct {
 	// tier sent before that would send no card or no team email, never
 	// retried. Released by IncidentTeamLookupsLoaded; also false unless held.
 	incidentSpacesPending atomic.Bool
+}
+
+// WithIncidentSLAAlerts turns incident SLA clock registration and alerting on
+// or off; see Engine.incidentSLAAlerts. Case clocks are unaffected either way.
+func (e *Engine) WithIncidentSLAAlerts(enabled bool) *Engine {
+	e.incidentSLAAlerts = enabled
+	return e
 }
 
 // WithIncidentSLATeams sets how an incident's SLA alert finds its SRE teams;
@@ -595,6 +610,10 @@ const CaseTypeIncident = "INCIDENT"
 // ended (a priority lowered before this ran) is skipped rather than
 // scheduled, so a cancelled-after-breach clock never alerts.
 func (e *Engine) RegisterIncidentClocks(ctx context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string) {
+	if !e.incidentSLAAlerts {
+		slog.DebugContext(ctx, "slaengine: INCIDENT_SLA_ALERTS_ENABLED=false, incident sla clocks not registered", "incidentId", incidentID)
+		return
+	}
 	e.registerClocks(ctx, incidentID, createdAt, ClockMeta{
 		CaseNumber: number,
 		CaseTitle:  title,
@@ -1519,6 +1538,13 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 	}
 
 	if meta.CaseType == CaseTypeIncident {
+		if !e.incidentSLAAlerts {
+			// A clock registered while the switch was on: skipped the same
+			// way as a gated-off case tier above, so it counts as alerted and
+			// turning the switch on later does not replay it.
+			slog.InfoContext(ctx, "slaengine: INCIDENT_SLA_ALERTS_ENABLED=false, skipping incident sla alert", "incidentId", caseID, "clockType", clockType, "tier", tier)
+			return
+		}
 		e.sendIncidentBreachAlert(ctx, meta, caseID, clockType, tier, state)
 		return
 	}

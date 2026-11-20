@@ -512,3 +512,56 @@ func TestTick_IncidentBreach_EscalatedToSMEAlertsTheSMETeam(t *testing.T) {
 		t.Errorf("email recipients = %v, want %v", incidentRecipients(email.calls), want)
 	}
 }
+
+// INCIDENT_SLA_ALERTS_ENABLED=false (the default): an incident's clocks are
+// never registered, however entity-service answers.
+func TestRegisterIncidentClocks_Disabled_RegistersNothing(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{}).WithIncidentSLAAlerts(false)
+	started := time.Date(2026, 11, 3, 7, 19, 53, 0, time.UTC)
+	entity := &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {ID: "sla-row-1", Found: true, Stage: "IN_PROGRESS", StartedOn: &started, DurationSeconds: int64((4 * time.Hour).Seconds())},
+	}}
+	e.entity = entity
+
+	e.RegisterIncidentClocks(context.Background(), "inc-1", "CRITICAL", started, "INC0091536", "Router 5xx", "Artemis SRE Group", "Choreo")
+
+	if _, found, _ := st.GetClock(context.Background(), "inc-1", ClockResolution); found {
+		t.Error("resolution clock registered, want none while incident SLA alerts are disabled")
+	}
+	if len(st.wake) != 0 {
+		t.Errorf("wake entries = %v, want none", st.wake)
+	}
+	if len(entity.calls) != 0 {
+		t.Errorf("entity-service clock-state reads = %v, want none: the switch is checked before any lookup", entity.calls)
+	}
+}
+
+// With the switch off, a due tier of an incident clock still in Redis (one
+// registered while the switch was on) sends no card and no email, and is
+// consumed like a gated-off case tier, so turning the switch on later does
+// not replay it.
+func TestTick_IncidentBreach_Disabled_SendsNothingAndConsumesTheTier(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, &fakePublisher{}).WithIncidentSLAAlerts(false)
+	e.email = email
+	sreTeamWiring(e, chat, map[string][]string{"Artemis SRE Group": {"artemis"}}, []string{"artemis"}, map[string]string{"artemis": "artemis@example.com"})
+	past := time.Now().Add(-5 * time.Hour)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com"},
+	}}
+	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Artemis SRE Group", Priority: "CRITICAL", StartedAt: past}
+	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if len(chat.incidentCalls)+len(chat.calls) != 0 || len(email.calls) != 0 {
+		t.Errorf("chat = %+v / %+v, email = %+v; want nothing while incident SLA alerts are disabled", chat.incidentCalls, chat.calls, email.calls)
+	}
+	if _, due := st.wake[wakeMember("inc-1", ClockResolution, 100)]; due {
+		t.Error("wake entry still due, want it consumed so enabling the switch later does not replay a stale alert")
+	}
+}

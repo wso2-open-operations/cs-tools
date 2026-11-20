@@ -270,6 +270,19 @@ SLA policies; today only "Cloud Incident - High Priority": Choreo/Asgardeo,
 Critical/High, service interruption, 4 h resolution) and alerts at the same
 50/75/100% tiers.
 
+- **Switch:** `INCIDENT_SLA_ALERTS_ENABLED` (`envBool(..., false)`, the
+  default-off cutover convention, not the `!= "false"` killswitch one) ->
+  `Engine.WithIncidentSLAAlerts`. Off, `RegisterIncidentClocks` returns
+  before any entity-service read and `sendBreachAlert` consumes a due
+  incident tier without sending (the same "counts as alerted" posture as
+  `SLA_EMAIL_SENDING_ENABLED=false`, so enabling later replays nothing);
+  `cmd/server` then also skips `WithIncidentSLATeams` and the startup hold.
+  Cases are tracked and alerted identically with it on or off: every
+  incident branch below is keyed on `ClockMeta.CaseType == "INCIDENT"`, which
+  no case clock has. It is off by default because the alert needs every SRE
+  and SME team's `team.chat_webhook_url`/`group_email` set first, and a
+  deployment must be able to carry this code without changing what anyone
+  receives until that is done.
 - **Registration:** `dispatch.handleIncidentCreated` and
   `incident.priority_elevated` call `Engine.RegisterIncidentClocks`
   (`ClockMeta.CaseType = "INCIDENT"`, `Team` = assignment group, `Product` =
@@ -302,7 +315,7 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   `GetClockState`'s `assignmentGroupTeamKey` names it when the current group
   shares its id with a team -- a specialist handoff (`SPECIALIST_HANDOFF_CONFIG`,
   Team Schedule teams) escalates to the SME team's own group, which entity-service
-  creates with that team's id -- no config here. The old ServiceNow "... Special
+  creates with that team's id -- no config here. The legacy "... Special
   Ops" groups share no team's id and reach no team. Otherwise the SRE team(s): the incident's current
   assignment group (`GetClockState`'s `assignmentGroupName`; empty -- an
   older entity-service, or no group right now -- keeps the registration-time
@@ -319,7 +332,7 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   `incident-sla/<team key>`). A team with no webhook gets no card: no shared
   fallback, never Incident Monitor (the CRE room) or a case audience. This
   is a second `GET /teams/chat-webhooks` per refresh, on purpose, so the case
-  loader stays untouched; #3538 tracks loading it once, by team key.
+  loader stays untouched; loading it once, by team key, is a later cleanup.
 - **Email:** the case emails, worded for an incident
   (`SLABreachEmailData.Incident`: "Incident ID", "View Incident", "Service",
   and an "SLA violated" preview at 100%; a case's wording is unchanged): the
