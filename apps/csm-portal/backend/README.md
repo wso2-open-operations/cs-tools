@@ -640,7 +640,7 @@ main service plus the `/plg/*` routes). Main areas:
 | Accounts, projects, products, deployments | `/accounts/*`, `/projects/*` (contacts, metadata), `/products/*`, `/deployments/*` and deployed products |
 | Operations | `/incidents`, `/change-requests` (including approvals), `/problems`, `/incident-tasks`, `/outages`, `/alerts`, `/smart-alerts` |
 | Time cards and updates | `/time-cards/*`, `/updates/product-update-levels`, `/updates/levels/search` |
-| Users and roles | `/users/me`, `/users/search`, `/users/{id}`, `POST /users`, `POST /users/{id}/roles`, `/roles/search`, `/roles/grantable`, `/teams/search` |
+| Users and roles | `/users/me`, `/users/search` (internal users only), `/admin/users/search` (any user type, write permission), `/users/{id}`, `POST /users`, `POST /users/{id}/roles`, `/roles/search`, `/roles/grantable`, `/teams/search` |
 | Team schedule | `/team-schedule/*` (assignments, absences, rotas, paging chain) |
 | Knowledge base | `/kb-articles/*`, `/knowledge-bases/*`, `/kb-manager-*` |
 | Announcements | `/announcements/*`, `/announcement-requests/*` |

@@ -920,8 +920,10 @@ func TestSearchUsers(t *testing.T) {
 
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
-		if string(capturedBody) != reqPayload {
-			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		// The general search adds the forced internal userType and nothing else.
+		const wantPayload = `{"email":"agent@example.com","filters":{"userType":"internal"}}`
+		if string(capturedBody) != wantPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, wantPayload)
 		}
 		resp := decodeJSON[map[string]any](t, w)
 		if resp["total"] != float64(1) {
