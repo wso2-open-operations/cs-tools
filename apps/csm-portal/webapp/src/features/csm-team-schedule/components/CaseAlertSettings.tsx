@@ -123,8 +123,8 @@ function statusLine(s: Settings): Status {
         ? { tone: "ok", short: "In use", text: `In use by the alert service${asOf}.`, loud: false }
         : {
             tone: "warn",
-            short: "Saved · applies after a restart",
-            text: `Saved. Changes apply the next time the alert service restarts${asOf}.`,
+            short: "Saved · applies within a few minutes",
+            text: `Saved. The alert service restarts itself to use the change, usually within a few minutes${asOf}.`,
             loud: false,
           };
     case "shadow":
@@ -931,6 +931,9 @@ const DEFAULT_APPLIED_NOTE = "The alert service uses it after its next restart."
 function whenUsed(s: Settings): string {
   // In step with statusLine: what the alert service does with a saved change.
   switch (s.revision.appliedMode) {
+    case "db":
+      // It restarts itself once a newer revision has settled.
+      return "The alert service restarts itself to use it, usually within a few minutes.";
     case "shadow":
       return "The alert service only compares it with its file (shadow mode); it uses it once PAGING_CONFIG_SOURCE is db or unset.";
     case "off":
