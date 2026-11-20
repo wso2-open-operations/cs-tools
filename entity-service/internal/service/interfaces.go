@@ -130,6 +130,21 @@ type SavedFilterViewService interface {
 	Reorder(ctx context.Context, req domain.ReorderSavedFilterViewRequest) (domain.SavedFilterViewList, error)
 }
 
+// CaseCommentTemplateService is the CSM portal's saved case comment templates:
+// the caller's own personal ones and the shared ones. The caller is the
+// validated x-user-id-token's user. Personal methods only ever touch that
+// user's templates; the shared ones are open to every internal user here, and
+// the CSM portal backend restricts their writes to admins. Postgres-only.
+type CaseCommentTemplateService interface {
+	List(ctx context.Context) (domain.CaseCommentTemplateList, error)
+	CreatePersonal(ctx context.Context, req domain.CreateCaseCommentTemplateRequest) (domain.CaseCommentTemplate, error)
+	UpdatePersonal(ctx context.Context, id string, req domain.UpdateCaseCommentTemplateRequest) (domain.CaseCommentTemplate, error)
+	DeletePersonal(ctx context.Context, id string) error
+	CreateShared(ctx context.Context, req domain.CreateCaseCommentTemplateRequest) (domain.CaseCommentTemplate, error)
+	UpdateShared(ctx context.Context, id string, req domain.UpdateCaseCommentTemplateRequest) (domain.CaseCommentTemplate, error)
+	DeleteShared(ctx context.Context, id string) error
+}
+
 // CustomDashboardService is the caller's own saved custom dashboards (CSM
 // portal My Dashboards). Postgres-only; the owner is always the authenticated
 // user resolved from x-user-id-token, never a client-supplied user id, and

@@ -12079,6 +12079,26 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
 
+## Saved case comment templates (`/users/me/case-comment-templates`, `/case-comment-templates`)
+
+Reusable comment and work note text for the CSM portal comment box (migration 0293,
+`case_comment_template`). A row with `owner_user_id` set is that user's personal template; NULL is a
+shared one. `applies_to` is `COMMENT`, `WORK_NOTE` or `BOTH`; the body is the comment box's HTML,
+stored as sent (at most 20000 bytes) and never rendered here.
+
+- **Every route is `internalOnly`**: the customer portal never reaches them. Postgres-only (not registered without a pool).
+- **The owner is the validated `x-user-id-token`'s user** (`auth.IdentityFromContext(...).UserEmail`, then
+  `GetUserByEmail`), never a body field, and every single-template query matches `owner_user_id IS NOT
+  DISTINCT FROM` the owner as well as the id. So the personal routes can only reach the caller's own
+  templates and the shared routes only the shared ones; anything else is a 404, never a 403, so an id
+  reveals nothing.
+- **Who may write a shared template is not decided here**: any internal user token passes. The CSM portal
+  backend registers the shared writes at `PermAdmin`, the same split as `PermUpdateDeleteAnyComment`, because
+  this service holds no portal role vocabulary. A user token is still required (the editor is recorded in
+  `created_by`/`updated_by`), so a service credential alone cannot write one.
+- Names are unique per owner ignoring case (index `case_comment_template_owner_name`, mapped to 409); the
+  shared set counts as one owner. Caps: 200 personal per user, 500 shared.
+
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 
 A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view

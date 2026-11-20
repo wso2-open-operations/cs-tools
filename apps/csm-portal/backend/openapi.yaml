@@ -1834,6 +1834,366 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /users/me/case-comment-templates:
+    get:
+      summary: List the caller's saved comment templates and the shared ones.
+      description: >-
+        The caller's personal templates, then the shared ones, each ordered by name.
+      operationId: listCaseCommentTemplates
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentTemplateList'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Save a personal comment template.
+      description: >-
+        The caller's own templates; the owner is the user of the x-user-id-token,
+        never a body field. Another user's template, or a shared one, is a 404.
+      operationId: createPersonalCaseCommentTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseCommentTemplateRequest'
+      responses:
+        "201":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentTemplate'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /users/me/case-comment-templates/{id}:
+    patch:
+      summary: Change one of the caller's comment templates.
+      description: >-
+        The caller's own templates; the owner is the user of the x-user-id-token,
+        never a body field. Another user's template, or a shared one, is a 404.
+      operationId: updatePersonalCaseCommentTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCaseCommentTemplateRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentTemplate'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Delete one of the caller's comment templates.
+      description: >-
+        The caller's own templates; the owner is the user of the x-user-id-token,
+        never a body field. Another user's template, or a shared one, is a 404.
+      operationId: deletePersonalCaseCommentTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /case-comment-templates:
+    post:
+      summary: Save a shared comment template.
+      description: >-
+        A shared template, seen by every CSM portal user who can comment.
+        The CSM portal backend allows this to admins only.
+      operationId: createSharedCaseCommentTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseCommentTemplateRequest'
+      responses:
+        "201":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentTemplate'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /case-comment-templates/{id}:
+    patch:
+      summary: Change a shared comment template.
+      description: >-
+        A shared template, seen by every CSM portal user who can comment.
+        The CSM portal backend allows this to admins only.
+      operationId: updateSharedCaseCommentTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCaseCommentTemplateRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentTemplate'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Delete a shared comment template.
+      description: >-
+        A shared template, seen by every CSM portal user who can comment.
+        The CSM portal backend allows this to admins only.
+      operationId: deleteSharedCaseCommentTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /users/me/saved-filter-views:
     get:
       summary: List the caller's saved filter views for one CSM list.
@@ -22920,6 +23280,71 @@ components:
           type: string
         qs:
           type: string
+    CaseCommentTemplate:
+      type: object
+      required: [id, name, body, appliesTo, shared, createdOn, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 100
+        body:
+          type: string
+          description: 'The comment box HTML the template inserts, at most 20000 bytes.'
+        appliesTo:
+          type: string
+          enum: [COMMENT, WORK_NOTE, BOTH]
+          description: 'Which entry the template is offered for: a public comment, a work note, or either.'
+        shared:
+          type: boolean
+          description: 'True for a shared template, false for one of the caller''s own.'
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    CaseCommentTemplateList:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseCommentTemplate'
+
+    CreateCaseCommentTemplateRequest:
+      type: object
+      required: [name, body, appliesTo]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        body:
+          type: string
+        appliesTo:
+          type: string
+          enum: [COMMENT, WORK_NOTE, BOTH]
+          description: 'Which entry the template is offered for: a public comment, a work note, or either.'
+
+    UpdateCaseCommentTemplateRequest:
+      type: object
+      minProperties: 1
+      description: 'Any of the three fields; one left out is not changed.'
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        body:
+          type: string
+        appliesTo:
+          type: string
+          enum: [COMMENT, WORK_NOTE, BOTH]
+          description: 'Which entry the template is offered for: a public comment, a work note, or either.'
+
     SavedFilterViewList:
       type: object
       required: [views]
