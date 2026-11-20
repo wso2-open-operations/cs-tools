@@ -26,7 +26,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
@@ -34,6 +36,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/server"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/servicebus"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/sqsqueue"
 )
 
 func main() {
@@ -279,6 +283,9 @@ func main() {
 		log.Printf("incident report flows running: draining every %s", cfg.IncidentReportPollInterval)
 	}
 
+	// The queue consumer streams alerts the gateways queued into the alert table; it runs only when ALERTING_VERSION is v2 or hybrid.
+	stopAlertConsumer := startAlertConsumer(cfg, pool)
+
 	// The health probe listens separately, on its own port, so that only its
 	// own route is reachable at the public visibility it is published with —
 	// see server.NewHealthServer and .choreo/component.yaml.
@@ -332,5 +339,89 @@ func main() {
 	if specialOpsPublisher != nil {
 		specialOpsPublisher.Close()
 	}
+	stopAlertConsumer()
 	log.Println("server stopped")
+}
+
+// alertConsumerStopTimeout bounds how long shutdown waits for the alerts in flight to be stored and settled.
+const alertConsumerStopTimeout = 60 * time.Second
+
+// startAlertConsumer starts the alert consumer on every configured cloud when it is enabled and returns the function that stops it.
+func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
+	if !cfg.AlertConsumerEnabled() || pool == nil {
+		return func() {}
+	}
+	// An alert whose source names no service gets the same default service an incident does.
+	transforms := alertsource.New(cfg.IncidentDefaultServiceID, nil)
+	var priorityQueues, standardQueues []service.AlertQueue
+	var closers []func(context.Context) error
+
+	if cfg.HasAlertServiceBus() {
+		client, err := servicebus.NewClient(servicebus.Config{
+			Namespace:    cfg.AlertServiceBusNamespace,
+			TenantID:     cfg.AlertServiceBusTenantID,
+			ClientID:     cfg.AlertServiceBusClientID,
+			ClientSecret: cfg.AlertServiceBusClientSecret,
+		})
+		if err != nil {
+			log.Fatalf("alert consumer: %v", err)
+		}
+		priority, err := servicebus.NewQueue(client, cfg.AlertPriorityQueue)
+		if err != nil {
+			log.Fatalf("alert consumer: %v", err)
+		}
+		standard, err := servicebus.NewQueue(client, cfg.AlertStandardQueue)
+		if err != nil {
+			log.Fatalf("alert consumer: %v", err)
+		}
+		priorityQueues = append(priorityQueues, priority)
+		standardQueues = append(standardQueues, standard)
+		closers = append(closers, priority.Close, standard.Close, client.Close)
+		log.Printf("alert consumer: Azure Service Bus %s and %s on %s", cfg.AlertPriorityQueue, cfg.AlertStandardQueue, servicebus.FullyQualifiedNamespace(cfg.AlertServiceBusNamespace))
+	}
+
+	if cfg.HasAlertSQS() {
+		client, err := sqsqueue.NewClient(context.Background(), sqsqueue.Config{
+			Region:          cfg.AlertSQSRegion(),
+			AccessKeyID:     cfg.AlertSQSAccessKeyID,
+			SecretAccessKey: cfg.AlertSQSSecretAccessKey,
+		})
+		if err != nil {
+			log.Fatalf("alert consumer: %v", err)
+		}
+		priority := sqsqueue.NewQueue(client, cfg.AlertSQSPriorityQueueURL, cfg.AlertSQSDeadLetterQueueURL)
+		standard := sqsqueue.NewQueue(client, cfg.AlertSQSStandardQueueURL, cfg.AlertSQSDeadLetterQueueURL)
+		priorityQueues = append(priorityQueues, priority)
+		standardQueues = append(standardQueues, standard)
+		log.Printf("alert consumer: AWS SQS %s and %s in %s", priority.Name(), standard.Name(), cfg.AlertSQSRegion())
+	}
+
+	consumer := service.NewAlertConsumer(
+		repository.NewAlertRepository(repository.NewScoped(pool)),
+		transforms,
+		priorityQueues, standardQueues,
+		service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight, RIAEnabled: cfg.RIAEnabled()},
+	)
+	// The system identity, because the alert table is internal only and there is no caller.
+	ctx, cancel := context.WithCancel(repository.WithSystemIdentity(context.Background()))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		consumer.Run(ctx)
+	}()
+	log.Printf("alert consumer running with %d workers (ALERTING_VERSION %s)", cfg.AlertConsumerConcurrency, cfg.AlertingVersion)
+
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(alertConsumerStopTimeout):
+			log.Printf("alert consumer: stop timed out; unsettled messages return to their queues when their locks expire")
+		}
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer closeCancel()
+		for _, closeQueue := range closers {
+			_ = closeQueue(closeCtx)
+		}
+	}
 }

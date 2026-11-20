@@ -10825,3 +10825,50 @@ type ACPReopenCheckResponse struct {
 	NextCursor       string   `json:"nextCursor"`
 	More             bool     `json:"more"`
 }
+
+// AlertTier is the Service Bus queue an SRE alert arrived on, which decides how soon it is processed.
+type AlertTier string
+
+// Alert tiers, matching the tier the alerting gateway stamps on every message.
+const (
+	AlertTierHigh    AlertTier = "high"
+	AlertTierDefault AlertTier = "default"
+)
+
+// AlertPipeline is the processor that turns a stored alert into incidents: the core fingerprint fold or the RIA Creator.
+type AlertPipeline string
+
+// Alert pipelines; core is the default, so an alert goes to the RIA Creator only when something asks for it.
+const (
+	AlertPipelineCore AlertPipeline = "core"
+	AlertPipelineRIA  AlertPipeline = "ria"
+)
+
+// NewAlert is one normalised SRE alert the Service Bus consumer stores in the alert table.
+type NewAlert struct {
+	ID           string
+	Source       string
+	Alert        json.RawMessage
+	Fingerprint  string
+	Tier         AlertTier
+	Pipeline     AlertPipeline
+	MessageID    string
+	MessageIndex int
+	ReceivedOn   time.Time
+}
+
+// AlertQueueMessage is one message received from an alert queue, on Azure Service Bus or AWS SQS alike.
+type AlertQueueMessage struct {
+	// ID is the cloud's message id, stable across redeliveries of the same message.
+	ID string
+	// Body is the monitoring source's request body, unchanged by the gateway.
+	Body []byte
+	// Properties are the gateway's message properties, such as source and received_at.
+	Properties map[string]string
+	// EnqueuedOn is when the queue stored the message, when the cloud reports it.
+	EnqueuedOn *time.Time
+	// LockedUntil is when the message becomes visible to other receivers again unless it is settled or renewed.
+	LockedUntil *time.Time
+	// Handle is the cloud's own message, which only the queue that received it uses to settle it.
+	Handle any
+}

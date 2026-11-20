@@ -1751,3 +1751,211 @@ func TestLoad_AuditLogEnabled(t *testing.T) {
 		}
 	}
 }
+
+func alertConsumerConfig() Config {
+	c := baseValidConfig()
+	c.DBPoolMaxConns = 20
+	c.AlertingVersion = AlertingVersionV2
+	c.AlertServiceBusNamespace = "sbns-example"
+	c.AlertServiceBusTenantID = "tenant"
+	c.AlertServiceBusClientID = "client"
+	c.AlertServiceBusClientSecret = "secret"
+	c.AlertPriorityQueue = "priority-queue"
+	c.AlertStandardQueue = "standard-queue"
+	c.AlertConsumerConcurrency = 8
+	c.AlertConsumerPriorityWeight = 4
+	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
+	return c
+}
+
+func TestConfig_Validate_AlertConsumer(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(c *Config)
+		wantErr bool
+	}{
+		{name: "complete", change: func(*Config) {}},
+		{name: "disabled ignores everything else", change: func(c *Config) { *c = baseValidConfig() }},
+		{name: "no database", change: func(c *Config) { c.DBUser, c.DBPassword, c.DBName = "", "", ""; c.DataSource = DataSourceServiceNow }, wantErr: true},
+		{name: "no namespace", change: func(c *Config) { c.AlertServiceBusNamespace = "" }, wantErr: true},
+		{name: "no tenant", change: func(c *Config) { c.AlertServiceBusTenantID = "" }, wantErr: true},
+		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
+		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
+		{name: "no default service", change: func(c *Config) { c.IncidentDefaultServiceID = "" }, wantErr: true},
+		{name: "same queue twice", change: func(c *Config) { c.AlertStandardQueue = c.AlertPriorityQueue }, wantErr: true},
+		{name: "concurrency takes the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 20 }, wantErr: true},
+		{name: "concurrency above the cap", change: func(c *Config) { c.DBPoolMaxConns = 200; c.AlertConsumerConcurrency = 65 }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := alertConsumerConfig()
+			tt.change(&c)
+			err := c.validateAlertConsumer()
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_AlertConsumerDefaults(t *testing.T) {
+	for _, key := range []string{"ALERTING_VERSION", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT"} {
+		t.Setenv(key, "")
+	}
+	c := Load()
+	if c.AlertingVersion != AlertingVersionV1 || c.AlertConsumerEnabled() {
+		t.Errorf("ALERTING_VERSION = %q with the consumer on %v by default, want v1 with it off", c.AlertingVersion, c.AlertConsumerEnabled())
+	}
+	if c.AlertPriorityQueue != "priority-queue" || c.AlertStandardQueue != "standard-queue" {
+		t.Errorf("queues = %q and %q, want the gateway's priority-queue and standard-queue", c.AlertPriorityQueue, c.AlertStandardQueue)
+	}
+	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 4 {
+		t.Errorf("concurrency %d and weight %d, want 8 and 4", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
+	}
+}
+
+func sqsOnlyConfig() Config {
+	c := alertConsumerConfig()
+	c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "", "", "", ""
+	c.AlertSQSPriorityQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"
+	c.AlertSQSStandardQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/standard-queue"
+	return c
+}
+
+func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(c *Config)
+		wantErr bool
+	}{
+		{name: "AWS only", change: func(*Config) {}},
+		{name: "AWS with keys and a dead-letter queue", change: func(c *Config) {
+			c.AlertSQSAccessKeyID, c.AlertSQSSecretAccessKey = "id", "secret"
+			c.AlertSQSDeadLetterQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/alerts-dead-letter"
+		}},
+		{name: "both clouds", change: func(c *Config) {
+			a := alertConsumerConfig()
+			c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = a.AlertServiceBusNamespace, a.AlertServiceBusTenantID, a.AlertServiceBusClientID, a.AlertServiceBusClientSecret
+		}},
+		{name: "no cloud at all", change: func(c *Config) { c.AlertSQSPriorityQueueURL, c.AlertSQSStandardQueueURL = "", "" }, wantErr: true},
+		{name: "only one SQS queue", change: func(c *Config) { c.AlertSQSStandardQueueURL = "" }, wantErr: true},
+		{name: "the same SQS queue twice", change: func(c *Config) { c.AlertSQSStandardQueueURL = c.AlertSQSPriorityQueueURL }, wantErr: true},
+		{name: "half a key pair", change: func(c *Config) { c.AlertSQSAccessKeyID = "id" }, wantErr: true},
+		{name: "not a queue url", change: func(c *Config) { c.AlertSQSPriorityQueueURL = "priority-queue" }, wantErr: true},
+		{name: "queues in two regions", change: func(c *Config) {
+			c.AlertSQSStandardQueueURL = "https://sqs.eu-west-1.amazonaws.com/123456789012/standard-queue"
+		}, wantErr: true},
+		{name: "dead-letter queue in another region", change: func(c *Config) {
+			c.AlertSQSDeadLetterQueueURL = "https://sqs.eu-west-1.amazonaws.com/123456789012/alerts-dead-letter"
+		}, wantErr: true},
+		{name: "partial Azure next to complete AWS", change: func(c *Config) { c.AlertServiceBusNamespace = "sbns-example" }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := sqsOnlyConfig()
+			tt.change(&c)
+			err := c.validateAlertConsumer()
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSQSRegionFromQueueURL(t *testing.T) {
+	for queueURL, want := range map[string]string{
+		"https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue":   "us-east-1",
+		"https://sqs.cn-north-1.amazonaws.com.cn/123456789012/q":            "cn-north-1",
+		"https://eu-west-1.queue.amazonaws.com/123456789012/standard-queue": "eu-west-1",
+	} {
+		if got, err := SQSRegionFromQueueURL(queueURL); err != nil || got != want {
+			t.Errorf("SQSRegionFromQueueURL(%q) = %q, %v; want %q", queueURL, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "priority-queue", "http://sqs.us-east-1.amazonaws.com/1/q", "https://example.com/1/q", "https://sqs.us-east-1.amazonaws.com"} {
+		if _, err := SQSRegionFromQueueURL(bad); err == nil {
+			t.Errorf("SQSRegionFromQueueURL(%q) accepted a bad url", bad)
+		}
+	}
+}
+
+func TestConfig_AlertingVersion(t *testing.T) {
+	tests := []struct {
+		version    AlertingVersion
+		consumerOn bool
+		wantErr    bool
+	}{
+		{version: AlertingVersionV1, consumerOn: false},
+		{version: AlertingVersionV2, consumerOn: true},
+		{version: AlertingVersionHybrid, consumerOn: true},
+		{version: "v3", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.version), func(t *testing.T) {
+			c := alertConsumerConfig()
+			c.AlertingVersion = tt.version
+			if got := c.AlertConsumerEnabled(); got != tt.consumerOn {
+				t.Errorf("AlertConsumerEnabled() = %v, want %v", got, tt.consumerOn)
+			}
+			if err := c.validateAlertConsumer(); tt.wantErr != (err != nil) {
+				t.Errorf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_AlertingVersionIgnoresCase(t *testing.T) {
+	t.Setenv("ALERTING_VERSION", "Hybrid")
+	if c := Load(); c.AlertingVersion != AlertingVersionHybrid {
+		t.Fatalf("ALERTING_VERSION = %q, want hybrid", c.AlertingVersion)
+	}
+}
+
+func TestConfig_AlertingVersionV1IgnoresIncompleteQueueSettings(t *testing.T) {
+	c := baseValidConfig()
+	c.AlertingVersion = AlertingVersionV1
+	c.AlertSQSPriorityQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"
+	if err := c.validateAlertConsumer(); err != nil {
+		t.Fatalf("validateAlertConsumer() = %v, want v1 to leave queue settings alone", err)
+	}
+}
+
+func TestConfig_Validate_RIAMode(t *testing.T) {
+	tests := []struct {
+		mode    RIAMode
+		version AlertingVersion
+		enabled bool
+		wantErr bool
+	}{
+		{mode: "", version: AlertingVersionV1},
+		{mode: RIAModeOff, version: AlertingVersionHybrid},
+		{mode: RIAModeShadow, version: AlertingVersionV2, enabled: true},
+		{mode: RIAModeOn, version: AlertingVersionV2, enabled: true},
+		{mode: RIAModeOn, version: AlertingVersionHybrid, enabled: true, wantErr: true},
+		{mode: RIAModeShadow, version: AlertingVersionV1, enabled: true, wantErr: true},
+		{mode: "maybe", version: AlertingVersionV2, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.mode)+"/"+string(tt.version), func(t *testing.T) {
+			c := alertConsumerConfig()
+			c.RIAMode, c.AlertingVersion = tt.mode, tt.version
+			if got := c.RIAEnabled(); got != tt.enabled {
+				t.Errorf("RIAEnabled() = %v, want %v", got, tt.enabled)
+			}
+			if err := c.validateAlertConsumer(); tt.wantErr != (err != nil) {
+				t.Errorf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_RIAModeDefaultsOffAndIgnoresCase(t *testing.T) {
+	t.Setenv("RIA_MODE", "")
+	if c := Load(); c.RIAMode != RIAModeOff || c.RIAEnabled() {
+		t.Errorf("RIA_MODE = %q enabled %v by default, want off", c.RIAMode, c.RIAEnabled())
+	}
+	t.Setenv("RIA_MODE", " Shadow ")
+	if c := Load(); c.RIAMode != RIAModeShadow {
+		t.Errorf("RIA_MODE = %q, want shadow", c.RIAMode)
+	}
+}
