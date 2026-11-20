@@ -16692,7 +16692,7 @@ paths:
                   countries: { type: array, items: { type: string } }
                   canEdit: { type: boolean }
         "400":
-          description: Bad request: the message says what is wrong with the window.
+          description: "Bad request: the message says what is wrong with the window."
           content:
             application/json:
               schema:
@@ -16753,7 +16753,7 @@ paths:
                 properties:
                   stored: { type: integer }
         "400":
-          description: Bad request: the message names the day that is wrong.
+          description: "Bad request: the message names the day that is wrong."
           content:
             application/json:
               schema:
@@ -16765,7 +16765,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden: only a portal admin or a rota admin can change the public holidays.
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
           content:
             application/json:
               schema:
@@ -16803,7 +16803,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden: only a portal admin or a rota admin can change the public holidays.
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
           content:
             application/json:
               schema:
