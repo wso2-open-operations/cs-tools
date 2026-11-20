@@ -17,6 +17,8 @@
 package notify
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,5 +165,94 @@ func TestRenderSLABreachReportTeamHeadingSurvivesDarkMode(t *testing.T) {
 	}
 	if !strings.Contains(body, ".reportTable .teamHeading { background-color: #33383d !important; }") {
 		t.Fatal("the dark-mode block must override the heading cell's inline background")
+	}
+}
+
+// cellStyleFor returns the opening <td ...> tag of the cell that encloses
+// the first occurrence of needle, so a test can assert on that one cell's
+// style rather than on the whole document.
+func cellStyleFor(t *testing.T, body, needle string) string {
+	t.Helper()
+	at := strings.Index(body, needle)
+	if at < 0 {
+		t.Fatalf("rendered body is missing %q", needle)
+	}
+	open := strings.LastIndex(body[:at], "<td")
+	if open < 0 {
+		t.Fatalf("%q is not inside a table cell", needle)
+	}
+	end := strings.Index(body[open:], ">")
+	if end < 0 {
+		t.Fatalf("unterminated <td> before %q", needle)
+	}
+	return body[open : open+end]
+}
+
+// TestRenderSLABreachReportLongCaseIdCannotOverflowItsColumn pins the fix
+// for a real rendering bug: the table is table-layout:fixed, so the case
+// id column cannot widen, and a nowrap id wider than it does not clip or
+// wrap -- it paints across WSO2 Product. Staging's ids are long enough to
+// show it where production's "WSO2-1001" never would.
+func TestRenderSLABreachReportLongCaseIdCannotOverflowItsColumn(t *testing.T) {
+	const longID = "AUTOMATIONTESTCUSMSSUB-100"
+	r := slaBreachFixture()
+	r.Rows[0].WSO2CaseID = longID
+	body := RenderSLABreachReport(r, testSLAHeading, testSLAIntro, "")
+
+	style := cellStyleFor(t, body, longID)
+	if strings.Contains(style, "white-space:nowrap") {
+		t.Fatalf("the case id cell must not be nowrap, or a long id overflows into the next column; got %s", style)
+	}
+	if !strings.Contains(style, "word-break:break-all") || !strings.Contains(style, "overflow-wrap:anywhere") {
+		t.Fatalf("the case id cell must break a long id in both engine families; got %s", style)
+	}
+}
+
+// TestRenderSLABreachReportLinkedLongCaseIdAlsoBreaks: the linked form
+// wraps the id in an <a>, so the cell style has to be asserted there too
+// -- a fix applied to only one of the two branches is the likely slip.
+func TestRenderSLABreachReportLinkedLongCaseIdAlsoBreaks(t *testing.T) {
+	const longID = "AUTOMATIONTESTCUSMSSUB-100"
+	r := slaBreachFixture()
+	r.Rows[0].WSO2CaseID = longID
+	body := RenderSLABreachReport(r, testSLAHeading, testSLAIntro, "https://example.invalid/cases")
+
+	style := cellStyleFor(t, body, longID)
+	if strings.Contains(style, "white-space:nowrap") {
+		t.Fatalf("the linked case id cell must not be nowrap either; got %s", style)
+	}
+}
+
+// TestRenderSLABreachReportPercentStaysOnOneLine guards the other half of
+// the change: the elapsed percentage is always short, so it keeps nowrap.
+// Dropping nowrap everywhere would "fix" the overflow by costing every
+// numeric column a wrap.
+func TestRenderSLABreachReportPercentStaysOnOneLine(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
+	style := cellStyleFor(t, body, "3315%")
+	if !strings.Contains(style, "white-space:nowrap") {
+		t.Fatalf("the elapsed percentage cell should stay on one line; got %s", style)
+	}
+}
+
+// TestSLABreachReportColumnWidthsSumTo100 guards the width rebalance:
+// under table-layout:fixed the declared widths are the layout, so a typo
+// that makes them sum to anything else silently reflows every column.
+func TestSLABreachReportColumnWidthsSumTo100(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
+	widths := regexp.MustCompile(`<th[^>]*width="(\d+)%"`).FindAllStringSubmatch(body, -1)
+	if len(widths) != slaBreachRowColumns {
+		t.Fatalf("expected %d column widths, found %d", slaBreachRowColumns, len(widths))
+	}
+	total := 0
+	for _, m := range widths {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("bad width %q", m[1])
+		}
+		total += n
+	}
+	if total != 100 {
+		t.Fatalf("column widths sum to %d%%, want 100%%", total)
 	}
 }
