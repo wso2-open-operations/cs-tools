@@ -335,6 +335,11 @@ type Engine struct {
 	// tier sent before that would send no card or no team email, never
 	// retried. Released by IncidentTeamLookupsLoaded; also false unless held.
 	incidentSpacesPending atomic.Bool
+	// creHeadsMu guards creHeads -- set by cmd/server/main.go once at
+	// construction and again once the escalation configuration (heads.cre)
+	// has loaded, which happens after RunTicker has already started.
+	creHeadsMu sync.RWMutex
+	creHeads   CREHeadResolver
 }
 
 // WithIncidentSLAAlerts turns incident SLA clock registration and alerting on
@@ -376,6 +381,53 @@ func (e *Engine) IncidentRoutingReady() {
 	e.incidentRoutingPending.Store(false)
 }
 
+// CREHeadResolver names the CRE head, the breach email's stand-in recipient
+// for a case whose account has no CRE team (ABT) inbox. Satisfied by
+// paging.CREHeads, so the email and the CRE ladder's call reach the same
+// person.
+type CREHeadResolver interface {
+	CREHeadEmails(ctx context.Context) ([]string, error)
+}
+
+// SetCREHeads replaces the CRE head lookup. nil turns the fallback off.
+func (e *Engine) SetCREHeads(r CREHeadResolver) {
+	e.creHeadsMu.Lock()
+	e.creHeads = r
+	e.creHeadsMu.Unlock()
+}
+
+// creHeadLookupTimeout bounds the one entity-service read the fallback makes,
+// so a slow lookup cannot hold up the tick that is sending the alert.
+const creHeadLookupTimeout = 10 * time.Second
+
+// creHeadEmails resolves the CRE head's addresses, nil when no lookup is set
+// or it fails (logged; the alert's other recipients are still sent).
+func (e *Engine) creHeadEmails(ctx context.Context, caseID, clockType string, tier int) []string {
+	e.creHeadsMu.RLock()
+	r := e.creHeads
+	e.creHeadsMu.RUnlock()
+	if r == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, creHeadLookupTimeout)
+	defer cancel()
+	emails, err := r.CREHeadEmails(ctx)
+	if err != nil {
+		// An upstream error's text carries its response body; log only its
+		// status code, never the body.
+		attrs := []any{"caseId", caseID, "clockType", clockType, "tier", tier}
+		var apiErr *apierror.Error
+		if errors.As(err, &apiErr) {
+			attrs = append(attrs, "statusCode", apiErr.StatusCode)
+		} else {
+			attrs = append(attrs, "err", err)
+		}
+		slog.ErrorContext(ctx, "slaengine: failed to resolve the cre head for a case with no cre team email", attrs...)
+		return nil
+	}
+	return emails
+}
+
 // clock returns e.now(), or time.Now() when no clock is set.
 func (e *Engine) clock() time.Time {
 	if e.now != nil {
@@ -408,6 +460,11 @@ func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *rec
 // engine's Chat card can route to), there's exactly one real team this
 // email goes to, so there's nothing for an env var to usefully vary.
 const slaBreachAmericasTeamKey = "americas_cre_team"
+
+// noABTTeamLabel fills the breach email's Team row when the CRE head gets it
+// because the case's account has no ABT at all, so the reader sees why it
+// came to them.
+const noABTTeamLabel = "No ABT assigned (sent to the CRE head)"
 
 // SetTeamGroupEmails atomically replaces the team.key -> group_email lookup
 // table sendBreachEmails reads for the Americas overnight-coverage email
@@ -1706,12 +1763,10 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 // constant's own doc comment) — on top of (not instead of) the Chat alert. A
 // no-op when e.email is nil (no SLA breach email reaction configured for
 // this deployment). Any recipient is skipped silently (logged at INFO, not
-// WARN/ERROR) when there's no address to send to for it (state.AssigneeEmail/
-// TeamEmail+OnboardingTeamEmail all empty, or slaBreachAmericasTeamKey not
-// yet resolved in teamGroupEmails) — a case with no assignee, or a team with
-// no configured group_email, is a normal state, not a misconfiguration this
-// engine can fix; production has no real address to send to in that case
-// regardless. The "team" email's own "to" list can carry two addresses, not
+// WARN/ERROR) when there's no address to send to for it (state.AssigneeEmail
+// empty, or slaBreachAmericasTeamKey not yet resolved in teamGroupEmails).
+// The team email is the exception: with no CRE team inbox (no ABT, or an ABT
+// with no group_email) it goes to the CRE head instead -- see the call site. The "team" email's own "to" list can carry two addresses, not
 // one — see its call site's own doc comment just below for why. isAmericas
 // is the SAME Resolve-computed decision sendBreachAlert's own Chat card used
 // to decide whether this breach posts to the chataudience.Americas Chat
@@ -1837,8 +1892,25 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		// account CRE or onboarding team's.
 		teamEmails = nonEmptyUnique(state.incidentTeamEmails...)
 	}
-	send("team", teamEmails, meta.Team, func(intendedFor string) string {
-		d := data
+	teamRole, teamLabel, teamData := "team", meta.Team, data
+	// No CRE team inbox: the account has no ABT, or its ABT has no
+	// group_email. Cases only -- an incident blanks TeamEmail on purpose,
+	// its team email going to its SRE team(s) above. Without a stand-in only the assignee (if any) heard about
+	// the at-risk/breached SLA, so the CRE head gets the team email instead
+	// (alongside the onboarding team, when there is one). Only when
+	// entity-service actually answered (Found): a failed or empty lookup
+	// says nothing about the team, and treating it as "no ABT" would mail
+	// the head for every case during an entity-service outage.
+	if meta.CaseType != CaseTypeIncident && state.Found && state.TeamEmail == "" {
+		teamRole = "cre_head"
+		teamEmails = nonEmptyUnique(append(teamEmails, e.creHeadEmails(ctx, caseID, clockType, tier)...)...)
+		if meta.Team == "" {
+			teamLabel = "CRE head"
+			teamData.Team = noABTTeamLabel
+		}
+	}
+	send(teamRole, teamEmails, teamLabel, func(intendedFor string) string {
+		d := teamData
 		d.IntendedFor = intendedFor
 		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
 	})
