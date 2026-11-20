@@ -207,6 +207,9 @@ export interface SearchProjectsRequest {
   /** Onboarding owners' emails to keep (case-insensitive); only arrives from a
    *  dashboard widget's click-through. Postgres data sources only. */
   onboardingOwnerEmails?: string[];
+  /** Teams (Team Schedule team ids) the onboarding owner is a member of; only
+   *  arrives from a dashboard widget. Postgres data sources only. */
+  onboardingOwnerTeamIds?: string[];
   /** Inclusive `yyyy-MM-dd` bounds, one From/To pair per date column. */
   onboardingStartDateFrom?: string;
   onboardingStartDateTo?: string;
