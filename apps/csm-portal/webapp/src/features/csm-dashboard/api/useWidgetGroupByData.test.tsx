@@ -91,6 +91,32 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.total).toBe(10);
   });
 
+  it("draws a staff owner's name without the circled W and marks the slice as staff", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "u-1", label: "Jane Doe Ⓦ", count: 3 },
+        { key: "u-2", label: "Sam Customer", count: 1 },
+        { key: "u-3", label: "Ⓦ", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "project", {}, { field: "onboardingOwner" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices.map(({ label, isStaff }) => ({ label, isStaff }))).toEqual([
+      { label: "Jane Doe", isStaff: true },
+      { label: "Sam Customer", isStaff: undefined },
+      // A name that is only the marker: a neutral label, still marked as staff.
+      { label: "Unnamed", isStaff: true },
+    ]);
+  });
+
   it("scopes a resourceType with no case-DSL/filter-array/named-array field (e.g. incident_task) to a flat top-level key", async () => {
     postMock.mockResolvedValue({
       groups: [{ key: "P1", label: "P1", count: 4 }],

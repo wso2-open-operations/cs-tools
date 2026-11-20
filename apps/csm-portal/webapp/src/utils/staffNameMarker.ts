@@ -49,3 +49,13 @@ export function joinStaffName(
     .filter(Boolean)
     .join(" ");
 }
+
+/**
+ * Whether a display name carries the circled-W staff marker (see
+ * {@link STAFF_NAME_MARKER}). Lets a place that only has a name (a dashboard
+ * group label, a list cell) show the staff badge in its place. A separate,
+ * non-global pattern: `test` on the global one keeps `lastIndex` between calls.
+ */
+export function hasStaffNameMarker(name: string | null | undefined): boolean {
+  return !!name && /[Ⓦⓦ]/u.test(name);
+}
