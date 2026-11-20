@@ -110,7 +110,7 @@ func TestCatalogRepository_GetCatalogItemVariables_ExtraFieldsAndChoices(t *test
 	seedCatalogVariableExtraFieldsFixture(t, pool)
 
 	repo := repository.NewCatalogRepository(repository.NewScoped(pool))
-	variables, err := repo.GetCatalogItemVariables(repository.WithSystemIdentity(context.Background()), cveCatalogID, cveCatalogItemID)
+	variables, err := repo.GetCatalogItemVariables(repository.WithSystemIdentity(context.Background()), cveCatalogID, cveCatalogItemID, false)
 	if err != nil {
 		t.Fatalf("GetCatalogItemVariables: unexpected error = %v", err)
 	}

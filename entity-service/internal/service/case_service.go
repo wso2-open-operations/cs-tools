@@ -110,6 +110,9 @@ type caseService struct {
 	// catalog answers when the caller sent none (fillServiceRequestText). nil
 	// unless wired via WithServiceRequestCatalog.
 	srCatalog srCatalogReader
+	// csmOnlyItems backs validateCSMOnlyCatalogItem. nil unless wired via
+	// WithCSMOnlyCatalogItemCheck, in which case nothing is checked.
+	csmOnlyItems csmOnlyCatalogItems
 	// typeTransfer backs UpdateCase's type transfer (see transferCaseType). nil
 	// unless wired via WithCaseTypeTransfer, in which case a request carrying a
 	// type is refused as it was before the transfer existed.
@@ -755,6 +758,9 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		}
 	}
 	if err := s.validateDeployedProductCategoryForType(ctx, req); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+	if err := s.validateCSMOnlyCatalogItem(ctx, req); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
 	// Before both create paths: derive subject and description for a service
