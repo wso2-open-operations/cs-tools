@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Footer from "@components/footer/Footer";
 import {
   PRIVACY_POLICY_URL,
@@ -42,34 +42,11 @@ vi.mock("@wso2/oxygen-ui", () => {
 });
 
 describe("Footer", () => {
-  const originalConfig = window.config;
-
-  afterEach(() => {
-    window.config = originalConfig;
-  });
-
   it("should render the default company name with LLC", () => {
-    window.config = {
-      ...originalConfig,
-      CUSTOMER_PORTAL_COMPANY_NAME: undefined,
-    };
     render(<Footer />);
     expect(
       screen.getByText(
         `© ${new Date().getFullYear()} WSO2 LLC. All rights reserved.`,
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("should render the configured company name with LLC", () => {
-    window.config = {
-      ...originalConfig,
-      CUSTOMER_PORTAL_COMPANY_NAME: " Acme Corp ",
-    };
-    render(<Footer />);
-    expect(
-      screen.getByText(
-        `© ${new Date().getFullYear()} Acme Corp LLC. All rights reserved.`,
       ),
     ).toBeInTheDocument();
   });

@@ -66,8 +66,5 @@ export const PRIVACY_POLICY_URL: string = "https://wso2.com/privacy-policy/";
 // URL for terms of service.
 export const TERMS_OF_SERVICE_URL: string = "https://wso2.com/terms-of-use/";
 
-// Legal suffix printed after the configured company name in the footer.
-export const COMPANY_LEGAL_SUFFIX: string = "LLC";
-
 // URL for join our community.
 export const JOIN_COMMUNITY_URL: string = "https://wso2.com/community";
