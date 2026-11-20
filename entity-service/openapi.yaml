@@ -9659,6 +9659,157 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/public-holidays:
+    get:
+      summary: The stored public holidays, for the holiday editor.
+      description: >
+        Internal staff only. Every stored day in the window (at most 366 days),
+        of one country when `country` is given, with where it came from:
+        CALENDAR (the daily refresh) or MANUAL (added in the portal, migration
+        0293). Also the countries in use (every stored one plus Sri Lanka and
+        India) and whether the caller may add or remove holidays.
+      operationId: listPublicHolidays
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: country, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: The stored days, the countries and canEdit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicHolidaysListResponse'
+        "400":
+          description: A date that is not YYYY-MM-DD, `to` before `from`, or a window over 366 days.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add one country's public holidays by hand.
+      description: >
+        A portal admin or a rota admin of any family (holidays are per country
+        and shared by every family). Up to 200 days, each a YYYY-MM-DD date from
+        last year to two years ahead with a title of at most 200 characters.
+        Each day is stored as a MANUAL row under the caller's email; a day
+        already stored (from the calendar or by hand) takes the new title and
+        becomes manual. The daily refresh never deletes or retitles a manual
+        row. The coming weeks' Public holiday tags (CRE) are placed in the
+        background right after.
+      operationId: addPublicHolidays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPublicHolidaysRequest'
+      responses:
+        "201":
+          description: How many days were stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddPublicHolidaysResponse'
+        "400":
+          description: A missing or invalid country, date or title, or too many days; the message names the day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not a portal admin or a rota admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/public-holidays/{country}/{date}:
+    delete:
+      summary: Remove one stored public holiday.
+      description: >
+        A portal admin or a rota admin of any family. Removes the day whether it
+        came from the calendar or by hand (a calendar day comes back at the next
+        refresh). The Public holiday tags are placed again in the background,
+        which takes away the day's tags nobody touched.
+      operationId: deletePublicHoliday
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: An invalid country or date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not a portal admin or a rota admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such day is stored, or no database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/public-holidays/search:
     post:
       summary: Public holidays of the given people over a date window.
@@ -30573,6 +30724,45 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SchedulePublicHoliday' }
         count: { type: integer }
+    StoredPublicHoliday:
+      type: object
+      required: [country, date, title, source]
+      properties:
+        country: { type: string }
+        date: { type: string, format: date }
+        title: { type: string }
+        source: { type: string, enum: [CALENDAR, MANUAL] }
+        updatedBy:
+          type: string
+          description: Who added or last changed a manual row; absent for the refresh's rows.
+    PublicHolidaysListResponse:
+      type: object
+      required: [holidays, countries, canEdit]
+      properties:
+        holidays:
+          type: array
+          items: { $ref: '#/components/schemas/StoredPublicHoliday' }
+        countries: { type: array, items: { type: string } }
+        canEdit: { type: boolean }
+    AddPublicHolidaysRequest:
+      type: object
+      required: [country, holidays]
+      properties:
+        country: { type: string, maxLength: 100 }
+        holidays:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [date, title]
+            properties:
+              date: { type: string, format: date }
+              title: { type: string, maxLength: 200 }
+    AddPublicHolidaysResponse:
+      type: object
+      required: [stored]
+      properties:
+        stored: { type: integer }
     PublicHolidayRefreshResult:
       type: object
       properties:

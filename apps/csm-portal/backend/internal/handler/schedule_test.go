@@ -37,11 +37,15 @@ type mockEntityScheduleClient struct {
 	assignmentsFn func(ctx context.Context, body []byte) ([]byte, error)
 	allocationsFn func(ctx context.Context, body []byte) ([]byte, error)
 	holidaysFn    func(ctx context.Context, body []byte) ([]byte, error)
-	availFn       func(ctx context.Context, body []byte) ([]byte, error)
-	confirmFn     func(ctx context.Context, teamKey, date string, confirm bool) ([]byte, error)
-	dismissFn     func(ctx context.Context, body []byte) ([]byte, error)
-	absencesFn    func(ctx context.Context, body []byte) ([]byte, error)
-	onDutyFn      func(ctx context.Context, at string) ([]byte, error)
+	// The holiday editor: the list's query, an add's body, a delete's path.
+	listHolidaysFn  func(ctx context.Context, from, to, country string) ([]byte, error)
+	addHolidaysFn   func(ctx context.Context, body []byte) ([]byte, error)
+	deleteHolidayFn func(ctx context.Context, country, date string) ([]byte, error)
+	availFn         func(ctx context.Context, body []byte) ([]byte, error)
+	confirmFn       func(ctx context.Context, teamKey, date string, confirm bool) ([]byte, error)
+	dismissFn       func(ctx context.Context, body []byte) ([]byte, error)
+	absencesFn      func(ctx context.Context, body []byte) ([]byte, error)
+	onDutyFn        func(ctx context.Context, at string) ([]byte, error)
 
 	createFn   func(ctx context.Context, body []byte) ([]byte, error)
 	updateFn   func(ctx context.Context, id string, body []byte) ([]byte, error)
@@ -213,6 +217,30 @@ func (m *mockEntityScheduleClient) SearchSchedulePublicHolidays(ctx context.Cont
 		return m.holidaysFn(ctx, body)
 	}
 	return []byte(`{"holidays":[],"count":0}`), nil
+}
+
+// ListPublicHolidays returns listHolidaysFn's answer, or an empty list.
+func (m *mockEntityScheduleClient) ListPublicHolidays(ctx context.Context, from, to, country string) ([]byte, error) {
+	if m.listHolidaysFn != nil {
+		return m.listHolidaysFn(ctx, from, to, country)
+	}
+	return []byte(`{"holidays":[],"countries":[],"canEdit":false}`), nil
+}
+
+// AddPublicHolidays returns addHolidaysFn's answer, or nothing stored.
+func (m *mockEntityScheduleClient) AddPublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
+	if m.addHolidaysFn != nil {
+		return m.addHolidaysFn(ctx, body)
+	}
+	return []byte(`{"stored":0}`), nil
+}
+
+// DeletePublicHoliday returns deleteHolidayFn's answer, or no body.
+func (m *mockEntityScheduleClient) DeletePublicHoliday(ctx context.Context, country, date string) ([]byte, error) {
+	if m.deleteHolidayFn != nil {
+		return m.deleteHolidayFn(ctx, country, date)
+	}
+	return nil, nil
 }
 
 // SearchHolidayAvailability returns availFn's answer, or an empty holiday list when none is set.
