@@ -55,17 +55,23 @@ func main() {
 	dashboardCatalogue := catalogue.NewDashboard()
 	// Never the key.
 	slog.Info("model calls", "enabled", cfg.Enabled(), "model", cfg.Model, "timeout", cfg.Timeout,
-		"gateway", cfg.GatewayHost())
+		"gateway", cfg.GatewayHost(), "codeGeneration", cfg.CodeGenerationEnabled)
 
-	// Without a key the AI routes answer 503 not_configured.
+	// Without a key the AI routes answer 503 not_configured. The code
+	// approach (phase 2) is off unless DASHBOARD_GENERATE_CODE_ENABLED is
+	// "true": its route is not registered and its generator not built.
 	var dashboardGenerator *dashboards.Generator
+	var codeGenerator *dashboards.CodeGenerator
 	if cfg.Enabled() {
 		client := claude.NewClient(claude.Config{APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Timeout: cfg.Timeout})
 		dashboardGenerator = dashboards.NewGenerator(client, cfg.Model, cfg.Timeout, dashboardCatalogue)
+		if cfg.CodeGenerationEnabled {
+			codeGenerator = dashboards.NewCodeGenerator(client, cfg.Model, cfg.Timeout, catalogue.NewCode())
+		}
 	}
-	dashboardHandler := handler.NewDashboardHandler(dashboardGenerator)
+	dashboardHandler := handler.NewDashboardHandler(dashboardGenerator, codeGenerator)
 
-	mux := newMux(dashboardHandler)
+	mux := newMux(dashboardHandler, cfg.CodeGenerationEnabled)
 
 	addr := ":" + envOrDefault("PORT", "8080")
 

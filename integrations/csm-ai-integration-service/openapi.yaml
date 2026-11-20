@@ -71,6 +71,52 @@ paths:
           $ref: '#/components/responses/Error'
         "504":
           $ref: '#/components/responses/Error'
+  /ai/dashboards/generate-code:
+    post:
+      summary: Ask the model for a dashboard written as JavaScript.
+      description: >
+        One model call (the code approach). Returns the source and the chat
+        sentence, or the model's sentence when it declined. **Off by default
+        (phase 2):** registered only when DASHBOARD_GENERATE_CODE_ENABLED is
+        exactly "true"; otherwise the path answers 404.
+      operationId: generateCodeDashboard
+      parameters:
+        - name: X-CSM-User-ID
+          in: header
+          required: false
+          description: As on /ai/dashboards/generate.
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCodeDashboardRequest'
+      responses:
+        "200":
+          description: The model answered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateCodeDashboardResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "404":
+          description: The code approach is off (DASHBOARD_GENERATE_CODE_ENABLED is not "true").
+        "422":
+          $ref: '#/components/responses/Error'
+        "429":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+        "502":
+          $ref: '#/components/responses/Error'
+        "503":
+          $ref: '#/components/responses/Error'
+        "504":
+          $ref: '#/components/responses/Error'
 components:
   responses:
     Error:
@@ -98,6 +144,30 @@ components:
         field:
           type: string
           enum: [creTeam, sreTeam]
+    PlaybookAnswerField:
+      type: object
+      description: A PLG playbook task a widget can filter or group by, with its answers.
+      required: [code, name, valueType, options]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        valueType:
+          type: string
+          enum: [SINGLE_SELECT, CHECKLIST]
+        options:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [code, label]
+            properties:
+              code:
+                type: string
+              label:
+                type: string
     GenerateDashboardRequest:
       type: object
       additionalProperties: false
@@ -119,6 +189,12 @@ components:
           maxItems: 500
           items:
             $ref: '#/components/schemas/Team'
+        playbookAnswers:
+          type: array
+          maxItems: 200
+          description: The PLG playbook answer fields, appended to the catalogue as its "PLG playbook answers" section.
+          items:
+            $ref: '#/components/schemas/PlaybookAnswerField'
     GenerateDashboardResponse:
       type: object
       required: [usage]
@@ -148,6 +224,52 @@ components:
               description: Input read from the prompt cache (the system prompt, on a call within the cache's lifetime).
             outputTokens:
               type: integer
+    GenerateCodeDashboardRequest:
+      type: object
+      additionalProperties: false
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        current:
+          type: string
+          maxLength: 60000
+          description: The source being edited, absent on a first message.
+        teams:
+          type: array
+          maxItems: 500
+          description: The teams a dashboard can filter by, as on /ai/dashboards/generate.
+          items:
+            $ref: '#/components/schemas/Team'
+        playbookAnswers:
+          type: array
+          maxItems: 200
+          description: The PLG playbook answer fields, as on /ai/dashboards/generate.
+          items:
+            $ref: '#/components/schemas/PlaybookAnswerField'
+    GenerateCodeDashboardResponse:
+      type: object
+      required: [usage]
+      properties:
+        source:
+          type: string
+          description: The code to run; it defines a render function.
+        reply:
+          type: string
+          description: The chat sentence shown with the code.
+        name:
+          type: string
+          maxLength: 255
+          description: >-
+            The name the model suggests saving the dashboard under (its Name
+            line, at most 255 characters). Absent when the model gave none.
+        declined:
+          type: string
+          description: The model's sentence when it declined the request.
+        usage:
+          $ref: '#/components/schemas/GenerateDashboardResponse/properties/usage'
     Error:
       type: object
       required: [code, message]

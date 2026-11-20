@@ -22,12 +22,17 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/handler"
 )
 
-// newMux is the service's routes.
-func newMux(dashboards *handler.DashboardHandler) *http.ServeMux {
+// newMux is the service's routes. codeGeneration registers POST
+// /ai/dashboards/generate-code (DASHBOARD_GENERATE_CODE_ENABLED); off, the
+// path is not registered at all and answers 404 like any unknown one.
+func newMux(dashboards *handler.DashboardHandler, codeGeneration bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("POST /ai/dashboards/generate", dashboards.Generate)
+	if codeGeneration {
+		mux.HandleFunc("POST /ai/dashboards/generate-code", dashboards.GenerateCode)
+	}
 	return mux
 }
