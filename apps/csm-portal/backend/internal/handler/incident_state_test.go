@@ -27,7 +27,7 @@ func TestIsValidIncidentStateTransition(t *testing.T) {
 		want     bool
 	}{
 		{incidentStateNew, incidentStateInProgress, true},
-		{incidentStateNew, incidentStateCancelled, false}, // started first, then cancelled
+		{incidentStateNew, incidentStateCancelled, true},
 		{incidentStateNew, incidentStateResolved, false},
 		{incidentStateNew, incidentStateClosed, false}, // the exact bug this closes
 		{incidentStateInProgress, incidentStateOnHold, true},

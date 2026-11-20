@@ -33,12 +33,11 @@ const (
 // from-state-aware check at all: a direct PATCH could jump straight from
 // NEW to CLOSED, since only the target value's enum membership was ever
 // validated (see validIncidentStates), never whether the transition from the
-// incident's current state was legal. CLOSED and CANCELLED are terminal, and
-// NEW can only be started (Cancelled is reachable from In Progress / On Hold).
+// incident's current state was legal. CLOSED and CANCELLED are terminal.
 func incidentNextStates(state string) []string {
 	switch state {
 	case incidentStateNew:
-		return []string{incidentStateInProgress}
+		return []string{incidentStateInProgress, incidentStateCancelled}
 	case incidentStateInProgress:
 		return []string{incidentStateOnHold, incidentStateResolved, incidentStateCancelled}
 	case incidentStateOnHold:
