@@ -368,6 +368,38 @@ func TestDashboardTeams_ResolvesTimeCardTeams(t *testing.T) {
 	}
 }
 
+// TestDashboardTeams_ResolvesProjectOnboardingOwnerTeams: a project query's
+// onboardingOwnerTeamIds takes the same group ids as a time card's teamIds, in
+// the widget and its slices; "__current_team__" and a team with no group are
+// refused with the reason.
+func TestDashboardTeams_ResolvesProjectOnboardingOwnerTeams(t *testing.T) {
+	teams := testDashboardTeams(t)
+	def, err := teams.resolve([]byte(`{"widgets":[{"resourceType":"project","query":{"onboardingOwnerTeamIds":["rigel"]},` +
+		`"slices":[{"label":"S","query":{"onboardingOwnerTeamIds":["Sirius"]}}]}]}`))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, want := range []string{rigelGroup, siriusGroup} {
+		if !strings.Contains(string(def), want) {
+			t.Errorf("resolve = %s; want %s", def, want)
+		}
+	}
+	// Only a time card widget's teamIds is a team list; a project's is left alone.
+	def, err = teams.resolve([]byte(`{"widgets":[{"resourceType":"project","query":{"teamIds":["rigel"]}}]}`))
+	if err != nil || strings.Contains(string(def), rigelGroup) {
+		t.Errorf("project teamIds: resolve = %s, %v; want it untouched", def, err)
+	}
+	// "My team" is refused for projects: it resolves only with a team picker.
+	_, err = teams.resolve([]byte(`{"widgets":[{"resourceType":"project","query":{"onboardingOwnerTeamIds":["__current_team__"]}}]}`))
+	if !errors.Is(err, errDashboardTeam) || !strings.Contains(err.Error(), `name the team (for example the onboarding team) instead of "my team"`) {
+		t.Errorf("__current_team__: err = %v", err)
+	}
+	_, err = teams.resolve([]byte(`{"widgets":[{"resourceType":"project","query":{"onboardingOwnerTeamIds":["orion"]}}]}`))
+	if !errors.Is(err, errDashboardTeam) || !strings.Contains(err.Error(), "team Orion has no group configured, so its members' onboarding projects cannot be found") {
+		t.Errorf("no group: err = %v", err)
+	}
+}
+
 // TestDashboardTeams_RefusesTimeCardTeamsItCannotFind: an unknown team, a
 // team of a family with no team filter, and a team with no group are
 // refused with the reason, in a slice as in the widget.
