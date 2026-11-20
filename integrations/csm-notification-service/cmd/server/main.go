@@ -358,8 +358,8 @@ func main() {
 
 	// SLA notification killswitch, same disable-entirely convention as
 	// EMAIL_SENDING_ENABLED/CALL_SENDING_ENABLED above. When false, NO
-	// SLA-related message is sent: the SLA breach Google Chat card (and any
-	// SLA breach email, which this service does not send today). The
+	// SLA-related message is sent: the SLA breach Google Chat card and the
+	// SLA breach emails (assignee, team or CRE head, Americas). The
 	// sla.tier_reached event is still published and tier tracking still
 	// advances. Non-SLA alerts are unaffected.
 	slaEmailSendingEnabled := envBool("SLA_EMAIL_SENDING_ENABLED", true)
@@ -592,6 +592,10 @@ func main() {
 	// (rather than a block-local :=) so it's reachable from there; nil when
 	// Redis isn't configured, same as slaProducer above.
 	var slaEngine *slaengine.Engine
+	// slaCREHeadsEntity backs the SLA breach email's CRE head fallback; kept
+	// at this scope so the escalation block below can hand the engine the
+	// configured heads.cre once that configuration has loaded.
+	var slaCREHeadsEntity *paging.EntityClient
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -681,6 +685,19 @@ func main() {
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
 		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		// A case with no CRE team inbox (no ABT) sends its at-risk/breach
+		// email to the CRE head instead. Until the escalation configuration
+		// below loads (after the ticker starts), the head is looked up by the
+		// cre_head role in the leadership team; then heads.cre, when set,
+		// takes over -- the same order the CRE ladder's own head rung uses.
+		slaCREHeadsEntity = paging.NewEntityClient(paging.EntityConfig{
+			BaseURL:      mustEnv("CUSTOMER_ENTITY_BASE_URL"),
+			TokenURL:     mustEnv("OAUTH2_TOKEN_URL"),
+			ClientID:     mustEnv("OAUTH2_CLIENT_ID"),
+			ClientSecret: mustEnv("OAUTH2_CLIENT_SECRET"),
+			Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+		})
+		slaEngine.SetCREHeads(paging.NewCREHeads(paging.LadderConfig{}, slaCREHeadsEntity))
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -1003,6 +1020,12 @@ func main() {
 		}
 		creCfg, creRunning := escalationCfg.For(paging.LadderKeyCRE)
 		sreCfg, sreRunning := escalationCfg.For(paging.LadderKeySRE)
+		// The SLA breach email's CRE head now follows heads.cre and
+		// teams.leadership too, whether or not the CRE ladder itself runs:
+		// the head is the same person either way.
+		if slaEngine != nil && cfgErr == nil {
+			slaEngine.SetCREHeads(paging.NewCREHeads(creCfg, slaCREHeadsEntity))
+		}
 		if cfgErr == nil {
 			applyIncidentRoutes(sreCfg, googleChatClient, incidentRoutes)
 		}
