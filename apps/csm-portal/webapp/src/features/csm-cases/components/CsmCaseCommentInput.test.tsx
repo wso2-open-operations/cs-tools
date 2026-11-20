@@ -25,6 +25,11 @@ import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgr
 // transitively via CsmUploadAttachmentModal -> useCsmCaseAttachments, just
 // for its MAX_ATTACHMENT_SIZE_BYTES constant — the mock only exists to keep
 // that import chain from throwing on missing runtime config.
+// The comment box's Templates menu has its own tests (CommentTemplatesMenu.test.tsx);
+// here it is a stand-in so these tests need no query client or current user.
+vi.mock("@features/comment-templates/components/CommentTemplatesMenu", () => ({
+  default: () => null,
+}));
 vi.mock("@api/backend/client", () => {
   const api = { post: vi.fn() };
   return { useBackendApi: () => api };
