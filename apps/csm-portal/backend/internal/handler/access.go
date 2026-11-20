@@ -318,6 +318,14 @@ const (
 	// time card approver) while who may see totals per user is still to be
 	// decided; a separate permission so that decision changes one line here.
 	PermViewTimeCardTotals
+	// PermOverrideApprovedTimeCardBillable is changing the billable flag of an
+	// already approved time card -- a PATCH /time-cards/{id} whose body carries
+	// isBillable and nothing else. The backing service applies that body to an
+	// approved card without any role check, so TimeCardHandler requires this
+	// permission for every isBillable-only body (no legitimate non-admin
+	// caller sends one: the edit form always sends the full field set). Held
+	// by admin only -- not the CS engineer, not the time card approver.
+	PermOverrideApprovedTimeCardBillable
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -520,6 +528,8 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// /products/vulnerabilities to Viewer, which is out of scope).
 			PermViewSecurityReportCases: build(cfg.Viewer, cfg.CsEngineer, cfg.Admin, cfg.CommentUpdater, cfg.SecurityTeam),
 			PermApproveTimeCard:         build(cfg.TimecardApprover, cfg.Admin),
+			// Admin only -- see PermOverrideApprovedTimeCardBillable's own doc comment.
+			PermOverrideApprovedTimeCardBillable: build(cfg.Admin),
 			// Viewer, unconditionally (no cs_engineer exclusion) -- see
 			// PermViewerAccess's own doc comment for why.
 			PermViewerAccess: build(cfg.Viewer),

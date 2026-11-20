@@ -15,8 +15,29 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import type { MutateOptions } from "@tanstack/react-query";
+
+// The dialog reads the backend-resolved time-card role, the error banner and
+// the billable mutation; each is mocked so the tests control them directly.
+vi.mock("@config/apiConfig", () => ({ apiConfig: { backendUrl: "https://example.test" } }));
+let isAdmin = false;
+vi.mock("@features/csm-timecards/hooks/useTimecardRole", () => ({
+  useTimecardRole: () => ({ isApprover: false, isAdmin }),
+}));
+const showError = vi.fn();
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({
+  useErrorBanner: () => ({ showError }),
+}));
+type BillableInput = { cardId: string; billable: boolean };
+const mutate = vi.fn();
+let isPending = false;
+vi.mock("@features/csm-timecards/api/useTimeCards", () => ({
+  useUpdateTimeCardBillable: () => ({ mutate, isPending }),
+}));
+
+import { BackendApiError } from "@api/backend/client";
 import TimeCardDetailsDialog from "@features/csm-timecards/components/TimeCardDetailsDialog";
 import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
@@ -36,6 +57,13 @@ function card(overrides: Partial<CsmTimeCard> = {}): CsmTimeCard {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  isAdmin = false;
+  isPending = false;
+  mutate.mockReset();
+  showError.mockReset();
+});
 
 describe("TimeCardDetailsDialog", () => {
   it("shows the card's own fields", () => {
@@ -151,5 +179,80 @@ describe("TimeCardDetailsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  describe("billable override on an approved card", () => {
+    const approved = (): CsmTimeCard => card({ state: "approved", billable: true });
+
+    it("hides the control from a non-admin", () => {
+      render(<TimeCardDetailsDialog card={approved()} onClose={vi.fn()} />);
+      expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save billable status" })).not.toBeInTheDocument();
+    });
+
+    it("hides the control from an admin when the card is not approved", () => {
+      isAdmin = true;
+      render(<TimeCardDetailsDialog card={card({ state: "submitted" })} onClose={vi.fn()} />);
+      expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    });
+
+    it("shows the control to an admin, with Save disabled until the value changes", () => {
+      isAdmin = true;
+      render(<TimeCardDetailsDialog card={approved()} onClose={vi.fn()} />);
+      expect(screen.getByRole("switch")).toBeChecked();
+      expect(screen.getByRole("button", { name: "Save billable status" })).toBeDisabled();
+    });
+
+    it("does not save until Save is clicked, then sends an isBillable-only payload", () => {
+      isAdmin = true;
+      render(<TimeCardDetailsDialog card={approved()} onClose={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("switch"));
+      expect(mutate).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save billable status" }));
+      expect(mutate).toHaveBeenCalledTimes(1);
+      expect(mutate.mock.calls[0][0]).toEqual({ cardId: "card-1", billable: false });
+    });
+
+    it("reflects the saved value after a successful save", () => {
+      isAdmin = true;
+      mutate.mockImplementation(
+        (_input: BillableInput, opts: MutateOptions<CsmTimeCard, Error, BillableInput>) =>
+          opts.onSuccess?.(card({ state: "approved", billable: false }), _input, undefined, undefined as never),
+      );
+      render(<TimeCardDetailsDialog card={approved()} onClose={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("switch"));
+      fireEvent.click(screen.getByRole("button", { name: "Save billable status" }));
+
+      expect(screen.getByText("Non-billable", { selector: "p" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save billable status" })).toBeDisabled();
+    });
+
+    it("surfaces the backend's message when the save is rejected", () => {
+      isAdmin = true;
+      const err = new BackendApiError(403, "Forbidden");
+      mutate.mockImplementation(
+        (_input: BillableInput, opts: MutateOptions<CsmTimeCard, Error, BillableInput>) =>
+          opts.onError?.(err, _input, undefined, undefined as never),
+      );
+      render(<TimeCardDetailsDialog card={approved()} onClose={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("switch"));
+      fireEvent.click(screen.getByRole("button", { name: "Save billable status" }));
+
+      expect(screen.getByRole("alert")).toHaveTextContent("Forbidden");
+      expect(showError).toHaveBeenCalledWith("Forbidden", err);
+    });
+
+    it("disables the control and shows a saving state while pending", () => {
+      isAdmin = true;
+      isPending = true;
+      render(<TimeCardDetailsDialog card={approved()} onClose={vi.fn()} />);
+
+      expect(screen.getByRole("switch")).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    });
   });
 });

@@ -167,6 +167,12 @@ export interface UpdateTimeCardInput {
   issueComplexity: IssueComplexity;
 }
 
+/** Input to change only the billable flag of an already-approved card. */
+export interface UpdateTimeCardBillableInput {
+  cardId: string;
+  billable: boolean;
+}
+
 /** Payload for a lead's accept/reject decision. */
 export interface TimeCardDecisionInput {
   cardId: string;

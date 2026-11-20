@@ -21,6 +21,7 @@
 //   POST   /time-cards/search   list for a case (server-side caseId filter)
 //   POST   /time-cards          create (already `submitted` — no draft step)
 //   PATCH  /time-cards/{id}     accept/reject { state, leadComment }
+//   PATCH  /time-cards/{id}     approved card's billable flag { isBillable }
 //   DELETE /time-cards/{id}     delete an own, still-submitted card
 //
 
@@ -37,11 +38,13 @@ import type {
   BeCreateTimeCardPayload,
   BeDeleteTimeCardResponse,
   BeTimeCardMutationResponse,
+  BeUpdateTimeCardBillablePayload,
   BeUpdateTimeCardPayload,
 } from "@api/backend/types";
 import type {
   CreateTimeCardInput,
   CsmTimeCard,
+  UpdateTimeCardBillableInput,
   UpdateTimeCardInput,
 } from "@features/csm-timecards/types/timeCards";
 import {
@@ -176,6 +179,36 @@ export function useUpdateTimeCard(): UseMutationResult<
       return mapTimeCard(res.timeCard);
     },
     onSuccess: () => invalidateTimecards(queryClient),
+  });
+}
+
+/**
+ * Change only the billable flag of an already-APPROVED card. The payload
+ * carries exactly `{ isBillable }` (see {@link BeUpdateTimeCardBillablePayload});
+ * the backend authorizes it (403 for a non-admin), so this hook does no
+ * client-side gating of its own. Also invalidates the project time-log
+ * breakdown report, which aggregates billable hours under its own key.
+ */
+export function useUpdateTimeCardBillable(): UseMutationResult<
+  CsmTimeCard,
+  Error,
+  UpdateTimeCardBillableInput
+> {
+  const api = useBackendApi();
+  const queryClient = useQueryClient();
+  return useMutation<CsmTimeCard, Error, UpdateTimeCardBillableInput>({
+    mutationFn: async (input): Promise<CsmTimeCard> => {
+      const payload: BeUpdateTimeCardBillablePayload = { isBillable: input.billable };
+      const res = await api.patch<
+        BeUpdateTimeCardBillablePayload,
+        BeTimeCardMutationResponse
+      >(`/time-cards/${encodeURIComponent(input.cardId)}`, payload);
+      return mapTimeCard(res.timeCard);
+    },
+    onSuccess: () => {
+      invalidateTimecards(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["spl-timelogs-breakdown"] });
+    },
   });
 }
 

@@ -75,7 +75,7 @@ func TestAccessGuard_PermissionMatrix(t *testing.T) {
 	// separately below -- approving a time card is a dedicated responsibility
 	// cs_engineer does not share, the same way PermAdmin isn't.
 	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg, PermViewCustomerHealth, PermViewTimeCardTotals}
-	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermManagePlaybooks, PermCreateAnnouncement)
+	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermOverrideApprovedTimeCardBillable, PermManagePlaybooks, PermCreateAnnouncement)
 	tests := []struct {
 		name  string
 		roles []string

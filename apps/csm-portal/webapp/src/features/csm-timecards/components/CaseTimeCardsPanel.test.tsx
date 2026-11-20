@@ -74,6 +74,7 @@ vi.mock("@features/csm-timecards/api/useTimeCards", () => ({
   }),
   useDecideTimeCard: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteTimeCard: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateTimeCardBillable: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock("@features/csm-timecards/api/useTimeSheets", () => ({
   useCurrentEngineer: () => ({ id: "user-1", name: "Jane Doe" }),

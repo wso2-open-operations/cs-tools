@@ -491,7 +491,24 @@ func (s *timeCardService) CreateTimeCard(ctx context.Context, req domain.CreateT
 	return domain.TimeCardMutationResponse{Message: "Time card created successfully", TimeCard: &view}, nil
 }
 
+// isBillableOnlyUpdate reports whether req carries isBillable and nothing
+// else (no state, leadComment, date, approvers, complexity, work log comment
+// or minutes) -- the only shape that can override an approved time card.
+func isBillableOnlyUpdate(req domain.UpdateTimeCardRequest) bool {
+	return req.IsBillable != nil && req.State == nil && req.LeadComment == nil && req.Date == nil &&
+		req.ApproverIDs == nil && req.IssueComplexity == nil && req.WorkLogComment == nil &&
+		req.TimeAnalyzing == nil && req.TimeSettingUp == nil && req.TimeReproducingDebugging == nil &&
+		req.TimeProvidingSolution == nil && req.TimePatching == nil
+}
+
 // UpdateTimeCard implements TimeCardService.
+//
+// A request carrying only isBillable on an already approved card overrides
+// that flag (Postgres only: no external mirror write; the card's project
+// hours are refreshed and an audit log line records who changed it, from what
+// to what). Any other edit of an approved card is refused as before. This
+// service does not check the caller's role for the override: the caller must
+// already have restricted it to admins.
 func (s *timeCardService) UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
 	ids := append([]string{req.ID}, req.ApproverIDs...)
 	if err := validateUUIDs("id", ids); err != nil {
@@ -517,6 +534,27 @@ func (s *timeCardService) UpdateTimeCard(ctx context.Context, req domain.UpdateT
 		s.dispatchTimeCardUpdateMirror(ctx, req)
 		s.refreshProjectHours(ctx, view)
 		return domain.TimeCardMutationResponse{Message: "Time card updated successfully", TimeCard: &view}, nil
+	}
+
+	// An isBillable-only request may be an admin's override of an already
+	// approved card. Try that first; applied=false (card missing or not
+	// approved) falls through to the regular submitted-card edit below.
+	if isBillableOnlyUpdate(req) {
+		view, previous, applied, err := s.repo.OverrideApprovedTimeCardBillable(ctx, req.ID, *req.IsBillable, actorID)
+		if err != nil {
+			return domain.TimeCardMutationResponse{}, err
+		}
+		if applied {
+			// Deliberately no dispatchTimeCardUpdateMirror: the external
+			// mirror rejects edits on non-submitted cards, so this override
+			// is Postgres-only.
+			slog.InfoContext(ctx, "approved time card billable overridden",
+				"audit", true, "action", "time-card-billable-override", "callerId", actorID,
+				"correlationId", middleware.CorrelationIDFromContext(ctx), "timeCardId", req.ID,
+				"from", previous, "to", *req.IsBillable)
+			s.refreshProjectHours(ctx, view)
+			return domain.TimeCardMutationResponse{Message: "Time card updated successfully", TimeCard: &view}, nil
+		}
 	}
 
 	if req.Date != nil {
