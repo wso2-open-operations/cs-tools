@@ -255,6 +255,16 @@ const InsertHtmlPlugin = ({
       if (!$isRangeSelection($getSelection())) {
         $getRoot().selectEnd();
       }
+      // A template is its own paragraph: when the cursor's paragraph already
+      // has text, split it at the cursor first, or the template's first line
+      // is glued onto the sentence being typed ("…shortly.Thanks for…").
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const block = selection.anchor.getNode().getTopLevelElement();
+        if (block && block.getTextContent().trim() !== "") {
+          selection.insertParagraph();
+        }
+      }
       $insertNodes(nodes);
     });
     editor.focus();

@@ -48,6 +48,9 @@ describe("Editor insertHtml", () => {
     );
     await waitFor(() => expect(lastHtml(onChange)).toContain("Template text."));
     expect(lastHtml(onChange)).toContain("First paragraph.");
+    // Its own paragraph, never glued onto the existing sentence.
+    expect(lastHtml(onChange)).not.toMatch(/First paragraph\.\s*Template text\./);
+    expect(lastHtml(onChange).match(/<p[\s>]/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(onInserted).toHaveBeenCalledTimes(1);
 
     // The same request again (a re-render) is not inserted a second time.
