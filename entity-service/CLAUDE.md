@@ -65,6 +65,12 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
+| `GIT_INTERNALS_ENABLED` | no | `false` | Must be `"true"` to register the git-internals routes (`POST /cases/{id}/product-work-items`, internal only). Also needs a pool and `ENGINEERING_ENTITY_BASE_URL`. Off means the routes are **not registered at all** |
+| `ENGINEERING_ENTITY_BASE_URL` | no* | — | WSO2 engineering entity service base URL. *Required when the gate is on or any `ENGINEERING_ENTITY_*` var is set |
+| `ENGINEERING_ENTITY_TOKEN_URL` | no* | — | OAuth2 token endpoint. Token URL, client id and client secret are all-or-none; with none set the client sends no `Authorization` header (local use) and startup logs a WARN |
+| `ENGINEERING_ENTITY_CLIENT_ID` | no* | — | OAuth2 client id |
+| `ENGINEERING_ENTITY_CLIENT_SECRET` | no* | — | OAuth2 client secret. Secret |
+| `ENGINEERING_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes |
 | `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
@@ -13503,3 +13509,78 @@ and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for
 `NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
 clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
 `/cases/search` only: aggregate, announcement-registry and every other search ignore it.
+
+## Product issues (internal GitHub issues raised from a case)
+
+Work item type `PRODUCT_ISSUE` (number series `PI`, migrations 0303-0305 and 100029): an
+issue in a product team's internal repository, raised from a support case. Tables:
+`product_issue` (extension), `github_issue_link` (the GitHub side, one row per GitHub-backed
+work item), `work_item_link` (kind `AFFECTS`: product issue → case; one active per issue),
+`work_item_status_event` (status history, `dedupe_key` unique), `comment_github_ref`,
+`board_status_map` (one global map of board column → normalised status) and
+`work_item_creation_request` (idempotency of the create endpoint).
+
+- **Internal only.** Every new table is internal-only under RLS. Product issues copy the
+  case's `project_id`, so `work_item` has a RESTRICTIVE policy, `work_item_internal_only_types`,
+  that hides the types listed in `work_item_type_is_internal_only()` from non-internal
+  sessions; child tables follow through their own `work_item` subqueries. A later
+  internal-only type is added to that one function. `sla`, `work_item_feedback` and
+  `case_autoclosure_event` have no RLS at all: never write product-issue rows there without
+  checking every customer-facing reader.
+- **Never set `work_item.github_*`** on a product issue or its case: the comment trigger
+  (0206) would send the case's comments to that repository. The GitHub side lives in
+  `github_issue_link` only.
+- `product_repo_mapping.board_project_number` / `is_internal` say which board tracks a
+  product's issues and whether its repository is internal; rows are maintained by hand.
+- **Create endpoint** `POST /cases/{id}/product-work-items` (`GIT_INTERNALS_ENABLED=true`, an
+  `ENGINEERING_ENTITY_*` base URL and a Postgres pool, else not registered; `internalOnly`). Files
+  the issue through `internal/engineeringentity` (Choreo OAuth2 client credentials; no token
+  settings = no `Authorization` header, for a local engineering entity) in the repository mapped
+  to the case's product, then registers the product issue, link and case link in one
+  transaction. `Type/Patch` registers no work item (kind `UNTRACKED_PATCH`). After that commit
+  the `patch` case tag (patch only) and the "GitHub issue filed" work note are written through
+  the case service (`AddCaseTagAs`, `CreateCaseCommentAs`), so its follow-ups run as for any
+  note (comment event, ServiceNow mirror in dual-write); the request stays GITHUB_CREATED until
+  both succeed, and a retry redoes them (a duplicate note is possible only if the final
+  COMPLETED write fails after the note). Idempotent on `(case, idempotencyKey)` in
+  `work_item_creation_request`: PENDING → GITHUB_CREATED (recorded straight after the create) →
+  COMPLETED; an ambiguous failure (timeout, 5xx, 408/409/425/429, a failed GITHUB_CREATED write;
+  only 400/401/403/404/422 are definite, `engineeringentity.Error.Definite`) leaves PENDING with a
+  note and the retry searches the repository's recent `Origin/CS` issues for the earlier attempt's
+  (same title, footer lines `WSO2 case id` and `Opened by`) before creating again. A row
+  that is in flight (no note) is leased 2 minutes, an ambiguous one 60 seconds since its last write
+  (`productRequestLease`, `productAmbiguousLease`; 409 `request_in_progress` meanwhile). Only a
+  row this attempt inserted or retried after FAILED is ever marked FAILED; a refusal on an
+  inherited PENDING row keeps it PENDING. Footer and labels are in
+  `service/product_issue_github_body.go` (the footer is parsed by workflows in the product
+  repositories: keep its seven lines; O19 labels `Type/Patch` only, `Affected/Onboarding`).
+- **Internal-only types on the case routes.** `repository.InternalOnlyWorkItemTypes` (a denylist,
+  kept in step with `work_item_type_is_internal_only()`; an integration test compares them) is
+  refused with the route's normal 404 on `PATCH /cases/{id}`, `POST /cases/{id}/comments`,
+  `POST /cases/{id}/comments/search`, `POST /cases/{id}/tags`, `DELETE /cases/{id}/tags/{tagId}`,
+  `GET /cases/{id}/escalations` and `POST /cases/{id}/sla/recalculate`
+  (`guardCaseID` / `refuseInternalOnlyWorkItem` in `internal/server`, one lookup per request).
+  The guard is wired **only when git internals is active** (`GIT_INTERNALS_ENABLED`, base URL, a
+  pool, not the ServiceNow data source): with the flag off these routes are not wrapped. It
+  **fails open**: a database error in the lookup logs a WARN with the work item id and passes the
+  request on to the route. The other id-addressed case routes already refuse a product issue by
+  their own SQL (case-like type filter or a join to `"case"`). `POST /attachments/search`
+  for a case (`SearchCaseAttachments`) and the stored-attachment parent lookup.
+- **Read and link routes** (same gate and `internalOnly`; `service/product_issue_service.go`, all reads under the
+  system identity, database only, no GitHub call on read). `GET /cases/{id}/product-work-items` lists the issues
+  with an active `AFFECTS` link to a case-like work item (an untracked patch has no work item, so it is not
+  listed); `GET /product-work-items/{id}` is one issue (404 for any other type) with its latest 200 non-deleted
+  comments (`conversationTruncated`, origin and GitHub comment id from `comment_github_ref`) and its status
+  events; `POST /product-work-items/search` filters on case, GitHub state, board statuses, owner/repository,
+  `unmatched` (no active link, P-37) and `query` (PI number or title, `%`/`_` literal; digits also match the
+  issue number), newest first. `POST /cases/{id}/product-work-items/links` takes `workItemId` or
+  `owner/repository/issueNumber`: a closed case is 409; a known issue is linked with source MANUAL (already linked
+  to this case: 200, to another: 409 `already_linked`); an unknown one must be in `product_repo_mapping` (any row),
+  is read once through `GetIssueDetail` (patch labels and pull requests refused) and registered in one transaction
+  through the same insert as create (priority/category from labels, opener/ABT team/public URL from the body footer
+  via `ParseProductIssueFooter`, last line wins; the footer email is stored in `opened_by_email` but
+  never resolved to `opened_by_user_id`, since the body is user-editable), a unique-index violation being
+  re-read, not a 500. An issue that a case's create request (PENDING or GITHUB_CREATED) already claims is
+  409 `request_in_progress` ("being registered from a case"), so a manual link cannot steal it. No work note,
+  no GitHub write. `DELETE /cases/{id}/product-work-items/{workItemId}/link` sets the active link inactive (404 if
+  none, 204 otherwise), leaving the issue unmatched.

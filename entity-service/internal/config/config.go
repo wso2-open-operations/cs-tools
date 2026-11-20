@@ -876,6 +876,21 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
+	// GitInternalsEnabled is GIT_INTERNALS_ENABLED (default false): the internal
+	// Git issue management feature set. Off, none of its routes are registered.
+	// It needs EngineeringEntityBaseURL and a database pool (GitInternalsActive).
+	GitInternalsEnabled bool
+	// EngineeringEntity* is the connection to the WSO2 engineering entity
+	// service (GitHub issues and projects). The three token fields are
+	// all-or-none; with none of them set the client sends no Authorization
+	// header (local use against http://localhost:9090). Scopes are optional.
+	// Any of them set requires EngineeringEntityBaseURL.
+	EngineeringEntityBaseURL      string
+	EngineeringEntityTokenURL     string
+	EngineeringEntityClientID     string
+	EngineeringEntityClientSecret string
+	EngineeringEntityScopes       string
+
 	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 10, at most 100).
 	// The declared size is checked when an upload starts and the real size when
 	// it is confirmed. Provisional default, to be set from the real size
@@ -1118,6 +1133,12 @@ func Load() *Config {
 		SalesEntityClientID:                           os.Getenv("SALES_ENTITY_CLIENT_ID"),
 		SalesEntityClientSecret:                       os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
 		SalesEntityScopes:                             os.Getenv("SALES_ENTITY_SCOPES"),
+		GitInternalsEnabled:                           os.Getenv("GIT_INTERNALS_ENABLED") == "true",
+		EngineeringEntityBaseURL:                      strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")),
+		EngineeringEntityTokenURL:                     strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_TOKEN_URL")),
+		EngineeringEntityClientID:                     strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_CLIENT_ID")),
+		EngineeringEntityClientSecret:                 strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_CLIENT_SECRET")),
+		EngineeringEntityScopes:                       strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_SCOPES")),
 		SCIMBaseURL:                                   os.Getenv("SCIM_BASE_URL"),
 		SCIMTokenURL:                                  os.Getenv("SCIM_TOKEN_URL"),
 		SCIMClientID:                                  os.Getenv("SCIM_CLIENT_ID"),
@@ -1509,6 +1530,13 @@ func (c *Config) Validate() error {
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
 	}
+	engTokenSet := c.EngineeringEntityTokenURL != "" || c.EngineeringEntityClientID != "" || c.EngineeringEntityClientSecret != ""
+	if engTokenSet && !c.EngineeringEntityAuthConfigured() {
+		return fmt.Errorf("ENGINEERING_ENTITY_TOKEN_URL, ENGINEERING_ENTITY_CLIENT_ID, and ENGINEERING_ENTITY_CLIENT_SECRET must be set together or not at all")
+	}
+	if (engTokenSet || c.EngineeringEntityScopes != "") && c.EngineeringEntityBaseURL == "" {
+		return fmt.Errorf("ENGINEERING_ENTITY_BASE_URL is required when any ENGINEERING_ENTITY_* variable is set")
+	}
 	scimSet := c.SCIMBaseURL != "" || c.SCIMTokenURL != "" || c.SCIMClientID != "" || c.SCIMClientSecret != "" || c.SCIMScopes != ""
 	if scimSet && !c.SCIMConfigured() {
 		return fmt.Errorf("SCIM_BASE_URL, SCIM_TOKEN_URL, SCIM_CLIENT_ID, and SCIM_CLIENT_SECRET must be set together or not at all")
@@ -1699,6 +1727,22 @@ func (c *Config) SalesEntityConfigured() bool {
 		c.SalesEntityTokenURL != "" &&
 		c.SalesEntityClientID != "" &&
 		c.SalesEntityClientSecret != ""
+}
+
+// EngineeringEntityAuthConfigured reports whether the OAuth2 client-credentials
+// settings of the engineering entity are all set. False means the client sends
+// no Authorization header.
+func (c *Config) EngineeringEntityAuthConfigured() bool {
+	return c.EngineeringEntityTokenURL != "" &&
+		c.EngineeringEntityClientID != "" &&
+		c.EngineeringEntityClientSecret != ""
+}
+
+// GitInternalsActive reports whether the git-internals routes may be registered:
+// the flag is on and the engineering entity base URL is set. routes.go ANDs it
+// with db != nil.
+func (c *Config) GitInternalsActive() bool {
+	return c.GitInternalsEnabled && c.EngineeringEntityBaseURL != ""
 }
 
 // SCIMConfigured reports whether every WSO2 internal-org SCIM search env var is set.

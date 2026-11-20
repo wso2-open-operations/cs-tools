@@ -183,3 +183,21 @@ const (
 // that was deleted or removed after its work item closed. A client shows
 // "removed" for it and a plain "not available" for a 404.
 const CodeAttachmentRemoved = "attachment_removed"
+
+// Refusals of an idempotent create (POST /cases/{id}/product-work-items).
+const (
+	// CodeIdempotencyKeyReused is the 409 for an idempotency key already used by
+	// a different request body on the same case: the key names one request, so
+	// nothing is created and the first request's result is not returned.
+	CodeIdempotencyKeyReused = "idempotency_key_reused"
+
+	// CodeRequestInProgress is the 409 for a request whose key another attempt is
+	// still processing. Nothing was created by this call; retry the same request
+	// shortly and it returns the first attempt's result.
+	CodeRequestInProgress = "request_in_progress"
+)
+
+// CodeAlreadyLinked is the 409 for linking a product issue that already has an
+// active link to another case (POST /cases/{id}/product-work-items/links). The
+// message names that case; nothing was changed.
+const CodeAlreadyLinked = "already_linked"
