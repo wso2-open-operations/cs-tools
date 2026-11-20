@@ -139,7 +139,23 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
   One run at a time per process. It upserts the current and next year for every country in
   use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
-  transient answer never wipes a year. Re-running is safe.
+  transient answer never wipes a year. Re-running is safe. The daily run starts **always**,
+  calendar configured or not: with neither `HOLIDAY_CALENDAR_*` nor `HR_ENTITY_*` it fetches
+  nothing but still places the Public holiday tags for the stored (manual) days.
+- **Added by hand** (migration 0293, `team_schedule_public_holiday.source` = `CALENDAR` /
+  `MANUAL`, `updated_by`): where no calendar is configured (prod today) this is the only
+  source. `GET /team-schedule/public-holidays?from&to&country` (internal staff, at most 366
+  days) lists the stored days with their source, the countries (stored ones plus Sri Lanka
+  and India) and `canEdit`; `POST /team-schedule/public-holidays {country, holidays:[{date,
+  title}]}` (up to 200 days, last year to two years ahead) stores them as MANUAL, a day
+  already stored taking the new title; `DELETE /team-schedule/public-holidays/{country}/{date}`
+  removes any stored day (404 when none). Writes are for a portal admin or a rota admin of
+  any family (`HolidayEditorCheck`, `schedule_holiday_editor.go`); a lead or Rota Manager may
+  not, because a holiday is per country and shared by every family. Each write places the
+  tags again in the background (`placeSoon`, past the request deadline), which also takes
+  away a removed day's untouched tags. **The refresh replaces only CALENDAR rows**
+  (`ReplaceCountryRange`): it never deletes a manual day or retitles one, so a calendar
+  configured later cannot wipe what was added by hand.
 - **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
   roster works while the services are down. A holiday is not leave and moves no shift.
 - **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,

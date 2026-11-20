@@ -23,6 +23,7 @@ import { useScheduleAssignmentsByMonth } from "../api/useTeamSchedule";
 import type { RotaAdminGrant, RotaFamily, RotaMarkerGrant, ScheduleTeam } from "../types";
 import { monthPieces } from "../utils/rota";
 import { teamDisplayName } from "../utils/teamDisplayName";
+import PublicHolidaysEditor from "./PublicHolidaysEditor";
 import RotaReminderSettings from "./RotaReminderSettings";
 import ScheduleSkeleton from "./ScheduleSkeleton";
 import { joinStaffName } from "@utils/staffNameMarker";
@@ -184,6 +185,8 @@ export default function RotaAccessTab({ teams: synced }: Props): JSX.Element {
       ) : null}
 
       {markerFamilies.includes("CRE") ? <RotaReminderSettings /> : null}
+      {/* Renders only for a portal or rota admin (the server's canEdit). */}
+      <PublicHolidaysEditor />
     </div>
   );
 }

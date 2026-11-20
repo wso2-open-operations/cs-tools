@@ -306,6 +306,39 @@ export interface SchedulePublicHolidaysResponse {
   count: number;
 }
 
+/** One stored holiday day, as the holiday editor lists it. */
+export interface StoredPublicHoliday {
+  country: string;
+  /** YYYY-MM-DD. */
+  date: string;
+  title: string;
+  /** CALENDAR: the daily refresh; MANUAL: added in the portal. */
+  source: "CALENDAR" | "MANUAL";
+  /** Who added or last changed a manual day. */
+  updatedBy?: string;
+}
+
+/** GET /team-schedule/public-holidays. */
+export interface PublicHolidaysList {
+  holidays: StoredPublicHoliday[];
+  /** Every stored country plus Sri Lanka and India. */
+  countries: string[];
+  /** Whether the reader may add or remove holidays (a portal or rota admin). */
+  canEdit: boolean;
+}
+
+/** One day of an add. */
+export interface ManualPublicHoliday {
+  date: string;
+  title: string;
+}
+
+/** POST /team-schedule/public-holidays. */
+export interface AddPublicHolidaysPayload {
+  country: string;
+  holidays: ManualPublicHoliday[];
+}
+
 export interface SearchSchedulePublicHolidaysPayload {
   userIds: string[];
   from: string;

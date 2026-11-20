@@ -41,10 +41,23 @@ type PublicHolidayRepository interface {
 	// ALLO_IND) moves people to, "" when there is none.
 	IndiaTeamKey(ctx context.Context) (string, error)
 	UpsertPersonLocation(ctx context.Context, userID, location string, at time.Time) error
-	// ReplaceCountryRange makes country's stored holidays in [from, to] the
+	// ReplaceCountryRange makes country's calendar holidays in [from, to] the
 	// given set, in one transaction, and returns how many days it stored.
+	// Manual rows (migration 0293) are never deleted or retitled by it.
 	ReplaceCountryRange(ctx context.Context, country string, from, to time.Time, days []domain.PublicHolidayDay, at time.Time) (int, error)
 	HolidaysBetween(ctx context.Context, countries []string, from, to time.Time) ([]domain.PublicHolidayDay, error)
+	// StoredHolidays lists the stored rows in [from, to], of one country when
+	// country is not "", with where each came from.
+	StoredHolidays(ctx context.Context, country string, from, to time.Time) ([]domain.StoredPublicHoliday, error)
+	// StoredCountries is every country with a stored row.
+	StoredCountries(ctx context.Context) ([]string, error)
+	// UpsertManualHolidays stores country's days as manual rows, in one
+	// transaction: a day already stored (from the calendar or by hand) takes
+	// the new title and becomes manual. Returns how many days it stored.
+	UpsertManualHolidays(ctx context.Context, country string, days []domain.PublicHolidayDay, actor string, at time.Time) (int, error)
+	// DeleteHoliday removes one stored day, manual or not; false when there
+	// was none.
+	DeleteHoliday(ctx context.Context, country, date string) (bool, error)
 }
 
 type publicHolidayRepository struct{ db *pgxpool.Pool }
@@ -149,8 +162,10 @@ func mergeHolidayDays(days []domain.PublicHolidayDay) (dates, titles []string) {
 	return dates, titles
 }
 
-// ReplaceCountryRange makes a country's stored holidays in a date range match
-// days, in one transaction, and returns how many fall inside the range.
+// ReplaceCountryRange makes a country's calendar holidays in a date range match
+// days, in one transaction, and returns how many fall inside the range. A
+// manual row is neither deleted nor retitled: the person who added it wins
+// over the calendar.
 func (r *publicHolidayRepository) ReplaceCountryRange(ctx context.Context, country string, from, to time.Time, days []domain.PublicHolidayDay, at time.Time) (int, error) {
 	dates, titles := mergeHolidayDays(days)
 	if dates == nil {
@@ -164,17 +179,19 @@ func (r *publicHolidayRepository) ReplaceCountryRange(ctx context.Context, count
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM team_schedule_public_holiday
 		 WHERE country = $1 AND holiday_date BETWEEN $2::date AND $3::date
+		   AND source = 'CALENDAR'
 		   AND NOT (holiday_date = ANY($4::date[]))`,
 		country, from.Format("2006-01-02"), to.Format("2006-01-02"), dates); err != nil {
 		return 0, fmt.Errorf("delete stale holidays: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO team_schedule_public_holiday (country, holiday_date, title, fetched_on)
-		SELECT $1, d, t, $4
+		INSERT INTO team_schedule_public_holiday (country, holiday_date, title, fetched_on, source)
+		SELECT $1, d, t, $4, 'CALENDAR'
 		  FROM unnest($2::date[], $3::text[]) AS x(d, t)
 		 WHERE d BETWEEN $5::date AND $6::date
 		ON CONFLICT (country, holiday_date) DO UPDATE
-		   SET title = EXCLUDED.title, fetched_on = EXCLUDED.fetched_on`,
+		   SET title = EXCLUDED.title, fetched_on = EXCLUDED.fetched_on
+		 WHERE team_schedule_public_holiday.source = 'CALENDAR'`,
 		country, dates, titles, at, from.Format("2006-01-02"), to.Format("2006-01-02")); err != nil {
 		return 0, fmt.Errorf("upsert holidays: %w", err)
 	}
@@ -188,6 +205,82 @@ func (r *publicHolidayRepository) ReplaceCountryRange(ctx context.Context, count
 		}
 	}
 	return stored, nil
+}
+
+// StoredHolidays lists the stored rows between two dates, of one country when
+// country is not empty, ordered by date and country.
+func (r *publicHolidayRepository) StoredHolidays(ctx context.Context, country string, from, to time.Time) ([]domain.StoredPublicHoliday, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT country, to_char(holiday_date, 'YYYY-MM-DD'), title, source, updated_by
+		  FROM team_schedule_public_holiday
+		 WHERE ($1 = '' OR country = $1)
+		   AND holiday_date BETWEEN $2::date AND $3::date
+		 ORDER BY holiday_date, country`,
+		country, from.Format("2006-01-02"), to.Format("2006-01-02"))
+	if err != nil {
+		return nil, fmt.Errorf("query stored holidays: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.StoredPublicHoliday{}
+	for rows.Next() {
+		var d domain.StoredPublicHoliday
+		if err := rows.Scan(&d.Country, &d.Date, &d.Title, &d.Source, &d.UpdatedBy); err != nil {
+			return nil, fmt.Errorf("scan stored holiday: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// StoredCountries returns every country with at least one stored row, sorted.
+func (r *publicHolidayRepository) StoredCountries(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT DISTINCT country FROM team_schedule_public_holiday ORDER BY country`)
+	if err != nil {
+		return nil, fmt.Errorf("query holiday countries: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, fmt.Errorf("scan holiday country: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// UpsertManualHolidays stores a country's days as manual rows in one
+// transaction. A day already stored takes the new title and becomes manual, so
+// a later refresh leaves it alone.
+func (r *publicHolidayRepository) UpsertManualHolidays(ctx context.Context, country string, days []domain.PublicHolidayDay, actor string, at time.Time) (int, error) {
+	dates, titles := mergeHolidayDays(days)
+	if len(dates) == 0 {
+		return 0, nil
+	}
+	tag, err := r.db.Exec(ctx, `
+		INSERT INTO team_schedule_public_holiday (country, holiday_date, title, fetched_on, source, updated_by)
+		SELECT $1, d, t, $4, 'MANUAL', $5
+		  FROM unnest($2::date[], $3::text[]) AS x(d, t)
+		ON CONFLICT (country, holiday_date) DO UPDATE
+		   SET title = EXCLUDED.title, fetched_on = EXCLUDED.fetched_on,
+		       source = 'MANUAL', updated_by = EXCLUDED.updated_by`,
+		country, dates, titles, at, actor)
+	if err != nil {
+		return 0, fmt.Errorf("upsert manual holidays: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// DeleteHoliday removes one stored day and says whether there was one.
+func (r *publicHolidayRepository) DeleteHoliday(ctx context.Context, country, date string) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		DELETE FROM team_schedule_public_holiday WHERE country = $1 AND holiday_date = $2::date`,
+		country, date)
+	if err != nil {
+		return false, fmt.Errorf("delete holiday: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // HolidaysBetween returns the stored holidays of the given countries between

@@ -16655,6 +16655,171 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays:
+    get:
+      summary: The stored public holidays, for the holiday editor.
+      operationId: listTeamSchedulePublicHolidays
+      description: >
+        Every stored day in the window (at most 366 days), of one country when
+        `country` is given, with where it came from (CALENDAR: the daily
+        refresh; MANUAL: added in the portal), the countries in use and whether
+        the caller may add or remove holidays. Forwarded to the entity service;
+        a 400 keeps its reason.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: country, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, countries, canEdit]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      type: object
+                      required: [country, date, title, source]
+                      properties:
+                        country: { type: string }
+                        date: { type: string, format: date }
+                        title: { type: string }
+                        source: { type: string, enum: [CALENDAR, MANUAL] }
+                        updatedBy: { type: string }
+                  countries: { type: array, items: { type: string } }
+                  canEdit: { type: boolean }
+        "400":
+          description: "Bad request: the message says what is wrong with the window."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add one country's public holidays by hand.
+      operationId: addTeamSchedulePublicHolidays
+      description: >
+        A portal admin or a rota admin of any family (the entity service
+        decides; a 403 keeps its reason). Up to 200 days, each stored as a
+        manual row that the daily refresh never deletes or retitles. A 400
+        names the day that is wrong. The coming weeks' Public holiday tags are
+        placed right after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [country, holidays]
+              properties:
+                country: { type: string, maxLength: 100 }
+                holidays:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [date, title]
+                    properties:
+                      date: { type: string, format: date }
+                      title: { type: string, maxLength: 200 }
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stored]
+                properties:
+                  stored: { type: integer }
+        "400":
+          description: "Bad request: the message names the day that is wrong."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays/{country}/{date}:
+    delete:
+      summary: Remove one stored public holiday.
+      operationId: deleteTeamSchedulePublicHoliday
+      description: >
+        A portal admin or a rota admin of any family. Removes the day whether
+        it came from the calendar or by hand; its untouched Public holiday tags
+        go with it.
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No such day is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/public-holidays/search:
     post:
       summary: Public holidays of the given engineers over a date window.
