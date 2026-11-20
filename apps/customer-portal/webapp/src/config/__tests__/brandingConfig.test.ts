@@ -35,7 +35,7 @@ describe("billingEmail", () => {
   it("is the WSO2 billing address when none is set", () => {
     setBillingEmail(undefined);
     expect(billingEmail()).toBe(DEFAULT_BILLING_EMAIL);
-    expect(DEFAULT_BILLING_EMAIL).toBe("billing@wso2.com");
+    expect(DEFAULT_BILLING_EMAIL).toBe("billing@choreolabs.com");
   });
 
   it("uses the configured address, trimmed", () => {
@@ -79,7 +79,7 @@ describe("billingEmailHref", () => {
 
   it("links the default address as is", () => {
     setBillingEmail(undefined);
-    expect(billingEmailHref()).toBe("mailto:billing@wso2.com");
+    expect(billingEmailHref()).toBe("mailto:billing@choreolabs.com");
   });
 
   it("percent-encodes characters that would end the recipient", () => {
