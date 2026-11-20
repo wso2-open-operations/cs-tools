@@ -528,7 +528,7 @@ Both lists have a checkbox column (for `canWrite` only), a selection bar (`BulkS
     narrowed by one closed since it was picked (it is skipped). Resolved / Closed need a resolution code and notes,
     applied to all; the two can also be set alone.
     Cancelled (terminal) confirms first with `CancelIncidentDialog`, as on the detail page (its action bar and Edit
-    save); New can't move to Cancelled, here or in the backend's `incidentNextStates`.
+    save). New, In Progress and On Hold can all move to Cancelled.
   - Subcategory follows the category being set, or the category every selected incident shares (else it is disabled
     with the reason). A new category needs a subcategory (the single Edit dialog's rule): a PATCH can't clear one, so
     on the ServiceNow paths the old category's subcategory would stay. Service offering is disabled until a service is

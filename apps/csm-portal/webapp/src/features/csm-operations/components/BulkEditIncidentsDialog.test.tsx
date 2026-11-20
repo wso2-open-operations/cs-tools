@@ -59,7 +59,7 @@ describe("BulkEditIncidentsDialog", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "Edit 2 incidents" });
     fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: "State" }));
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["No change", "In Progress"]);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["No change", "In Progress", "Cancelled"]);
   });
 
   it("confirms before setting Cancelled, and applies only on confirm", () => {

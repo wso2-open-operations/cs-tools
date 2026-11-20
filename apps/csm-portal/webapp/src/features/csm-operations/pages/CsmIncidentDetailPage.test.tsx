@@ -683,8 +683,8 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
   it("claims an unassigned incident for the signed-in engineer when starting work (-> IN_PROGRESS)", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW", assignedTo: null } });
     renderPage();
-    // NEW has one legal next state, so the bar is a single In Progress button.
-    fireEvent.click(screen.getByRole("button", { name: /in progress/i }));
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       {
         id: "inc-1",
@@ -706,8 +706,8 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
       },
     });
     renderPage();
-    // NEW has one legal next state, so the bar is a single In Progress button.
-    fireEvent.click(screen.getByRole("button", { name: /in progress/i }));
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       { id: "inc-1", patch: { state: "IN_PROGRESS" } },
       expect.objectContaining({ onError: expect.any(Function) }),
@@ -823,11 +823,17 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
     expect(patchMutateMock).not.toHaveBeenCalled();
   });
 
-  it("offers no Cancelled on a NEW incident", () => {
+  it("confirms before cancelling a NEW incident, the same as from In Progress", () => {
     mockQueryResult({ data: { ...BASE_INCIDENT, state: "NEW" } });
     renderPage();
-    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /cancelled/i })).not.toBeInTheDocument();
+    openChangeState();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog", { name: /cancel this incident\?/i })).getByRole("button", { name: /^cancel incident$/i }));
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "inc-1", patch: { state: "CANCELLED" } },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
   });
 
   it("renders no state-transition buttons for a terminal incident (CLOSED)", () => {
@@ -964,12 +970,6 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     expect(label.parentElement, stage).toHaveTextContent(/^Channel\s*PHONE$/);
   };
 
-  /** A state with exactly one legal next state (NEW) renders it as a single button. */
-  const clickSingleAction = (target: RegExp): void => {
-    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: target }));
-  };
-
   /** A state with several legal next states renders them in the "Change state" menu. */
   const chooseFromMenu = (target: RegExp): void => {
     fireEvent.click(screen.getByRole("button", { name: /change state/i }));
@@ -1000,7 +1000,7 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
     mockQueryResult({ data: atStage("NEW") });
     const newStage = renderPage();
     expectChannelShown("NEW");
-    clickSingleAction(/in progress/i);
+    chooseFromMenu(/in progress/i);
     expect(lastPatch()).toEqual({ state: "IN_PROGRESS", assignedEngineerId: ME_ID });
     newStage.unmount();
 

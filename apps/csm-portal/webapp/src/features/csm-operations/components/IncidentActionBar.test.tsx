@@ -50,13 +50,14 @@ function incidentInState(state: BeIncidentState): BeIncidentDetail {
 }
 
 describe("IncidentActionBar — button set per state", () => {
-  it("NEW offers only In Progress, as a single button (no Cancelled)", () => {
+  it("NEW offers In Progress and Cancelled via a Change-state menu", () => {
     render(
       <IncidentActionBar incident={incidentInState("NEW")} isPending={false} onAction={() => {}} />,
     );
-    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /in progress/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /cancelled/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /change state/i }));
+    expect(screen.getByRole("menuitem", { name: /in progress/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /cancelled/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^new$/i })).not.toBeInTheDocument();
   });
 
   it("IN_PROGRESS offers On Hold, Resolved, Cancelled via a Change-state menu", () => {
