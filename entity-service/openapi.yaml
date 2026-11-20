@@ -18595,6 +18595,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /audit-log/maintenance:
+    post:
+      summary: Run the audit log's upkeep (service credentials only).
+      description: |
+        Registered only when CSM_AUDIT_LOG_ENABLED=true; otherwise the route does not exist and answers 404.
+
+        Called by csm-scheduled-tasks, weekly by default (its schedule can be overridden). Creates the coming monthly partitions of the audit log,
+        checks the log's health, puts back audit triggers that are missing, disabled or different from their
+        registration on registered tables, and deletes the monthly partitions that ended at least CSM_AUDIT_LOG_RETENTION_MONTHS
+        (default 18) ago, dropped for good and not archived, and deletes the rows that old from the catch-all
+        partition. Safe to repeat. It tries every step even if one fails.
+
+        A 200 means the request was handled, not that everything is fine: read the lists. Health
+        problems, unresolved triggers and step errors need a person. A repaired trigger was off for a while, so the history had a
+        gap.
+      responses:
+        "200":
+          description: The upkeep ran; the body says what it found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogMaintenanceResponse'
+        "400":
+          description: The request has a body that is not empty or a single JSON object (the call takes no options).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The audit log is switched off (CSM_AUDIT_LOG_ENABLED is not true).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: |
+            Unexpected failure, for example the request was cancelled. A step that could not run is
+            not a 500: it is reported in stepErrors with a 200, so the other steps' results are kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /instances/usage-rollups/daily:
     post:
       summary: Recompute one UTC day's daily usage rows from the hourly rows (internal callers only).
@@ -33414,6 +33469,55 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
+    AuditTriggerProblem:
+      type: object
+      properties:
+        schema:
+          type: string
+        table:
+          type: string
+        problem:
+          type: string
+
+    AuditLogMaintenanceResponse:
+      type: object
+      properties:
+        partitionsCreated:
+          type: integer
+          description: Monthly partitions this run created.
+        partitionsDeleted:
+          type: array
+          description: Names of the monthly partitions this run deleted because they ended at least the retention period ago.
+          items:
+            type: string
+        defaultRowsDeleted:
+          type: integer
+          format: int64
+          description: Rows older than the retention period this run deleted from the catch-all partition.
+        healthProblems:
+          type: array
+          description: |
+            Rows in the catch-all partition, or a missing monthly partition from this month to CSM_AUDIT_LOG_MONTHS_AHEAD months ahead.
+          items:
+            type: string
+        repairedTriggers:
+          type: array
+          description: Triggers that were missing, disabled or different from their registration and have been put back.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        unresolvedTriggers:
+          type: array
+          description: Triggers that are still wrong after the repair.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        stepErrors:
+          type: array
+          description: |
+            Steps that could not run at all, in words that carry no database detail (the full error
+            is in the service log). The other steps still ran and are reported above.
+          items:
+            type: string
+
     ErrorResponse:
       type: object
       description: >-
