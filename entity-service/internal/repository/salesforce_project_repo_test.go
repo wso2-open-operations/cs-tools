@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -419,12 +420,24 @@ func TestSalesforceProjectSQL_ColumnList(t *testing.T) {
 		// other ServiceNow/CSM columns
 		"number", "planned_end_date", "assignment_group_id", "is_pdp_subscription", "last_case_created_on", "portal_wso2_id_counter",
 	}
+	closureCols := []string{"wso2_closure_state", "end_date_closure_state", "invoice_due_date_closure_state", "compliance_violation_closure_state"}
 	for name, sql := range map[string]string{"update": updateSalesforceProjectQuery, "insert": insertSalesforceProjectQuery} {
 		for _, col := range forbidden {
+			if name == "insert" && slices.Contains(closureCols, col) {
+				continue // the INSERT starts these OPEN, checked below
+			}
 			if regexp.MustCompile(`\b` + col + `\b`).MatchString(sql) {
 				t.Errorf("project %s writes %q", name, col)
 			}
 		}
+	}
+	for _, col := range closureCols {
+		if !regexp.MustCompile(`\b` + col + `\b`).MatchString(insertSalesforceProjectQuery) {
+			t.Errorf("project INSERT must set %s", col)
+		}
+	}
+	if n := strings.Count(insertSalesforceProjectQuery, "'OPEN'::"); n != len(closureCols) {
+		t.Errorf("project INSERT has %d OPEN closure values, want %d", n, len(closureCols))
 	}
 	if regexp.MustCompile(`\bonboarding_status\b`).MatchString(updateSalesforceProjectQuery) {
 		t.Error("project UPDATE writes onboarding_status")
