@@ -253,3 +253,25 @@ func TestServiceGenerator_NoPlaybooksSendsNoneAndRefusesTheirFilters(t *testing.
 		t.Errorf("a playbook answer filter with no playbooks: err = %v, want errDashboardPlaybook", err)
 	}
 }
+
+// The code generator sends the same answer fields; when the playbooks cannot
+// be read it sends none and still answers.
+func TestServiceCodeGenerator_SendsThePlaybookAnswers(t *testing.T) {
+	list := func(context.Context) ([]plgdomain.Playbook, error) { return testPlaybooks, nil }
+	client := &fakeAICodeClient{res: csmai.CodeResult{Source: "async function render(portal, root) {}\n"}}
+	if _, err := WithCodePlaybooks(NewServiceCodeDashboardGenerator(client, nil), list).Generate(context.Background(), "p", ""); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if want := playbookAnswerFields(testPlaybooks); len(want) == 0 || !reflect.DeepEqual(client.got.PlaybookAnswers, want) {
+		t.Errorf("sent %+v, want %+v", client.got.PlaybookAnswers, want)
+	}
+
+	failing := func(context.Context) ([]plgdomain.Playbook, error) { return nil, errors.New("entity-service down") }
+	client = &fakeAICodeClient{res: csmai.CodeResult{Source: "async function render(portal, root) {}\n"}}
+	if _, err := WithCodePlaybooks(NewServiceCodeDashboardGenerator(client, nil), failing).Generate(context.Background(), "p", ""); err != nil {
+		t.Fatalf("Generate with no playbooks: %v", err)
+	}
+	if len(client.got.PlaybookAnswers) != 0 {
+		t.Errorf("sent %+v with the playbooks unavailable, want none", client.got.PlaybookAnswers)
+	}
+}

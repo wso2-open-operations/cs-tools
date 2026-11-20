@@ -72,6 +72,13 @@ func (c *CustomerEntityClient) VolumeTrend(ctx context.Context, body []byte) ([]
 	return c.do(ctx, http.MethodPost, "/cases/volume-trend", body)
 }
 
+// CaseResolutionTime calls POST /cases/resolution-time on the entity
+// service: the cases resolved in a window and their mean business time to
+// resolve, overall and per group. Response is returned as raw JSON.
+func (c *CustomerEntityClient) CaseResolutionTime(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/cases/resolution-time", body)
+}
+
 // SearchFeedback calls POST /cases/feedback/search on the entity service:
 // search of case-feedback (satisfaction rating) records across cases,
 // filterable by case, accounts, and submission date range. Response is

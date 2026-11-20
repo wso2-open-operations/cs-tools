@@ -73,6 +73,12 @@ func WithPlaybooks(g DashboardGenerator, list func(context.Context) ([]plgdomain
 // the teams with a group configured are sent, the ones a dashboard can
 // filter by (see dashboardTeams).
 func NewServiceDashboardGenerator(client aiDashboardClient, teams []directory.TeamResult) DashboardGenerator {
+	return &serviceDashboardGenerator{client: client, teams: promptTeams(teams)}
+}
+
+// promptTeams is the team list sent to the model: the registry's teams with
+// a group configured, the ones a dashboard can filter by (see dashboardTeams).
+func promptTeams(teams []directory.TeamResult) []csmai.Team {
 	var sent []csmai.Team
 	for _, t := range newDashboardTeams(teams).list {
 		if t.GroupID == "" {
@@ -80,7 +86,7 @@ func NewServiceDashboardGenerator(client aiDashboardClient, teams []directory.Te
 		}
 		sent = append(sent, csmai.Team{Key: t.Key, Name: t.Name, Family: t.Family, Field: t.Field})
 	}
-	return &serviceDashboardGenerator{client: client, teams: sent}
+	return sent
 }
 
 // Generate makes one service call for one chat message.

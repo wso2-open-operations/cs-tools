@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -206,5 +207,84 @@ func TestHealth(t *testing.T) {
 	var e *Error
 	if err := c.Health(context.Background()); !errors.As(err, &e) || e.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("down: err = %v", err)
+	}
+}
+
+func TestGenerateCodeSendsTheRequestAndReadsTheAnswer(t *testing.T) {
+	var got map[string]any
+	f := &fakeService{handle: func(w http.ResponseWriter, _ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &got)
+		_, _ = io.WriteString(w, `{"source":"async function render(portal, root) {}\n","reply":"Done.","name":"Open Cases","usage":{"inputTokens":10,"cacheCreationInputTokens":30,"cacheReadInputTokens":40,"outputTokens":2}}`)
+	}}
+	ctx := middleware.WithUserInfo(withCorrelationID(t, "corr-9"), &middleware.UserInfo{Email: "someone@example.com", UserID: "user-42"})
+	res, err := newTestClient(t, f, 5*time.Second).GenerateCode(ctx, CodeRequest{Prompt: "Open cases", Current: "function render() {}"})
+	if err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
+	if res.Source != "async function render(portal, root) {}\n" || res.Reply != "Done." || res.Name != "Open Cases" || res.Declined != "" || res.Usage.CacheReadInputTokens != 40 {
+		t.Errorf("result = %+v", res)
+	}
+	if f.lastPath.Load() != "POST /ai/dashboards/generate-code" || f.lastAuth.Load() != "Bearer tok-1" || f.lastUser.Load() != "user-42" {
+		t.Errorf("request = %v, auth %v, user %v", f.lastPath.Load(), f.lastAuth.Load(), f.lastUser.Load())
+	}
+	if corr, _ := f.lastCorr.Load().(string); !strings.Contains(corr, "corr-9") {
+		t.Errorf("correlation id = %q, want the caller's", corr)
+	}
+	if got["prompt"] != "Open cases" || got["current"] != "function render() {}" || len(got) != 2 {
+		t.Errorf("body = %v, want exactly prompt and current", got)
+	}
+}
+
+func TestGenerateCodeSendsTheTeams(t *testing.T) {
+	var got map[string]any
+	f := &fakeService{handle: func(w http.ResponseWriter, _ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &got)
+		_, _ = io.WriteString(w, `{"source":"async function render(portal, root) {}\n","reply":"Done.","usage":{}}`)
+	}}
+	req := CodeRequest{Prompt: "p", Teams: []Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}}}
+	if _, err := newTestClient(t, f, 5*time.Second).GenerateCode(context.Background(), req); err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
+	want := []any{map[string]any{"key": "rigel", "name": "Rigel", "family": "cre-abt", "field": "creTeam"}}
+	if !reflect.DeepEqual(got["teams"], want) {
+		t.Errorf("teams = %v, want %v", got["teams"], want)
+	}
+	if _, ok := got["playbookAnswers"]; ok {
+		t.Errorf("body has playbookAnswers with none to send: %v", got)
+	}
+}
+
+func TestGenerateCodeSendsThePlaybookAnswers(t *testing.T) {
+	var got map[string]any
+	f := &fakeService{handle: func(w http.ResponseWriter, _ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &got)
+		_, _ = io.WriteString(w, `{"source":"async function render(portal, root) {}\n","reply":"Done.","usage":{}}`)
+	}}
+	req := CodeRequest{Prompt: "p", PlaybookAnswers: []PlaybookAnswerField{{Code: "OUTCOME", Name: "Outcome", ValueType: "SINGLE_SELECT",
+		Options: []PlaybookAnswerOption{{Code: "MONITOR", Label: "Monitor"}}}}}
+	if _, err := newTestClient(t, f, 5*time.Second).GenerateCode(context.Background(), req); err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
+	want := []any{map[string]any{"code": "OUTCOME", "name": "Outcome", "valueType": "SINGLE_SELECT",
+		"options": []any{map[string]any{"code": "MONITOR", "label": "Monitor"}}}}
+	if !reflect.DeepEqual(got["playbookAnswers"], want) {
+		t.Errorf("playbookAnswers = %v, want %v", got["playbookAnswers"], want)
+	}
+}
+
+func TestGenerateCodeLeavesOutAnEmptyCurrentAndKeepsAnError(t *testing.T) {
+	var raw string
+	f := &fakeService{handle: func(w http.ResponseWriter, _ *http.Request, body []byte) {
+		raw = string(body)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"code":"unusable","message":"x"}`)
+	}}
+	_, err := newTestClient(t, f, 5*time.Second).GenerateCode(context.Background(), CodeRequest{Prompt: "p"})
+	var se *Error
+	if !errors.As(err, &se) || se.StatusCode != http.StatusBadGateway || se.Code != CodeUnusable {
+		t.Fatalf("err = %v, want the service's 502 unusable", err)
+	}
+	if raw != `{"prompt":"p"}` {
+		t.Errorf("body = %s, want no current on a first message", raw)
 	}
 }
