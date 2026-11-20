@@ -17,7 +17,7 @@
 -- Start auditing work_item (see 0295_audit_log_foundation.sql).
 --
 --   key        the primary key (id)
---   excluded   none: every column is recorded, updated_on and updated_by included
+--   excluded   none of its own; the trigger always leaves out updated_on and updated_by
 --   masked     none: description is recorded in clear (binary columns are never
 --              logged; register_audit leaves them out on its own)
 --

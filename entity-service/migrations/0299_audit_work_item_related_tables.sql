@@ -17,8 +17,10 @@
 -- Start auditing the tables that hang off a work item and are wanted in the
 -- audit log (see 0295 to 0298): comments, attachments, escalations, calls, time
 -- cards, SLA clocks, feedback and watchers. Each is registered with its primary
--- key as the record id and every column recorded. A comment's text is therefore
--- stored in the log in full.
+-- key as the record id and every column recorded (the trigger always leaves out
+-- updated_on and updated_by). A comment's text is therefore stored in the log, but
+-- a value over 8192 bytes once serialized is logged as "[value too large]", so a
+-- very long comment cannot be recovered from the log.
 --
 -- A table is registered only when it has no audit_config row yet, so a
 -- registration made by hand, or a table an admin turned off with
