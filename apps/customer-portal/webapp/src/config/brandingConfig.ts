@@ -53,7 +53,7 @@ export function hasConfiguredCompanyName(): boolean {
 }
 
 /** Billing email used when `CUSTOMER_PORTAL_BILLING_EMAIL` is not set. */
-export const DEFAULT_BILLING_EMAIL = "billing@wso2.com";
+export const DEFAULT_BILLING_EMAIL = "billing@choreolabs.com";
 
 /**
  * One plain address: an unquoted local part (no whitespace and none of RFC
