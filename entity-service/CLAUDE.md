@@ -267,6 +267,9 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
   ```sql
   BEGIN;
   SET LOCAL lock_timeout = '5s';
+  -- Block audit writes first, so the count below stays true until COMMIT.
+  LOCK TABLE csm_audit_log IN SHARE MODE;
+  CREATE TEMP TABLE audit_rows_before ON COMMIT DROP AS SELECT count(*) AS n FROM csm_audit_log;
   ALTER TABLE csm_audit_log DETACH PARTITION csm_audit_log_default;
   ALTER TABLE csm_audit_log_default RENAME TO csm_audit_log_default_old;
   CREATE TABLE csm_audit_log_default PARTITION OF csm_audit_log DEFAULT;
@@ -280,12 +283,12 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
       FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
   INSERT INTO csm_audit_log SELECT * FROM csm_audit_log_default_old;
   -- Verify: this must return true, else ROLLBACK (everything above is undone).
-  SELECT count(*) = <rows_before> AS all_rows_moved FROM csm_audit_log;
+  SELECT count(*) = (SELECT n FROM audit_rows_before) AS all_rows_moved FROM csm_audit_log;
   DROP TABLE csm_audit_log_default_old;
   COMMIT;
   ```
 
-  Take `<rows_before>` from `SELECT count(*) FROM csm_audit_log` just before `BEGIN`. `audit_create_partitions` covers only the current and coming months, so a past month with rows in the catch-all needs its own `CREATE TABLE … PARTITION OF` as above. Rows whose month still has no partition land in the new catch-all.
+  The lock holds audit writes (and the business writes behind them) until `COMMIT`, which is why the lock timeout is short; if it times out, run it again. `audit_create_partitions` covers only the current and coming months, so a past month with rows in the catch-all needs its own `CREATE TABLE … PARTITION OF` as above. Rows whose month still has no partition land in the new catch-all.
 
 ### Rules for new code
 
