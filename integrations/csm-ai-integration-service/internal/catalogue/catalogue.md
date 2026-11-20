@@ -108,8 +108,9 @@ Do not use any other dashboard field.
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project, day or team, counting cards or summing hours; no `line`).
 An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`/`bar` with `slices` or
-`groupBy` by `state` only (no `line`). An `account` or `project` widget is `count`, `list`, or `pie`/`bar`
-with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
+`groupBy` by `state` only (no `line`). An `account` widget is `count`, `list`, or `pie`/`bar`
+with `slices` only (no `groupBy`, no `line`); a `project` widget is the same, or a `pie`/`bar` with `groupBy`
+`onboardingOwner`, `onboardingStatus` or `region` (section 5c). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
 with `groupBy.bucket` (section 5d) or rating `slices` (no `line`). An `mttr` widget is **only** a `bar`
 with `groupBy.bucket` (section 5f), or a `count` of one band with no `groupBy` — never `list`, `pie`,
 `slices`, `groupBy.field` or `line` (there is no MTTR record to list, and the bars are averages, not parts
@@ -441,6 +442,7 @@ values are case-sensitive exactly as written.
 | `regions` | a list of the project's account regions, e.g. `["APAC", "EU"]` (case is ignored); a project whose account has no region never matches |
 | `onboardingOwnerIds` | **only** `["__current_user__"]`: the projects whose onboarding the viewer owns ("my onboarding projects") |
 | `onboardingOwnerEmails` | a list of onboarding owners' email addresses, **only those the request gives** ("onboarded by person@example.com"); a project with no onboarding owner never matches |
+| `onboardingOwnerTeamIds` | the projects whose onboarding owner is a member of these teams: team **keys** from the Teams section (e.g. the onboarding team's key, `["customer_onboarding"]`). Never `__current_team__`: "my team's" projects name the team |
 | `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date (section 5) |
 | `onboardingStartDateFrom`, `onboardingStartDateTo` | the onboarding start date, from / to (inclusive): one date (section 5) |
 | `goLivePlanDateFrom`, `goLivePlanDateTo` | the planned go-live date, from / to (inclusive): one date (section 5) |
@@ -458,13 +460,21 @@ date never matches that date's filter.
 
 **Shapes.** `count`; `list` with `listLimit`: **an account list sets no `sortBy`**, a project list may
 sort only by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or
-`productionReadinessCompletionDate` ("ending soonest" is `endDate` `asc`; projects with no value sort last); `pie`/`bar` with `slices` only (each slice's `query`
-flat too), e.g. one slice per risk or per onboarding status.
+`productionReadinessCompletionDate` ("ending soonest" is `endDate` `asc`; projects with no value sort last); `pie`/`bar` with `slices` (each slice's `query`
+flat too), e.g. one slice per risk or per onboarding status. A **project** `pie`/`bar` may instead group on the server with
+`groupBy` `{"field": ...}`: `onboardingOwner` (one bar per owner, "by onboarding owner", "per owner"), `onboardingStatus` or
+`region`, `maxGroups` at most 50; a project with no owner, status or region counts in "Others". Accounts never take `groupBy`.
+
+```json
+{ "resourceType": "project", "shape": "bar", "gridWidth": 6,
+  "query": { "onboardingStatus": ["In-Progress"], "onboardingOwnerTeamIds": ["customer_onboarding"] },
+  "groupBy": { "field": "onboardingOwner", "maxGroups": 20 } }
+```
 
 **Not expressible** (section 1): "my accounts" or a
 named account manager's / owner's accounts; a region or sub-region on accounts, or a sub-region on projects (a
 project's region is `regions`); a product; ARR or revenue; a named
-account's projects; grouping on the server (`groupBy`).
+account's projects; grouping accounts on the server (`groupBy`).
 
 ### 5d. Customer satisfaction (`resourceType: "case_feedback"`)
 
@@ -714,7 +724,7 @@ or breached group, `warning` next, otherwise leave it out.
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
 `change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day`, `state` or `team` with
-`measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` or `playbookAnswer` (with `playbookTask`), section 5e; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+`measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` or `playbookAnswer` (with `playbookTask`), section 5e; `account`: no `groupBy`; `project`: `onboardingOwner`, `onboardingStatus` or `region`, section 5c; `case_feedback`: `groupBy.bucket` only,
 section 5d; `mttr`: `groupBy.bucket` (always `"severity"`) only, section 5f). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
 add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
@@ -848,6 +858,7 @@ Never set both `slices` and `groupBy`.
 | "accounts with EOL products" / "not live yet" / "no cases in 6 months" / "with recent escalations" | `risks` `["hasEolProduct"]` / `["hasNoGoLive"]` / `["noSupportCases6mo"]` / `["hasRecentEscalations"]` |
 | "projects", "subscriptions" | `resourceType: "project"` (section 5c) |
 | "projects in onboarding" / "onboarding not started" / "onboarded" | `onboardingStatus` `["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
+| "the onboarding team's projects", "projects handled by <team>" / "... by onboarding owner" | project `onboardingOwnerTeamIds ["<team key>"]` (add `onboardingStatus` when asked for projects in onboarding) / that plus `groupBy` `onboardingOwner` on a `bar`. "My team's" names no team: use the team the request is about (onboarding: `customer_onboarding`), else ask which team in a `note` |
 | "my onboarding projects" / "projects onboarded by person@example.com" / "onboarding projects in APAC" | project `onboardingOwnerIds ["__current_user__"]` / `onboardingOwnerEmails ["person@example.com"]` / `regions ["APAC"]` (with `onboardingStatus` when asked for projects in onboarding); one project slice per owner or region for a pie / bar |
 | "projects by onboarding status" | a `pie` with one slice each for Not started, In progress, Completed |
 | "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStates ["Suspended"]` / `["Restricted"]` (or `closureStatus`); "suspended or restricted": `closureStates ["Suspended", "Restricted"]` |
