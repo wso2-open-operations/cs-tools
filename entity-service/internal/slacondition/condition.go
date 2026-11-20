@@ -159,6 +159,7 @@ var knownFields = []string{
 	"category",
 	"cs_engineer_response_comment",
 	"fix_eta_shared",
+	"github_state",
 	"opened_at",
 	"priority",
 	"product",
@@ -166,6 +167,7 @@ var knownFields = []string{
 	"state",
 	"sys_created_on",
 	"u_workaround_provided",
+	"waits_on",
 }
 
 // Parse parses raw sla_policy condition text into a Condition. Never

@@ -197,6 +197,25 @@ func TestDoSuccess(t *testing.T) {
 	}
 }
 
+func TestProductIssueReconcileCallsTheReconcileRoute(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/product-work-items/reconcile" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(r.Body)
+		gotBody = buf.String()
+		_, _ = w.Write([]byte(`{"more":false}`))
+	}))
+	defer upstream.Close()
+	client := mustNewClient(t, Config{BaseURL: upstream.URL, TokenURL: tokenServer(t).URL, ClientID: "test-client", ClientSecret: "test-secret", Scopes: testScopes})
+	out, err := client.ProductIssueReconcile(context.Background(), []byte(`{"limit":200}`))
+	if err != nil || string(out) != `{"more":false}` || gotBody != `{"limit":200}` {
+		t.Fatalf("out=%q body=%q err=%v", out, gotBody, err)
+	}
+}
+
 // TestDoRejectsOversizedSuccessBody: a successful (2xx) response larger than
 // the client's limit is rejected with an error instead of being read into
 // memory. Error bodies were already capped; success bodies weren't, so a

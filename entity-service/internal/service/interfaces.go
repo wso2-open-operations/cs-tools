@@ -1029,6 +1029,10 @@ type CaseService interface {
 	// RemoveCaseTag removes the tag identified by tagID from the case identified by caseID.
 	// A NotFoundError is returned if the tag does not exist on the case.
 	RemoveCaseTag(ctx context.Context, caseID, tagID string) error
+	// RemoveCaseTagAs is RemoveCaseTag for a caller that already knows who is
+	// acting and has no x-user-id-token (the git-internals tag rule). Same
+	// delete and ServiceNow mirror; only the actor is not resolved from the token.
+	RemoveCaseTagAs(ctx context.Context, caseID, tagID, actorEmail string) error
 	// SearchTags returns the tags (not scoped to any single case) whose label matches
 	// req.Filters.SearchQuery, for FE autocomplete when attaching a tag to a case. An empty
 	// query returns all known tags. req.Limit caps the number of results (<=0 means use the

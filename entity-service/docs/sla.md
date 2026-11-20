@@ -9,7 +9,9 @@ How entity-service stores and drives SLA clocks. Breach *alerting* (Chat/email) 
   `RESOLUTION`), `duration`, `schedule` (a calendar name; `WSO2 Business days` skips weekends, anything else is
   wall-clock), and five condition columns: `start_condition`, `stop_condition`, `pause_condition`,
   `resume_condition`, `cancel_condition`. `when_to_cancel` / `when_to_resume` say how cancel/resume are decided
-  (see below).
+  (see below). `applies_to` (migration `0306`, nullable, only `PRODUCT_ISSUE` allowed) names an explicit policy
+  family: NULL rows (all today's) are classified by condition markers and are the only rows case and incident
+  resolution list; a tagged row is listed only by its family's resolver and never reaches a case or incident.
 - **`sla`** (migration `0048`) — one row per clock instance: `work_item_id`, `sla_policy_id`, `stage`
   (`IN_PROGRESS`, `PAUSED`, `ACHIEVED`, `BREACHED`, `CANCELLED`, `COMPLETED`), `is_active`, `start_on`, `duration`,
   `paused_on`, `pause_duration` (completed pause segments), `has_breached`, elapsed/remaining columns.
@@ -44,7 +46,27 @@ Resume rule (`when_to_resume`): `RESUME_CONDITIONS_ARE_MET` (default) resumes wh
 
 Pausing sets `stage = PAUSED` and `paused_on`. Resuming adds the finished segment to `pause_duration` and clears
 `paused_on`, so elapsed time = wall-clock since `start_on` minus pauses. Business-day clocks do the same
-arithmetic on the business calendar (`internal/businessdays`, `America/New_York`).
+arithmetic on the business calendar (`internal/businessdays`, `America/New_York`). Which calendar a
+schedule uses is decided in one place, `internal/slacalendar` (`For`, `NonFlat`); any schedule it does not
+know is flat wall-clock time.
+
+## Product issues
+
+`PRODUCT_ISSUE` work items (internal GitHub issues raised from a case) run on the same engine through their own
+subject (`internal/service/sla_product_issue.go`, repository `sla_product_issue_repo.go`). Their policies are the
+three rows of migration `0307` (`applies_to = 'PRODUCT_ISSUE'`, source `CSM`): one RESOLUTION clock, P1 24h on
+`CS 24x7`, P2 24h and P3 48h on `CS 12x5 IST` (Mon-Fri 09:00-21:00 Asia/Kolkata); no priority, no clock. Facts:
+`priority`, `state` (CLOSED when the GitHub issue is closed; REOPENED when a GitHub reopen is newer than the board's
+last move to Resolved/Closed; else the board status; OPEN when not on a board), `waits_on` (CS only for
+WAITING_ON_CS), `github_state`, `category`. Only WAITING_ON_CS pauses; RESOLVED or CLOSED stops.
+
+- Status changes come from GitHub, so every write happens at the **event's** time (`*At` repository methods; the
+  case paths still use the current time). A newest event is applied inline and then the clock is rebuilt; an older
+  one only rebuilds. A rebuild replays `work_item_status_event` from the issue's creation (`github_created_on`) and
+  ends with the link's current state when the history lacks it (backfill writes no close events).
+- A reopen gets a new clock back-dated to creation; resolved/closed time does not count. A priority change cancels
+  the old clock and back-dates the new one. Rebuilds are serialised per work item (advisory lock).
+- Product-issue clocks are never published and never reach `/sla-status` (case-like types only).
 
 ## Breach
 

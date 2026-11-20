@@ -4515,6 +4515,26 @@ func (s *caseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) e
 	if err != nil {
 		return err
 	}
+	return s.removeCaseTagAs(ctx, caseID, tagID, actor.Email)
+}
+
+// RemoveCaseTagAs implements CaseService for a caller that already knows the
+// acting email and has no x-user-id-token to resolve one from (the mirror
+// image of AddCaseTagAs). Everything but the actor is RemoveCaseTag: the same
+// validation, the same delete and the same ServiceNow mirror.
+func (s *caseService) RemoveCaseTagAs(ctx context.Context, caseID, tagID, actorEmail string) error {
+	if err := validateUUIDs("caseId", []string{caseID}); err != nil {
+		return err
+	}
+	if err := validateUUIDs("tagId", []string{tagID}); err != nil {
+		return err
+	}
+	return s.removeCaseTagAs(ctx, caseID, tagID, actorEmail)
+}
+
+// removeCaseTagAs is the shared body behind RemoveCaseTag (token-resolved
+// actor) and RemoveCaseTagAs (caller-supplied actor); the ids are validated.
+func (s *caseService) removeCaseTagAs(ctx context.Context, caseID, tagID, actorEmail string) error {
 
 	// Whether this attachment is mirrored at all: dual-write mode, and a
 	// case-like work item (a change request's tags are Postgres-only -- see
@@ -4528,7 +4548,7 @@ func (s *caseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) e
 		snSysID, snLookupErr = s.repo.GetCaseTagSNSysID(ctx, caseID, tagID)
 	}
 
-	if err := s.repo.RemoveCaseTag(ctx, caseID, tagID, actor.Email); err != nil {
+	if err := s.repo.RemoveCaseTag(ctx, caseID, tagID, actorEmail); err != nil {
 		return err
 	}
 

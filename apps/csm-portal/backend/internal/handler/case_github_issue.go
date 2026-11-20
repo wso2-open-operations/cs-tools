@@ -46,12 +46,11 @@ const (
 	regressionLabel          = "regression"
 	originLabel              = "Origin/CS"
 	patchIssueTypeLabel      = "Type/Patch"
-	patchExtraLabel          = "patch"
 	discussionIssueTypeLabel = "Type/Discussion"
 	incidentIssueTypeLabel   = "Type/Incident"
 	hotfixLabel              = "Require/Hotfix"
 	migrationLabel           = "Affected/Migration"
-	onboardingLabel          = "Onboarding/affected"
+	onboardingLabel          = "Affected/Onboarding"
 
 	priorityCriticalLabel = "Priority/Critical(P1)"
 	priorityHighLabel     = "Priority/High(P2)"
@@ -367,10 +366,10 @@ func githubPriorityLabel(level string) string {
 }
 
 // buildGitHubIssueLabels applies the sheet's rules. Origin/CS and the product
-// label always go on. Patch adds Type/Patch and patch. Discussion adds
+// label always go on. Patch adds Type/Patch only. Discussion adds
 // Type/Incident and the (Pn) priority label. The switches add Require/Hotfix,
 // regression, and Affected/Migration. An in-progress project adds
-// Onboarding/affected.
+// Affected/Onboarding.
 func buildGitHubIssueLabels(productLabel string, req caseGitHubIssueRequest) []string {
 	var labels []string
 	seen := make(map[string]bool)
@@ -388,7 +387,6 @@ func buildGitHubIssueLabels(productLabel string, req caseGitHubIssueRequest) []s
 	switch issueType {
 	case patchIssueTypeLabel:
 		add(patchIssueTypeLabel)
-		add(patchExtraLabel)
 	case discussionIssueTypeLabel:
 		add(incidentIssueTypeLabel)
 		add(githubPriorityLabel(req.PriorityLevel))

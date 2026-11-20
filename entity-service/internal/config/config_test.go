@@ -1751,3 +1751,73 @@ func TestLoad_AuditLogEnabled(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_Validate_EngineeringEntity(t *testing.T) {
+	tests := []struct {
+		name                          string
+		baseURL, tokenURL, id, secret string
+		scopes                        string
+		wantErr                       bool
+	}{
+		{name: "none set"},
+		{name: "base URL only (no auth, local use)", baseURL: "http://localhost:9090"},
+		{name: "all set", baseURL: "b", tokenURL: "t", id: "c", secret: "s3cr3t-value"},
+		{name: "all plus scopes", baseURL: "b", tokenURL: "t", id: "c", secret: "s3cr3t-value", scopes: "x"},
+		{name: "partial token settings", baseURL: "b", tokenURL: "t", id: "c", wantErr: true},
+		{name: "secret only", baseURL: "b", secret: "s3cr3t-value", wantErr: true},
+		{name: "token settings without base URL", tokenURL: "t", id: "c", secret: "s3cr3t-value", wantErr: true},
+		{name: "scopes without base URL", scopes: "x", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.EngineeringEntityBaseURL = tt.baseURL
+			c.EngineeringEntityTokenURL = tt.tokenURL
+			c.EngineeringEntityClientID = tt.id
+			c.EngineeringEntityClientSecret = tt.secret
+			c.EngineeringEntityScopes = tt.scopes
+			err := c.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && tt.secret != "" && strings.Contains(err.Error(), tt.secret) {
+				t.Fatalf("error echoes the secret: %v", err)
+			}
+		})
+	}
+}
+
+func TestConfig_GitInternalsActive(t *testing.T) {
+	for _, tc := range []struct {
+		enabled bool
+		base    string
+		want    bool
+	}{{false, "", false}, {false, "http://x", false}, {true, "", false}, {true, "http://x", true}} {
+		c := Config{GitInternalsEnabled: tc.enabled, EngineeringEntityBaseURL: tc.base}
+		if got := c.GitInternalsActive(); got != tc.want {
+			t.Errorf("%+v: got %v", tc, got)
+		}
+	}
+}
+
+func TestSplitLoginList(t *testing.T) {
+	got := splitLoginList(" a , ,b[bot],,c ")
+	if len(got) != 3 || got[0] != "a" || got[1] != "b[bot]" || got[2] != "c" {
+		t.Fatalf("got %q", got)
+	}
+	if splitLoginList("") != nil {
+		t.Error("empty must give none")
+	}
+}
+
+func TestConfig_Validate_RejectsAMalformedBotLogin(t *testing.T) {
+	c := baseValidConfig()
+	c.GitInternalsBotLogins = []string{"ok-bot", "not a login"}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GIT_INTERNALS_BOT_LOGINS") {
+		t.Fatalf("err = %v", err)
+	}
+	c.GitInternalsBotLogins = []string{"ok-bot", "app[bot]"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid logins refused: %v", err)
+	}
+}

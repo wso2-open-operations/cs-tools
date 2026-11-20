@@ -116,6 +116,13 @@ func (c *Client) ReopenCheck(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/acp/reopen-check", body)
 }
 
+// ProductIssueReconcile calls POST /product-work-items/reconcile, one call of
+// entity-service's daily reconciliation of linked product issues with GitHub.
+// Response is returned as raw JSON.
+func (c *Client) ProductIssueReconcile(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/product-work-items/reconcile", body)
+}
+
 // SearchProjectOpportunityLinks calls POST /project-opportunity-links/search.
 // No by-id fetch exists for this resource — a project can link to more than
 // one opportunity, so the underlying data has no single-record shape.

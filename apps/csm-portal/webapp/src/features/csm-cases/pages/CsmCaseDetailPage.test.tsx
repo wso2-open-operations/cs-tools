@@ -309,6 +309,15 @@ vi.mock("@features/csm-cases/api/useSearchCaseTasks", () => ({
 vi.mock("@features/csm-cases/api/useSearchLinkedIncidents", () => ({
   useSearchLinkedIncidents: () => ({ data: undefined }),
 }));
+// Default: feature off (the route answered 404 -> data null, query succeeded).
+const { productWorkItemsResult } = vi.hoisted(() => ({
+  productWorkItemsResult: {
+    value: { data: null, isSuccess: true } as { data: unknown; isSuccess: boolean },
+  },
+}));
+vi.mock("@features/csm-cases/api/useCaseProductWorkItems", () => ({
+  useCaseProductWorkItems: () => productWorkItemsResult.value,
+}));
 vi.mock("@features/csm-cases/api/useSearchDeployments", () => ({
   useSearchDeployments: () => ({
     data: undefined,
@@ -650,10 +659,13 @@ vi.mock("@features/csm-cases/components/LinkedChangeRequestsWidget", () => ({
 // Captures the props the page hands the dialog so a test can submit it the way
 // the real dialog does (the dialog's own behaviour is covered in
 // CreateGithubIssueDialog.test.tsx).
-let githubDialogProps: { onSubmit: (payload: Record<string, unknown>) => void } | undefined;
+let githubDialogProps:
+  | { onSubmit: (payload: Record<string, unknown>) => void; onClose: () => void }
+  | undefined;
 vi.mock("@features/csm-cases/components/CreateGithubIssueDialog", () => ({
   CreateGithubIssueDialog: (props: {
     onSubmit: (payload: Record<string, unknown>) => void;
+    onClose: () => void;
   }) => {
     githubDialogProps = props;
     return <div data-testid="create-github-issue-dialog-probe" />;
@@ -2946,6 +2958,7 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
     addTagMutateAsyncMock.mockResolvedValue(undefined);
     showErrorMock.mockClear();
     githubDialogProps = undefined;
+    productWorkItemsResult.value = { data: null, isSuccess: true };
   });
 
   /** Opens the dialog, submits `payload`, and returns what the page sent to the Git issue request. */
@@ -2983,11 +2996,36 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
 
     expect(variables).toEqual({
       caseId: expect.any(String),
+      idempotencyKey: expect.any(String),
       reason: "default",
       title: "A title",
       description: "A description",
     });
     expect(addTagMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it("reuses the key for an identical payload, mints a new one when edited, and a new one per opening", () => {
+    const payload = { reason: "default", title: "t", description: "d" };
+    renderPage();
+    const open = (): void =>
+      void fireEvent.click(screen.getByRole("button", { name: /stub open raise git issue/i }));
+    const keys = (): unknown[] =>
+      postGithubIssueMutateMock.mock.calls.map(([v]) => (v as { idempotencyKey: string }).idempotencyKey);
+
+    open();
+    act(() => githubDialogProps?.onSubmit(payload));
+    act(() => githubDialogProps?.onSubmit({ ...payload }));
+    act(() => githubDialogProps?.onSubmit({ ...payload, title: "edited" }));
+    const [first, second, third] = keys();
+    expect(typeof first).toBe("string");
+    expect(second).toBe(first);
+    expect(third).not.toBe(first);
+
+    act(() => githubDialogProps?.onClose());
+    open();
+    act(() => githubDialogProps?.onSubmit(payload));
+    expect(keys()[3]).not.toBe(first);
+    expect(keys()[3]).not.toBe(third);
   });
 
   it("tags the case s_dip, and nothing else, for a plain Git issue", async () => {
@@ -3067,6 +3105,51 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
     });
 
     expect(addedTags()).toEqual(["s_dip", "s_rg", "migration"]);
+  });
+
+  describe("when the backend serves the product-issue routes (git internals on)", () => {
+    const featureOn = (): void => {
+      productWorkItemsResult.value = { data: [], isSuccess: true };
+    };
+
+    it("adds no s_dip for a discussion issue", async () => {
+      featureOn();
+      const { options } = submitGithubIssue({ reason: "default", title: "t", description: "d" });
+      await act(async () => {
+        options.onSuccess(issueCreated);
+        await Promise.resolve();
+      });
+      expect(addedTags()).toEqual([]);
+    });
+
+    it("adds no patch for a patch issue, but keeps s_rg and migration", async () => {
+      featureOn();
+      const { options } = submitGithubIssue({
+        reason: "migration",
+        regression: true,
+        issueTypeLabel: "Type/Patch",
+        title: "t",
+        description: "d",
+      });
+      await act(async () => {
+        options.onSuccess(issueCreated);
+        await Promise.resolve();
+      });
+      expect(addedTags()).toEqual(["s_rg", "migration"]);
+    });
+
+    it.each([
+      ["still loading", { data: undefined, isSuccess: false }],
+      ["failed with another error", { data: undefined, isSuccess: false }],
+    ])("falls back to the browser adding s_dip while the query is %s", async (_n, result) => {
+      productWorkItemsResult.value = result;
+      const { options } = submitGithubIssue({ reason: "default", title: "t", description: "d" });
+      await act(async () => {
+        options.onSuccess(issueCreated);
+        await Promise.resolve();
+      });
+      expect(addedTags()).toEqual(["s_dip"]);
+    });
   });
 
   it("adds no tag when the Git issue could not be created", async () => {
