@@ -4322,7 +4322,10 @@ already use — no route path, request, or response shape changed.
   defaults every non-bot, non-system case comment to `"wso2_engineer"`, so a
   badge keyed on it marked customers as staff too (reported live). An
   automation/system author resolves to no `"user"` row (or a `SYSTEM` type)
-  and gets no flag.
+  and gets no flag. `GET /cases/{id}` carries the same flag on `createdBy` and on
+  each `watchList[].user` (`fetchCaseWatchers` reads `user_type` for the persisted
+  and the stakeholder rows alike), so a portal can badge the creator and sort or
+  group watchers by staff/customer from the response alone.
 - **Adding a comment to a case stamps its `updated_on`/`updated_by`.** A comment
   is activity on a case — ServiceNow advances `sys_updated_on` for any journal
   entry — and the lists' Updated column, the `updatedOn` search filter (relative

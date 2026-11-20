@@ -651,10 +651,11 @@ type UserReference struct {
 }
 
 type UserRef struct {
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	UserID string `json:"userId,omitempty"`
-	Email  string `json:"email"`
+	IsInternal bool   `json:"isInternal,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	UserID     string `json:"userId,omitempty"`
+	Email      string `json:"email"`
 }
 
 // Tag is a free-text label attached to a case.
@@ -776,10 +777,11 @@ type UpdateCaseRequest struct {
 
 // WatchListUser is a user watching a case (ServiceNow data source only).
 type WatchListUser struct {
-	ID       string `json:"id"`
-	UserName string `json:"userName"`
-	Name     string `json:"name,omitempty"`
-	Email    string `json:"email,omitempty"`
+	User     *UserReference `json:"user"`
+	ID       string         `json:"id"`
+	UserName string         `json:"userName"`
+	Name     string         `json:"name,omitempty"`
+	Email    string         `json:"email,omitempty"`
 	// Locked mirrors entity-service's own domain.WatchListUser.Locked: true
 	// when this watcher is one of the case's account's four named
 	// stakeholders, which entity-service always re-adds on the next write

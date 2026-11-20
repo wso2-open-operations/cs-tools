@@ -32,10 +32,10 @@ import {
   Tooltip,
   Typography,
   useTheme,
-  colors,
 } from "@wso2/oxygen-ui";
-import { Bot, Headset, Lock, MoreVertical, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Bot, Lock, MoreVertical, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
 import UserRefLink from "@components/UserRefLink";
@@ -146,28 +146,7 @@ export default function CsmCaseCommentBubble({
   // `uiCommentFromBe`), so the badge reads the backend's own resolution of the
   // author's user type instead -- no per-comment user lookup from here.
   const isTechnicalTeam = !isBot && !!comment.authorUser?.isInternal;
-  const technicalTeamBadge = (
-    <Box
-      component="span"
-      role="img"
-      aria-label="Technical Team"
-      sx={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        position: "relative",
-        width: 18,
-        height: 18,
-        borderRadius: "50%",
-        bgcolor: "common.white",
-        color: colors.blue[700],
-        boxShadow: 1,
-        flexShrink: 0,
-      }}
-    >
-      <Headset size={14} strokeWidth={2.5} />
-    </Box>
-  );
+  const technicalTeamBadge = <TechnicalTeamBadge />;
   // A chatbot (Novera) message body is Markdown, and so is the description of
   // a record raised from a GitHub issue; those are rendered to HTML first.
   // Every other comment body is rich-text HTML and goes through the

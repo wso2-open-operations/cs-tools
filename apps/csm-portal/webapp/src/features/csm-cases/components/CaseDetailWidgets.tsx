@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import {
   Box,
@@ -67,7 +69,7 @@ import {
 import { Link as RouterLink } from "react-router";
 import { formatBytes } from "@utils/formatBytes";
 import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityChip";
-import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
+import { useSearchUsersByName } from "@api/useSearchUsersByName";
 import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
 import {
@@ -836,8 +838,9 @@ export function WatchersWidget({
           aria-label="Watchers"
           sx={{ listStyle: "none", m: 0, p: 0, display: "flex", flexDirection: "column" }}
         >
-          {watchers.map((w) => {
-            const label = w.isMe ? `${w.name} (you)` : w.name;
+          {[...watchers].sort((a, b) => stripStaffNameMarker(a.name).localeCompare(stripStaffNameMarker(b.name), undefined, { sensitivity: "base" })).map((w) => {
+            const name = stripStaffNameMarker(w.name) || w.email || w.id;
+            const label = w.isMe ? `${name} (you)` : name;
             return (
               <Box
                 component="li"
@@ -853,7 +856,7 @@ export function WatchersWidget({
                   "&:last-of-type": { borderBottom: 0 },
                 }}
               >
-                <User size={14} />
+                {w.user?.isInternal ? <TechnicalTeamBadge /> : <User size={14} />}
                 <Typography
                   variant="body2"
                   component="span"
@@ -903,8 +906,8 @@ export function WatchersWidget({
             value=""
             onChange={addWatcher}
             disabled={isSaving}
-            useSearch={useSearchInternalUsersByName}
-            // useSearchInternalUsersByName drops any user without an id, so every
+            useSearch={useSearchUsersByName}
+            // useSearchUsersByName drops any user without an id, so every
             // option here is guaranteed to have one.
             getId={(u) => u.id!}
             getLabel={userLabel}

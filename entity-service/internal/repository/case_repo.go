@@ -1774,6 +1774,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		sreTeamID, sreTeamName                   *string
 		creatorEmail                             string
 		creatorID, creatorName                   *string
+		creatorInternal                          bool
 		bestCaseEta, mostLikelyEta, worstCaseEta *time.Time
 		etaSharedOn                              *time.Time
 		autoclosureStep                          *string
@@ -1799,6 +1800,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta, wi.eta_shared_on,
 		        `+caseLikeAutoclosureStepColumn+`, `+caseLikeAutoclosureStateOnColumn+`,
 		        wi.created_by, creator.id, COALESCE(creator.name, NULLIF(TRIM(CONCAT_WS(' ', creator.first_name, creator.last_name)), '')),
+		        COALESCE(creator.user_type = 'INTERNAL'::user_type_enum, false),
 		        p.id, p.name,
 		        d.id, d.name,
 		        dp.id, prod.name || COALESCE(' ' || pv.version, ''),
@@ -1841,7 +1843,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&cv.Subject,
 		&bestCaseEta, &mostLikelyEta, &worstCaseEta, &etaSharedOn,
 		&autoclosureStep, &autoclosureStateOn,
-		&creatorEmail, &creatorID, &creatorName,
+		&creatorEmail, &creatorID, &creatorName, &creatorInternal,
 		&projID, &projName,
 		&depID, &depName,
 		&dpID, &dpDisplayName,
@@ -2034,6 +2036,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		id2 = *creatorID
 	}
 	cv.CreatedBy = domain.NewUserReference(id2, creatorEmail, name)
+	if cv.CreatedBy != nil {
+		cv.CreatedBy.IsInternal = creatorInternal
+	}
 	if aeID != nil {
 		aName := ""
 		if aeName != nil {
@@ -4186,7 +4191,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 		),
 		persisted AS (
 			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
-			       false AS locked
+			       false AS locked, COALESCE(u.user_type = 'INTERNAL'::user_type_enum, false) AS is_internal
 			FROM work_item_watcher w
 			JOIN "user" u ON u.id = w.user_id
 			WHERE w.work_item_id = $1
@@ -4203,7 +4208,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 		),
 		stakeholders AS (
 			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
-			       true AS locked
+			       true AS locked, COALESCE(u.user_type = 'INTERNAL'::user_type_enum, false) AS is_internal
 			FROM case_context cc
 			JOIN "user" u ON u.id IN (
 			    cc.technical_owner_id, cc.secondary_technical_owner_id,
@@ -4212,7 +4217,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			)
 		),
 		deduped AS (
-			SELECT DISTINCT ON (id) id, user_name, name, email, locked
+			SELECT DISTINCT ON (id) id, user_name, name, email, locked, is_internal
 			FROM (
 			    SELECT * FROM persisted
 			    UNION ALL
@@ -4220,7 +4225,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			) combined
 			ORDER BY id, locked DESC
 		)
-		SELECT id, user_name, name, email, locked FROM deduped
+		SELECT id, user_name, name, email, locked, is_internal FROM deduped
 		ORDER BY user_name`, caseID)
 	if err != nil {
 		return nil, fmt.Errorf("query case watch list: %w", err)
@@ -4231,9 +4236,13 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 	for rows.Next() {
 		var id, userName, name string
 		var email *string
-		var locked bool
-		if err := rows.Scan(&id, &userName, &name, &email, &locked); err != nil {
+		var locked, isInternal bool
+		if err := rows.Scan(&id, &userName, &name, &email, &locked, &isInternal); err != nil {
 			return nil, fmt.Errorf("scan case watcher: %w", err)
+		}
+		user := domain.NewUserReference("", stringOrEmpty(email), name)
+		if user != nil {
+			user.IsInternal = isInternal
 		}
 		watchers = append(watchers, domain.WatchListUser{
 			ID:       id,
@@ -4246,7 +4255,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			// not guaranteed to point at a user record"). Pass "" rather
 			// than id so NewUserReference omits it, even though this
 			// particular row is known to resolve to a real user.
-			User: domain.NewUserReference("", stringOrEmpty(email), name),
+			User: user,
 		})
 	}
 	if err := rows.Err(); err != nil {
