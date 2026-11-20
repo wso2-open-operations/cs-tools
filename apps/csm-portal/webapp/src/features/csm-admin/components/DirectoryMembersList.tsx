@@ -31,7 +31,7 @@ import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } fro
 import { useLocation } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import UserRefLink from "@components/UserRefLink";
-import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
+import { useAdminSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import { useSearchRoles } from "@features/csm-admin/api/useSearchRoles";
 import ResponsiveRoleChips from "@components/ResponsiveRoleChips";
 import type { SearchUsersRequest } from "@features/csm-users/types/csmUsers";
@@ -60,7 +60,7 @@ interface DirectoryMembersListProps {
 }
 
 /**
- * A role/group/team's member list, backed by `POST /users/search` with the
+ * A role/group/team's member list, backed by `POST /admin/users/search` with the
  * matching membership filter. Server-side filtered and paginated — never
  * fetch-everything-and-slice, since a membership filter can match anywhere
  * from zero to the whole user base. A filter matching nobody is a normal,
@@ -94,7 +94,7 @@ export default function DirectoryMembersList({
     error,
     refetch,
     dataUpdatedAt,
-  } = useSearchUsers(request);
+  } = useAdminSearchUsers(request);
   const users = data?.users ?? [];
   const total = data?.total ?? 0;
 

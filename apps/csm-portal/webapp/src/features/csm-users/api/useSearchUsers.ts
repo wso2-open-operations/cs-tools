@@ -25,24 +25,29 @@ import {
   type SearchUsersResponse,
 } from "@features/csm-users/types/csmUsers";
 
+const DIRECTORY_SEARCH_PATH = "/users/search";
+const ADMIN_SEARCH_PATH = "/admin/users/search";
+
 /**
- * Searches users via `POST /users/search`. The endpoint returns a `oneOf`
- * (postgres `User` vs ServiceNow `SnUser`); the result is normalized into a
- * source-agnostic {@link NormalizedUserSearchResult} so callers don't branch
- * on the live data source.
- *
- * `enabled` (default `true`) skips the query entirely — for a caller that
- * only wants to search once it has something to filter by (e.g. a `userIds`
- * scope derived from another query), rather than firing against an empty or
- * not-yet-known filter set.
+ * Shared fetch behind {@link useSearchUsers} and {@link useAdminSearchUsers}.
+ * Both routes take the same request and return the same envelope; only the
+ * path and the cache key differ. The admin key carries an extra `"admin"`
+ * segment so the two routes never share cached results (the directory route
+ * is restricted to internal users, the admin one is not), while both stay
+ * under the `"csm-users-search"` prefix that mutations invalidate.
  */
-export function useSearchUsers(request: SearchUsersRequest, enabled = true) {
+function useUserSearchQuery(
+  path: string,
+  keyScope: readonly string[],
+  request: SearchUsersRequest,
+  enabled: boolean,
+) {
   const authFetch = useAuthApiClient();
 
   return useQuery<SearchUsersResponse, Error, NormalizedUserSearchResult>({
-    queryKey: ["csm-users-search", request],
+    queryKey: ["csm-users-search", ...keyScope, request],
     queryFn: async () => {
-      const res = await authFetch(`${apiConfig.backendUrl}/users/search`, {
+      const res = await authFetch(`${apiConfig.backendUrl}${path}`, {
         method: "POST",
         body: JSON.stringify(request),
       });
@@ -61,4 +66,31 @@ export function useSearchUsers(request: SearchUsersRequest, enabled = true) {
     staleTime: 30_000,
     enabled,
   });
+}
+
+/**
+ * Searches users via `POST /users/search`, the directory route used by
+ * pickers. The backend restricts it to internal users. The endpoint returns a
+ * `oneOf` (postgres `User` vs the legacy source's envelope); the result is
+ * normalized into a source-agnostic {@link NormalizedUserSearchResult} so
+ * callers don't branch on the live data source.
+ *
+ * `enabled` (default `true`) skips the query entirely — for a caller that
+ * only wants to search once it has something to filter by (e.g. a `userIds`
+ * scope derived from another query), rather than firing against an empty or
+ * not-yet-known filter set.
+ */
+export function useSearchUsers(request: SearchUsersRequest, enabled = true) {
+  return useUserSearchQuery(DIRECTORY_SEARCH_PATH, [], request, enabled);
+}
+
+/**
+ * Same as {@link useSearchUsers} but against `POST /admin/users/search`, which
+ * can also list external (customer) users. Only the user-management screens
+ * may use it; every picker stays on {@link useSearchUsers}. The route needs
+ * the write permission, so a caller without it gets a 403 `ApiError` like any
+ * other forbidden response.
+ */
+export function useAdminSearchUsers(request: SearchUsersRequest, enabled = true) {
+  return useUserSearchQuery(ADMIN_SEARCH_PATH, ["admin"], request, enabled);
 }

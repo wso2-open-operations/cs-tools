@@ -127,7 +127,9 @@ describe("DirectoryMembersList", () => {
     renderList({ filterKey: "roleIds", entityId: "agent", entityNoun: "role" });
 
     await waitFor(() => expect(authFetchMock).toHaveBeenCalled());
-    const [, requestInit] = authFetchMock.mock.calls[0];
+    const [url, requestInit] = authFetchMock.mock.calls[0];
+    // Member lists live under user management, so they use the admin route.
+    expect(url).toBe("https://example.test/admin/users/search");
     const body = JSON.parse(requestInit.body as string);
     expect(body.filters).toEqual({ roleIds: ["agent"] });
   });
@@ -254,5 +256,18 @@ describe("DirectoryMembersList", () => {
     renderList();
 
     expect(await screen.findByText("Internal Server Error")).toBeInTheDocument();
+  });
+
+  it("shows the server's message in the error state when the admin route returns 403", async () => {
+    authFetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      text: async () => JSON.stringify({ message: "Insufficient permissions" }),
+    } as unknown as Response);
+    renderList();
+
+    expect(await screen.findByText("Insufficient permissions")).toBeInTheDocument();
+    expect(screen.queryByText(/No members found/i)).not.toBeInTheDocument();
   });
 });
