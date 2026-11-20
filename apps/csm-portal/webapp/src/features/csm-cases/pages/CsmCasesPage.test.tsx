@@ -32,6 +32,10 @@ vi.mock("@features/csm-cases/components/CsmIssuesView", () => ({
   },
 }));
 
+vi.mock("@features/csm-cases/components/MyWocGitIssuesPanel", () => ({
+  default: () => null,
+}));
+
 // CsmCasesPage now reads usePortalAccess (to gate its "Create case" button),
 // which transitively imports the real backend client/config — mock both so
 // this test doesn't need real window.config. Defaults to full write access;

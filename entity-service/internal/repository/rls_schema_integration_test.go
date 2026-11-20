@@ -76,6 +76,14 @@ var rlsProtectedTables = []string{
 	"standard_change_proposal",
 	"standard_change_proposal_evidence",
 	"alert_mute_rule",
+	"product_issue",
+	"github_issue_link",
+	"work_item_link",
+	"work_item_status_event",
+	"comment_github_ref",
+	"board_status_map",
+	"work_item_creation_request",
+	"github_command",
 }
 
 // TestRLSSchemaIntegration_EveryProtectedTableHasForceRowLevelSecurity is the

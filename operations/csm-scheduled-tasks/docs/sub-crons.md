@@ -38,7 +38,7 @@ What every task inherits from the engine:
 |---|---|
 | Period key | The task's most recent cron firing. Every tick between two firings derives the same key, so retries land on one ledger row |
 | Retry | A failed attempt is retried on the first tick after its retry time, which defaults to `DRIVER_INTERVAL` after the failure. There is no cap by default |
-| Attempt cap | `MaxAttempts` is set on three tasks only: `time_card_report`, `acp_reopen_check` and `acp_closure` (2 each: one retry, because a retry can repeat something outward). The cap is checked only after a handler returns an error: a crash, or a failure to record the result, leaves a stale claim that can run again beyond the cap and repeat emails |
+| Attempt cap | `MaxAttempts` is set on four tasks only: `time_card_report`, `acp_reopen_check`, `product_issue_reconcile` and `acp_closure` (2 each: one retry, because a retry can repeat something outward, or a lasting failure would alert every tick). The cap is checked only after a handler returns an error: a crash, or a failure to record the result, leaves a stale claim that can run again beyond the cap and repeat emails |
 | Abandonment | When the next period comes due while the old one is still unresolved, entity-service marks the old row superseded and only the new period is chased |
 | Stale claims | The engine passes entity-service a stale-claim threshold of twice `DRIVER_INTERVAL`, after which a claimed attempt that never reported can be claimed again |
 | Failure alerts | Every failed attempt emails the task's own `to` plus `ALERT_RECIPIENTS`, with the task's `cc`. `ALERTS_ENABLED=false` silences it |
@@ -79,9 +79,10 @@ Colombo is UTC+5:30 with no daylight saving.
 | `rota_manual_reminder` | `*/5 * * * *` | Same | Fulfil "Send now" and "Send a test to me" requests |
 | `case_autoclosure` | `30 2 * * *` | `AUTOCLOSURE_ENABLED=true` | Remind and close cases idle in Awaiting Info or Solution Proposed |
 | `acp_reopen_check` | `30 3 * * *` | `ACP_REOPEN_CHECK_ENABLED=true` | Drive entity-service's daily ACP reopen check |
+| `product_issue_reconcile` | `0 1 * * *` | `PRODUCT_ISSUE_RECONCILE_ENABLED=true` | Drive entity-service's daily reconciliation of linked product issues with GitHub |
 | `acp_closure` | `0 4 * * 1-5` | `ACP_ENABLED=true` | Account Closure Process: notices and suspension |
 
-That is 26 registered names. Task names are API contracts: a rename orphans the
+That is 27 registered names. Task names are API contracts: a rename orphans the
 task's ledger history and stops matching any schedule or recipient override.
 
 ### Who gets what
@@ -318,6 +319,19 @@ day (`MaxAttempts` 2).
 - **Triggers:** weekdays at 04:00 (09:30 in Colombo); the handler also succeeds without acting on a Colombo weekend.
 - **Does:** lists every Open project, and per project reads Salesforce data, runs the subscription end date cascade and the unpaid invoice cascade (windows at 90, 60, 30, 15, 7 and 0 days), sends the notice, records it in CSM, and suspends at day 0.
 - **Full detail:** [acp-closure.md](acp-closure.md), `CLAUDE.md` "ACP closure", `internal/acp/`.
+
+## 13a. Product issue reconcile
+
+One task, off unless `PRODUCT_ISSUE_RECONCILE_ENABLED=true`.
+
+### `product_issue_reconcile`
+
+- **Registered when:** `PRODUCT_ISSUE_RECONCILE_ENABLED=true`. It needs entity-service with `GIT_INTERNALS_ENABLED=true` (and this client in `M2M_CLIENT_IDS`), or every run fails with a 404 or 403.
+- **Triggers:** daily at 01:00 (06:30 in Colombo), including weekends.
+- **Does:** `POST /product-work-items/reconcile` call after call (limit 200) while the answer says more remain. entity-service compares each tracking board with the linked product issues, corrects title, labels, state and board status (recording missed status changes as events), and refreshes linked issues a board does not list. This task decides and writes nothing itself.
+- **Rate limit:** an answer with `retryAfterSeconds` of at most 900 s is waited out and the run continues from the returned cursor (at most 3 waits a run); a longer wait, or a fourth, fails the run with the position reached.
+- **Fails when:** boards or issues failed (entity-service's log names them), a call errors or makes no progress, or more than 5,000 calls are needed. Retried after 4 hours, at most once a day.
+- **Detail:** `CLAUDE.md` "Product issue reconcile", `internal/productissues/`.
 
 ## 14. Running a task outside the schedule
 

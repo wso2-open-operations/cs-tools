@@ -29,7 +29,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/businessdays"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacalendar"
 )
 
 // slaScheduleWSO2BusinessDays is the one non-24x7 schedule this engine
@@ -39,21 +39,40 @@ import (
 // resolves a case policy to -- see sla_policy_resolver.go's own case-policy
 // classification) is treated as plain 24x7 flat wall-clock time, same as a
 // NULL/empty schedule always has been, rather than guessed at.
-const slaScheduleWSO2BusinessDays = "WSO2 Business days"
+//
+// The schedule decision itself lives in internal/slacalendar; this constant is
+// kept as an alias of its name.
+const slaScheduleWSO2BusinessDays = slacalendar.WSO2BusinessDays
+
+// clockCalendar returns the calendar a clock on `schedule` is measured with.
+// An unknown schedule gets the flat calendar, as it always has.
+func clockCalendar(schedule string) slacalendar.Calendar {
+	cal, _ := slacalendar.For(schedule)
+	return cal
+}
+
+// calendarScheduleParam appends the list of non-flat schedule names to args
+// and returns the placeholder ("$n::text[]") that refers to it. Rows are
+// routed to the calendar paths with `sp.schedule = ANY(<placeholder>)` and to
+// the flat SQL paths with `NOT (COALESCE(sp.schedule, empty string) = ANY(<placeholder>))`.
+func calendarScheduleParam(args []any) ([]any, string) {
+	args = append(args, slacalendar.NonFlatSchedules())
+	return args, fmt.Sprintf("$%d::text[]", len(args))
+}
 
 // businessDayElapsedSnapshot computes a 'WSO2 Business days' clock's
 // elapsed/remaining/percentage/breached figures as of instant `at`, given
 // its stored start_on and the business-day pause time already accumulated
 // from every COMPLETED pause/resume cycle (businessPauseSoFar never
 // includes an open, still-running pause segment -- a caller finalizing one
-// of those into the total before calling, e.g. completeClockBusinessDays
+// of those into the total before calling, e.g. completeClockCalendar
 // folding in the segment up to its own `at`, is what keeps this one
 // function correct for completion, pause and a live read alike). Shared by
-// completeClockBusinessDays, setPausedBusinessDays, recomputeActiveBusinessDays
+// completeClockCalendar, setPausedCalendar, recomputeActiveBusinessDays
 // and SLAStatusRepository.GetClockState's own live business-day branch, so
 // the one real elapsed-time formula is written once.
-func businessDayElapsedSnapshot(startOn, at time.Time, businessPauseSoFar, duration time.Duration) (elapsed, remaining time.Duration, percentage float64, breached bool) {
-	elapsed = businessdays.Elapsed(startOn, at) - businessPauseSoFar
+func calendarElapsedSnapshot(cal slacalendar.Calendar, startOn, at time.Time, businessPauseSoFar, duration time.Duration) (elapsed, remaining time.Duration, percentage float64, breached bool) {
+	elapsed = cal.Elapsed(startOn, at) - businessPauseSoFar
 	if elapsed < 0 {
 		elapsed = 0
 	}
@@ -66,6 +85,12 @@ func businessDayElapsedSnapshot(startOn, at time.Time, businessPauseSoFar, durat
 	}
 	breached = elapsed >= duration
 	return elapsed, remaining, percentage, breached
+}
+
+// businessDayElapsedSnapshot is calendarElapsedSnapshot on the 'WSO2 Business
+// days' calendar.
+func businessDayElapsedSnapshot(startOn, at time.Time, businessPauseSoFar, duration time.Duration) (elapsed, remaining time.Duration, percentage float64, breached bool) {
+	return calendarElapsedSnapshot(clockCalendar(slaScheduleWSO2BusinessDays), startOn, at, businessPauseSoFar, duration)
 }
 
 // businessDayCorrectedLiveState recomputes (stage, hasBreached,
@@ -94,7 +119,8 @@ func businessDayElapsedSnapshot(startOn, at time.Time, businessPauseSoFar, durat
 // CompleteClock's own doc comments), so recomputing them here from "now"
 // would be wrong, not just redundant.
 func businessDayCorrectedLiveState(schedule, stage string, startedOn *time.Time, businessPauseSeconds, durationSeconds float64) (correctedStage string, correctedHasBreached bool, correctedPercent float64, ok bool) {
-	if schedule != slaScheduleWSO2BusinessDays || startedOn == nil {
+	cal, isCalendar := slacalendar.NonFlat(schedule)
+	if !isCalendar || startedOn == nil {
 		return "", false, 0, false
 	}
 	if stage != "IN_PROGRESS" && stage != "BREACHED" {
@@ -110,7 +136,7 @@ func businessDayCorrectedLiveState(schedule, stage string, startedOn *time.Time,
 	}
 	duration := time.Duration(durationSeconds * float64(time.Second))
 	businessPause := time.Duration(businessPauseSeconds * float64(time.Second))
-	_, _, pct, breached := businessDayElapsedSnapshot(*startedOn, time.Now().UTC(), businessPause, duration)
+	_, _, pct, breached := calendarElapsedSnapshot(cal, *startedOn, time.Now().UTC(), businessPause, duration)
 	newStage := "IN_PROGRESS"
 	if breached {
 		newStage = "BREACHED"
@@ -213,6 +239,11 @@ type SLAPolicyRef struct {
 	// assumed to already be in this engine's own neutral predicate
 	// vocabulary and is parsed as-is.
 	Source string
+	// AppliesTo is sla_policy.applies_to verbatim: "" for NULL (every row
+	// that exists today, classified by condition markers in the service
+	// layer), or the policy family a row is explicitly tagged with
+	// ("PRODUCT_ISSUE"). See ListCandidatePolicies/ListFamilyCandidatePolicies.
+	AppliesTo string
 	// StartCondition/StopCondition/PauseCondition/ResumeCondition/
 	// CancelCondition are the raw sla_policy condition columns, exactly as
 	// the external sync job writes them -- translated by
@@ -445,6 +476,14 @@ type SLAEngineRepository interface {
 	// one with no duration at all, so both are excluded the same way.
 	ListCandidatePolicies(ctx context.Context, target string) ([]SLAPolicyRef, error)
 
+	// ListFamilyCandidatePolicies is ListCandidatePolicies for a policy
+	// family named by sla_policy.applies_to (e.g. "PRODUCT_ISSUE"): the same
+	// active/duration filters and id order, but selecting rows by
+	// applies_to = family and ignoring source. ListCandidatePolicies, for its
+	// part, returns only rows whose applies_to is NULL, so a family row is
+	// never offered to a case or incident.
+	ListFamilyCandidatePolicies(ctx context.Context, target, family string) ([]SLAPolicyRef, error)
+
 	// GetCaseFacts reads the current field values of workItemID needed to
 	// evaluate an sla_policy condition against it (internal/slacondition).
 	// Returns apierror.NotFoundError if no such work item exists.
@@ -483,6 +522,29 @@ type SLAEngineRepository interface {
 	// breached clock's own policy required). Returns whether a row was
 	// found and updated.
 	CancelClockByPolicy(ctx context.Context, workItemID, target, policyID string) (bool, error)
+
+	// CancelClockByPolicyAt is CancelClockByPolicy with an explicit event time,
+	// for clocks on a non-flat calendar schedule ONLY (slacalendar.NonFlat).
+	// A matching open clock on a flat schedule is left untouched and false is
+	// returned: the flat SQL path measures with the database NOW() and has no
+	// way to take an event time. An `at` earlier than the clock's start_on or
+	// paused_on clamps elapsed and the open pause segment at zero.
+	CancelClockByPolicyAt(ctx context.Context, workItemID, target, policyID string, at time.Time) (bool, error)
+
+	// CompleteClockByPolicyAt is CompleteClock for one policy at an explicit
+	// event time; same non-flat-only contract as CancelClockByPolicyAt.
+	CompleteClockByPolicyAt(ctx context.Context, workItemID, target, policyID string, at time.Time) (bool, error)
+
+	// SetPausedByPolicyAt is SetPausedByPolicy at an explicit event time; same
+	// non-flat-only contract as CancelClockByPolicyAt.
+	SetPausedByPolicyAt(ctx context.Context, workItemID, target, policyID string, paused bool, at time.Time) (bool, error)
+
+	// RegisterWorkItemClock is RegisterClock for work items that may run the
+	// same policy more than once: only an OPEN clock (slaEngineOpenStageFilter)
+	// for the same work item and policy blocks the insert; an earlier
+	// ACHIEVED/COMPLETED/CANCELLED row does not. RegisterClock itself is
+	// unchanged. startOn zero means now.
+	RegisterWorkItemClock(ctx context.Context, workItemID string, policy SLAPolicyRef, startOn time.Time) (bool, error)
 
 	// ActiveClockPolicies returns every sla_policy row currently backing one
 	// of workItemID's open (slaEngineOpenStageFilter) clocks for target, so
@@ -633,7 +695,7 @@ type SLAEngineRepository interface {
 	// business_elapsed_percentage/business_duration/
 	// remaining_business_duration together with them, recomputed as of this
 	// clock's own paused_on instant -- the same formula setPausedFlat/
-	// setPausedBusinessDays already freeze these at, just fed the newly
+	// setPausedCalendar already freeze these at, just fed the newly
 	// corrected pause total instead of trusting whatever was stored at the
 	// moment this clock actually paused. elapsedSeconds/remainingSeconds
 	// are the schedule-appropriate (flat or business-day) elapsed/remaining
@@ -715,14 +777,14 @@ const slaPolicyRefColumns = `
 	COALESCE(start_condition, ''), COALESCE(stop_condition, ''),
 	COALESCE(pause_condition, ''), COALESCE(resume_condition, ''), COALESCE(cancel_condition, ''),
 	COALESCE(retroactive, FALSE), COALESCE(when_to_cancel::TEXT, 'CANCEL_CONDITIONS_ARE_MET'),
-	COALESCE(when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET')`
+	COALESCE(when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET'), COALESCE(applies_to, '')`
 
 func scanSLAPolicyRef(row interface{ Scan(...any) error }) (SLAPolicyRef, error) {
 	var ref SLAPolicyRef
 	var durationSeconds float64
 	if err := row.Scan(&ref.ID, &ref.Name, &ref.Target, &durationSeconds, &ref.Schedule, &ref.Source,
 		&ref.StartCondition, &ref.StopCondition, &ref.PauseCondition, &ref.ResumeCondition, &ref.CancelCondition,
-		&ref.Retroactive, &ref.WhenToCancel, &ref.WhenToResume); err != nil {
+		&ref.Retroactive, &ref.WhenToCancel, &ref.WhenToResume, &ref.AppliesTo); err != nil {
 		return SLAPolicyRef{}, err
 	}
 	ref.Duration = time.Duration(durationSeconds * float64(time.Second))
@@ -736,14 +798,32 @@ func (r *slaEngineRepo) ListCandidatePolicies(ctx context.Context, target string
 		FROM sla_policy
 		WHERE target = $1::sla_policy_target_enum
 		  AND source = 'SERVICENOW'
+		  AND applies_to IS NULL
 		  AND (is_active IS NULL OR is_active)
 		  AND duration IS NOT NULL
 		  AND duration > INTERVAL '0'
 		ORDER BY id`
+	return r.queryCandidatePolicies(ctx, "list candidate sla policies", query, target)
+}
 
-	rows, err := r.db.Query(ctx, query, target)
+// ListFamilyCandidatePolicies implements SLAEngineRepository.
+func (r *slaEngineRepo) ListFamilyCandidatePolicies(ctx context.Context, target, family string) ([]SLAPolicyRef, error) {
+	query := `
+		SELECT ` + slaPolicyRefColumns + `
+		FROM sla_policy
+		WHERE target = $1::sla_policy_target_enum
+		  AND applies_to = $2
+		  AND (is_active IS NULL OR is_active)
+		  AND duration IS NOT NULL
+		  AND duration > INTERVAL '0'
+		ORDER BY id`
+	return r.queryCandidatePolicies(ctx, "list family candidate sla policies", query, target, family)
+}
+
+func (r *slaEngineRepo) queryCandidatePolicies(ctx context.Context, what, query string, args ...any) ([]SLAPolicyRef, error) {
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list candidate sla policies: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer rows.Close()
 
@@ -751,12 +831,12 @@ func (r *slaEngineRepo) ListCandidatePolicies(ctx context.Context, target string
 	for rows.Next() {
 		ref, err := scanSLAPolicyRef(rows)
 		if err != nil {
-			return nil, fmt.Errorf("list candidate sla policies: scan: %w", err)
+			return nil, fmt.Errorf("%s: scan: %w", what, err)
 		}
 		refs = append(refs, ref)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list candidate sla policies: rows: %w", err)
+		return nil, fmt.Errorf("%s: rows: %w", what, err)
 	}
 	return refs, nil
 }
@@ -936,7 +1016,7 @@ func (r *slaEngineRepo) cancelClock(ctx context.Context, workItemID, target, pol
 	if ok && policyID != "" {
 		return true, nil
 	}
-	bdOK, err := r.cancelClockBusinessDays(ctx, workItemID, target, policyID)
+	bdOK, err := r.cancelClockCalendar(ctx, workItemID, target, policyID, time.Now().UTC(), false)
 	return ok || bdOK, err
 }
 
@@ -947,6 +1027,7 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 		policyFilter = " AND sp.id = $4::uuid"
 		args = append(args, policyID)
 	}
+	args, scheduleParam := calendarScheduleParam(args)
 	query := `
 		UPDATE sla s
 		SET stage = 'CANCELLED'::sla_stage_enum, is_active = FALSE, end_on = NOW(),
@@ -964,7 +1045,7 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
 		  AND sp.target::TEXT = $2
-		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
+		  AND NOT (COALESCE(sp.schedule, '') = ANY(` + scheduleParam + `))
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
 
 	tag, err := r.db.Exec(ctx, query, args...)
@@ -974,9 +1055,9 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 	return tag.RowsAffected() > 0, nil
 }
 
-// cancelClockBusinessDays is cancelClock's 'WSO2 Business days' branch --
+// cancelClockCalendar is cancelClock's 'WSO2 Business days' branch --
 // same pause-aware elapsed-vs-duration computation as
-// completeClockBusinessDays, just writing CANCELLED instead of ACHIEVED.
+// completeClockCalendar, just writing CANCELLED instead of ACHIEVED.
 // Also freezes business_elapsed_percentage/business_duration/
 // remaining_business_duration at the real elapsed figure as of cancellation
 // -- a real, reported gap: an earlier version of this method left those
@@ -989,7 +1070,7 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 // severity) displayed 0% elapsed regardless of how much real time had
 // actually passed before the cancellation, which reads as if the clock had
 // just started rather than showing how far it had genuinely gotten.
-func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID, target, policyID string) (bool, error) {
+func (r *slaEngineRepo) cancelClockCalendar(ctx context.Context, workItemID, target, policyID string, now time.Time, explicitEnd bool) (bool, error) {
 	var found bool
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		policyFilter := ""
@@ -998,16 +1079,17 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			policyFilter = " AND sp.id = $3::uuid"
 			args = append(args, policyID)
 		}
+		args, scheduleParam := calendarScheduleParam(args)
 		rows, err := tx.Query(ctx, `
 			SELECT s.id, s.start_on, s.paused_on,
 			       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 			       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-			       EXTRACT(EPOCH FROM sp.duration)
+			       EXTRACT(EPOCH FROM sp.duration), sp.schedule
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
 			  AND sp.target::TEXT = $2
-			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
+			  AND sp.schedule = ANY(`+scheduleParam+`)
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
 			FOR UPDATE OF s`, args...)
 		if err != nil {
@@ -1018,11 +1100,12 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			startOn                                             time.Time
 			pausedOn                                            *time.Time
 			pauseSeconds, businessPauseSeconds, durationSeconds float64
+			schedule                                            string
 		}
 		var open []openRow
 		for rows.Next() {
 			var o openRow
-			if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds); err != nil {
+			if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds, &o.schedule); err != nil {
 				rows.Close()
 				return fmt.Errorf("cancel business-day sla clock: scan: %w", err)
 			}
@@ -1032,18 +1115,17 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			return fmt.Errorf("cancel business-day sla clock: rows: %w", err)
 		}
 
-		now := time.Now().UTC()
 		for _, o := range open {
 			flatPause := time.Duration(o.pauseSeconds * float64(time.Second))
 			businessPause := time.Duration(o.businessPauseSeconds * float64(time.Second))
 			if o.pausedOn != nil {
 				// An open pause segment at cancellation time -- finalize it
-				// into both totals, same as completeClockBusinessDays does.
-				flatPause += now.Sub(*o.pausedOn)
-				businessPause += businessdays.Elapsed(*o.pausedOn, now)
+				// into both totals, same as completeClockCalendar does.
+				flatPause += nonNegative(now.Sub(*o.pausedOn))
+				businessPause += clockCalendar(o.schedule).Elapsed(*o.pausedOn, now)
 			}
 
-			elapsed := businessdays.Elapsed(o.startOn, now) - businessPause
+			elapsed := clockCalendar(o.schedule).Elapsed(o.startOn, now) - businessPause
 			if elapsed < 0 {
 				elapsed = 0
 			}
@@ -1059,7 +1141,7 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			hasBreached := elapsed >= duration
 
 			if _, err := tx.Exec(ctx, `
-				UPDATE sla SET stage = 'CANCELLED'::sla_stage_enum, is_active = FALSE, end_on = NOW(),
+				UPDATE sla SET stage = 'CANCELLED'::sla_stage_enum, is_active = FALSE, end_on = COALESCE($9::timestamptz, NOW()),
 				    business_elapsed_percentage = $2,
 				    business_duration = $3::interval,
 				    remaining_business_duration = $4::interval,
@@ -1070,7 +1152,7 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 				    updated_on = NOW(), updated_by = $7
 				WHERE id = $1::uuid`,
 				o.id, pct, formatIntervalLiteral(elapsed), formatIntervalLiteral(remaining),
-				formatIntervalLiteral(flatPause), formatIntervalLiteral(businessPause), sqlActorLiteral, hasBreached,
+				formatIntervalLiteral(flatPause), formatIntervalLiteral(businessPause), sqlActorLiteral, hasBreached, endOnArg(now, explicitEnd),
 			); err != nil {
 				return fmt.Errorf("cancel business-day sla clock: update: %w", err)
 			}
@@ -1154,7 +1236,7 @@ func slaPolicyRefColumnsPrefixed(alias string) string {
 		"COALESCE(" + alias + "start_condition, '')", "COALESCE(" + alias + "stop_condition, '')",
 		"COALESCE(" + alias + "pause_condition, '')", "COALESCE(" + alias + "resume_condition, '')", "COALESCE(" + alias + "cancel_condition, '')",
 		"COALESCE(" + alias + "retroactive, FALSE)", "COALESCE(" + alias + "when_to_cancel::TEXT, 'CANCEL_CONDITIONS_ARE_MET')",
-		"COALESCE(" + alias + "when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET')",
+		"COALESCE(" + alias + "when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET')", "COALESCE(" + alias + "applies_to, '')",
 	}
 	return strings.Join(cols, ", ")
 }
@@ -1259,6 +1341,80 @@ func (r *slaEngineRepo) RegisterClock(ctx context.Context, workItemID string, po
 	return registerClockExec(ctx, r.db, workItemID, policy, startOn)
 }
 
+// nonNegative clamps a pause segment at zero so an explicit event time that
+// precedes the segment's start never produces a negative pause total.
+func nonNegative(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// endOnArg is the end_on bind value of the calendar paths: nil keeps the
+// database NOW() (every pre-existing caller), an explicit event time is
+// written as given (the *At variants).
+func endOnArg(at time.Time, explicit bool) any {
+	if !explicit {
+		return nil
+	}
+	return at
+}
+
+// CancelClockByPolicyAt implements SLAEngineRepository. Calendar (non-flat)
+// clocks only; a flat-schedule clock is left untouched and false is returned.
+func (r *slaEngineRepo) CancelClockByPolicyAt(ctx context.Context, workItemID, target, policyID string, at time.Time) (bool, error) {
+	return r.cancelClockCalendar(ctx, workItemID, target, policyID, at.UTC(), true)
+}
+
+// CompleteClockByPolicyAt implements SLAEngineRepository. Calendar (non-flat)
+// clocks only; a flat-schedule clock is left untouched and false is returned.
+func (r *slaEngineRepo) CompleteClockByPolicyAt(ctx context.Context, workItemID, target, policyID string, at time.Time) (bool, error) {
+	return r.completeClockCalendar(ctx, workItemID, target, policyID, at.UTC(), true)
+}
+
+// SetPausedByPolicyAt implements SLAEngineRepository. Calendar (non-flat)
+// clocks only; a flat-schedule clock is left untouched and false is returned.
+func (r *slaEngineRepo) SetPausedByPolicyAt(ctx context.Context, workItemID, target, policyID string, paused bool, at time.Time) (bool, error) {
+	return r.setPausedCalendar(ctx, workItemID, target, policyID, paused, at.UTC())
+}
+
+// slaEngineRegisterWorkItemClockQuery is slaEngineRegisterClockQuery with one
+// blocker only: an OPEN clock (slaEngineOpenStageFilter) for the same
+// (work item, policy). An ACHIEVED/COMPLETED/CANCELLED earlier row does not
+// block, so a work item can run the same policy again after it finished.
+const slaEngineRegisterWorkItemClockQuery = `
+	WITH registration_lock AS (
+		SELECT pg_advisory_xact_lock(hashtextextended($1::text || '|' || $2::text, 0))
+	)
+	INSERT INTO sla (
+		id, created_on, updated_on, created_by, updated_by,
+		work_item_id, sla_policy_id, schedule, is_active, stage, start_on,
+		duration, business_elapsed_percentage, business_duration,
+		remaining_business_duration, has_breached
+	)
+	SELECT gen_random_uuid(), NOW(), NOW(), $3, $3,
+	       $1::uuid, $2::uuid, $5, TRUE, 'IN_PROGRESS'::sla_stage_enum, $6::timestamptz,
+	       $4::interval, 0, INTERVAL '0', $4::interval, FALSE
+	FROM registration_lock
+	WHERE NOT EXISTS (
+		SELECT 1 FROM sla s
+		WHERE s.work_item_id = $1::uuid
+		  AND s.sla_policy_id = $2::uuid
+		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + `
+	)`
+
+// RegisterWorkItemClock implements SLAEngineRepository.
+func (r *slaEngineRepo) RegisterWorkItemClock(ctx context.Context, workItemID string, policy SLAPolicyRef, startOn time.Time) (bool, error) {
+	if startOn.IsZero() {
+		startOn = time.Now().UTC()
+	}
+	tag, err := r.db.Exec(ctx, slaEngineRegisterWorkItemClockQuery, workItemID, policy.ID, sqlActorLiteral, formatIntervalLiteral(policy.Duration), nullableSchedule(policy.Schedule), startOn)
+	if err != nil {
+		return false, fmt.Errorf("register work item sla clock: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // CompleteClock implements SLAEngineRepository.
 //
 // business_elapsed_percentage, business_duration and remaining_business_duration
@@ -1324,7 +1480,7 @@ const completedElapsedExpr = `(NOW() - s.start_on - COALESCE(s.pause_duration, I
 // paused_on left set, which would make GetClockState report a finished
 // clock as paused with an incomplete pause total.
 // CompleteClock dispatches to the flat wall-clock SQL path above for every
-// 24x7 (or NULL/unsupported-schedule) clock, and to completeClockBusinessDays
+// 24x7 (or NULL/unsupported-schedule) clock, and to completeClockCalendar
 // (internal/businessdays) for a clock backed by a 'WSO2 Business days'
 // policy -- see that method's own doc comment for why this is done in Go
 // rather than hand-rolled as a second SQL formula. completeClockFlat's own
@@ -1360,7 +1516,7 @@ func (r *slaEngineRepo) completeClock(ctx context.Context, workItemID, target, p
 	if ok && policyID != "" {
 		return true, nil
 	}
-	bdOK, err := r.completeClockBusinessDays(ctx, workItemID, target, policyID)
+	bdOK, err := r.completeClockCalendar(ctx, workItemID, target, policyID, time.Now().UTC(), false)
 	return ok || bdOK, err
 }
 
@@ -1371,6 +1527,7 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 		policyFilter = " AND sp.id = $4::uuid"
 		args = append(args, policyID)
 	}
+	args, scheduleParam := calendarScheduleParam(args)
 	query := `
 		UPDATE sla s
 		SET stage = 'ACHIEVED'::sla_stage_enum, end_on = NOW(), is_active = FALSE,
@@ -1388,7 +1545,7 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
 		  AND sp.target::TEXT = $2
-		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
+		  AND NOT (COALESCE(sp.schedule, '') = ANY(` + scheduleParam + `))
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
 
 	tag, err := r.db.Exec(ctx, query, args...)
@@ -1398,7 +1555,7 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 	return tag.RowsAffected() > 0, nil
 }
 
-// completeClockBusinessDays is CompleteClock's 'WSO2 Business days' branch:
+// completeClockCalendar is CompleteClock's 'WSO2 Business days' branch:
 // reads the one open row's raw instants under a row lock, computes its real
 // elapsed/remaining business time in Go (internal/businessdays.Elapsed),
 // and writes the result back -- the same final shape completeClockFlat
@@ -1406,11 +1563,11 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 // Finalizes an open pause segment into both pause_duration (flat) and
 // business_pause_duration (business-day), mirroring completedElapsedExpr's
 // own CASE for the flat path.
-// completeClockBusinessDays locks and completes EVERY open business-day row
+// completeClockCalendar locks and completes EVERY open business-day row
 // matching (workItemID, target[, policyID]), not just one -- a target with
 // two simultaneously-open business-day policies (not just one flat/one
 // business-day) must have both finalized by a single bulk CompleteClock call.
-func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemID, target, policyID string) (bool, error) {
+func (r *slaEngineRepo) completeClockCalendar(ctx context.Context, workItemID, target, policyID string, now time.Time, explicitEnd bool) (bool, error) {
 	var found bool
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		policyFilter := ""
@@ -1419,16 +1576,17 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 			policyFilter = " AND sp.id = $3::uuid"
 			args = append(args, policyID)
 		}
+		args, scheduleParam := calendarScheduleParam(args)
 		rows, err := tx.Query(ctx, `
 			SELECT s.id, s.start_on, s.paused_on,
 			       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 			       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-			       EXTRACT(EPOCH FROM sp.duration)
+			       EXTRACT(EPOCH FROM sp.duration), sp.schedule
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
 			  AND sp.target::TEXT = $2
-			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
+			  AND sp.schedule = ANY(`+scheduleParam+`)
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
 			FOR UPDATE OF s`, args...)
 		if err != nil {
@@ -1439,11 +1597,12 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 			startOn                                             time.Time
 			pausedOn                                            *time.Time
 			pauseSeconds, businessPauseSeconds, durationSeconds float64
+			schedule                                            string
 		}
 		var open []openRow
 		for rows.Next() {
 			var o openRow
-			if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds); err != nil {
+			if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds, &o.schedule); err != nil {
 				rows.Close()
 				return fmt.Errorf("complete business-day sla clock: scan: %w", err)
 			}
@@ -1453,7 +1612,6 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 			return fmt.Errorf("complete business-day sla clock: rows: %w", err)
 		}
 
-		now := time.Now().UTC()
 		for _, o := range open {
 			flatPause := time.Duration(o.pauseSeconds * float64(time.Second))
 			businessPause := time.Duration(o.businessPauseSeconds * float64(time.Second))
@@ -1461,11 +1619,11 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 				// An open pause segment at completion time -- finalize it
 				// into both totals, same as completedElapsedExpr's CASE does
 				// for the flat path.
-				flatPause += now.Sub(*o.pausedOn)
-				businessPause += businessdays.Elapsed(*o.pausedOn, now)
+				flatPause += nonNegative(now.Sub(*o.pausedOn))
+				businessPause += clockCalendar(o.schedule).Elapsed(*o.pausedOn, now)
 			}
 
-			elapsed := businessdays.Elapsed(o.startOn, now) - businessPause
+			elapsed := clockCalendar(o.schedule).Elapsed(o.startOn, now) - businessPause
 			if elapsed < 0 {
 				elapsed = 0
 			}
@@ -1481,7 +1639,7 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 
 			hasBreached := elapsed >= duration
 			if _, err := tx.Exec(ctx, `
-				UPDATE sla SET stage = 'ACHIEVED'::sla_stage_enum, end_on = NOW(), is_active = FALSE,
+				UPDATE sla SET stage = 'ACHIEVED'::sla_stage_enum, end_on = COALESCE($9::timestamptz, NOW()), is_active = FALSE,
 				    business_elapsed_percentage = $2,
 				    business_duration = $3::interval,
 				    remaining_business_duration = $4::interval,
@@ -1492,7 +1650,7 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 				    updated_on = NOW(), updated_by = $7
 				WHERE id = $1::uuid`,
 				o.id, pct, formatIntervalLiteral(elapsed), formatIntervalLiteral(remaining),
-				formatIntervalLiteral(flatPause), formatIntervalLiteral(businessPause), sqlActorLiteral, hasBreached,
+				formatIntervalLiteral(flatPause), formatIntervalLiteral(businessPause), sqlActorLiteral, hasBreached, endOnArg(now, explicitEnd),
 			); err != nil {
 				return fmt.Errorf("complete business-day sla clock: update: %w", err)
 			}
@@ -1602,7 +1760,7 @@ func (r *slaEngineRepo) setPaused(ctx context.Context, workItemID, target, polic
 	if ok && policyID != "" {
 		return true, nil
 	}
-	bdOK, err := r.setPausedBusinessDays(ctx, workItemID, target, policyID, paused)
+	bdOK, err := r.setPausedCalendar(ctx, workItemID, target, policyID, paused, time.Now().UTC())
 	return ok || bdOK, err
 }
 
@@ -1613,6 +1771,7 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 		policyFilter = " AND sp.id = $5::uuid"
 		args = append(args, policyID)
 	}
+	args, scheduleParam := calendarScheduleParam(args)
 	query := `
 		UPDATE sla s
 		SET stage = CASE WHEN $3 THEN 'PAUSED'::sla_stage_enum ELSE 'IN_PROGRESS'::sla_stage_enum END,
@@ -1641,7 +1800,7 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
 		  AND sp.target::TEXT = $2
-		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
+		  AND NOT (COALESCE(sp.schedule, '') = ANY(` + scheduleParam + `))
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
 
 	tag, err := r.db.Exec(ctx, query, args...)
@@ -1651,17 +1810,17 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 	return tag.RowsAffected() > 0, nil
 }
 
-// setPausedBusinessDays is SetPaused's 'WSO2 Business days' branch -- same
+// setPausedCalendar is SetPaused's 'WSO2 Business days' branch -- same
 // transition shape as setPausedFlat (pause freezes the live figures at the
 // pause instant and leaves them alone on every subsequent idempotent pause
 // call; resume accumulates this segment's real elapsed business time into
 // business_pause_duration/pause_duration and leaves the frozen figures
 // alone), computed with internal/businessdays.Elapsed instead of flat SQL
 // arithmetic.
-// setPausedBusinessDays locks and transitions EVERY open business-day row
+// setPausedCalendar locks and transitions EVERY open business-day row
 // matching (workItemID, target[, policyID]) -- same bulk reasoning as
-// completeClockBusinessDays above.
-func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, target, policyID string, paused bool) (bool, error) {
+// completeClockCalendar above.
+func (r *slaEngineRepo) setPausedCalendar(ctx context.Context, workItemID, target, policyID string, paused bool, now time.Time) (bool, error) {
 	var found bool
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		policyFilter := ""
@@ -1670,16 +1829,17 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 			policyFilter = " AND sp.id = $3::uuid"
 			args = append(args, policyID)
 		}
+		args, scheduleParam := calendarScheduleParam(args)
 		rows, err := tx.Query(ctx, `
 			SELECT s.id, s.start_on, s.paused_on,
 			       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 			       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-			       EXTRACT(EPOCH FROM sp.duration)
+			       EXTRACT(EPOCH FROM sp.duration), sp.schedule
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
 			  AND sp.target::TEXT = $2
-			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
+			  AND sp.schedule = ANY(`+scheduleParam+`)
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
 			FOR UPDATE OF s`, args...)
 		if err != nil {
@@ -1690,11 +1850,12 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 			startOn                                             time.Time
 			pausedOn                                            *time.Time
 			pauseSeconds, businessPauseSeconds, durationSeconds float64
+			schedule                                            string
 		}
 		var open []openRow
 		for rows.Next() {
 			var o openRow
-			if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds); err != nil {
+			if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds, &o.schedule); err != nil {
 				rows.Close()
 				return fmt.Errorf("set business-day sla clock paused: scan: %w", err)
 			}
@@ -1704,7 +1865,6 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 			return fmt.Errorf("set business-day sla clock paused: rows: %w", err)
 		}
 
-		now := time.Now().UTC()
 		for _, o := range open {
 			flatPause := time.Duration(o.pauseSeconds * float64(time.Second))
 			businessPause := time.Duration(o.businessPauseSeconds * float64(time.Second))
@@ -1726,7 +1886,7 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 				newPausedOn = &freeze
 				newFlatPause = flatPause
 				newBusinessPause = businessPause
-				elapsed := businessdays.Elapsed(o.startOn, freeze) - businessPause
+				elapsed := clockCalendar(o.schedule).Elapsed(o.startOn, freeze) - businessPause
 				if elapsed < 0 {
 					elapsed = 0
 				}
@@ -1747,8 +1907,8 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 				newFlatPause = flatPause
 				newBusinessPause = businessPause
 				if o.pausedOn != nil {
-					newFlatPause += now.Sub(*o.pausedOn)
-					newBusinessPause += businessdays.Elapsed(*o.pausedOn, now)
+					newFlatPause += nonNegative(now.Sub(*o.pausedOn))
+					newBusinessPause += clockCalendar(o.schedule).Elapsed(*o.pausedOn, now)
 				}
 				// business_elapsed_percentage/business_duration/
 				// remaining_business_duration are left untouched on resume --
@@ -1783,7 +1943,7 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 // formatIntervalOrNil is formatIntervalLiteral for an optional *time.Duration
 // -- nil passes through as a real SQL NULL so the UPDATE's own
 // COALESCE($n, column) keeps the column's existing value, used by
-// setPausedBusinessDays' resume branch (which must not touch these three
+// setPausedCalendar' resume branch (which must not touch these three
 // columns at all).
 func formatIntervalOrNil(d *time.Duration) any {
 	if d == nil {
@@ -1820,8 +1980,8 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 	// being recorded as such) -- completedElapsedExpr's flat wall-clock SQL
 	// can express that for a 24x7 clock directly, but a business-day
 	// calendar has no SQL formula, so those rows are read and updated
-	// row-by-row in Go (reviseClocksCancelBusinessDays), same as
-	// completeClockBusinessDays/setPausedBusinessDays already do.
+	// row-by-row in Go (reviseClocksCancelCalendar), same as
+	// completeClockCalendar/setPausedCalendar already do.
 	const flatCancelQuery = `
 		UPDATE sla s
 		SET stage = 'CANCELLED'::sla_stage_enum, is_active = FALSE, end_on = NOW(),
@@ -1838,7 +1998,7 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
+		  AND NOT (COALESCE(sp.schedule, '') = ANY($3::text[]))
 		  AND (
 		    (sp.target::TEXT = 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED'))
 		    OR (sp.target::TEXT != 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED', 'BREACHED'))
@@ -1846,13 +2006,13 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 
 	var cancelled int
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, flatCancelQuery, workItemID, sqlActorLiteral)
+		tag, err := tx.Exec(ctx, flatCancelQuery, workItemID, sqlActorLiteral, slacalendar.NonFlatSchedules())
 		if err != nil {
 			return fmt.Errorf("revise csm sla clocks: cancel active: %w", err)
 		}
 		cancelled = int(tag.RowsAffected())
 
-		bdCancelled, err := reviseClocksCancelBusinessDays(ctx, tx, workItemID)
+		bdCancelled, err := reviseClocksCancelCalendar(ctx, tx, workItemID)
 		if err != nil {
 			return fmt.Errorf("revise csm sla clocks: cancel active (business-day): %w", err)
 		}
@@ -1880,7 +2040,7 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 	return cancelled, nil
 }
 
-// reviseClocksCancelBusinessDays is ReviseClocks' 'WSO2 Business days'
+// reviseClocksCancelCalendar is ReviseClocks' 'WSO2 Business days'
 // branch -- same cancel-eligibility predicate as the flat cancel query above
 // (RESPONSE never cancels a BREACHED row; WORKAROUND/RESOLUTION do), just
 // computed with internal/businessdays.Elapsed, which a single bulk SQL
@@ -1891,26 +2051,26 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 //
 // Also freezes business_elapsed_percentage/business_duration/
 // remaining_business_duration at the real elapsed figure as of cancellation
-// -- a real, reported gap (see cancelClockBusinessDays' own doc comment for
+// -- a real, reported gap (see cancelClockCalendar' own doc comment for
 // the full reasoning, confirmed against a real case: a severity change's
 // own clock cancellation, the overwhelmingly common real trigger for this
 // path, left a clock that had genuinely run for several minutes displaying
 // 0% elapsed).
-func reviseClocksCancelBusinessDays(ctx context.Context, tx pgx.Tx, workItemID string) (int, error) {
+func reviseClocksCancelCalendar(ctx context.Context, tx pgx.Tx, workItemID string) (int, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT s.id, s.start_on, s.paused_on,
 		       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-		       EXTRACT(EPOCH FROM sp.duration)
+		       EXTRACT(EPOCH FROM sp.duration), sp.schedule
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid
-		  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
+		  AND sp.schedule = ANY($2::text[])
 		  AND (
 		    (sp.target::TEXT = 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED'))
 		    OR (sp.target::TEXT != 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED', 'BREACHED'))
 		  )
-		FOR UPDATE OF s`, workItemID)
+		FOR UPDATE OF s`, workItemID, slacalendar.NonFlatSchedules())
 	if err != nil {
 		return 0, fmt.Errorf("select: %w", err)
 	}
@@ -1919,11 +2079,12 @@ func reviseClocksCancelBusinessDays(ctx context.Context, tx pgx.Tx, workItemID s
 		startOn                                             time.Time
 		pausedOn                                            *time.Time
 		pauseSeconds, businessPauseSeconds, durationSeconds float64
+		schedule                                            string
 	}
 	var open []openRow
 	for rows.Next() {
 		var o openRow
-		if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds); err != nil {
+		if err := rows.Scan(&o.id, &o.startOn, &o.pausedOn, &o.pauseSeconds, &o.businessPauseSeconds, &o.durationSeconds, &o.schedule); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("scan: %w", err)
 		}
@@ -1939,12 +2100,12 @@ func reviseClocksCancelBusinessDays(ctx context.Context, tx pgx.Tx, workItemID s
 		businessPause := time.Duration(o.businessPauseSeconds * float64(time.Second))
 		if o.pausedOn != nil {
 			// An open pause segment at cancellation time -- finalize it
-			// into both totals, same as completeClockBusinessDays does.
+			// into both totals, same as completeClockCalendar does.
 			flatPause += now.Sub(*o.pausedOn)
-			businessPause += businessdays.Elapsed(*o.pausedOn, now)
+			businessPause += clockCalendar(o.schedule).Elapsed(*o.pausedOn, now)
 		}
 
-		elapsed := businessdays.Elapsed(o.startOn, now) - businessPause
+		elapsed := clockCalendar(o.schedule).Elapsed(o.startOn, now) - businessPause
 		if elapsed < 0 {
 			elapsed = 0
 		}

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/businessdays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacalendar"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacondition"
 )
 
@@ -63,11 +63,6 @@ type CaseSLAPauseRecalcReport struct {
 // writing back a value only off by clock-skew-sized rounding would just add
 // noise (an updated_on bump, an audit trail entry) for no real correction.
 const recalcPauseThresholdSeconds = 2
-
-// recalcScheduleWSO2BusinessDays must match repository's own (unexported)
-// slaScheduleWSO2BusinessDays exactly -- duplicated here because this
-// package has no existing copy of that constant to import.
-const recalcScheduleWSO2BusinessDays = "WSO2 Business days"
 
 // RecalculateCasePauseTotals reconstructs one case's own currently-active,
 // IN_PROGRESS clocks' pause history from the case's real state-change
@@ -198,7 +193,7 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 		}
 
 		result.NewPauseSeconds = pauseSeconds
-		businessDays := clock.Schedule == recalcScheduleWSO2BusinessDays
+		cal, businessDays := slacalendar.NonFlat(clock.Schedule)
 		needsUpdate := abs64(pauseSeconds-clock.PauseSeconds) > recalcPauseThresholdSeconds
 
 		var businessPauseArg *int64
@@ -213,7 +208,7 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 		if needsUpdate {
 			var writeErr error
 			if isPaused {
-				elapsedPercent, elapsedSeconds, remainingSeconds := frozenPausedSnapshot(clock, pauseSeconds, businessPauseSeconds, businessDays)
+				elapsedPercent, elapsedSeconds, remainingSeconds := frozenPausedSnapshot(clock, pauseSeconds, businessPauseSeconds, cal)
 				writeErr = s.repo.UpdateClockPausedSnapshot(ctx, caseID, clock.PolicyID, pauseSeconds, businessPauseArg, elapsedPercent, elapsedSeconds, remainingSeconds)
 			} else {
 				writeErr = s.repo.UpdateClockPauseTotals(ctx, caseID, clock.PolicyID, pauseSeconds, businessPauseArg)
@@ -300,15 +295,15 @@ func normalizeActivityState(label string) (string, bool) {
 // is only nil if the DB row itself is inconsistent (Stage == "PAUSED" with no
 // paused_on); that can't happen through the live engine's own write paths, so
 // this falls back to clock.StartOn rather than panicking.
-func frozenPausedSnapshot(clock repository.ActiveClockForRecalc, pauseSeconds, businessPauseSeconds int64, businessDays bool) (elapsedPercent float64, elapsedSeconds, remainingSeconds int64) {
+func frozenPausedSnapshot(clock repository.ActiveClockForRecalc, pauseSeconds, businessPauseSeconds int64, cal slacalendar.Calendar) (elapsedPercent float64, elapsedSeconds, remainingSeconds int64) {
 	pausedOn := clock.StartOn
 	if clock.PausedOn != nil {
 		pausedOn = *clock.PausedOn
 	}
 
 	var elapsed time.Duration
-	if businessDays {
-		elapsed = businessdays.Elapsed(clock.StartOn, pausedOn) - time.Duration(businessPauseSeconds)*time.Second
+	if cal != nil {
+		elapsed = cal.Elapsed(clock.StartOn, pausedOn) - time.Duration(businessPauseSeconds)*time.Second
 	} else {
 		elapsed = pausedOn.Sub(clock.StartOn) - time.Duration(pauseSeconds)*time.Second
 	}
@@ -397,7 +392,7 @@ func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents 
 		return 0, 0, false, "history shows this clock should already have stopped or been cancelled at its own start -- needs manual review"
 	}
 
-	businessDays := clock.Schedule == recalcScheduleWSO2BusinessDays
+	cal, businessDays := slacalendar.NonFlat(clock.Schedule)
 	var flatTotal, businessTotal time.Duration
 	lastEventTime := clock.StartOn
 
@@ -407,7 +402,7 @@ func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents 
 		}
 		flatTotal += to.Sub(from)
 		if businessDays {
-			businessTotal += businessdays.Elapsed(from, to)
+			businessTotal += cal.Elapsed(from, to)
 		}
 	}
 

@@ -865,6 +865,33 @@ both places.
   refusal every project would get stops the run before the first notice. The cost is one extra CSM
   write per notice.
 
+## Product issue reconcile
+
+`productissues.RunReconcile`, registered as **`product_issue_reconcile`** (default `0 1 * * *`, 06:30
+Colombo every day), drives entity-service's daily reconciliation of the product issues linked to GitHub
+(git internals): `POST /product-work-items/reconcile`, `{cursor, limit: 200}`, call after call from the
+start while the answer says `more`, following `nextCursor`. entity-service reads each product's tracking
+board, corrects the linked issues' title, labels, state and board status (writing the missed status
+changes as events), and refreshes the linked issues a board no longer lists; see its CLAUDE.md,
+"Product issues". This task decides nothing itself. **Off unless `PRODUCT_ISSUE_RECONCILE_ENABLED=true`**
+(exactly `true`), and it needs entity-service with `GIT_INTERNALS_ENABLED=true` and an engineering entity
+URL (the route is not registered otherwise: the run fails with a 404 and alerts), and this client's id in
+`M2M_CLIENT_IDS`.
+
+- A call that answers `retryAfterSeconds` (GitHub rate limit through the engineering entity): up to 900 s
+  is waited out (the wait respects the run's context) and the run continues from the returned cursor, at
+  most 3 waits a run. A longer wait, or a fourth, returns an error naming the board/cursor reached and the
+  items checked, so the run fails visibly and the retry and mail above apply. The per-call HTTP timeout is
+  2 minutes, above entity-service's default `REQUEST_TIMEOUT` of 60 s.
+- A run in which boards or issues failed (`failed` summed over the calls) returns an error (entity-service's
+  log names each one); retried after 4 hours and at most once a day (`MaxAttempts` 2), like the ACP tasks.
+  A call error, a call that makes no progress (`more` with a cursor that did not move) or more than 5,000
+  calls also fail the run.
+- Calls entity-service with the shared `OAUTH2_*` client through `acp/entity`, 2-minute timeout per call
+  (entity-service stops short of its own request deadline and answers with a cursor).
+- There is no backfill task: the one-off backfill of existing issues is an operator's tool (entity-service
+  `POST /product-work-items/backfill`, see its CLAUDE.md).
+
 ## ACP reopen check
 
 `acp.RunReopenCheck`, registered as **`acp_reopen_check`** (default `30 3 * * *`, 09:00 Colombo every
@@ -979,7 +1006,7 @@ reading the handlers' code and doc comments (a judgement, not a test):
 - **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
   daily limit); `incident_autoclose` (entity-service's row-locked re-check and per-call daily budget); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
   them; it is a real run, sending real notices and suspending, with the configured `ACP_*` settings);
-  `acp_reopen_check` (entity-service records each reopen); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
+  `acp_reopen_check` (entity-service records each reopen); `product_issue_reconcile` (writes only what differs from GitHub, deduplicated); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
   `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
   `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
   `rota_manual_reminder` (claims waiting requests, each reported once).
@@ -1268,6 +1295,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
+| `PRODUCT_ISSUE_RECONCILE_ENABLED` | No (default `false`) | Registers `product_issue_reconcile`, entity-service's daily reconciliation of linked product issues with GitHub; needs entity-service with `GIT_INTERNALS_ENABLED=true` — see "Product issue reconcile" above |
 | `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |

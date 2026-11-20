@@ -17,32 +17,35 @@
 import { describe, expect, it } from "vitest";
 import { githubIssueCaseTags } from "./githubIssueCaseTags";
 
+const OFF = { serverManagesIssueTags: false };
+const ON = { serverManagesIssueTags: true };
+
 describe("githubIssueCaseTags", () => {
   it("tags the case s_dip, the tag the case filters exclude on, when the issue is not a patch", () => {
-    expect(githubIssueCaseTags({ reason: "default" })).toEqual(["s_dip"]);
-    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Discussion" })).toEqual([
+    expect(githubIssueCaseTags({ reason: "default" }, OFF)).toEqual(["s_dip"]);
+    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Discussion" }, OFF)).toEqual([
       "s_dip",
     ]);
   });
 
   it("tags the case patch, and not s_dip, for a patch issue", () => {
-    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Patch" })).toEqual([
+    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Patch" }, OFF)).toEqual([
       "patch",
     ]);
-    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: " Type/Patch " })).toEqual([
+    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: " Type/Patch " }, OFF)).toEqual([
       "patch",
     ]);
   });
 
   it("adds the regression and migration tags to a patch after patch, in the same order", () => {
     expect(
-      githubIssueCaseTags({ reason: "migration", regression: true, issueTypeLabel: "Type/Patch" }),
+      githubIssueCaseTags({ reason: "migration", regression: true, issueTypeLabel: "Type/Patch" }, OFF),
     ).toEqual(["patch", "s_rg", "migration"]);
   });
 
   it("does not match a patch type by a partial or differently cased name", () => {
     for (const issueTypeLabel of ["Type/patch", "patch", "Type/Patch-ish", ""]) {
-      expect(githubIssueCaseTags({ reason: "default", issueTypeLabel })).toEqual(["s_dip"]);
+      expect(githubIssueCaseTags({ reason: "default", issueTypeLabel }, OFF)).toEqual(["s_dip"]);
     }
   });
 
@@ -52,28 +55,28 @@ describe("githubIssueCaseTags", () => {
       { reason: "migration" as const, regression: true },
       { reason: "rd_ticket" as const },
     ]) {
-      expect(githubIssueCaseTags(payload)).not.toContain("s_dp");
+      expect(githubIssueCaseTags(payload, OFF)).not.toContain("s_dp");
     }
   });
 
   it("adds s_rg for a regression", () => {
-    expect(githubIssueCaseTags({ reason: "default", regression: true })).toEqual([
+    expect(githubIssueCaseTags({ reason: "default", regression: true }, OFF)).toEqual([
       "s_dip",
       "s_rg",
     ]);
   });
 
   it("does not add s_rg when regression is false or unset", () => {
-    expect(githubIssueCaseTags({ reason: "default", regression: false })).toEqual(["s_dip"]);
-    expect(githubIssueCaseTags({ reason: "default" })).toEqual(["s_dip"]);
+    expect(githubIssueCaseTags({ reason: "default", regression: false }, OFF)).toEqual(["s_dip"]);
+    expect(githubIssueCaseTags({ reason: "default" }, OFF)).toEqual(["s_dip"]);
   });
 
   it("adds migration for a migration issue", () => {
-    expect(githubIssueCaseTags({ reason: "migration" })).toEqual(["s_dip", "migration"]);
+    expect(githubIssueCaseTags({ reason: "migration" }, OFF)).toEqual(["s_dip", "migration"]);
   });
 
   it("adds both extras in a stable order when both apply", () => {
-    expect(githubIssueCaseTags({ reason: "migration", regression: true })).toEqual([
+    expect(githubIssueCaseTags({ reason: "migration", regression: true }, OFF)).toEqual([
       "s_dip",
       "s_rg",
       "migration",
@@ -81,6 +84,29 @@ describe("githubIssueCaseTags", () => {
   });
 
   it("adds no migration tag for an R&D ticket", () => {
-    expect(githubIssueCaseTags({ reason: "rd_ticket" })).toEqual(["s_dip"]);
+    expect(githubIssueCaseTags({ reason: "rd_ticket" }, OFF)).toEqual(["s_dip"]);
+  });
+
+  describe("when the server manages s_dip and patch", () => {
+    it("adds no s_dip for a discussion and no patch for a patch issue", () => {
+      expect(githubIssueCaseTags({ reason: "default" }, ON)).toEqual([]);
+      expect(
+        githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Discussion" }, ON),
+      ).toEqual([]);
+      expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Patch" }, ON)).toEqual(
+        [],
+      );
+    });
+
+    it("still adds s_rg and migration", () => {
+      expect(
+        githubIssueCaseTags(
+          { reason: "migration", regression: true, issueTypeLabel: "Type/Patch" },
+          ON,
+        ),
+      ).toEqual(["s_rg", "migration"]);
+      expect(githubIssueCaseTags({ reason: "default", regression: true }, ON)).toEqual(["s_rg"]);
+      expect(githubIssueCaseTags({ reason: "migration" }, ON)).toEqual(["migration"]);
+    });
   });
 });

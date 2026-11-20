@@ -1,0 +1,105 @@
+{
+  "delivery_id": "dacd45f0-e246-11f1-82f9-0c5016da8f72",
+  "event": "projects_v2_item",
+  "action": "edited",
+  "delivered_at": "2026-11-17T05:22:18.191Z",
+  "request_headers": {
+    "Accept": "*/*",
+    "Content-Type": "application/json",
+    "User-Agent": "GitHub-Hookshot/a20120d",
+    "X-Github-Delivery": "dacd45f0-e246-11f1-82f9-0c5016da8f72",
+    "X-Github-Event": "projects_v2_item",
+    "X-Github-Hook-Id": "712955606",
+    "X-Github-Hook-Installation-Target-Id": "357668845",
+    "X-Github-Hook-Installation-Target-Type": "organization"
+  },
+  "payload": {
+    "action": "edited",
+    "projects_v2_item": {
+      "id": 307799589,
+      "node_id": "PVTI_lADOFVGX7c4Br9OpzhJYpiU",
+      "project_node_id": "PVT_kwDOFVGX7c4Br9Op",
+      "content_node_id": "I_kwDOVxO0As8AAAABf7upuQ",
+      "content_type": "Issue",
+      "creator": {
+        "login": "github-project-automation[bot]",
+        "id": 113052574,
+        "node_id": "BOT_kgDOBr0Lng",
+        "avatar_url": "https://avatars.githubusercontent.com/in/235829?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-project-automation%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-project-automation",
+        "followers_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-project-automation%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "created_at": "2026-11-17T05:20:25Z",
+      "updated_at": "2026-11-17T05:22:17Z",
+      "archived_at": null
+    },
+    "changes": {
+      "field_value": {
+        "field_node_id": "PVTSSF_lADOFVGX7c4Br9OpzhqNgtE",
+        "field_type": "single_select",
+        "field_name": "Status",
+        "project_number": 1,
+        "from": {
+          "id": "09b07dd5",
+          "name": "In Progress",
+          "color": "YELLOW",
+          "description": ""
+        },
+        "to": {
+          "id": "9dffc45c",
+          "name": "Resolved",
+          "color": "ORANGE",
+          "description": ""
+        }
+      }
+    },
+    "organization": {
+      "login": "example-org",
+      "id": 357668845,
+      "node_id": "O_kgDOFVGX7Q",
+      "url": "https://api.github.com/orgs/example-org",
+      "repos_url": "https://api.github.com/orgs/example-org/repos",
+      "events_url": "https://api.github.com/orgs/example-org/events",
+      "hooks_url": "https://api.github.com/orgs/example-org/hooks",
+      "issues_url": "https://api.github.com/orgs/example-org/issues",
+      "members_url": "https://api.github.com/orgs/example-org/members{/member}",
+      "public_members_url": "https://api.github.com/orgs/example-org/public_members{/member}",
+      "avatar_url": "https://avatars.githubusercontent.com/u/357668845?v=4",
+      "description": null
+    },
+    "sender": {
+      "login": "test-user",
+      "id": 36051512,
+      "node_id": "MDQ6VXNlcjM2MDUxNTEy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/36051512?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/test-user",
+      "html_url": "https://github.com/test-user",
+      "followers_url": "https://api.github.com/users/test-user/followers",
+      "following_url": "https://api.github.com/users/test-user/following{/other_user}",
+      "gists_url": "https://api.github.com/users/test-user/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/test-user/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/test-user/subscriptions",
+      "organizations_url": "https://api.github.com/users/test-user/orgs",
+      "repos_url": "https://api.github.com/users/test-user/repos",
+      "events_url": "https://api.github.com/users/test-user/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/test-user/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    }
+  }
+}

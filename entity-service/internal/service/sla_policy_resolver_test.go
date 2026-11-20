@@ -45,6 +45,10 @@ func (f *fakeCandidatePolicyRepo) ListCandidatePolicies(_ context.Context, targe
 	return f.byTarget[target], nil
 }
 
+func (f *fakeCandidatePolicyRepo) ListFamilyCandidatePolicies(context.Context, string, string) ([]repository.SLAPolicyRef, error) {
+	panic("not implemented")
+}
+
 func (f *fakeCandidatePolicyRepo) FindPolicyByName(context.Context, string, string) (repository.SLAPolicyRef, error) {
 	panic("not implemented")
 }
@@ -239,4 +243,17 @@ func TestSLAPolicyResolver_Resolve_BothMatchesReturned(t *testing.T) {
 	if got1[0].ID != "a-hosting-qt" || got1[1].ID != "b-query-open-source" {
 		t.Errorf("resolve() = [%q, %q], want [a-hosting-qt, b-query-open-source] (ListCandidatePolicies' own id order)", got1[0].ID, got1[1].ID)
 	}
+}
+
+func (f *fakeCandidatePolicyRepo) CancelClockByPolicyAt(context.Context, string, string, string, time.Time) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) CompleteClockByPolicyAt(context.Context, string, string, string, time.Time) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) SetPausedByPolicyAt(context.Context, string, string, string, bool, time.Time) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) RegisterWorkItemClock(context.Context, string, repository.SLAPolicyRef, time.Time) (bool, error) {
+	panic("not implemented")
 }

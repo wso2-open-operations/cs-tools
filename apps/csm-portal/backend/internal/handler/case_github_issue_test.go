@@ -173,7 +173,7 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		if c.body != wantBody {
 			t.Errorf("body = %q, want %q", c.body, wantBody)
 		}
-		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/High(P2)", "Require/Hotfix", "regression", "Affected/Migration", "Onboarding/affected"}; !slices.Equal(c.labels, want) {
+		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/High(P2)", "Require/Hotfix", "regression", "Affected/Migration", "Affected/Onboarding"}; !slices.Equal(c.labels, want) {
 			t.Errorf("labels = %v, want %v", c.labels, want)
 		}
 	})
@@ -183,7 +183,7 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Patch","priorityLevel":"Priority/High","regression":true}`)
 		post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Critical"}`)
 		post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Medium(P3)"}`)
-		if want := []string{"Origin/CS", "Alpha", "Type/Patch", "patch", "regression"}; !slices.Equal(eng.calls[0].labels, want) {
+		if want := []string{"Origin/CS", "Alpha", "Type/Patch", "regression"}; !slices.Equal(eng.calls[0].labels, want) {
 			t.Errorf("labels = %v, want %v", eng.calls[0].labels, want)
 		}
 		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/Critical(P1)"}; !slices.Equal(eng.calls[1].labels, want) {
@@ -590,7 +590,7 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 	t.Run("a priority string in the update level is not applied as a label", func(t *testing.T) {
 		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
 		post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Patch","updateLevel":"Priority/Critical"}`)
-		if want := []string{"Origin/CS", "Alpha", "Type/Patch", "patch"}; !slices.Equal(eng.calls[0].labels, want) {
+		if want := []string{"Origin/CS", "Alpha", "Type/Patch"}; !slices.Equal(eng.calls[0].labels, want) {
 			t.Errorf("labels = %v, want %v", eng.calls[0].labels, want)
 		}
 	})

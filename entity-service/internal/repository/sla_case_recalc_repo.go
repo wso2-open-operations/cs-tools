@@ -60,7 +60,7 @@ type ActiveClockForRecalc struct {
 	// clock's own currently-open pause segment began, and so the instant
 	// its frozen BusinessElapsedPercent/BusinessDuration/
 	// RemainingBusinessDuration were computed as of (see setPausedFlat/
-	// setPausedBusinessDays' own freeze formula, which
+	// setPausedCalendar' own freeze formula, which
 	// RecalculateCasePauseTotals mirrors when correcting a PAUSED clock).
 	PausedOn *time.Time
 	// DurationSeconds is this clock's own bound policy's resolved duration
@@ -170,7 +170,7 @@ func (r *slaEngineRepo) UpdateClockPauseTotals(ctx context.Context, workItemID, 
 // totals -- see that field's own doc comment for why a PAUSED clock's
 // correction can't touch pause_duration/business_pause_duration alone: all
 // five columns were written together, frozen at the moment this clock
-// paused, from the exact same formula setPausedFlat/setPausedBusinessDays
+// paused, from the exact same formula setPausedFlat/setPausedCalendar
 // already use (see those functions' own doc comments) -- correcting the
 // pause total without also recomputing what it froze would leave the row
 // disagreeing with itself. Scoped to the active, PAUSED row -- see

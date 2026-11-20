@@ -25,6 +25,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacalendar"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacondition"
 )
 
@@ -379,25 +380,41 @@ func slaPolicyConditionText(candidate repository.SLAPolicyRef, raw string) strin
 // resolveApplicablePolicies' own doc comment in sla_engine_service.go for
 // why callers must tell the two apart.
 func (r *slaPolicyResolver) resolve(ctx context.Context, target string, facts repository.CaseFacts) ([]repository.SLAPolicyRef, error) {
-	candidates, err := r.repo.ListCandidatePolicies(ctx, target)
+	return r.resolveSubject(ctx, target, caseSLASubject{facts: facts})
+}
+
+// resolveSubject is the one candidate loop behind resolve and resolveIncident:
+// it classifies candidates with subj.IsPolicy (the policy family), translates
+// condition text with subj.ConditionText and evaluates start conditions against
+// subj.Facts(). The log messages name subj.Kind() ("case"/"incident").
+func (r *slaPolicyResolver) resolveSubject(ctx context.Context, target string, subj slaSubject) ([]repository.SLAPolicyRef, error) {
+	family := subj.Family()
+	var candidates []repository.SLAPolicyRef
+	var err error
+	if family == "" {
+		candidates, err = r.repo.ListCandidatePolicies(ctx, target)
+	} else {
+		candidates, err = r.repo.ListFamilyCandidatePolicies(ctx, target, family)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "sla policy resolver: list candidate policies failed", "target", target, "err", err)
 		return nil, err
 	}
 
-	f := caseConditionFacts{c: facts}
+	kind := subj.Kind()
+	f := subj.Facts()
 	var matches []repository.SLAPolicyRef
-	var skippedNonCase []string
+	var skipped []string
 	for _, candidate := range candidates {
-		if !isCasePolicy(candidate.StartCondition, candidate.StopCondition, candidate.PauseCondition, candidate.ResumeCondition, candidate.CancelCondition) {
-			skippedNonCase = append(skippedNonCase, candidate.Name)
+		if family == "" && !subj.IsPolicy(candidate.StartCondition, candidate.StopCondition, candidate.PauseCondition, candidate.ResumeCondition, candidate.CancelCondition) {
+			skipped = append(skipped, candidate.Name)
 			continue
 		}
-		if candidate.Schedule != "" && candidate.Schedule != "24 x 7" && candidate.Schedule != slaScheduleWSO2BusinessDaysLabel {
+		if _, known := slacalendar.For(candidate.Schedule); !known {
 			slog.WarnContext(ctx, "sla policy resolver: unsupported schedule, evaluating with flat wall-clock time anyway",
 				"policy", candidate.Name, "schedule", candidate.Schedule)
 		}
-		startCondition := slaPolicyConditionText(candidate, candidate.StartCondition)
+		startCondition := subj.ConditionText(candidate, candidate.StartCondition)
 		parsed := slacondition.Parse(startCondition)
 		// A clause that fails closed with no visible trace is exactly how a
 		// translation gap (an un-mapped raw value, a field the translator
@@ -411,20 +428,26 @@ func (r *slaPolicyResolver) resolve(ctx context.Context, target string, facts re
 			matches = append(matches, candidate)
 		}
 	}
-	if len(skippedNonCase) > 0 {
-		slog.DebugContext(ctx, "sla policy resolver: skipped non-case policy candidates", "target", target, "skipped", skippedNonCase)
+	if len(skipped) > 0 {
+		slog.DebugContext(ctx, "sla policy resolver: skipped non-"+kind+" policy candidates", "target", target, "skipped", skipped)
 	}
 
 	switch len(matches) {
 	case 0:
-		slog.InfoContext(ctx, "sla policy resolver: no case policy matched", "target", target)
+		if family != "" && len(candidates) == 0 {
+			// A family with no policy at all for this target (a product issue has no
+			// RESPONSE or WORKAROUND policy): not worth an info line per resolve.
+			slog.DebugContext(ctx, "sla policy resolver: no "+kind+" policy matched", "target", target)
+		} else {
+			slog.InfoContext(ctx, "sla policy resolver: no "+kind+" policy matched", "target", target)
+		}
 	case 1:
 	default:
 		names := make([]string, len(matches))
 		for i, m := range matches {
 			names[i] = m.Name
 		}
-		slog.InfoContext(ctx, "sla policy resolver: more than one policy matched the same case, registering/evaluating each independently",
+		slog.InfoContext(ctx, "sla policy resolver: more than one policy matched the same "+kind+", registering/evaluating each independently",
 			"target", target, "matches", names)
 	}
 	return matches, nil
@@ -449,55 +472,5 @@ func slaIncidentPolicyConditionText(candidate repository.SLAPolicyRef, raw strin
 // for the "more than one match, no fallback duration, error vs. no-match"
 // semantics, identical here.
 func (r *slaPolicyResolver) resolveIncident(ctx context.Context, target string, facts repository.IncidentFacts) ([]repository.SLAPolicyRef, error) {
-	candidates, err := r.repo.ListCandidatePolicies(ctx, target)
-	if err != nil {
-		slog.ErrorContext(ctx, "sla policy resolver: list candidate policies failed", "target", target, "err", err)
-		return nil, err
-	}
-
-	f := incidentConditionFacts{i: facts}
-	var matches []repository.SLAPolicyRef
-	var skippedNonIncident []string
-	for _, candidate := range candidates {
-		if !isIncidentPolicy(candidate.StartCondition, candidate.StopCondition, candidate.PauseCondition, candidate.ResumeCondition, candidate.CancelCondition) {
-			skippedNonIncident = append(skippedNonIncident, candidate.Name)
-			continue
-		}
-		if candidate.Schedule != "" && candidate.Schedule != "24 x 7" && candidate.Schedule != slaScheduleWSO2BusinessDaysLabel {
-			slog.WarnContext(ctx, "sla policy resolver: unsupported schedule, evaluating with flat wall-clock time anyway",
-				"policy", candidate.Name, "schedule", candidate.Schedule)
-		}
-		startCondition := slaIncidentPolicyConditionText(candidate, candidate.StartCondition)
-		parsed := slacondition.Parse(startCondition)
-		if unknown := parsed.UnknownClauses(); len(unknown) > 0 {
-			slog.WarnContext(ctx, "sla policy resolver: start condition has unknown/untranslated clauses, they evaluate false",
-				"policy", candidate.Name, "target", target, "unknownClauses", unknown)
-		}
-		if parsed.Evaluate(f) {
-			matches = append(matches, candidate)
-		}
-	}
-	if len(skippedNonIncident) > 0 {
-		slog.DebugContext(ctx, "sla policy resolver: skipped non-incident policy candidates", "target", target, "skipped", skippedNonIncident)
-	}
-
-	switch len(matches) {
-	case 0:
-		slog.InfoContext(ctx, "sla policy resolver: no incident policy matched", "target", target)
-	case 1:
-	default:
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.Name
-		}
-		slog.InfoContext(ctx, "sla policy resolver: more than one policy matched the same incident, registering/evaluating each independently",
-			"target", target, "matches", names)
-	}
-	return matches, nil
+	return r.resolveSubject(ctx, target, incidentSLASubject{facts: facts})
 }
-
-// slaScheduleWSO2BusinessDaysLabel mirrors
-// repository.slaScheduleWSO2BusinessDays (unexported in that package) --
-// kept as a separate literal here rather than exporting that constant
-// purely for one string comparison in a warning log.
-const slaScheduleWSO2BusinessDaysLabel = "WSO2 Business days"

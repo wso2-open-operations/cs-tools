@@ -29,6 +29,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/engineeringentity"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
@@ -93,6 +94,25 @@ func main() {
 			go worker.Run(githubCtx)
 			log.Printf("github outbound worker enabled (every %s)", cfg.GithubOutboundInterval)
 		}
+	}
+
+	// Git internals write-back: delivers the portal's queued actions on product issues
+	// (comment, move to WOW, close) to GitHub through the engineering entity. Same
+	// predicate as the routes that queue them (cfg.GitInternalsServed), so with the
+	// flag off the worker does not exist.
+	if cfg.GitInternalsServed(pool != nil) {
+		commandWorker := service.NewProductIssueCommandWorker(
+			repository.NewGitHubCommandRepository(repository.NewScoped(pool)),
+			engineeringentity.New(cfg.EngineeringEntityBaseURL, engineeringentity.ClientCredentialsConfig{
+				TokenURL:     cfg.EngineeringEntityTokenURL,
+				ClientID:     cfg.EngineeringEntityClientID,
+				ClientSecret: cfg.EngineeringEntityClientSecret,
+				Scopes:       cfg.EngineeringEntityScopes,
+			}),
+			cfg.GitInternalsCommandInterval,
+		)
+		go commandWorker.Run(githubCtx)
+		log.Printf("git internals write-back worker enabled (every %s)", cfg.GitInternalsCommandInterval)
 	}
 
 	// CSM-native SLA engine recompute worker: removed. It used to rewrite

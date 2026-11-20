@@ -7308,7 +7308,14 @@ paths:
     post:
       summary: Create a GitHub issue from a case.
       description: |
-        By default the request is forwarded to the entity service (ServiceNow data source only).
+        With `GIT_INTERNALS_ENABLED=true` the request is forwarded to the entity service's
+        product-work-items endpoint, which builds the issue body and labels, writes the work note
+        and, for a Type/Patch issue, the `patch` case tag. The response then also carries `kind`
+        (`PRODUCT_ISSUE` or `UNTRACKED_PATCH`) and `workItem` (null for a patch), and a replay of
+        an earlier identical request answers 201 as well. A 400 or 409 carries the reason in
+        `message`.
+
+        Otherwise, by default the request is forwarded to the entity service (ServiceNow data source only).
         When the backend is configured with an engineering entity service, the issue is filed
         through it. The repository and product label are resolved from the case product via
         product_repo_mapping (`GET /products/github-repo`). A product with no mapping returns
@@ -7318,6 +7325,17 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: |
+            Only used when `GIT_INTERNALS_ENABLED=true`: 1 to 200 printable characters naming this
+            request. Repeating the request with the same key never files a second issue. When
+            absent, the backend generates a new key per request.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
         - name: id
           in: path
           required: true
@@ -7370,6 +7388,711 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/product-work-items:
+    get:
+      summary: List the product issues linked to a case.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. Untracked patches (Type/Patch issues) are not listed.
+        Every issue carries `sla` (always present) and `nonStandardColumn`. `sla` has `state` (`NONE` no clock: no priority or not measured, numbers 0 and `pausedSince`, `policyName`, `schedule` null; `OK`; `AT_RISK` at 75% or more consumed; `PAUSED` waiting on CS, the clock is paused; `MET`; `BREACHED`), `budgetSeconds`, `consumedSeconds`, `remainingSeconds`, `percentage`, `running`, `pausedSince`, `priority`, `policyName` and `schedule`. `nonStandardColumn` is true when the issue sits in a board column outside the standard set (`boardStatus` OTHER, the column name in `boardStatusRaw`).
+      operationId: listCaseProductWorkItems
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The linked product issues, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/product-work-items/links:
+    post:
+      summary: Link a product issue to a case.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body gives exactly one of `workItemId`, or `owner`, `repository` and
+        `issueNumber`. Answers 200 for a created or an already existing link. A 409 carries
+        `errorCode` `already_linked` or `request_in_progress` with the reason in `message`.
+      operationId: linkCaseProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: The product issue summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/product-work-items/{workItemId}/link:
+    delete:
+      summary: Unlink a product issue from a case.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The product issue then appears among the unmatched issues of
+        POST /product-work-items/search.
+      operationId: unlinkCaseProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+        - name: workItemId
+          in: path
+          required: true
+          description: UUID of the product issue work item.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Unlinked. No response body.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/{id}:
+    get:
+      summary: Get one product issue with its conversation and status history.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. Raw base64 inline images in the conversation are redacted for a caller
+        without the attachment download permission.
+        The issue carries `sla` and `nonStandardColumn` as in `GET /cases/{id}/product-work-items`.
+      operationId: getProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the product issue work item.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/search:
+    post:
+      summary: Search product issues.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is one JSON object of filters (it may be empty); the entity
+        service validates them.
+
+        Filters (under `filters`, with `pagination` `limit` and `offset`): `boardStatuses` (array of normalised board statuses, for example `["WAITING_ON_CS"]`); `mine` (boolean: issues the signed-in user opened, or whose case is assigned to them; `true` without a resolvable user is a 400); `sort` (`created`, the default and newest first; `pausedSince`, oldest pause first and the default when `mine` is true; `slaPercentage`, highest first). Each returned issue carries `sla` and `nonStandardColumn` as in `GET /cases/{id}/product-work-items`.
+      operationId: searchProductWorkItems
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: A page of product issues, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/{id}/comments:
+    post:
+      summary: Add a portal comment to a product issue.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is `{"body":"text"}` (1 to 60000 characters after trimming). Answers `{comment, command}`. 409 `link_inactive`. Stored issue state is not changed by this call; it changes when GitHub confirms. A 409 carries the reason in `message` and its stable name in `errorCode`.
+      operationId: commentProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the product issue.
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional, 1 to 200 printable characters. A repeat with the same key on the same item returns the first command (200 instead of 202).
+          schema:
+            type: string
+            maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: A repeat of an earlier request with the same Idempotency-Key; the first result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "202":
+          description: Accepted. The command is queued for delivery to GitHub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/{id}/board-status:
+    post:
+      summary: Move a product issue from Waiting on CS to Waiting on Product Team.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is `{"status":"WAITING_ON_PRODUCT_TEAM"}`; any other value is a 400 `unsupported_status`. Answers `{command}`. 409 `not_waiting_on_cs`, `command_pending`, `link_inactive` or `no_tracking_board`. Stored issue state is not changed by this call; it changes when GitHub confirms. A 409 carries the reason in `message` and its stable name in `errorCode`.
+      operationId: setProductWorkItemBoardStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the product issue.
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional, 1 to 200 printable characters. A repeat with the same key on the same item returns the first command (200 instead of 202).
+          schema:
+            type: string
+            maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: A repeat of an earlier request with the same Idempotency-Key; the first result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "202":
+          description: Accepted. The command is queued for delivery to GitHub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/{id}/close:
+    post:
+      summary: Close a product issue on GitHub.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is `{}` (may be omitted). Answers `{command}`. 409 `already_closed`, `command_pending` or `link_inactive`. Stored issue state is not changed by this call; it changes when GitHub confirms. A 409 carries the reason in `message` and its stable name in `errorCode`.
+      operationId: closeProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the product issue.
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional, 1 to 200 printable characters. A repeat with the same key on the same item returns the first command (200 instead of 202).
+          schema:
+            type: string
+            maxLength: 200
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: A repeat of an earlier request with the same Idempotency-Key; the first result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "202":
+          description: Accepted. The command is queued for delivery to GitHub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/{id}/commands/{commandId}/retry:
+    post:
+      summary: Retry a failed write-back command.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is `{}` (may be omitted). Answers `{command}`. 409 `not_failed`, or the refusals of the original action. Stored issue state is not changed by this call; it changes when GitHub confirms. A 409 carries the reason in `message` and its stable name in `errorCode`.
+      operationId: retryProductWorkItemCommand
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the product issue.
+          schema:
+            type: string
+            format: uuid
+        - name: commandId
+          in: path
+          required: true
+          description: UUID of the failed command.
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional, 1 to 200 printable characters. A repeat with the same key on the same item returns the first command (200 instead of 202).
+          schema:
+            type: string
+            maxLength: 200
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: A repeat of an earlier request with the same Idempotency-Key; the first result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "202":
+          description: Accepted. The command is queued for delivery to GitHub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
           content:
             application/json:
               schema:
@@ -31195,6 +31918,11 @@ components:
           type: string
           description: GitHub priority label for a Discussion. Sent as Priority/Critical(P1), Priority/High(P2), or Priority/Medium(P3). Bare Priority/Critical (etc.) is rewritten to the (Pn) form. Discussion also gets Type/Incident.
 
+    ProductWorkItemPassthrough:
+      type: object
+      additionalProperties: true
+      description: A JSON object passed through unchanged from the entity service's product work item routes (see its openapi.yaml for the fields).
+
     CreateCaseGithubIssueResponse:
       type: object
       properties:
@@ -31213,6 +31941,20 @@ components:
             repo:
               type: string
               description: Repository where the issue was created. "owner/repo" when the backend files the issue through the engineering entity service.
+        kind:
+          type: string
+          enum: [PRODUCT_ISSUE, UNTRACKED_PATCH]
+          description: Present only with GIT_INTERNALS_ENABLED=true.
+        workItem:
+          type: object
+          nullable: true
+          description: The registered product issue (`id`, `number`); null for an untracked patch. Present only with GIT_INTERNALS_ENABLED=true.
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
 
     ConversationMessage:
       type: object
