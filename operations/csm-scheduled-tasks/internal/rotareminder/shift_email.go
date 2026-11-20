@@ -111,11 +111,14 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
 	subject := fmt.Sprintf("[%s] %s – %s (%s)", cfg.Family, title, date, when)
+	// The rota admins are copied on every weekday reminder, the one with the
+	// invitation included (Cc, never a guest of the event), so they see who
+	// was told and can add or remove people afterwards.
 	if cfg.invitesFor(w.base) {
 		// It carries the invitation: only the invitation copies see it.
-		return finishCopied(cfg, to, cfg.InviteCopy, subject, data), true
+		return finishCopied(cfg, to, append(append([]string{}, cfg.InviteCopy...), cfg.AdminCopy...), subject, data), true
 	}
-	return finish(cfg, to, subject, data), true
+	return finishCopied(cfg, to, append(append([]string{}, cfg.Copy...), cfg.AdminCopy...), subject, data), true
 }
 
 // buildReminderCopy is the copy of a weekday window's reminder for cfg.Copy
@@ -134,7 +137,9 @@ func buildReminderCopy(cfg Config, w *window, today time.Time) (shiftEmail, bool
 	if !ok {
 		return shiftEmail{}, false
 	}
-	to := without(cfg.Copy, append(append([]string{}, email.to...), cfg.InviteCopy...))
+	// Nobody already on the invitation email gets the copy too: its people,
+	// the invitation copies and the rota admins.
+	to := without(cfg.Copy, append(append(append([]string{}, email.to...), cfg.InviteCopy...), cfg.AdminCopy...))
 	if len(to) == 0 {
 		return shiftEmail{}, false
 	}
@@ -577,17 +582,7 @@ func buildCancelEmail(cfg Config, inv Invite, emails []string, stamp time.Time) 
 // finish marking the weekend. final is Friday's: the reminder has already gone
 // out with what was marked.
 func buildAdminEmail(cfg Config, admins []teamschedule.RotaAdmin, days []time.Time, gaps []gap, final bool) (shiftEmail, bool) {
-	var to, named []string
-	seen := map[string]bool{}
-	for _, a := range admins {
-		addr := strings.TrimSpace(a.Email)
-		if addr == "" || seen[strings.ToLower(addr)] {
-			continue
-		}
-		seen[strings.ToLower(addr)] = true
-		to = append(to, addr)
-		named = append(named, a.Name)
-	}
+	to, named := adminAddresses(admins)
 	if len(to) == 0 {
 		return shiftEmail{}, false
 	}
@@ -613,6 +608,51 @@ func buildAdminEmail(cfg Config, admins []teamschedule.RotaAdmin, days []time.Ti
 		data.Rows = append(data.Rows, []string{g.day.Format("Monday, 2 January"), windowTitle(cfg, g.base), fmt.Sprint(g.have), fmt.Sprint(g.need)})
 	}
 	subject := fmt.Sprintf("[%s] Action needed: the weekend rota for %s is not complete", cfg.Family, when)
+	return finish(cfg, to, subject, data), true
+}
+
+// adminAddresses is the distinct addresses of admins, and their names, in
+// order; an admin with no address is left out.
+func adminAddresses(admins []teamschedule.RotaAdmin) (to, named []string) {
+	seen := map[string]bool{}
+	for _, a := range admins {
+		addr := strings.TrimSpace(a.Email)
+		if addr == "" || seen[strings.ToLower(addr)] {
+			continue
+		}
+		seen[strings.ToLower(addr)] = true
+		to = append(to, addr)
+		named = append(named, a.Name)
+	}
+	return to, named
+}
+
+// buildMarkCheckEmail writes the email that asks the family's rota admins,
+// the evening before, to finish marking a weekday's rotations (WeekdayMarkCheck).
+// Unlike the weekend's, nothing waits for it: the reminders go out the next
+// morning to whoever is marked by then, copied to the rota admins.
+func buildMarkCheckEmail(cfg Config, admins []teamschedule.RotaAdmin, reminderDay, day time.Time, gaps []gap) (shiftEmail, bool) {
+	to, named := adminAddresses(admins)
+	if len(to) == 0 {
+		return shiftEmail{}, false
+	}
+	date := day.Format("Monday, 2 January")
+	data := notify.RotaReminderData{
+		Greeting: greeting(named),
+		// The reminder's own date, not "tomorrow": a retry after midnight
+		// would otherwise name the wrong day.
+		Intro: fmt.Sprintf("The %s weekday rota for %s is not fully marked in the Team Schedule. The rotation reminders for that day "+
+			"go out on %s at 09:00 IST, to the people marked by then.", cfg.Family, date, reminderDay.Format("Monday, 2 January")),
+		ScheduleURL: cfg.ScheduleURL,
+		Columns:     []string{"Day", "Rotation", "Marked", "Needed"},
+		AfterTable: []string{"Please mark the missing rotations before then. You are copied on each reminder, so you can see who " +
+			"was told and add or remove people afterwards."},
+		Closing: "This email goes to the " + cfg.Family + " rota admins.",
+	}
+	for _, g := range gaps {
+		data.Rows = append(data.Rows, []string{g.day.Format("Monday, 2 January"), windowTitle(cfg, g.base), fmt.Sprint(g.have), fmt.Sprint(g.need)})
+	}
+	subject := fmt.Sprintf("[%s] Action needed: the weekday rota for %s is not complete", cfg.Family, date)
 	return finish(cfg, to, subject, data), true
 }
 
