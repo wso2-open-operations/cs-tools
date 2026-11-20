@@ -15,10 +15,14 @@
 // under the License.
 
 // Avatar fallback shown when there's no profile picture (or it fails to load) — e.g. "Jane Doe" -> "JD".
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
+
 export function initialsOf(fullName: string): string {
+  // Only the first two words are read, after the staff marker is removed (see staffNameMarker.ts):
+  // a trailing marker, or anything else after the last name, never reaches the avatar.
   return (
-    fullName
-      .split(" ")
+    stripStaffNameMarker(fullName)
+      .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase())

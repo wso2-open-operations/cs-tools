@@ -27,6 +27,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import type { RemoveUserModalProps } from "@features/settings/types/settings";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 /**
  * Confirmation modal before removing a user from the project.
@@ -49,9 +50,9 @@ export default function RemoveUserModal({
   );
 
   const displayName = contact
-    ? contact.firstName && contact.lastName
-      ? `${contact.firstName} ${contact.lastName}`
-      : contact.firstName || contact.lastName || contact.email || "this user"
+    ? joinStaffName(contact.firstName, contact.lastName) ||
+      contact.email ||
+      "this user"
     : "this user";
 
   return (

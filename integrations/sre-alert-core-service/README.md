@@ -139,9 +139,11 @@ succeeding and its confirmation being stored, the retry creates a second CSM inc
 - `internal/model`: the `Alert`/`Incident`/`Note` shapes, severity/fingerprint
   normalization, and HTML note formatting.
 - `internal/hub`: the `/alertz` HTTP handler that wakes the poller early.
-- `internal/api`: read-only `GET /alert-mute-rules/{id}/muted-incidents`, which the CSM portal backend calls to list
-  the incidents an alert mute rule muted (with each one's outcome). Guarded by the shared `ALERT_CORE_API_TOKEN`
-  (`openssl rand -hex 32`); unset, every call is rejected. Rows go when the retention job purges them.
+- `internal/api`: the read API (`GET /alert-mute-rules/{id}/muted-incidents`, `/alert-mute-rules/muted-counts`,
+  `/alert-field-values`), which the CSM portal backend and csm-integration-service call to list the incidents an alert
+  mute rule muted (with each one's outcome). Callers come through the Choreo gateway: its "Alert Core Read API"
+  endpoint lets in only apps subscribed to it, with their OAuth2 client-credentials token, so this service does no
+  authentication of its own on these routes. Rows go when the retention job purges them.
 - `internal/postgres`: connection setup (`pgxpool`) and schema migration.
 - `internal/config`: loads and validates `config.toml`.
 - `internal/auth`: PBKDF2 hashing/verification and the `integration_users`

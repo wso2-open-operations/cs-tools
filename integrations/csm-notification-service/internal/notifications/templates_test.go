@@ -638,7 +638,7 @@ func TestRenderProjectContactInvitedEmail_SignInButton(t *testing.T) {
 		"reminder": RenderProjectContactInvitedReminderEmail,
 	} {
 		got := render(ProjectContactInvitedEmailData{DisplayName: "jane", Email: "jane@acme.com", ProjectName: "Acme Cloud", ProjectKey: "ACMECLOUD", PortalURL: portal})
-		for _, want := range []string{`bgcolor="#FF6700"`, "background-color:#FF6700", "color:#000000", ">Sign in to Support Portal</a>", "Button not working? Use this link:", "Sign-in email", "mailto:support@wso2.com", "Cheers!<br>The WSO2 Team", "WSO2-Logo-White.png", "WSO2-Pulse-Orange.png"} {
+		for _, want := range []string{`bgcolor="#FF6700"`, "background-color:#FF6700", "color:#000000", ">Sign in to Support Portal</a>", "Button not working? Use this link:", "Sign-in email", "mailto:support@wso2.com", "Cheers!<br>The WSO2 Team", "WSO2-Logo-White.png", "WSO2-Logo-Black.png"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s: rendered email does not contain %q", name, want)
 			}

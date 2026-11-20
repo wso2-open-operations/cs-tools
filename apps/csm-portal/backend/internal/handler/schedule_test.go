@@ -288,6 +288,45 @@ func TestCreateScheduleAbsenceKindPassesTheReason(t *testing.T) {
 	}
 }
 
+func TestDeleteScheduleAbsenceKindPassesTheReason(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{"403 keeps its reason", &apierror.Error{StatusCode: http.StatusForbidden,
+			Body: `{"message":"this tag is shared by every family; only a rota admin or a portal admin can delete it"}`},
+			http.StatusForbidden, "this tag is shared by every family; only a rota admin or a portal admin can delete it"},
+		{"409 keeps its reason", &apierror.Error{StatusCode: http.StatusConflict,
+			Body: `{"message":"the tag is still used by 3 leave or allocation entries; remove those first"}`},
+			http.StatusConflict, "the tag is still used by 3 leave or allocation entries; remove those first"},
+		{"500 stays generic", &apierror.Error{StatusCode: http.StatusInternalServerError,
+			Body: `{"message":"pq: relation does not exist"}`},
+			http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewScheduleHandler(&mockEntityScheduleClient{
+				deleteKindFn: func(context.Context, string) ([]byte, error) { return nil, tc.err },
+			})
+			r := withUser(httptest.NewRequest(http.MethodDelete, "/team-schedule/absence-kinds/PUBLIC_HOLIDAY", nil))
+			r.SetPathValue("code", "PUBLIC_HOLIDAY")
+			w := httptest.NewRecorder()
+			h.DeleteScheduleAbsenceKind(w, r)
+			if w.Code != tc.wantCode {
+				t.Fatalf("status %d, want %d (%s)", w.Code, tc.wantCode, w.Body.String())
+			}
+			if tc.wantMsg != "" && !strings.Contains(w.Body.String(), tc.wantMsg) {
+				t.Fatalf("body %s, want the reason %q", w.Body.String(), tc.wantMsg)
+			}
+			if tc.wantMsg == "" && strings.Contains(w.Body.String(), "pq:") {
+				t.Fatalf("body %s leaks the upstream detail", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestSearchScheduleAssignments(t *testing.T) {
 	t.Run("requires an authenticated user", func(t *testing.T) {
 		h := NewScheduleHandler(&mockEntityScheduleClient{})

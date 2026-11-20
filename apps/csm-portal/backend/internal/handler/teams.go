@@ -183,7 +183,7 @@ func (h *TeamHandler) GetTeamMembers(w http.ResponseWriter, r *http.Request) {
 // callerIsTeamLead reports whether user currently holds role "lead" on the
 // given team, by fetching the team's own roster and matching on email
 // (case-insensitively) -- the roster already carries each member's email, so
-// unlike CaseHandler.callerIsCaseTeamLead this needs no separate GetUserMe
+// unlike CaseHandler.callerMayDeescalate this needs no separate GetUserMe
 // call to resolve the caller's own platform id first. Fails closed (false) on
 // any upstream or parse error, or when the team has no such member: an
 // authorization check must never silently grant on a failure it can't

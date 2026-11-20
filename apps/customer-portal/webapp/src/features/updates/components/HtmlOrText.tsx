@@ -42,6 +42,8 @@ export const HTML_CONTENT_SX = {
   "& a": { color: "primary.main", textDecoration: "underline" },
   "& ul, & ol": { mt: 0, mb: 0.5, pl: 2.5 },
   "& li": { mb: 0.25 },
+  // Lexical wrapper <li> that only holds a sub-list: no marker (else an empty bullet).
+  "& li.editor-list-item-nested": { listStyleType: "none" },
   "& strong, & b": { fontWeight: 600, color: "text.primary" },
 };
 

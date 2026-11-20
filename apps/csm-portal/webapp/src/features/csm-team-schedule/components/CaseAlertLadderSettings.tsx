@@ -519,11 +519,11 @@ function ValueRow({
               <select
                 className="cas-select"
                 aria-label={spec.label}
-                value={typeof current === "string" ? current : ""}
+                value={typeof current === "string" ? current : (spec.defaultValue ?? "")}
                 disabled={drafts.submitting === family}
                 onChange={(e) => change(e.target.value)}
               >
-                {typeof current === "string" ? null : <option value="">Not reported yet</option>}
+                {typeof current === "string" || spec.defaultValue ? null : <option value="">Not reported yet</option>}
                 {(spec.options ?? []).map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}

@@ -221,7 +221,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: Forbidden (including moving a closed case to any other state without the admin role).
           content:
             application/json:
               schema:
@@ -1046,12 +1046,11 @@ paths:
       description: >
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
-        effect. Supported by the ServiceNow data source only.
-
-        Authorization depends on the action. `ESCALATE` requires the
-        `escalate` permission. `DEESCALATE` requires the caller to be one of
-        the case's ABT team leads; no escalation role is needed, but holding
-        one does not substitute for being the lead.
+        effect. Escalating needs an escalation role (escalator, CS engineer or
+        admin). De-escalating is allowed for somebody an admin named (Settings
+        > User management > Escalation access), who needs no escalation role,
+        or for a lead of the case's ABT team, who does. Supported by the
+        ServiceNow data source only.
       operationId: postCasesIdEscalations
       parameters:
         - name: id
@@ -2568,6 +2567,147 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      operationId: listCaseDeescalators
+      description: >
+        Backed by entity-service. Admin-only. They may de-escalate any case besides the leads of the case's own ABT
+        team, who keep that ability for their team's cases.
+      responses:
+        "200":
+          description: The grants (userId, name, email, grantedBy, grantedOn, active).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deescalators:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string, format: uuid }
+                        name: { type: string }
+                        email: { type: string }
+                        grantedBy: { type: string }
+                        grantedOn: { type: string, format: date-time }
+                        active: { type: boolean }
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only; the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (the entity service has no database for it).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      operationId: putCaseDeescalator
+      description: >
+        Admin-only. The person must be active internal staff. Idempotent. Audited by the entity service.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID, or refused by the entity service with its reason, e.g. the person is not active internal staff).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      operationId: deleteCaseDeescalator
+      description: >
+        Admin-only. Idempotent. A team lead keeps the ability to de-escalate their own team's cases.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /teams/{id}/lead:
     post:
       summary: Assign a user as the team's one lead.
@@ -8609,6 +8749,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /reports/mttr:
+    get:
+      summary: MTTR (mean time to resolution) by severity band, over a trailing window.
+      description: >-
+        Thin proxy of entity-service's own GET /reports/mttr -- backs the dashboard
+        builder's "mttr" resourceType. For each severity band (S1-S4, S1-S3, S0, S1, S2, S3,
+        S4 -- the two combined bands never include S0), the average time in hours from a case's creation to
+        the LAST time it entered Solution Proposed (a rejected proposal bounces a case
+        back for more work before a later one sticks, so the last entry, not the first,
+        is when it was actually resolved), over cases whose last such entry falls within
+        the window. creTeamId may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Same read audience as the other aggregate widgets
+        (e.g. POST /cases/feedback/aggregate).
+      operationId: getMTTRReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: months
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months. Exactly one of `months` and `days` is required.
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [7]
+          description: The trailing window, in days. Exactly one of `months` and `days` is required.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: exactly one of months (1, 3, 6 or 12) or days (7) is required; or a creTeamId is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /configuration-items/search:
     post:
       summary: Search configuration items (CMDB, ServiceNow data source only).
@@ -11913,6 +12127,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+  /plg/organizations/{organizationId}/reveal:
+    post:
+      summary: Reveal one organisation's name and owner email.
+      description: >-
+        Reveals the name and owner email behind one organisation's company id: stored
+        values first, else the Cloud Directory API. Never cached (Cache-Control: no-store)
+        and audited with the organisation id only. Limited per user (PLG_REVEAL_LIMIT_PER_MINUTE,
+        PLG_REVEAL_LIMIT_PER_DAY). source is DATABASE, CLOUD, UNRESOLVED or FAILED.
+      operationId: plgRevealOrganization
+      parameters:
+        - name: organizationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The organisation, revealed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgCompanyIdentity"
+        "400":
+          description: Bad request — the id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: Forbidden — needs the PLG permission (CS engineer or admin).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "404":
+          description: No such organisation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "429":
+          description: Too many reveals; Retry-After gives the seconds to wait.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "503":
+          description: The reveal is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -12012,10 +12291,9 @@ paths:
         - name: organizationId
           in: path
           required: true
-          description: "The organisation's id."
+          description: "The organisation's record id or its Cloud organisation id (moesifCompanyId)."
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: The organisation.
@@ -13113,7 +13391,7 @@ paths:
         - name: health
           in: query
           required: false
-          description: "Repeatable. `HEALTHY` or `AT_RISK`."
+          description: "Repeatable. `NONE`, `HEALTHY` or `AT_RISK`."
           schema:
             type: string
         - name: reason
@@ -19461,6 +19739,11 @@ paths:
   /team-schedule/absence-kinds/{code}:
     delete:
       summary: Delete a leave or allocation tag once nothing uses it.
+      description: >
+        A portal admin may delete any tag added from the portal; a rota admin
+        their own family's and the shared ones; a lead the families of the rota
+        teams they lead. A 403 and a 409 keep entity-service's message, so the
+        portal can say why (whose tag it is, how many entries still use it).
       operationId: deleteTeamScheduleAbsenceKind
       parameters:
         - name: code
@@ -19485,13 +19768,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: >
+            The caller may not delete this tag: a built-in one, another
+            family's, or a shared one for a caller who is no rota or portal
+            admin. The message says which.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: The tag is still used; the message says by how many entries.
           content:
             application/json:
               schema:
@@ -24496,6 +24788,21 @@ components:
         closeNotes:
           type: string
           description: Free-text closure notes — only allowed when state is closed or solution_proposed.
+        reopenReason:
+          type: string
+          description: >
+            Optional free-text note on why a closed case is being reopened. Only meaningful
+            alongside `state` when the case's current state is closed and the caller holds the
+            admin role — every other caller gets 403 for that transition regardless of this
+            field. An admin reopen (moving a closed case to any other state) is also only
+            supported for a plain case (type `case`): the entity service rejects it with a 400
+            for every other case-like type (engagement, service_request,
+            security_report_analysis, announcement), whether or not `reopenReason` is supplied
+            — this applies only to a genuine admin reopen of a closed case; an ordinary PATCH
+            with no state change ignores a stray `reopenReason` instead (the portal strips it
+            before forwarding when the request isn't actually reopening a closed case). Write-
+            only: never returned by this or any other endpoint, and not shown anywhere in the
+            portal.
         parentId:
           type: string
           format: uuid
@@ -26084,6 +26391,13 @@ components:
         name:
           type: string
           example: Jane Doe
+        isInternal:
+          type: boolean
+          description: >-
+            True when the person resolved to an INTERNAL-type user (WSO2
+            staff). Set on comment authors; omitted elsewhere, so absent means
+            "not known to be internal", never "known external".
+          example: true
 
     ChangeRequestCustomerContact:
       type: object
@@ -27444,6 +27758,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         creTeam:
           nullable: true
           allOf:
@@ -27517,6 +27835,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
@@ -27666,6 +27988,29 @@ components:
             Only projects whose overall closure state is any of these values (the
             include-side counterpart of excludeClosureStates; a project with no
             recorded closure state matches none). Postgres data sources only.
+        regions:
+          type: array
+          items:
+            type: string
+          description: >
+            Only projects whose account's region is any of these (exact,
+            case-insensitive); a project whose account has no region matches
+            none. Postgres data sources only.
+        onboardingOwnerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            Only projects whose onboarding owner is any of these user ids; a
+            project with no owner matches none. Postgres data sources only.
+        onboardingOwnerEmails:
+          type: array
+          items:
+            type: string
+          description: >
+            Only projects whose onboarding owner's email is any of these
+            (case-insensitive). Postgres data sources only.
         sortBy:
           type: string
           enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
@@ -27972,6 +28317,12 @@ components:
               description: Null when the project has no linked account.
               allOf:
                 - $ref: '#/components/schemas/EntityRef'
+                - type: object
+                  properties:
+                    region:
+                      type: string
+                      nullable: true
+                      description: The account's region (e.g. "APAC"); null when none is recorded.
 
     ProjectDetails:
       description: >
@@ -30220,6 +30571,55 @@ components:
         total:
           type: integer
           description: The number of members.
+
+    MTTRReport:
+      type: object
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [0, 1, 3, 6, 12]
+          description: 0 when the report was asked for a day window.
+        windowDays:
+          type: integer
+          enum: [7]
+          description: Present only for a day window.
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+
+    MTTRReportBand:
+      type: object
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
 
     ChangeRequestApprovalDecisionPayload:
       type: object
@@ -33295,11 +33695,13 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
         createdOn:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         registeredName:
           nullable: true
@@ -33319,7 +33721,17 @@ components:
         companyNameFromDomain:
           type: string
         moesifCompanyId:
+          nullable: true
           type: string
+          description: The Cloud organisation id.
+        cloudUserId:
+          type: string
+          nullable: true
+          description: The Cloud user id of the organisation's owner.
+        emailClassification:
+          type: string
+          nullable: true
+          description: The owner's email classification from a registration playbook.
         fieldsInherited:
           type: boolean
         platformCards:
@@ -33374,8 +33786,14 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -33436,7 +33854,12 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
+        moesifCompanyId:
+          nullable: true
+          type: string
+          description: The company id.
         product:
           type: object
           properties:
@@ -33472,6 +33895,7 @@ components:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         subscriptionTier:
           type: string
@@ -33848,7 +34272,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -33926,6 +34355,7 @@ components:
               type: integer
     PlgRegistrationSearchResponse:
       type: object
+      description: One item per organisation; total counts organisations.
       properties:
         registrations:
           type: array
@@ -33939,7 +34369,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -33951,6 +34386,7 @@ components:
                   name:
                     type: string
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -33972,6 +34408,37 @@ components:
                     type: string
                   name:
                     type: string
+              platforms:
+                type: array
+                description: >
+                  The organisation's matching registrations, newest first. The
+                  top-level registration fields are the newest one's.
+                items:
+                  type: object
+                  properties:
+                    orgPlatformId:
+                      type: string
+                      format: uuid
+                    product:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        code:
+                          type: string
+                        name:
+                          type: string
+                    registeredOn:
+                      type: string
+                      format: date-time
+                    lifecycleStage:
+                      type: string
+                    stageName:
+                      type: string
+                    isNew:
+                      type: boolean
+                      description: Not acknowledged yet.
         total:
           type: integer
         limit:
@@ -34098,6 +34565,24 @@ components:
               type: integer
             offset:
               type: integer
+    PlgCompanyIdentity:
+      type: object
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        companyId:
+          nullable: true
+          type: string
+        organizationName:
+          nullable: true
+          type: string
+        email:
+          nullable: true
+          type: string
+        source:
+          type: string
+          enum: [DATABASE, CLOUD, UNRESOLVED, FAILED]
     PlgOrganizationSearchFilters:
       type: object
       description: >-
@@ -34292,7 +34777,7 @@ components:
           type: string
         healthState:
           type: string
-          description: "`HEALTHY` or `AT_RISK`."
+          description: "`NONE` (not yet marked), `HEALTHY` or `AT_RISK`."
         subscriptionTier:
           type: string
           description: "`FREE`, `TRIAL`, `TRIAL_EXTENDED` or `PAYG`."

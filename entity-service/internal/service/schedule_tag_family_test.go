@@ -113,6 +113,9 @@ func TestAbsenceKinds_ARotaAdminsAreTheirFamilys(t *testing.T) {
 		if len(repo.gotKindAllowed) != 1 || repo.gotKindAllowed[0] != "SME" {
 			t.Errorf("allowed families = %v, want [SME]", repo.gotKindAllowed)
 		}
+		if !repo.gotKindAllowShared {
+			t.Error("a rota admin may delete a shared tag, but allowShared was false")
+		}
 		lead := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 		if err := NewScheduleService(lead, alwaysUnrestrictedAccess{}).DeleteAbsenceKind(scheduleCaller("lead@example.com"), "SME_TRAINING"); err != nil {
 			t.Fatal(err)
@@ -120,7 +123,31 @@ func TestAbsenceKinds_ARotaAdminsAreTheirFamilys(t *testing.T) {
 		if len(lead.gotKindAllowed) != 1 || lead.gotKindAllowed[0] != "CRE" {
 			t.Errorf("allowed families for a CRE lead = %v, want [CRE]", lead.gotKindAllowed)
 		}
+		if lead.gotKindAllowShared {
+			t.Error("a lead who is no rota admin may not delete a shared tag, but allowShared was true")
+		}
 	})
+}
+
+// A portal admin who is also a CRE rota admin deletes any custom tag: being a
+// rota admin too does not narrow them to CRE. Adding a tag still goes by the
+// rota admin family, as before.
+func TestAbsenceKinds_APortalAdminWhoIsARotaAdminDeletesAnyTag(t *testing.T) {
+	repo := &fakeScheduleRepo{adminTeams: []string{"vega"}, adminFamilies: []string{"CRE"}, portalAdmin: true}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	if err := svc.DeleteAbsenceKind(scheduleCaller("admin.cre@example.com"), "PUBLIC_HOLIDAY"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if repo.gotKindAllowed != nil {
+		t.Errorf("allowed families = %v, want none (any family)", repo.gotKindAllowed)
+	}
+	req := domain.CreateScheduleAbsenceKindRequest{ShortCode: "TR", Label: "TR", Bucket: "ALLOCATION", ColourToken: "INT"}
+	if _, err := svc.CreateAbsenceKind(scheduleCaller("admin.cre@example.com"), req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if repo.gotKindFamily == nil || *repo.gotKindFamily != "CRE" {
+		t.Errorf("a new tag's family = %v, want CRE", repo.gotKindFamily)
+	}
 }
 
 func TestPortalAdminTagFamily(t *testing.T) {

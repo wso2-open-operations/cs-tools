@@ -1284,7 +1284,7 @@ func TestScheduleIntegration_DeleteAbsenceKindOnlyRemovesAnUnusedCustomTag(t *te
 	})
 
 	var forbidden *apierror.ForbiddenError
-	if err := repo.DeleteAbsenceKind(ctx, "ANNUAL_LEAVE", schedLeadEmail, nil); !errors.As(err, &forbidden) {
+	if err := repo.DeleteAbsenceKind(ctx, "ANNUAL_LEAVE", schedLeadEmail, nil, false); !errors.As(err, &forbidden) {
 		t.Fatalf("deleting annual leave: want ForbiddenError, got %v", err)
 	}
 
@@ -1303,7 +1303,7 @@ func TestScheduleIntegration_DeleteAbsenceKindOnlyRemovesAnUnusedCustomTag(t *te
 		t.Fatalf("marking the tag: %v", err)
 	}
 	var conflict *apierror.ConflictError
-	if err := repo.DeleteAbsenceKind(ctx, k.Code, schedLeadEmail, nil); !errors.As(err, &conflict) {
+	if err := repo.DeleteAbsenceKind(ctx, k.Code, schedLeadEmail, nil, false); !errors.As(err, &conflict) {
 		t.Fatalf("deleting a tag in use: want ConflictError, got %v", err)
 	}
 
@@ -1312,16 +1312,61 @@ func TestScheduleIntegration_DeleteAbsenceKindOnlyRemovesAnUnusedCustomTag(t *te
 	}, schedLeadEmail); err != nil {
 		t.Fatalf("clearing the day: %v", err)
 	}
-	if err := repo.DeleteAbsenceKind(ctx, k.Code, schedLeadEmail, nil); err != nil {
+	if err := repo.DeleteAbsenceKind(ctx, k.Code, schedLeadEmail, nil, false); err != nil {
 		t.Fatalf("deleting the unused tag: %v", err)
 	}
-	cat, err := repo.Catalogue(ctx)
+	assertTagGone(t, repo, k.Code)
+}
+
+// A shared tag (no family, as tags added before families were) goes only for a
+// caller allowed shared tags -- a rota admin -- or with no family limit (a
+// portal admin). Another family's tag never goes for a family-limited caller.
+func TestScheduleIntegration_DeleteAbsenceKindSharedAndOtherFamily(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM team_schedule_absence_kind WHERE code IN ('INTEGRATION_SHARED_TAG', 'INTEGRATION_SRE_TAG')`)
+	})
+	shared, err := repo.CreateAbsenceKind(ctx, "INTEGRATION_SHARED_TAG", domain.CreateScheduleAbsenceKindRequest{
+		ShortCode: "IST", Label: "Integration shared tag", Bucket: "LEAVE", ColourToken: "INT",
+	}, nil, schedLeadEmail)
+	if err != nil {
+		t.Fatalf("CreateAbsenceKind shared: %v", err)
+	}
+	sre := "SRE"
+	sreTag, err := repo.CreateAbsenceKind(ctx, "INTEGRATION_SRE_TAG", domain.CreateScheduleAbsenceKindRequest{
+		ShortCode: "ISR", Label: "Integration SRE tag", Bucket: "ALLOCATION", ColourToken: "INT",
+	}, &sre, schedLeadEmail)
+	if err != nil {
+		t.Fatalf("CreateAbsenceKind SRE: %v", err)
+	}
+
+	var forbidden *apierror.ForbiddenError
+	if err := repo.DeleteAbsenceKind(ctx, shared.Code, schedLeadEmail, []string{"CRE"}, false); !errors.As(err, &forbidden) {
+		t.Fatalf("a CRE lead deleting a shared tag: want ForbiddenError, got %v", err)
+	}
+	if err := repo.DeleteAbsenceKind(ctx, sreTag.Code, schedLeadEmail, []string{"CRE"}, true); !errors.As(err, &forbidden) {
+		t.Fatalf("a CRE rota admin deleting an SRE tag: want ForbiddenError, got %v", err)
+	}
+	if err := repo.DeleteAbsenceKind(ctx, shared.Code, schedLeadEmail, []string{"CRE"}, true); err != nil {
+		t.Fatalf("a CRE rota admin deleting a shared tag: %v", err)
+	}
+	assertTagGone(t, repo, shared.Code)
+	if err := repo.DeleteAbsenceKind(ctx, sreTag.Code, schedLeadEmail, nil, false); err != nil {
+		t.Fatalf("a portal admin deleting an SRE tag: %v", err)
+	}
+	assertTagGone(t, repo, sreTag.Code)
+}
+
+func assertTagGone(t *testing.T, repo ScheduleRepository, code string) {
+	t.Helper()
+	cat, err := repo.Catalogue(context.Background())
 	if err != nil {
 		t.Fatalf("Catalogue: %v", err)
 	}
 	for _, kind := range cat.AbsenceKinds {
-		if kind.Code == k.Code {
-			t.Fatal("the deleted tag is still in the catalogue")
+		if kind.Code == code {
+			t.Fatalf("the deleted tag %s is still in the catalogue", code)
 		}
 		if kind.Code == "ANNUAL_LEAVE" && kind.Custom {
 			t.Fatal("annual leave is marked custom")

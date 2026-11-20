@@ -737,6 +737,11 @@ type CaseActivity struct {
 	SizeBytes          int               `json:"sizeBytes,omitempty"`
 	DownloadURL        string            `json:"downloadUrl,omitempty"`
 	Changes            []CaseFieldChange `json:"changes,omitempty"`
+	// CreatedByIsInternal is true when entity-service resolved the author to
+	// an INTERNAL-type user (WSO2 staff): the webapp badges a support
+	// engineer's comment avatar from it, with no per-comment user lookup.
+	// Absent means "not known to be internal", never "known external".
+	CreatedByIsInternal bool `json:"createdByIsInternal,omitempty"`
 }
 
 // SearchCaseActivitiesResponse is the portal's response for
@@ -815,16 +820,17 @@ func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseAc
 			// elsewhere) so an automation/integration-authored activity — no
 			// resolvable name or email — renders as "system" instead of an empty
 			// string indistinguishable from a genuinely unknown author.
-			CreatedBy:          userRefDisplayNameOrSystem(a.CreatedBy),
-			CreatedByFirstName: a.CreatedByFirstName,
-			CreatedByLastName:  a.CreatedByLastName,
-			CreatedByFullName:  userRefDisplayNameOrSystem(a.CreatedBy),
-			CommentType:        commentType,
-			FileName:           a.FileName,
-			ContentType:        a.ContentType,
-			SizeBytes:          a.SizeBytes,
-			DownloadURL:        a.DownloadURL,
-			Changes:            changes,
+			CreatedBy:           userRefDisplayNameOrSystem(a.CreatedBy),
+			CreatedByFirstName:  a.CreatedByFirstName,
+			CreatedByLastName:   a.CreatedByLastName,
+			CreatedByFullName:   userRefDisplayNameOrSystem(a.CreatedBy),
+			CommentType:         commentType,
+			FileName:            a.FileName,
+			ContentType:         a.ContentType,
+			SizeBytes:           a.SizeBytes,
+			DownloadURL:         a.DownloadURL,
+			Changes:             changes,
+			CreatedByIsInternal: a.CreatedBy != nil && a.CreatedBy.IsInternal,
 		})
 	}
 	return SearchCaseActivitiesResponse{

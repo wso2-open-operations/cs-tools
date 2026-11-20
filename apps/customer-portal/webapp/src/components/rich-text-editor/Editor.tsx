@@ -329,6 +329,7 @@ const DEFAULT_EDITOR_CONFIG = {
     list: {
       ul: "editor-list-ul",
       ol: "editor-list-ol",
+      nested: { listitem: "editor-nested-listitem" },
     },
     link: "editor-link",
     code: "editor-code",
@@ -534,6 +535,15 @@ const Editor = ({
             },
             "& .editor-list-ul": { ml: 3, listStyleType: "disc" },
             "& .editor-list-ol": { ml: 3, listStyleType: "decimal" },
+            // Lexical stores a nested list inside a wrapper <li> that holds only
+            // the sub-list. Hide that wrapper's bullet/number and keep it from
+            // using up a number, and don't indent the sub-list twice.
+            "& li.editor-nested-listitem": {
+              listStyleType: "none",
+              counterIncrement: "list-item 0",
+              "&::marker": { content: "none" },
+              "& > .editor-list-ul, & > .editor-list-ol": { ml: 0 },
+            },
             "& .editor-link": {
               color: "primary.main",
               textDecoration: "underline",

@@ -96,10 +96,8 @@ type Customer struct {
 	// guard compares; only the realtime path returns it.
 	LastModifiedDate *string `json:"lastModifiedDate"`
 
-	// The fields below arrive with the Sales Entity "customer fields" change
-	// (SE-1 in docs/customer-onboarding/SALESFORCE_SYNC_PLAN.md). Until it is
-	// deployed they are absent and decode as nil, and the Account ingest
-	// keeps the stored value of the columns they feed.
+	// Sales Entity sends the fields below. Absent or null decodes as nil, and
+	// the Account ingest then clears the columns they feed.
 	CsmEmail                *string       `json:"csmEmail"`
 	SecondaryTechnicalOwner *string       `json:"secondaryTechnicalOwner"`
 	RenewalManager          *CustomerUser `json:"renewalManager"`

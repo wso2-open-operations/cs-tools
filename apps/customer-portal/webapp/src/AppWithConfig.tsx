@@ -102,6 +102,13 @@ export default function AppWithConfig(): JSX.Element {
                     maxWidth: "100vw",
                     overflowX: "clip",
                   },
+                  // Oxygen UI lifts the label of an empty Select by 7px to centre it in a
+                  // medium field. MUI already centres it in a small one, where the lift puts
+                  // it near the top border. The extra class outranks Oxygen's rule.
+                  ".MuiFormControl-root:has(.MuiSelect-select) .MuiInputLabel-root.MuiInputLabel-sizeSmall:not(.MuiInputLabel-shrink)":
+                    {
+                      top: 0,
+                    },
                 }}
               />
               <FontSizeProvider>

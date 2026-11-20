@@ -30,31 +30,53 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // maxBody caps how much of a response is read; a page is at most 100 incidents.
 const maxBody = 4 << 20
 
-// Config holds the alert-core base URL and the shared token its read API expects (ALERT_CORE_API_TOKEN there).
+// tokenFetchTimeout bounds a call to the token endpoint, separately from the API call's own timeout.
+var tokenFetchTimeout = 5 * time.Second
+
+// Config holds alert-core's read API URL (its "Alert Core Read API" endpoint in Choreo) and the OAuth2
+// client-credentials app the call authenticates as: this backend's shared app, subscribed to that API. The gateway
+// checks the token; alert-core itself does no authentication on these routes.
 type Config struct {
-	BaseURL string
-	Token   string
+	BaseURL      string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	Scopes       []string
 }
 
-// Client calls alert-core's read API with Authorization: Bearer <token>.
+// Client calls alert-core's read API with an OAuth2 access token, fetched and refreshed by the client-credentials flow.
 type Client struct {
 	http    *http.Client
 	baseURL string
-	token   string
 }
 
 // NewClient returns a Client for cfg.
 func NewClient(cfg Config) *Client {
-	return &Client{
-		http:    &http.Client{Timeout: 10 * time.Second},
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-		token:   cfg.Token,
+	cc := clientcredentials.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		TokenURL:     cfg.TokenURL,
+		Scopes:       cfg.Scopes,
 	}
+	// The token request carries the client secret (Authorization: Basic), which Go copies to a same-host redirect,
+	// plain http included, so the token endpoint's redirects are not followed either.
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
+		Timeout:       tokenFetchTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	})
+	httpClient := cc.Client(tokenCtx)
+	httpClient.Timeout = 10 * time.Second
+	// The OAuth2 transport adds the token to every request it sends, redirects included, so a redirect is never
+	// followed: the token must not reach wherever alert-core's URL points.
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}
 }
 
 // MutedIncidents returns alert-core's JSON page of the incidents alert mute rule ruleID muted.
@@ -81,7 +103,6 @@ func (c *Client) get(ctx context.Context, pathAndQuery, what string) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("alertcore: build %s request: %w", what, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {

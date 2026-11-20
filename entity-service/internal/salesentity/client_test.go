@@ -76,7 +76,7 @@ func TestGetCustomer_PostsRealtimeSearch(t *testing.T) {
 }
 
 // TestGetCustomer_DecodesAccountIngestFields pins the JSON names the Account
-// ingest reads, including the SE-1 fields Sales Entity does not send yet.
+// ingest reads, including the customer success manager, vertical and deactivation fields.
 func TestGetCustomer_DecodesAccountIngestFields(t *testing.T) {
 	client := newTestClient(t, http.StatusOK, []map[string]any{{
 		"id": "001xx", "name": "Acme",

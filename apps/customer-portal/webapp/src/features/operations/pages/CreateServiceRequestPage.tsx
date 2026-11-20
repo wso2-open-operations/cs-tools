@@ -63,11 +63,9 @@ import { resolveDisplayTimeZone } from "@utils/dateTime";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import {
-  filterDeploymentProductsByCategory,
   getBaseDeploymentOptions,
   getBaseProductOptions,
-  getDeploymentProductDisplayLabel,
-  isUnknownPlaceholderProductLabel,
+  isServiceRequestProduct,
   resolveDeploymentMatch,
   resolveProductId,
 } from "@features/support/utils/caseCreation";
@@ -91,6 +89,7 @@ import { CaseType } from "@features/support/constants/supportConstants";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useLogger } from "@hooks/useLogger";
 import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
+import { joinStaffName } from "@utils/staffNameMarker";
 import {
   uploadServiceRequestAttachments,
   ATTACHMENT_UPLOAD_WAIT_MS,
@@ -288,7 +287,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
   }, [searchParams, projectDeployments]);
 
   const effectiveDeployment = deployment || prefill.deploymentLabel || "";
-  const effectiveProduct = product || prefill.productId || "";
 
   const baseDeploymentOptions = getBaseDeploymentOptions(projectDeployments);
   const selectedDeploymentMatch = useMemo(
@@ -350,17 +348,23 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const allDeploymentProducts = useMemo(
     () =>
-      filterDeploymentProductsByCategory(
-        (deploymentProductsData ?? []).filter((item) => {
-          const label = getDeploymentProductDisplayLabel(item);
-          return (
-            Boolean(label.trim()) && !isUnknownPlaceholderProductLabel(label)
-          );
-        }),
-        srProductCategories,
+      (deploymentProductsData ?? []).filter((item) =>
+        isServiceRequestProduct(item, srProductCategories),
       ),
     [deploymentProductsData, srProductCategories],
   );
+
+  // The product picked on the Deployments tab arrives by id. It is used only
+  // while its own deployment is selected and the form lists it, so the field
+  // never shows a bare id: not for a product the project's rules leave out,
+  // and not after the user picks another deployment.
+  const prefillDeploymentId = searchParams.get("deploymentId")?.trim() ?? "";
+  const isPrefilledProductListed =
+    !!prefill.productId &&
+    selectedDeploymentId === prefillDeploymentId &&
+    allDeploymentProducts.some((item) => item.id === prefill.productId);
+  const effectiveProduct =
+    product || (isPrefilledProductListed ? prefill.productId : "");
   const baseProductOptions = getBaseProductOptions(allDeploymentProducts);
   const sortedProductOptions = useMemo(
     () =>
@@ -392,7 +396,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const contactOptions = useMemo(
     () =>
       (contactsData ?? []).filter(isRegisteredContact).map((c) => ({
-        label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+        label: joinStaffName(c.firstName, c.lastName) || c.email,
         value: c.email,
       })),
     [contactsData],
@@ -443,6 +447,30 @@ export default function CreateServiceRequestPage(): JSX.Element {
       void deploymentsQuery.fetchNextPage();
     }
   }, [isPrimaryProductionOnly, projectDeployments.length, deploymentsQuery]);
+
+  // Without a category restriction products load ten at a time, so the product
+  // picked on the Deployments tab may sit on a later page. Keep paging until it
+  // shows up or the pages run out; until then the field stays empty.
+  useEffect(() => {
+    if (!prefill.productId || product) return;
+    if (selectedDeploymentId !== prefillDeploymentId) return;
+    if (deploymentProductsData.some((item) => item.id === prefill.productId)) {
+      return;
+    }
+    if (
+      deploymentProductsQuery.hasNextPage &&
+      !deploymentProductsQuery.isFetchingNextPage
+    ) {
+      void deploymentProductsQuery.fetchNextPage();
+    }
+  }, [
+    prefill.productId,
+    product,
+    selectedDeploymentId,
+    prefillDeploymentId,
+    deploymentProductsData,
+    deploymentProductsQuery,
+  ]);
 
   // For Cloud Support / Cloud Evaluation Support: auto-pick the first primary
   // production deployment so the hidden field still resolves to a valid value.
@@ -540,8 +568,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
     e.preventDefault();
     if (isNavigatingAfterCreate || inlineImages.isUploadingImages) return;
 
+    // The deployment and product the form shows, which may come from the
+    // Deployments tab's link without the user touching either field.
     const deploymentMatch = resolveDeploymentMatch(
-      deployment,
+      effectiveDeployment,
       projectDeployments,
       undefined,
     );
@@ -549,9 +579,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
     const variables = variablesData?.variables ?? [];
     const contextValues = {
       projectDisplay: projectDetails?.name ?? "",
-      deploymentDisplay: deployment,
+      deploymentDisplay: effectiveDeployment,
       productDisplay:
-        sortedProductOptions.find((p) => p.id === product)?.label ?? "",
+        sortedProductOptions.find((p) => p.id === effectiveProduct)?.label ??
+        "",
     };
     const firstEmpty = getFirstEmptyRequiredField(
       variables,
@@ -855,9 +886,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
               selectedRequestTypeLabel={selectedCatalogItemLabel}
               contextValues={{
                 projectDisplay: projectDisplay,
-                deploymentDisplay: deployment,
+                deploymentDisplay: effectiveDeployment,
                 productDisplay:
-                  sortedProductOptions.find((p) => p.id === product)?.label ?? "",
+                  sortedProductOptions.find((p) => p.id === effectiveProduct)
+                    ?.label ?? "",
               }}
               attachments={attachments}
               onAttachmentClick={handleAttachmentClick}

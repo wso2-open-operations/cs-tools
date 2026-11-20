@@ -158,7 +158,8 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 		where := fmt.Sprintf("widgets[%d]", i)
 		resourceType, _ := widget["resourceType"].(string)
 		timeCard := resourceType == string(dashboard.ResourceTimeCard)
-		c, err := t.resolveQuery(widget["query"], where, timeCard)
+		mttr := resourceType == string(dashboard.ResourceMTTR)
+		c, err := t.resolveQuery(widget["query"], where, timeCard, mttr)
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +170,7 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 			if !ok {
 				continue
 			}
-			c, err := t.resolveQuery(slice["query"], fmt.Sprintf("%s.slices[%d]", where, j), timeCard)
+			c, err := t.resolveQuery(slice["query"], fmt.Sprintf("%s.slices[%d]", where, j), timeCard, mttr)
 			if err != nil {
 				return nil, err
 			}
@@ -190,8 +191,9 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 
 // resolveQuery handles one query object; changed reports whether a value was
 // swapped. timeCard is whether the widget is a time card widget: only its
-// teamIds is a list of teams.
-func (t dashboardTeams) resolveQuery(q any, where string, timeCard bool) (changed bool, err error) {
+// teamIds is a list of teams. mttr is whether it is an MTTR widget: only its
+// creTeamIds is.
+func (t dashboardTeams) resolveQuery(q any, where string, timeCard, mttr bool) (changed bool, err error) {
 	query, ok := q.(map[string]any)
 	if !ok {
 		return false, nil
@@ -214,6 +216,13 @@ func (t dashboardTeams) resolveQuery(q any, where string, timeCard bool) (change
 	}
 	if v, ok := query["teamIds"]; ok && timeCard {
 		c, err := t.resolveTimeCardTeams(v, where)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || c
+	}
+	if v, ok := query["creTeamIds"]; ok && mttr {
+		c, err := t.resolveMTTRTeams(v, where)
 		if err != nil {
 			return false, err
 		}
@@ -265,6 +274,29 @@ func (t dashboardTeams) resolveTimeCardTeams(v any, where string) (bool, error) 
 		}
 		if team.GroupID == "" {
 			return false, fmt.Errorf("%w: %s: team %s has no group configured, so its members' time cards cannot be found", errDashboardTeam, where, team.Name)
+		}
+		if name != team.GroupID {
+			values[k] = team.GroupID
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
+// resolveMTTRTeams swaps the team keys or names in an mttr query's
+// creTeamIds for the teams' own CRE group ids -- the same id
+// account.cre_team_id-backed filtering already matches on. Unlike
+// resolveTimeCardTeams, this is CRE-only (an MTTR widget has no SRE
+// equivalent) and there is no "__current_team__" for MTTR, so each value
+// must name a real team.
+func (t dashboardTeams) resolveMTTRTeams(v any, where string) (bool, error) {
+	values, _ := v.([]any)
+	changed := false
+	for k, value := range values {
+		name, _ := value.(string)
+		team, err := t.teamFor(name, "creTeam", where)
+		if err != nil {
+			return false, err
 		}
 		if name != team.GroupID {
 			values[k] = team.GroupID
@@ -348,11 +380,12 @@ func (t dashboardTeams) resolveDashboard(d *dashboard.Dashboard) error {
 		w := &d.Widgets[i]
 		where := fmt.Sprintf("widgets[%d]", i)
 		timeCard := w.ResourceType == dashboard.ResourceTimeCard
-		if _, err := t.resolveQuery(w.Query, where, timeCard); err != nil {
+		mttr := w.ResourceType == dashboard.ResourceMTTR
+		if _, err := t.resolveQuery(w.Query, where, timeCard, mttr); err != nil {
 			return err
 		}
 		for j := range w.Slices {
-			if _, err := t.resolveQuery(w.Slices[j].Query, fmt.Sprintf("%s.slices[%d]", where, j), timeCard); err != nil {
+			if _, err := t.resolveQuery(w.Slices[j].Query, fmt.Sprintf("%s.slices[%d]", where, j), timeCard, mttr); err != nil {
 				return err
 			}
 		}

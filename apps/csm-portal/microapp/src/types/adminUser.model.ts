@@ -15,6 +15,7 @@
 // under the License.
 
 import type { AdminUserType, SnUserDto, UserDto } from "./adminUser.dto";
+import { joinStaffName, stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /**
  * Source-agnostic row the UI renders. Both {@link UserDto} and {@link SnUserDto}
@@ -44,7 +45,7 @@ export function toAdminUser(u: UserDto | SnUserDto): AdminUser {
     return {
       id: u.id,
       userName: u.userName,
-      name: u.name?.trim() || "",
+      name: stripStaffNameMarker(u.name),
       email: u.email,
       timezone: u.timeZone ?? null,
       active: u.active,
@@ -54,7 +55,7 @@ export function toAdminUser(u: UserDto | SnUserDto): AdminUser {
   return {
     id: u.id,
     userName: u.userName,
-    name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim(),
+    name: joinStaffName(u.firstName, u.lastName),
     email: u.email,
     timezone: u.timezone ?? null,
     userType: u.userType,

@@ -57,7 +57,7 @@ import (
 // renewed reports that the invoice track's saved state should go back to
 // "open" (see resetToOpen): nothing is left to chase on this track, either no
 // due invoice (paid), an account the track doesn't apply to, or a suspend
-// date more than 90 days away.
+// date that has moved out past the recorded window (movedOut).
 //
 // A track whose own closure state is not Open has no cascade and is not
 // reset (see buildSubscriptionCascade, actInvoice): nothing is read for it.
@@ -95,7 +95,7 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 
 	decision := closure.DecideInvoice(now, invoice.InvoiceDate, invoice.DueDate, invoice.EULAVersionDecimal, hasPrimaryPartner, lastWindow)
 	if !decision.Fires {
-		return nil, canReset && newTerm(decision.DaysRemaining), nil
+		return nil, lastWindow != nil && movedOut(decision.DaysRemaining, *lastWindow), nil
 	}
 
 	if decision.ShouldSuspend {

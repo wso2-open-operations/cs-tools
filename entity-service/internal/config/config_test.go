@@ -17,6 +17,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"net/url"
 	"os"
 	"reflect"
@@ -1387,6 +1389,41 @@ func TestConfig_Validate_QueryHourInternalEmailDomain(t *testing.T) {
 	}
 }
 
+// ACP_INTERNAL_EMAIL_DOMAINS is matched with strings.HasSuffix like the
+// setting above, so every entry needs its "@"; unset keeps @wso2.com.
+func TestConfig_Validate_ACPInternalEmailDomains(t *testing.T) {
+	tests := []struct {
+		name    string
+		domains []string
+		wantErr bool
+	}{
+		{name: "unset is valid, the service defaults", domains: nil},
+		{name: "two domains with the @", domains: []string{"@example.com", "@example.org"}},
+		{name: "one without the @ is rejected", domains: []string{"@example.com", "example.org"}, wantErr: true},
+		{name: "no dot is rejected", domains: []string{"@localhost"}, wantErr: true},
+		{name: "a bare suffix is rejected", domains: []string{"@.com"}, wantErr: true},
+		{name: "a full address is rejected", domains: []string{"@me@example.com"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.ACPInternalEmailDomains = tt.domains
+			err := c.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ACPInternalEmailDomains=%q: err = %v, want error %v", tt.domains, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_ACPInternalEmailDomains(t *testing.T) {
+	t.Setenv("ACP_INTERNAL_EMAIL_DOMAINS", " @example.com , ,@example.org")
+	cfg := Load()
+	if want := []string{"@example.com", "@example.org"}; !reflect.DeepEqual(cfg.ACPInternalEmailDomains, want) {
+		t.Errorf("ACPInternalEmailDomains = %q, want %q", cfg.ACPInternalEmailDomains, want)
+	}
+}
+
 // INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS is optional: comma-separated UUIDs,
 // trimmed, empty entries dropped; a non-UUID entry refuses
 // to start.
@@ -1622,6 +1659,96 @@ func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEnvIntInRange(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{"unset uses the default", "", 3},
+		{"lowest allowed", "2", 2},
+		{"in range", "6", 6},
+		{"highest allowed", "24", 24},
+		{"below the range uses the default", "1", 3},
+		{"above the range uses the default", "25", 3},
+		{"not a number uses the default", "many", 3},
+		{"zero uses the default", "0", 3},
+		{"negative uses the default", "-4", 3},
+		{"surrounding spaces are ignored", " 6 ", 6},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CSM_TEST_MONTHS_AHEAD", tc.value)
+			if got := envIntInRange("CSM_TEST_MONTHS_AHEAD", 3, 2, 24); got != tc.want {
+				t.Errorf("envIntInRange(%q) = %d, want %d", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+// captureWarnings returns what slog logs while the test runs.
+func captureWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buf
+}
+
+// A value that is wrong in any way is reported, naming the setting and the value
+// as written, before the default is used. Unset and valid values log nothing.
+func TestEnvIntInRange_WarnsOnEveryKindOfBadValue(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		warn  bool
+	}{
+		{"", false}, {"12", false}, {"120", false},
+		{"many", true}, {"0", true}, {"-3", true}, {"11", true}, {"121", true}, {"1.5", true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			logs := captureWarnings(t)
+			t.Setenv("CSM_TEST_RETENTION", tc.value)
+			envIntInRange("CSM_TEST_RETENTION", 18, 12, 120)
+			got := logs.String()
+			if tc.warn != (got != "") {
+				t.Fatalf("value %q: warning logged = %v, want %v (%q)", tc.value, got != "", tc.warn, got)
+			}
+			if tc.warn && (!strings.Contains(got, "CSM_TEST_RETENTION") || !strings.Contains(got, tc.value)) {
+				t.Errorf("warning %q does not name the setting and the value %q", got, tc.value)
+			}
+		})
+	}
+}
+
+// The retention setting: 18 by default, 12 to 120 accepted, anything else falls
+// back to 18, so a typo can never shorten how long audit history is kept.
+func TestLoad_AuditLogRetentionMonths(t *testing.T) {
+	for value, want := range map[string]int{
+		"": 18, "12": 12, "24": 24, "120": 120,
+		"11": 18, "121": 18, "0": 18, "-6": 18, "eighteen": 18,
+	} {
+		t.Setenv("CSM_AUDIT_LOG_RETENTION_MONTHS", value)
+		if got := Load().AuditLogRetentionMonths; got != want {
+			t.Errorf("CSM_AUDIT_LOG_RETENTION_MONTHS=%q: AuditLogRetentionMonths = %d, want %d", value, got, want)
+		}
+	}
+}
+
+// TestLoad_AuditLogEnabled pins the audit log's switch: off unless it parses as
+// true, so a typo leaves the upkeep endpoint unregistered.
+func TestLoad_AuditLogEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"": false, "true": true, "TRUE": true, "1": true,
+		"false": false, "0": false, "yes": false, "on": false, "garbage": false,
+	} {
+		t.Setenv("CSM_AUDIT_LOG_ENABLED", value)
+		if got := Load().AuditLogEnabled; got != want {
+			t.Errorf("CSM_AUDIT_LOG_ENABLED=%q -> %v, want %v", value, got, want)
+		}
 	}
 }
 

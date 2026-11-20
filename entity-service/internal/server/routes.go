@@ -372,6 +372,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// rest of the Team Schedule.
 	var rotaGenerateHandler *handler.RotaGenerateHandler
 	var rotaAccessHandler *handler.RotaAccessHandler
+	// Who may de-escalate any case; set once the database is available.
+	var caseEscalationAccessHandler *handler.CaseEscalationAccessHandler
 	var scheduleReminderHandler *handler.ScheduleReminderHandler
 	var rotaReminderSettingsHandler *handler.RotaReminderSettingsHandler
 	var rotaReminderRequestHandler *handler.RotaReminderRequestHandler
@@ -381,7 +383,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var pagingChainHandler *handler.PagingChainHandler
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
+	var deprecatedProductUsageReportHandler *handler.DeprecatedProductUsageReportHandler
 	var longOpenCaseReportHandler *handler.LongOpenCaseReportHandler
+	var mttrReportHandler *handler.MTTRReportHandler
 	var runbookHandler *handler.RunbookHandler
 	// standardChangeHandler serves the standard change catalogue and its proposals
 	// (migration 0252); Postgres only. standardChangeRepo is also what the change
@@ -391,6 +395,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
+	var eolProductUsageReportHandler *handler.EolProductUsageReportHandler
+	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
 
@@ -636,6 +642,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Notify:          projectEventPublisher != nil,
 				DryRun:          cfg.ACPReopenDryRun,
 				TestProjectSfID: cfg.ACPReopenTestProjectSfID,
+				InternalDomains: cfg.ACPInternalEmailDomains,
 			}
 			// Dual-write: copy each reopen to the previous system, as PATCH
 			// /projects/{id} copies ACP's suspension.
@@ -1492,6 +1499,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// The ABT team leads (who may de-escalate) live in Postgres team data
 		// whatever DATA_SOURCE is.
 		caseEscalationSvc = service.WithCaseTeamLeads(caseEscalationSvc, escalationRepo)
+		// Besides them, the people an admin named (role case_deescalator).
+		caseEscalationAccessRepo := repository.NewCaseEscalationAccessRepository(db)
+		caseEscalationSvc = service.WithCaseDeescalators(caseEscalationSvc, caseEscalationAccessRepo)
+		caseEscalationAccessHandler = handler.NewCaseEscalationAccessHandler(
+			service.NewCaseEscalationAccessService(caseEscalationAccessRepo, accessSvc, cfg.CSMPortalBackendClientID),
+		)
 	}
 	caseEscalationHandler := handler.NewCaseEscalationHandler(caseEscalationSvc)
 
@@ -1750,6 +1763,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 					AccountsTag:       cfg.MigrationCaseReportAccountsTag,
 					RecipientTeamKeys: cfg.MigrationCaseReportTeamKeys,
 				}))
+		// Monthly deprecated product usage report: customers running a
+		// product version whose support status is Deprecated in Primary
+		// Production, for the scheduled task that mails it to account
+		// managers and CS leadership. It reads deployed products from
+		// Postgres, so it is offered only when they are read from Postgres
+		// (UsageReadRoute): in any other mode the route is absent and the
+		// task fails loudly instead of mailing an incomplete report.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			deprecatedProductUsageReportHandler = handler.NewDeprecatedProductUsageReportHandler(
+				service.NewDeprecatedProductUsageReportService(
+					repository.NewDeprecatedProductUsageReportRepository(repository.NewScoped(db))))
+		}
 		// Long-open cases report: the cases still being worked on after a
 		// given age, in two tables by their project's onboarding status. It
 		// reads the Postgres case tables only, so it is not offered when cases
@@ -1765,6 +1790,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						OpenBeforeYesterdayProjectTypes:        cfg.OpenBeforeYesterdayReportProjectTypes,
 						OpenBeforeYesterdayProductProjectTypes: cfg.OpenBeforeYesterdayReportProductProjectTypes,
 					}))
+			// MTTR report: average time from a case's creation to its last
+			// entry into Solution Proposed, by severity band (S1-S4, S1-S3,
+			// S1, S2, S3, S4) and trailing window (1/3/6/12 months), read
+			// from the Postgres case/work_item_activity tables only -- same
+			// reason as the long-open-cases report above.
+			mttrReportHandler = handler.NewMTTRReportHandler(
+				service.NewMTTRReportService(
+					repository.NewMTTRReportRepository(repository.NewScoped(db))))
 		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
@@ -1797,6 +1830,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewProductRegressionReportService(
 				repository.NewProductRegressionReportRepository(repository.NewScoped(db)),
 				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
+		// Monthly EOL product usage report: customers running a product
+		// version past its EOL date in Primary Production, for the scheduled
+		// task that mails it to account managers and CS leadership. Offered
+		// only when deployed products are read from Postgres, for the same
+		// reason as the deprecated product usage report above.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			eolProductUsageReportHandler = handler.NewEolProductUsageReportHandler(
+				service.NewEolProductUsageReportService(
+					repository.NewEolProductUsageReportRepository(repository.NewScoped(db))))
+		}
+		// Weekly SLA breach reports: the clocks that breached last week, under
+		// each report's own stage and onboarding-status filters, for the
+		// scheduled tasks that mail them.
+		slaBreachReportHandler = handler.NewSLABreachReportHandler(
+			service.NewSLABreachReportService(
+				repository.NewSLABreachReportRepository(repository.NewScoped(db))))
 		caseAlertSettingsHandler = handler.NewCaseAlertSettingsHandler(
 			service.NewCaseAlertSettingsService(repository.NewCaseAlertSettingsRepository(db), repository.NewPagingChainRepository(db), accessSvc,
 				service.CaseAlertSettingsConfig{
@@ -2352,15 +2401,34 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// assigned to each migration; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/migration-cases", internalOnly(accessSvc, migrationCaseReportHandler.GetMigrationCaseReport))
 	}
+	if deprecatedProductUsageReportHandler != nil {
+		// internalOnly: the report names customers and their deployments.
+		mux.HandleFunc("GET /reports/deprecated-product-usage", internalOnly(accessSvc, deprecatedProductUsageReportHandler.GetDeprecatedProductUsageReport))
+	}
 	if longOpenCaseReportHandler != nil {
 		// internalOnly: the report names customers' cases and who is
 		// assigned to each; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/long-open-cases", internalOnly(accessSvc, longOpenCaseReportHandler.GetLongOpenCaseReport))
 	}
+	if mttrReportHandler != nil {
+		// internalOnly: an aggregate, but still an internal operational
+		// metric with no per-project/customer scoping concept -- same
+		// posture as the reports above.
+		mux.HandleFunc("GET /reports/mttr", internalOnly(accessSvc, mttrReportHandler.GetMTTRReport))
+	}
 	if productRegressionReportHandler != nil {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	if eolProductUsageReportHandler != nil {
+		// internalOnly: the report names customers and their deployments.
+		mux.HandleFunc("GET /reports/eol-product-usage", internalOnly(accessSvc, eolProductUsageReportHandler.GetEolProductUsageReport))
+	}
+	if slaBreachReportHandler != nil {
+		// internalOnly, same reasoning as the regression report above: the
+		// report names customers' cases, accounts and assignees.
+		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
 	}
 	// Alert mute rules (Operations > Alert mute rules, migration 0278): Postgres only. On the
 	// ServiceNow data source every route answers 400 (alert-core, through
@@ -2468,6 +2536,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /team-schedule/absences/{id}", scheduleHandler.DeleteScheduleAbsence)
 		mux.HandleFunc("POST /team-schedule/absence-kinds", scheduleHandler.CreateScheduleAbsenceKind)
 		mux.HandleFunc("DELETE /team-schedule/absence-kinds/{code}", scheduleHandler.DeleteScheduleAbsenceKind)
+	}
+	if caseEscalationAccessHandler != nil {
+		// Who may de-escalate any case besides the case's team leads. The
+		// service requires a CSM admin's user token for all three.
+		mux.HandleFunc("GET /case-escalation-access/deescalators", caseEscalationAccessHandler.ListDeescalators)
+		mux.HandleFunc("PUT /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.GrantDeescalator)
+		mux.HandleFunc("DELETE /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.RevokeDeescalator)
 	}
 	if rotaAccessHandler != nil {
 		// Who holds a rota admin role or marks a team's rota, and changing
@@ -2623,6 +2698,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /teams/{id}/members", teamHandler.GetTeamMembers)
 		mux.HandleFunc("POST /teams/search", teamHandler.SearchTeams)
 		mux.HandleFunc("GET /teams/chat-webhooks", teamHandler.ListChatWebhooks)
+		mux.HandleFunc("GET /teams/group-emails", teamHandler.ListGroupEmails)
 		mux.HandleFunc("GET /teams/{id}", teamHandler.GetTeam)
 		mux.HandleFunc("PATCH /teams/{id}", teamHandler.UpdateTeam)
 		mux.HandleFunc("POST /teams/{id}/lead", teamHandler.AssignLead)
@@ -3037,6 +3113,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		closeRedis()
 	}
 
+	// The audit log's upkeep (migration 0295), called by csm-scheduled-tasks, weekly by default.
+	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
+	// EXECUTE on the audit_* functions for the application's database role.
+	if db != nil && cfg.AuditLogEnabled {
+		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
+			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead, cfg.AuditLogRetentionMonths))
+		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))
+	}
+
 	// PLG Customer Success Portal. Every repository, service, handler and route
 	// it needs is in plg_routes.go — this is the only part of entity-service's
 	// own wiring the merge touches.
@@ -3048,7 +3133,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// query of every PLG request. Not registering means those paths 404, which
 	// is the truthful answer where PLG has no data to serve.
 	if db != nil {
-		registerPLGRoutes(mux, db)
+		registerPLGRoutes(mux, db, accessSvc)
 	}
 
 	return middleware.CorrelationID(

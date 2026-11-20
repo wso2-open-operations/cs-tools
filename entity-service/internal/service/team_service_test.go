@@ -42,6 +42,9 @@ type fakeTeamRepo struct {
 	chatWebhooks    []domain.TeamChatWebhook
 	chatWebhooksErr error
 
+	groupEmails    []domain.TeamGroupEmail
+	groupEmailsErr error
+
 	teamDetail domain.TeamDetail
 	getTeamErr error
 
@@ -69,6 +72,10 @@ func (f *fakeTeamRepo) SearchTeams(_ context.Context, q string, limit, offset in
 
 func (f *fakeTeamRepo) ListChatWebhooks(context.Context) ([]domain.TeamChatWebhook, error) {
 	return f.chatWebhooks, f.chatWebhooksErr
+}
+
+func (f *fakeTeamRepo) ListGroupEmails(context.Context) ([]domain.TeamGroupEmail, error) {
+	return f.groupEmails, f.groupEmailsErr
 }
 
 func (f *fakeTeamRepo) GetTeamDetail(context.Context, string) (domain.TeamDetail, error) {
@@ -204,6 +211,43 @@ func TestTeamService_ListChatWebhooks_RepoError(t *testing.T) {
 	svc := NewTeamService(&fakeTeamRepo{chatWebhooksErr: boom}, alwaysUnrestrictedAccess{})
 
 	if _, err := svc.ListChatWebhooks(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("expected repo error, got %v", err)
+	}
+}
+
+func TestTeamService_ListGroupEmails_RequiresInternalCaller(t *testing.T) {
+	svc := NewTeamService(&fakeTeamRepo{}, restrictedAccess{})
+
+	_, err := svc.ListGroupEmails(context.Background())
+
+	var fe *apierror.ForbiddenError
+	if !errors.As(err, &fe) {
+		t.Fatalf("expected ForbiddenError for a non-internal caller, got %v", err)
+	}
+}
+
+func TestTeamService_ListGroupEmails_ReturnsConfiguredTeams(t *testing.T) {
+	repo := &fakeTeamRepo{
+		groupEmails: []domain.TeamGroupEmail{
+			{Key: "americas_cre_team", GroupEmail: "americas-cre@example.test"},
+		},
+	}
+	svc := NewTeamService(repo, alwaysUnrestrictedAccess{})
+
+	resp, err := svc.ListGroupEmails(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Teams) != 1 || resp.Teams[0].Key != "americas_cre_team" || resp.Teams[0].GroupEmail != "americas-cre@example.test" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestTeamService_ListGroupEmails_RepoError(t *testing.T) {
+	boom := errors.New("boom")
+	svc := NewTeamService(&fakeTeamRepo{groupEmailsErr: boom}, alwaysUnrestrictedAccess{})
+
+	if _, err := svc.ListGroupEmails(context.Background()); !errors.Is(err, boom) {
 		t.Fatalf("expected repo error, got %v", err)
 	}
 }

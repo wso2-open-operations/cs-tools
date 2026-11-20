@@ -17,6 +17,7 @@
 import { Card, Chip, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import type { AdminUser } from "@src/types";
 import { INTERNAL_USER_ROLES } from "./config";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 // Mobile-card equivalent of the webapp's CsmUsersPage table row: username, name, email, role
 // chips (or the postgres-source userType when roles aren't present), active/inactive status, and
@@ -40,7 +41,7 @@ export function UserCard({ user }: { user: AdminUser }) {
         </Stack>
 
         <Typography variant="body1" color="text.primary" noWrap>
-          {user.name || "—"}
+          {stripStaffNameMarker(user.name) || "—"}
         </Typography>
         <Typography variant="body2" color="text.secondary" noWrap>
           {user.email}

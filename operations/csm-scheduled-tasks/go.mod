@@ -15,7 +15,7 @@
 // under the License.
 module github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks
 
-go 1.26.6
+go 1.26.11
 
 require (
 	github.com/adhocore/gronx v1.20.3

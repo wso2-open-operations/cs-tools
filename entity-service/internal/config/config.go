@@ -347,11 +347,32 @@ type Config struct {
 	// ACPReopenTestProjectSfID limits the reopen check to one Salesforce
 	// project (CSM_ACP_REOPEN_TEST_PROJECT_SF_ID). Empty: every project.
 	ACPReopenTestProjectSfID string
+	// ACPInternalEmailDomains are the domains the "Back to Open state"
+	// notice may go to (ACP_INTERNAL_EMAIL_DOMAINS, comma-separated, each
+	// starting with "@"). Empty: @wso2.com only.
+	ACPInternalEmailDomains []string
 	// ACPReactivationPollInterval is how often ProjectReactivationDrainer
 	// looks for queued "Back to Open state" notices
 	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
 	// another drainer never changes it.
 	ACPReactivationPollInterval time.Duration
+	// AuditLogEnabled registers POST /audit-log/maintenance, the audit log's
+	// upkeep (CSM_AUDIT_LOG_ENABLED). Defaults to false, and while it is false
+	// routes.go does not register the route at all, so it 404s. Turn it on only
+	// once migration 0295 is applied and the database role may run the audit
+	// functions; the audit_log_maintenance sub-cron in csm-scheduled-tasks has
+	// its own switch and must be turned on after this one.
+	AuditLogEnabled bool
+	// AuditLogMonthsAhead is how many months past the current one get a
+	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
+	// the audit log's own health check reports a problem on every run.
+	AuditLogMonthsAhead int
+	// AuditLogRetentionMonths is how long audit rows are kept
+	// (CSM_AUDIT_LOG_RETENTION_MONTHS, default 18, from 12 to 120). Each weekly
+	// maintenance run deletes the monthly partitions that ended at least this
+	// many months ago; the data is not archived. The floor stops a typo from
+	// deleting recent history.
+	AuditLogRetentionMonths int
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -1178,7 +1199,11 @@ func Load() *Config {
 	cfg.ACPReopenEnabled = os.Getenv("CSM_ACP_REOPEN_ENABLED") == "true"
 	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
+	cfg.ACPInternalEmailDomains = splitComma(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
+	cfg.AuditLogEnabled = getBoolOrDefault("CSM_AUDIT_LOG_ENABLED", false)
+	cfg.AuditLogMonthsAhead = envIntInRange("CSM_AUDIT_LOG_MONTHS_AHEAD", 3, 2, 24)
+	cfg.AuditLogRetentionMonths = envIntInRange("CSM_AUDIT_LOG_RETENTION_MONTHS", 18, 12, 120)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
@@ -1377,6 +1402,13 @@ func (c *Config) Validate() error {
 	if c.QueryHourInternalEmailDomain != "" && !strings.HasPrefix(c.QueryHourInternalEmailDomain, "@") {
 		return fmt.Errorf("QUERY_HOUR_INTERNAL_EMAIL_DOMAIN must start with \"@\", got %q",
 			c.QueryHourInternalEmailDomain)
+	}
+	// Same reason for the ACP notice: a bare "wso2.com" would also admit
+	// someone@notwso2.com.
+	for _, d := range c.ACPInternalEmailDomains {
+		if !strings.HasPrefix(d, "@") || !strings.Contains(d[1:], ".") || strings.HasPrefix(d[1:], ".") || strings.ContainsAny(d[1:], "@ ") {
+			return fmt.Errorf("ACP_INTERNAL_EMAIL_DOMAINS entry %q must look like \"@example.com\"", d)
+		}
 	}
 	// A team id that is not a UUID can never match account.sre_team_id, so
 	// the team it was meant to automate would silently never be.
@@ -1829,6 +1861,26 @@ func envPositiveInt(key string, def int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// envIntInRange reads an integer that must lie in lo..hi. Unset is def, silently.
+// A value that is not a number, or is outside the range (zero and negative
+// included), falls back to def with a warning that names the value as it was
+// written. It validates the raw text itself: going through envPositiveInt first
+// would turn a bad value into def before the range check, and no warning would
+// ever be logged.
+func envIntInRange(key string, def, lo, hi int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < lo || n > hi {
+		slog.Warn("configuration value invalid or out of range, using the default",
+			"key", key, "value", raw, "min", lo, "max", hi, "default", def)
 		return def
 	}
 	return n

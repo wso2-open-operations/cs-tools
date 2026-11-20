@@ -27,6 +27,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import type { ResendInvitationModalProps } from "@features/settings/types/settings";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 /**
  * Confirmation modal before re-sending a contact's invitation. Mirrors
@@ -47,11 +48,7 @@ export default function ResendInvitationModal({
     if (!isResending) onClose();
   }, [onClose, isResending]);
 
-  const name = contact
-    ? contact.firstName && contact.lastName
-      ? `${contact.firstName} ${contact.lastName}`
-      : contact.firstName || contact.lastName || ""
-    : "";
+  const name = contact ? joinStaffName(contact.firstName, contact.lastName) : "";
   const email = contact?.email ?? "";
 
   return (

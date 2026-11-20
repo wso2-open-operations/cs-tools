@@ -43,6 +43,7 @@ import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
 import type { CaseComment } from "@features/support/types/cases";
 import type { InlineAttachment } from "@features/support/types/supportInlineAttachment";
 import type { MetadataItem } from "@/types/common";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import { alpha, colors, type Theme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { createElement, type ComponentType, type ReactNode } from "react";
@@ -570,7 +571,7 @@ function getAssignedEngineerDisplayValue(obj: {
   label?: string;
   name?: string | null;
 }): string {
-  return obj.label ?? obj.name ?? "";
+  return stripStaffNameMarker(obj.label ?? obj.name ?? "");
 }
 
 /**
@@ -582,7 +583,7 @@ function getAssignedEngineerDisplayValue(obj: {
 export function getAssignedEngineerLabel(value: AssignedEngineerValue): string {
   if (value == null || value === "") return "";
   if (typeof value === "object") return getAssignedEngineerDisplayValue(value);
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" ? stripStaffNameMarker(value) : "";
 }
 
 /**
@@ -619,19 +620,25 @@ export function getInitials(
     | null
     | undefined,
 ): string {
-  const label =
+  const rawLabel =
     typeof name === "object" && name
       ? getAssignedEngineerDisplayValue(name)
       : name;
+  const label = typeof rawLabel === "string" ? stripStaffNameMarker(rawLabel) : rawLabel;
   if (!label || typeof label !== "string") return "--";
+  // Only ever the first two words -- first name, last name -- never
+  // whatever comes after. More defensive than stripStaffNameMarker alone:
+  // it keeps the avatar clean against any OTHER trailing marker/icon this
+  // codebase doesn't yet know to recognize too, since a third (or later)
+  // word is never looked at at all.
   const initials = label
     .trim()
     .split(/\s+/)
     .filter(Boolean)
+    .slice(0, 2)
     .map((n) => n[0])
     .join("")
-    .toUpperCase()
-    .slice(0, 3);
+    .toUpperCase();
   return initials || "--";
 }
 
@@ -1019,6 +1026,7 @@ export function getCallRequestStatusColor(status?: string): string {
     case normalized.includes(CallRequestStatus.SCHEDULED.toLowerCase()):
       return "info.main";
     case normalized.includes(CallRequestStatus.PENDING.toLowerCase()):
+    case normalized.includes(CallRequestStatus.IN_PROGRESS.toLowerCase()):
       return "warning.main";
     case normalized.includes(CallRequestStatus.COMPLETED.toLowerCase()):
       return "success.main";
@@ -1102,10 +1110,11 @@ export function getSeverityColor(label?: string): string {
 }
 
 /**
- * Returns the color (hex) for a given case status label using colors.yellow[500] style.
+ * Returns the color for a given case status label: a hex color, or a theme
+ * palette path for callers to pass through {@link resolveColorFromTheme}.
  *
  * @param {string} label - The case status label.
- * @returns {string} Hex color string (e.g. colors.blue[500]).
+ * @returns {string} Hex color string (e.g. colors.blue[500]) or palette path.
  */
 export function getStatusColor(label?: string): string {
   switch (label) {
@@ -1113,7 +1122,8 @@ export function getStatusColor(label?: string): string {
       return colors.lightBlue[500];
     case CaseStatus.WORK_IN_PROGRESS:
     case LEGACY_WORK_IN_PROGRESS_LABEL:
-      return colors.green[500];
+      // The same orange the dashboard's cases table gives In Progress.
+      return "warning.main";
     case CaseStatus.AWAITING_INFO:
       return colors.orange[900];
     case CaseStatus.WAITING_ON_WSO2:
@@ -1727,10 +1737,12 @@ export const ACTION_TO_CASE_STATE_LABEL: Record<string, string> = {
  * Returns the list of available action button labels based on the case status.
  *
  * @param status - Current status of the case.
+ * @param isInternalUser - True for WSO2 staff, who alone get "Waiting on WSO2".
  * @returns {string[]} Array of action button labels to display.
  */
 export function getAvailableCaseActions(
   status: string | null | undefined,
+  isInternalUser = false,
 ): string[] {
   const normalized = status?.toLowerCase() || "";
 
@@ -1742,7 +1754,8 @@ export function getAvailableCaseActions(
       return ["Accept Solution", "Reject Solution"];
 
     case CaseStatus.AWAITING_INFO.toLowerCase():
-      return ["Closed", "Waiting on WSO2"];
+      // Handing the case back to WSO2 is a staff action; customers only close.
+      return isInternalUser ? ["Closed", "Waiting on WSO2"] : ["Closed"];
 
     default:
       // Covers Open, Work in Progress, Waiting on WSO2, Reopened.

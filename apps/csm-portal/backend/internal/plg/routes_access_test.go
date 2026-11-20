@@ -51,6 +51,7 @@ var everydayRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/plg/organizations/aggregate"},
 	{http.MethodGet, "/plg/organizations/org-1"},
 	{http.MethodPatch, "/plg/organizations/org-1"},
+	{http.MethodPost, "/plg/organizations/org-1/reveal"},
 	{http.MethodGet, "/plg/organizations/org-1/products/choreo"},
 	{http.MethodPatch, "/plg/organizations/org-1/products/choreo"},
 	{http.MethodPost, "/plg/organizations/org-1/products/choreo/playbook-runs"},

@@ -19,7 +19,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildReleaseLinePayload,
   buildVersionCreatePayload,
-  buildVersionSupportPayload,
+  buildVersionEditPayload,
+  isPublicAbbreviationRequired,
   buildVersionUpdatePayload,
   emptyVersionForm,
   parseTags,
@@ -114,17 +115,36 @@ describe("buildVersionUpdatePayload", () => {
   });
 });
 
-describe("buildVersionSupportPayload", () => {
-  it("sends only the support fields that changed, never row-specific ones", () => {
+describe("buildVersionEditPayload", () => {
+  it("sends only the fields that changed, support and publishing alike, never row-specific ones", () => {
     const live = liveVersion();
     const form = {
       ...versionToForm(live),
       supportEolDate: "2031-01-31",
       deploymentProfile: "Something else",
+      publicId: "999",
       description: "changed",
     };
-    expect(buildVersionSupportPayload(live, form)).toEqual({ supportEolDate: "2031-01-31" });
-    expect(buildVersionSupportPayload(live, versionToForm(live))).toEqual({});
+    expect(buildVersionEditPayload(live, form)).toEqual({ supportEolDate: "2031-01-31", description: "changed" });
+    expect(buildVersionEditPayload(live, versionToForm(live))).toEqual({});
+  });
+
+  it("clears a publishing field emptied in the form", () => {
+    const live = liveVersion({ publicName: "Acme Gateway 1.0" });
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), publicName: "  " })).toEqual({ publicName: null });
+  });
+
+  it("does not rewrite padded text or repeated tags the user left alone", () => {
+    const live = liveVersion({ publicName: "Acme Gateway ", description: " First release.", tags: ["lts", "lts", " beta"] });
+    const form = { ...versionToForm(live), supportEolDate: "2031-01-31" };
+    expect(buildVersionEditPayload(live, form)).toEqual({ supportEolDate: "2031-01-31" });
+    expect(buildVersionEditPayload(live, versionToForm(live))).toEqual({});
+  });
+
+  it("treats a tag reorder as no change, and a real tag change as one", () => {
+    const live = liveVersion({ tags: ["a", "b"] });
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), tags: "b, a" })).toEqual({});
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), tags: "b, c" })).toEqual({ tags: ["b", "c"] });
   });
 });
 
@@ -195,6 +215,42 @@ describe("validateVersionForm", () => {
     expect(validateVersionForm({ ...form, isPublic: false }, "create", { productCode: null })).toEqual({});
   });
 
+  describe("on an update (with the live row)", () => {
+    // A legacy row: on the public feeds, no abbreviation, product has no code,
+    // and a public name longer than the limit.
+    const legacy = liveVersion({ publicAbbreviation: null, publicName: "x".repeat(160), isPublic: true });
+
+    it("lets a change that leaves the publishing fields alone save", () => {
+      const form = { ...versionToForm(legacy), supportEolDate: "2031-01-31" };
+      expect(validateVersionForm(form, "update", { productCode: null, live: legacy })).toEqual({});
+    });
+
+    it("still checks the publishing fields the change touches", () => {
+      const renamed = { ...versionToForm(legacy), publicName: "y".repeat(151) };
+      expect(validateVersionForm(renamed, "update", { productCode: null, live: legacy }).publicName).toBeTruthy();
+      const listed = { ...versionToForm(liveVersion({ isPublic: false, showInSupportMatrix: false })), isPublic: true };
+      expect(
+        validateVersionForm(listed, "update", { productCode: null, live: liveVersion({ isPublic: false, showInSupportMatrix: false }) })
+          .publicAbbreviation,
+      ).toMatch(/no code/);
+    });
+
+    it("always checks the date order of the row the change leaves", () => {
+      const live = liveVersion({ releaseDate: "2026-01-01" });
+      const form = { ...versionToForm(live), supportEolDate: "2025-01-01" };
+      expect(validateVersionForm(form, "update", { live }).supportEolDate).toMatch(/before the release date/);
+    });
+
+    it("lets a release date be corrected or added, but not cleared", () => {
+      const live = liveVersion({ releaseDate: "2024-01-15" });
+      expect(validateVersionForm({ ...versionToForm(live), releaseDate: "2024-02-01" }, "update", { live })).toEqual({});
+      expect(validateVersionForm({ ...versionToForm(live), releaseDate: "" }, "update", { live }).releaseDate).toMatch(/can't be cleared/);
+      const undated = liveVersion({ releaseDate: null });
+      expect(validateVersionForm(versionToForm(undated), "update", { live: undated })).toEqual({});
+      expect(validateVersionForm({ ...versionToForm(undated), releaseDate: "2024-02-01" }, "update", { live: undated })).toEqual({});
+    });
+  });
+
   it("accepts a well-formed form", () => {
     expect(validateVersionForm({ ...emptyVersionForm(), version: "1.0.0", releaseDate: "2026-01-01", supportEolDate: "2029-01-01" }, "create")).toEqual({});
   });
@@ -228,3 +284,43 @@ describe("parseTags", () => {
     expect(parseTags(" a, ,b,a ")).toEqual(["a", "b"]);
   });
 });
+
+describe("isPublicAbbreviationRequired", () => {
+  it("is required on create when the product has no code and a feed is on", () => {
+    const form = { ...emptyVersionForm(), isPublic: true };
+    expect(isPublicAbbreviationRequired(form, { productCode: null })).toBe(true);
+    expect(isPublicAbbreviationRequired(form, { productCode: "ex" })).toBe(false);
+    expect(isPublicAbbreviationRequired({ ...form, isPublic: false }, { productCode: null })).toBe(false);
+    expect(isPublicAbbreviationRequired(form)).toBe(false); // no product context
+  });
+
+  it("on an update, only while a feed switch or the abbreviation changes", () => {
+    const live = liveVersion({ isPublic: true, showInSupportMatrix: false, publicAbbreviation: null });
+    const untouched = versionToForm(live);
+    expect(isPublicAbbreviationRequired(untouched, { productCode: null, live })).toBe(false);
+    expect(isPublicAbbreviationRequired({ ...untouched, showInSupportMatrix: true }, { productCode: null, live })).toBe(true);
+    expect(isPublicAbbreviationRequired({ ...untouched, publicAbbreviation: "EX" }, { productCode: null, live })).toBe(true);
+  });
+});
+
+describe("tags containing a comma", () => {
+  it("are left as stored when the Tags box is untouched", () => {
+    const live = liveVersion({ tags: ["alpha,beta", "gamma"] });
+    const form = { ...versionToForm(live), supportEolDate: "2031-01-31" };
+    expect(buildVersionEditPayload(live, form)).toEqual({ supportEolDate: "2031-01-31" });
+    expect(buildVersionEditPayload(live, versionToForm(live))).toEqual({});
+  });
+
+  it("count as changed when an edit splits a stored tag", () => {
+    const live = liveVersion({ tags: ["alpha,beta"] });
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), tags: "alpha, beta" })).toEqual({ tags: ["alpha", "beta"] });
+  });
+
+  it("are re-parsed only when the user edits the Tags box", () => {
+    const live = liveVersion({ tags: ["alpha,beta"] });
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), tags: "alpha,beta, delta" })).toEqual({
+      tags: ["alpha", "beta", "delta"],
+    });
+  });
+});
+

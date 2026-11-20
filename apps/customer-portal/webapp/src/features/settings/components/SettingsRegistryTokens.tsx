@@ -62,7 +62,6 @@ import {
   REGISTRY_GENERATE_USER_TOKEN,
   REGISTRY_MENU_DELETE,
   REGISTRY_MENU_REGENERATE,
-  REGISTRY_PAGE_DESCRIPTION,
   REGISTRY_PAGE_TITLE,
   REGISTRY_SEARCH_PLACEHOLDER_SERVICE,
   REGISTRY_SEARCH_PLACEHOLDER_USER,
@@ -70,6 +69,7 @@ import {
   REGISTRY_SUBTAB_SERVICE_BASE,
   REGISTRY_SUBTAB_USER_BASE,
   REGISTRY_USER_TOKENS_EMPTY,
+  registryPageDescription,
 } from "@features/settings/constants/settingsConstants";
 import {
   RegistryTokenSubTabId,
@@ -192,7 +192,7 @@ export default function SettingsRegistryTokens({
           {REGISTRY_PAGE_TITLE}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {REGISTRY_PAGE_DESCRIPTION}
+          {registryPageDescription()}
         </Typography>
       </Box>
 

@@ -25,6 +25,9 @@ const (
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+// cloudIDRe is a Cloud organisation id: UUIDs in Cloud, plain tokens in local data.
+var cloudIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
 // validateUUID rejects a non-UUID before it reaches Postgres.
 //
 // Every actor, owner and author is a UUID, so this is what stands between a

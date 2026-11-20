@@ -75,6 +75,7 @@ import {
 import { resolveAccountTier, type Account } from "@features/csm-accounts/types/csmAccounts";
 import AccountPreviewDrawer from "@features/csm-accounts/components/AccountPreviewDrawer";
 import { StatusChip } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail } from "@features/plg/components/CompanyIdentity";
 import type { OrganizationSummary, RegistrationItem } from "@features/plg/api/types";
 import type { Project } from "@features/csm-projects/types/csmProjects";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
@@ -775,13 +776,10 @@ function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps
             state: dashboardReturnState,
           }),
         cells: [
-          <Box key="name" sx={{ minWidth: 0 }}>
-            <Typography variant="body2" noWrap title={org.organizationName}>
-              {org.organizationName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {org.registeredEmail}
-            </Typography>
+          // Masked as on the PLG pages; the organisation page reveals them.
+          <Box key="name" sx={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <CompanyName organizationId={org.id} companyId={org.moesifCompanyId} />
+            <MaskedEmail organizationId={org.id} />
           </Box>,
           <Box key="products" sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
             {(org.platformStages ?? []).map((ps) => (
@@ -836,13 +834,10 @@ function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps
             { state: dashboardReturnState },
           ),
         cells: [
-          <Box key="name" sx={{ minWidth: 0 }}>
-            <Typography variant="body2" noWrap title={r.organizationName}>
-              {r.organizationName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {r.registeredEmail}
-            </Typography>
+          // Masked as on the PLG pages; the organisation page reveals them.
+          <Box key="name" sx={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <CompanyName organizationId={r.organizationId} companyId={r.moesifCompanyId} />
+            <MaskedEmail organizationId={r.organizationId} />
           </Box>,
           <Typography key="product" variant="body2" noWrap title={r.product.name}>
             {r.product.name}
@@ -1114,6 +1109,23 @@ function CaseFeedbackWidgetList({ items, isLoading }: WidgetListRendererProps): 
   );
 }
 
+/**
+ * Structurally-required `shape: "list"` renderer for `resourceType: "mttr"`
+ * -- genuinely unreachable: `ParseGenerated` refuses every shape but
+ * `pie`/`bar` with `groupBy.bucket` for this resourceType (backend's own
+ * `noSlices`/`shapes` rule), so no saved dashboard can ever produce a
+ * `shape: "list"` mttr widget for this to render. Exists only because
+ * `WIDGET_LIST_RENDERERS` is a `Record<BeWidgetResourceType, ...>` -- every
+ * key needs an entry, or the map fails to compile.
+ */
+function MttrWidgetList(): JSX.Element {
+  return (
+    <Typography variant="body2" color="text.secondary">
+      MTTR has no list view.
+    </Typography>
+  );
+}
+
 /** Per-resourceType renderer for a `shape: "list"` dashboard widget. Every
  * resource type is covered — `WIDGET_RESOURCE_CONFIG` (in
  * `widgetResourceConfig.ts`) is keyed the same way, so a missing entry here
@@ -1145,4 +1157,5 @@ export const WIDGET_LIST_RENDERERS: Record<
   case_feedback: CaseFeedbackWidgetList,
   plg_organization: PlgOrganizationWidgetList,
   plg_registration: PlgRegistrationWidgetList,
+  mttr: MttrWidgetList,
 };

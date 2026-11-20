@@ -101,6 +101,7 @@ import RoleMembersPage from "@features/csm-admin/pages/RoleMembersPage";
 import CsmGroupsPage from "@features/csm-admin/pages/CsmGroupsPage";
 import GroupMembersPage from "@features/csm-admin/pages/GroupMembersPage";
 import CsmTeamsPage from "@features/csm-admin/pages/CsmTeamsPage";
+import CsmEscalationAccessPage from "@features/csm-admin/pages/CsmEscalationAccessPage";
 import TeamMembersPage from "@features/csm-admin/pages/TeamMembersPage";
 import DashboardBuilderRouteGuard from "@features/csm-admin/dashboards/pages/DashboardBuilderRouteGuard";
 import CsmDashboardBuilderListPage from "@features/csm-admin/dashboards/pages/CsmDashboardBuilderListPage";
@@ -109,6 +110,7 @@ import CsmDashboardSharedConfigPage from "@features/csm-admin/dashboards/pages/C
 import CsmBannersRouteGuard from "@features/csm-admin/banners/CsmBannersRouteGuard";
 import CsmBannersPage from "@features/csm-admin/banners/CsmBannersPage";
 import CsmSlaEngineRouteGuard from "@features/csm-admin/sla-engine/CsmSlaEngineRouteGuard";
+import ProductCatalogRouteGuard from "@features/csm-products/components/ProductCatalogRouteGuard";
 import CsmSlaEnginePage from "@features/csm-admin/sla-engine/CsmSlaEnginePage";
 import CsmCustomersLayout from "@features/csm-customers/pages/CsmCustomersLayout";
 import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
@@ -238,9 +240,10 @@ function FeatureRouteGuard(): JSX.Element {
 }
 
 /**
- * Redirects a legacy detail path (`/accounts/:id`, `/projects/:id`) to its new
- * home under `/customers`, preserving the id. Exists only so old pinned/deep
- * links survive the Accounts+Projects → Customers menu merge.
+ * Redirects a legacy path to its new home, preserving the query string, the
+ * hash and, for a detail path (`/accounts/:id`, `/projects/:id` → under
+ * `/customers`), the id. Exists only so old pinned/deep links survive a menu
+ * move (Accounts+Projects → Customers, Products → Settings ▸ Product catalogue).
  */
 function LegacyDetailRedirect({ to }: { to: string }): JSX.Element {
   const { id } = useParams();
@@ -392,6 +395,10 @@ export default function App(): JSX.Element {
                     <Route path="user-management/groups" element={<CsmGroupsPage />} />
                     <Route path="user-management/teams" element={<CsmTeamsPage />} />
                     <Route
+                      path="user-management/escalation-access"
+                      element={<CsmEscalationAccessPage />}
+                    />
+                    <Route
                       path="user-management/permissions"
                       element={
                         <CsmComingSoonPage
@@ -419,6 +426,17 @@ export default function App(): JSX.Element {
                     </Route>
                     <Route path="sla-engine" element={<CsmSlaEngineRouteGuard />}>
                       <Route index element={<CsmSlaEnginePage />} />
+                    </Route>
+                    {/* Product catalogue: the data behind the public Support
+                        Matrix and Release Matrix. Catalogue managers only. */}
+                    <Route path="product-catalog" element={<ProductCatalogRouteGuard />}>
+                      <Route element={<ProductsLayout />}>
+                        {/* The first catalogue tab this person may open: a deployment can hide
+                            Products and keep Release lines through feature overrides. */}
+                        <Route index element={<SectionIndexRedirect sectionId="admin.product-catalog" />} />
+                        <Route path="products" element={<ProductCatalogPage />} />
+                        <Route path="release-lines" element={<ReleaseLinesPage />} />
+                      </Route>
                     </Route>
                   </Route>
 
@@ -726,14 +744,22 @@ export default function App(): JSX.Element {
                     <Route path="admin" element={<CsmKBAdminPage />} />
                   </Route>
 
-                  {/* Products: the product catalogue behind the public Support
-                      Matrix and Release Matrix. Editing is a catalogue
-                      manager's job; the pages offer it only to them. */}
-                  <Route path="products" element={<ProductsLayout />}>
-                    <Route index element={<Navigate to="catalogue" replace />} />
-                    <Route path="catalogue" element={<ProductCatalogPage />} />
-                    <Route path="release-lines" element={<ReleaseLinesPage />} />
-                  </Route>
+                  {/* The product catalogue was a top-level "Products" section
+                      until it moved to Settings ▸ Product catalogue; its old
+                      links land on the new pages, query string and hash
+                      included (LegacyDetailRedirect, with no :id here). */}
+                  <Route
+                    path="products"
+                    element={<LegacyDetailRedirect to="/admin/product-catalog/products" />}
+                  />
+                  <Route
+                    path="products/catalogue"
+                    element={<LegacyDetailRedirect to="/admin/product-catalog/products" />}
+                  />
+                  <Route
+                    path="products/release-lines"
+                    element={<LegacyDetailRedirect to="/admin/product-catalog/release-lines" />}
+                  />
 
                   {/* Usage Metrics and Customer Health are gated by their own
                       flags, not isSplAudience. Usage Metrics also goes to

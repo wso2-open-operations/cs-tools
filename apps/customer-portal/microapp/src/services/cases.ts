@@ -16,6 +16,13 @@
 
 import axios from "axios";
 import apiClient from "@src/services/apiClient";
+import {
+  commentEntries,
+  createdCommentDto,
+  toCommentDto,
+  type CaseActivitiesPage,
+  type CreatedCommentResponse,
+} from "@utils/caseComments";
 import { infiniteQueryOptions, mutationOptions, queryOptions, skipToken } from "@tanstack/react-query";
 import type {
   CaseSummary,
@@ -29,7 +36,6 @@ import type {
   GetCasesRequestDto,
   Case,
   CaseDto,
-  CommentsDto,
   CommentDto,
   Comment,
   CreateCommentRequestDto,
@@ -53,6 +59,7 @@ import {
   CASE_ATTACHMENTS_ENDPOINT,
   CASE_CLASSIFICATION_ENDPOINT,
   CASE_COMMENTS_ENDPOINT,
+  CASE_ACTIVITIES_SEARCH_ENDPOINT,
   CASE_DETAILS_ENDPOINT,
   CASE_FEEDBACK_ENDPOINT,
   CASE_STATS_ENDPOINT,
@@ -60,6 +67,7 @@ import {
   PROJECT_CASES_ENDPOINT,
   PROJECT_CASES_FILTERS_ENDPOINT,
 } from "@config/endpoints";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export const getAllCases = async (id: string, body: GetCasesRequestDto = {}): Promise<PaginatedArray<CaseSummary>> => {
   const response = (
@@ -131,14 +139,31 @@ const getCasesStats = async (id: string, body: Partial<GetCasesStatsRequestDto>)
   return (await apiClient.get<CasesStatsDto>(CASE_STATS_ENDPOINT(id), { params })).data;
 };
 
+// A case's comments are read from its activity feed: backend-v2 has no GET for comments (adding one is a
+// POST to /comments), and the feed is also the only place it says which authors are internal, which the
+// timeline shows as a headset badge. The feed is paged and newest first; every page is read, up to a cap
+// that keeps a very long case bounded (it then keeps the newest entries).
+const ACTIVITY_PAGE_SIZE = 50;
+const MAX_ACTIVITY_PAGES = 20;
+
 const getComments = async (id: string): Promise<Comment[]> => {
-  const response = (await apiClient.get<CommentsDto>(CASE_COMMENTS_ENDPOINT(id))).data;
-  return response.comments.map(toComment);
+  const pages: CaseActivitiesPage[] = [];
+  for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
+    const { data } = await apiClient.post<CaseActivitiesPage>(CASE_ACTIVITIES_SEARCH_ENDPOINT(id), {
+      pagination: { offset: page * ACTIVITY_PAGE_SIZE, limit: ACTIVITY_PAGE_SIZE },
+      includeFieldChanges: false,
+    });
+    pages.push(data);
+    if (!data.hasMore) break;
+  }
+  return commentEntries(pages)
+    .map((entry) => ({ ...toComment(toCommentDto(entry)), createdByIsInternal: entry.createdByIsInternal === true }))
+    .sort((a, b) => a.createdOn.getTime() - b.createdOn.getTime());
 };
 
 const createComment = async (id: string, body: CreateCommentRequestDto): Promise<Comment> => {
-  const response = (await apiClient.post<CommentDto>(CASE_COMMENTS_ENDPOINT(id), body)).data;
-  return toComment(response);
+  const response = (await apiClient.post<CreatedCommentResponse>(CASE_COMMENTS_ENDPOINT(id), body)).data;
+  return toComment(createdCommentDto(response, body.content));
 };
 
 const getAttachments = async (id: string, body: Partial<Omit<Pagination, "totalRecords">>): Promise<Attachment[]> => {
@@ -181,10 +206,10 @@ export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     title: dto.title,
     description: dto.description ?? "",
-    assigned: dto.assignedEngineer?.label,
+    assigned: stripStaffNameMarker(dto.assignedEngineer?.label) || undefined,
     statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
@@ -199,17 +224,17 @@ export function toCase(dto: CaseDto): Case {
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     updatedOn: new Date(dto.updatedOn.replace(" ", "T")),
     title: dto.title,
     description: dto.description ?? "",
-    assigned: dto.assignedEngineer?.label,
+    assigned: stripStaffNameMarker(dto.assignedEngineer?.label) || undefined,
     statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
     product: dto.deployedProduct ? `${dto.deployedProduct?.label} ${dto.deployedProduct?.version}` : undefined,
     deployment: dto.deployment?.label ?? undefined,
-    reporter: dto.createdBy,
+    reporter: stripStaffNameMarker(dto.createdBy),
     account: dto.account?.label,
     parentCaseId: dto.parentCase?.id,
     conversationId: dto.conversation?.id,
@@ -221,15 +246,17 @@ export function toComment(dto: CommentDto): Comment {
   return {
     id: dto.id,
     content: dto.content,
+    // Only the activity feed says who is internal; getComments sets this from it.
+    createdByIsInternal: false,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     attachments: dto.inlineAttachments.map((attachment) => ({
       id: attachment.id,
       type: "others",
       fileName: attachment.fileName,
       downloadUrl: attachment.downloadUrl,
       createdOn: new Date(attachment.createdOn.replace(" ", "T")),
-      createdBy: attachment.createdBy,
+      createdBy: stripStaffNameMarker(attachment.createdBy),
     })),
   };
 }
@@ -243,7 +270,7 @@ export function toCaseFeedback(dto: CaseFeedbackDto): CaseFeedback {
     chips: dto.chips ?? undefined,
     additionalComment: dto.additionalComment ?? undefined,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
   };
 }
 
@@ -254,7 +281,7 @@ export function toAttachment(dto: AttachmentDto): Attachment {
     fileName: dto.name,
     downloadUrl: dto.downloadUrl,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
   };
 }
 

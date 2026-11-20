@@ -15,10 +15,9 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import Footer from "@components/footer/Footer";
 import {
-  COMPANY_NAME,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
 } from "@features/project-hub/constants/appLayoutConstants";
@@ -27,7 +26,30 @@ import {
 // real Oxygen UI implementation instead of a flat mock.
 
 describe("Footer", () => {
-  it("should render the company name", () => {
+  const originalConfig = window.config;
+
+  afterEach(() => {
+    window.config = originalConfig;
+  });
+
+  it("should render the default company name with LLC", () => {
+    window.config = {
+      ...originalConfig,
+      CUSTOMER_PORTAL_COMPANY_NAME: undefined,
+    };
+    render(<Footer />);
+    expect(
+      screen.getByText(
+        `© ${new Date().getFullYear()} WSO2 LLC. All rights reserved.`,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("should render the configured company name with LLC", () => {
+    window.config = {
+      ...originalConfig,
+      CUSTOMER_PORTAL_COMPANY_NAME: " Acme Corp ",
+    };
     render(<Footer />);
     expect(screen.getByText(new RegExp(COMPANY_NAME, "i"))).toBeDefined();
     expect(

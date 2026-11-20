@@ -30,6 +30,7 @@ import {
   incidentStateLabel,
 } from "@components/operations/incidentConfig";
 import { formatDate } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 // Read-only counterpart of the webapp's CsmIncidentDetailPage.tsx (no Edit dialog, no comment
 // composer, no attachments — see the scope note on OperationsPage.tsx). Layout follows this app's
@@ -81,7 +82,7 @@ function IncidentDetailContent({ id }: { id: string }) {
 
       <SectionCard title="Overview">
         <Stack gap={1}>
-          <DetailRow label="Caller" value={incident.caller?.name} />
+          <DetailRow label="Caller" value={stripStaffNameMarker(incident.caller?.name) || undefined} />
           <DetailRow label="Category" value={incident.category} />
           <DetailRow label="Subcategory" value={incident.subcategory} />
           <DetailRow label="Channel" value={incident.channel} />
@@ -91,7 +92,7 @@ function IncidentDetailContent({ id }: { id: string }) {
           <DetailRow label="Service Offering" value={incident.serviceOffering?.name} />
           <DetailRow label="Configuration Item" value={incident.configurationItem?.name} />
           <DetailRow label="Assignment Group" value={incident.assignmentGroup?.name} />
-          <DetailRow label="Assigned To" value={incident.assignedTo?.name} />
+          <DetailRow label="Assigned To" value={stripStaffNameMarker(incident.assignedTo?.name) || undefined} />
           <DetailRow label="Opened" value={incident.openedOn ? formatDate(incident.openedOn) : undefined} />
           <DetailRow label="Created By" value={incident.createdBy} />
           <DetailRow label="Created On" value={incident.createdOn ? formatDate(incident.createdOn) : undefined} />
@@ -107,7 +108,7 @@ function IncidentDetailContent({ id }: { id: string }) {
             {/* "Caused by" has no confirmed target record type (could be a change request, a
                 problem, or something else), same caveat the webapp's own detail page notes — left
                 as plain text rather than guessing a route. */}
-            <DetailRow label="Caused By" value={incident.causedBy?.name} />
+            <DetailRow label="Caused By" value={stripStaffNameMarker(incident.causedBy?.name) || undefined} />
           </Stack>
         </SectionCard>
       )}
@@ -125,7 +126,7 @@ function IncidentDetailContent({ id }: { id: string }) {
         <SectionCard title="Watch list">
           <Stack direction="row" gap={1} flexWrap="wrap">
             {incident.watchList.map((w) => (
-              <Chip key={w.id} size="small" variant="outlined" label={w.name || w.email} />
+              <Chip key={w.id} size="small" variant="outlined" label={stripStaffNameMarker(w.name) || w.email} />
             ))}
           </Stack>
         </SectionCard>

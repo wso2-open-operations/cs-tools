@@ -17,6 +17,7 @@
 import {
   AlertOctagon,
   AlertTriangle,
+  ArrowUpRight,
   Award,
   BarChart3,
   BellOff,
@@ -58,7 +59,7 @@ import type { PortalAccess } from "@context/current-user/portalAccess";
  * visibility state.
  */
 import { PLG_NAV_SECTION } from "@features/plg/config/plgNavItems";
-import { PRODUCTS_NAV_SECTION } from "@features/csm-products/config/productsNavItems";
+import { PRODUCT_CATALOG_NAV_NODE } from "@features/csm-products/config/productsNavItems";
 
 export interface CsmNavNode {
   /**
@@ -429,10 +430,6 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       },
     ],
   },
-  // The product catalogue behind the public Support Matrix and Release
-  // Matrix. Declared in features/csm-products/config/productsNavItems, like
-  // PLG below.
-  PRODUCTS_NAV_SECTION,
   // PLG Customer Success Portal. Declared in
   // features/plg/config/plgNavItems so a change to PLG's pages does not
   // touch this file. Hide the whole section with
@@ -503,14 +500,19 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "admin",
     label: "Settings",
     href: "/admin",
-    // cs_engineer/admin only -- see canViewSettings's own doc comment.
-    requires: "canViewSettings",
+    // cs_engineer/admin, plus catalogue managers -- see
+    // canViewSettingsSection's own doc comment. Every tab but Product
+    // catalogue keeps the narrower canViewSettings (or isAdmin) on its own
+    // node, so a manager who is not a CS engineer sees the catalogue alone.
+    requires: "canViewSettingsSection",
     icon: Settings,
     children: [
       {
         id: "admin.user-management",
         label: "User management",
         href: "/admin/user-management",
+        // cs_engineer/admin only -- see canViewSettings's own doc comment.
+        requires: "canViewSettings",
         children: [
           {
             id: "admin.user-management.users",
@@ -535,6 +537,15 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
             label: "Teams",
             href: "/admin/user-management/teams",
             icon: Building2,
+          },
+          // Admin only (a real backend action, PermAdmin): who may de-escalate
+          // any case besides the leads of the case's own ABT team.
+          {
+            id: "admin.user-management.escalation-access",
+            label: "Escalation access",
+            href: "/admin/user-management/escalation-access",
+            icon: ArrowUpRight,
+            requires: "isAdmin",
           },
           // Routes to a placeholder that already names its backend blocker, so
           // it renders itself rather than the generic WIP page.
@@ -561,6 +572,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         id: "admin.dashboards",
         label: "Dashboards",
         href: "/admin/dashboards",
+        requires: "canViewSettings",
       },
       // Settings is also open to a CS engineer. This tab is admin only, so
       // the sidebar and Quick-nav hide it the same way the Settings tabs do.
@@ -582,6 +594,9 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         icon: RefreshCw,
         requires: "isAdmin",
       },
+      // The product catalogue behind the public Support Matrix and Release
+      // Matrix. Declared in features/csm-products/config/productsNavItems.
+      PRODUCT_CATALOG_NAV_NODE,
     ],
   },
   {
@@ -635,9 +650,10 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       { id: "help.customers", label: "Customers", href: "/help#customers" },
       {
         id: "help.products",
-        label: "Products",
+        label: "Product catalogue",
         href: "/help#products",
-        requires: "canViewStaffSections",
+        // Follows the page it documents: catalogue managers only.
+        requires: "canManageProductCatalog",
       },
       {
         id: "help.people-access",

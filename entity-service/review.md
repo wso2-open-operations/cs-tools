@@ -87,6 +87,9 @@ failure class turns up during review that isn't on this list, add it here in the
       with a later statement using the new value).
 - [ ] A migration that defines or touches an RLS policy goes in the `1NNNNN_*.sql` track, not the
       4-digit sequence.
+- [ ] A SQL function that deletes data on a schedule (`audit_delete_expired_partitions`) refuses an argument that would
+      delete everything (a retention of 0 or less put the cutoff in the future), and a test pins its boundary
+      (a partition ending exactly at the cutoff goes, the next one stays).
 - [ ] Renaming an already-applied migration file is never done — the filename is the identity; a
       rename makes it look new and re-run from scratch.
 
@@ -98,6 +101,11 @@ failure class turns up during review that isn't on this list, add it here in the
 - [ ] A new table protected by row-level security is written to under the caller's own identity
       context, not as a superuser/bypass path, unless there's a documented, deliberate reason
       (internal ingest, migration backfill).
+- [ ] A branch of `ResolveScope` / `scopeForUser` that returns an `Unrestricted` scope with no `ViewerEmail`
+      sets `AuditActor` to the person when there is one (never `ViewerEmail`, which `user_service.go` reads
+      as "CSM portal caller") — staff using a portal had no email on their scope, so the audit log named
+      the database role. A CSM portal scope already carries the person in `ViewerEmail` and leaves
+      `AuditActor` empty: the audit trigger falls back to `ViewerEmail`.
 - [ ] A customer-visible response doesn't leak an internal-only field (WSO2 team routing, Salesforce
       ids, another customer's data) — check the field against what the BFF layer is expected to
       trim, don't assume entity-service's own shape is already customer-safe.

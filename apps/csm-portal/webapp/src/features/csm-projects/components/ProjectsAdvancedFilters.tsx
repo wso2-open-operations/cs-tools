@@ -19,6 +19,7 @@ import { useMemo, type JSX } from "react";
 import OperationsAdvancedFilters from "@features/csm-operations/components/OperationsAdvancedFilters";
 import { projectAdvancedFields } from "@features/csm-projects/utils/projectAdvancedFields";
 import { buildProjectFilterChips, type ProjectFilters } from "@features/csm-projects/utils/projectFilters";
+import { useUserNamesById } from "@features/csm-users/api/useUserNamesById";
 
 interface ProjectsAdvancedFiltersProps {
   filters: ProjectFilters;
@@ -50,7 +51,10 @@ export function ProjectFilterChips({
   panelOpen,
   onChange,
 }: ProjectFilterChipsProps): JSX.Element | null {
-  const chips = buildProjectFilterChips(filters, !panelOpen);
+  // Only looked up while the chips are shown: with the panel open the owner
+  // row's own picker names them.
+  const ownerNames = useUserNamesById(panelOpen ? [] : filters.onboardingOwnerIds);
+  const chips = buildProjectFilterChips(filters, !panelOpen, (id) => ownerNames.get(id));
   if (chips.length === 0) return null;
   return (
     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>

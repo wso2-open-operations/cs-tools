@@ -15,7 +15,7 @@
 // under the License.
 
 
-import { Box, Typography } from "@wso2/oxygen-ui";
+import { Box } from "@wso2/oxygen-ui";
 import { type JSX, Suspense, useMemo } from "react";
 import { Outlet } from "react-router";
 import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
@@ -25,15 +25,17 @@ import { isFeatureVisible } from "@config/featureFlags";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 
 /**
- * Products shell: the product catalogue behind the public Support Matrix and
- * Release Matrix, under one tab strip (Catalogue, Release lines)
- * driven by the navigation tree. `useRouteTabs` resolves tabs for the
- * deployment only, so a tab whose nav node `requires` a capability is narrowed
- * here by the caller's access, the same way `CsmAdminLayout` narrows its tabs.
+ * Settings ▸ Product catalogue: the data behind the public Support Matrix and
+ * Release Matrix, under its own second-level tab strip (Catalogue, Release
+ * lines), driven by the navigation tree. `CsmAdminLayout` renders the
+ * "Settings" title and the first-level strip above it. `useRouteTabs` resolves
+ * tabs for the deployment only, so a tab whose nav node `requires` a
+ * capability is narrowed here by the caller's access, the same way
+ * `CsmAdminLayout` narrows its tabs.
  */
 export default function ProductsLayout(): JSX.Element {
   const access = usePortalAccess();
-  const allTabs = useRouteTabs("products");
+  const allTabs = useRouteTabs("admin.product-catalog");
   const tabs = useMemo(() => {
     const visible = allTabs.tabs.filter((tab) => isFeatureVisible(tab.node.id, access));
     const activeKey = visible.some((tab) => tab.key === allTabs.activeKey)
@@ -44,9 +46,7 @@ export default function ProductsLayout(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Typography variant="h5">Products</Typography>
-
-      <SectionTabs {...tabs} ariaLabel="Products tabs" scrollable />
+      <SectionTabs {...tabs} ariaLabel="Product catalogue tabs" variant="secondary" />
 
       <Suspense fallback={<RouteSuspenseFallback />}>
         <Outlet />

@@ -27,6 +27,7 @@ import { ErrorState } from "@components/support/ErrorState";
 import { formatBytes } from "@utils/attachments";
 import { fromNow } from "@utils/dateTime";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
+import { AuthorAvatar } from "./AuthorAvatar";
 import { CommentBody } from "./CommentBody";
 
 interface CaseActivityFeedProps {
@@ -100,6 +101,7 @@ export function CaseActivityFeed({ comments, audit, attachments }: CaseActivityF
               <Stack gap={0.5} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
                   <Stack direction="row" alignItems="center" gap={1} sx={{ minWidth: 0 }}>
+                    <AuthorAvatar name={e.comment.createdBy} isSupportEngineer={e.comment.createdByIsInternal} />
                     <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
                       {e.comment.createdBy}
                     </Typography>

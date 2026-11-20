@@ -314,7 +314,17 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                     ? { px: 0, pb: 0, pt: 0 }
                     : {
                         px: { xs: 1.5, sm: 2, md: 3 },
-                        py: { xs: 2, sm: 2.5, md: 3 },
+                        pt: { xs: 2, sm: 2.5, md: 3 },
+                        // The bottom space is a spacer after the page, not
+                        // padding: this box shrinks to the visible height, so
+                        // a long page runs past its padding and its last
+                        // buttons end up against the footer.
+                        "&::after": {
+                          content: '""',
+                          display: "block",
+                          flexShrink: 0,
+                          height: { xs: "16px", sm: "20px", md: "24px" },
+                        },
                       }),
               }}
             >

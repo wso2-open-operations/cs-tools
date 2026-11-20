@@ -37,6 +37,7 @@ import {
 import {
   CALL_REQUEST_STATE_CUSTOMER_REJECTED,
   CALL_REQUEST_STATE_NOTES_PENDING_ID,
+  CALL_REQUEST_STATE_PENDING_ON_WSO2,
   CallRequestStatus,
 } from "@features/support/constants/supportConstants";
 
@@ -72,9 +73,17 @@ export default function CallRequestCard({
     stateId === "pending_on_customer" ||
     stateId === "1" ||
     call.state?.label === CallRequestStatus.PENDING_ON_CUSTOMER;
-  const statusLabel = isPendingOnCustomer
-    ? CallRequestStatus.PENDING_ON_CUSTOMER
-    : (call.state?.label ?? "--");
+  // A request waiting on WSO2 is shown to the customer as In Progress. The
+  // state id decides when there is one; the label only when there is not.
+  const isPendingOnWso2 =
+    !isPendingOnCustomer &&
+    (stateId
+      ? stateId === "pending_on_wso2" ||
+        stateId === String(CALL_REQUEST_STATE_PENDING_ON_WSO2)
+      : call.state?.label?.trim().toLowerCase() === "pending on wso2");
+  let statusLabel: string = call.state?.label ?? "--";
+  if (isPendingOnCustomer) statusLabel = CallRequestStatus.PENDING_ON_CUSTOMER;
+  else if (isPendingOnWso2) statusLabel = CallRequestStatus.IN_PROGRESS;
   const statusLower = statusLabel?.toLowerCase() ?? "";
   const isCancelled = statusLower === "cancelled" || statusLower === "canceled";
   const isTerminal = isCancelled || statusLabel === CallRequestStatus.COMPLETED;

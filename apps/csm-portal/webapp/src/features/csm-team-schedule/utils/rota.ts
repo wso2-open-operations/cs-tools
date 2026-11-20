@@ -17,6 +17,7 @@
  */
 
 import type { RotaFamily, ScheduleAbsenceKind, ScheduleAssignment, ScheduleShift, ScheduleTier } from "../types";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 
 /**
@@ -322,11 +323,16 @@ export function shiftsByCode(shifts: ScheduleShift[]): Map<string, ScheduleShift
 export function initialsOf(name: string): string {
   // Words only: a numbering suffix ("Engineer 11") is not an initial, and
   // made every numbered account read "A1".
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  const words = stripStaffNameMarker(name).split(/\s+/).filter(Boolean);
   const parts = words.filter((w) => !/^\d+$/.test(w));
   if (parts.length === 0) return words.length ? words[0].slice(0, 2).toUpperCase() : "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  // Only ever the first two real words -- first name, last name -- never
+  // whatever comes after. More defensive than stripStaffNameMarker alone:
+  // it keeps the avatar clean against any OTHER trailing marker/icon this
+  // codebase doesn't yet know to recognize too, not just the ones matched
+  // above, since a third (or later) word is never looked at at all.
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 /**

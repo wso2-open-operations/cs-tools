@@ -25,7 +25,8 @@ import { ApiQueryKeys } from "@constants/apiConstants";
  * `useWidgetPieData`), `[KEY, "group-by", widgetId, ...]` for pie/bar via
  * `groupBy` (see `useWidgetGroupByData`), `[KEY, "feedback-trend", widgetId,
  * ...]` for the case-feedback bar/date-bucket trend (see
- * `useCaseFeedbackTrendData`).
+ * `useCaseFeedbackTrendData`), `[KEY, "mttr-report", widgetId, ...]` for the
+ * mttr severity-band bar (see `useMttrReportData`).
  *
  * Shared between `DashboardWidgetGrid` (a whole section's worth of widget
  * ids at once) and `DashboardWidgetTile` (its own single widget id) so this
@@ -40,7 +41,10 @@ export function invalidateWidgetQueries(
       const key = query.queryKey;
       if (key[0] !== ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA) return false;
       const widgetId =
-        key[1] === "pie-slice" || key[1] === "group-by" || key[1] === "feedback-trend"
+        key[1] === "pie-slice" ||
+        key[1] === "group-by" ||
+        key[1] === "feedback-trend" ||
+        key[1] === "mttr-report"
           ? key[2]
           : key[1];
       return typeof widgetId === "string" && widgetIds.has(widgetId);

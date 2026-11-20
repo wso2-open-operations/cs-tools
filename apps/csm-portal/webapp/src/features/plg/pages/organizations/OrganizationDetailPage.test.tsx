@@ -16,7 +16,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 const organization = {
@@ -48,9 +48,20 @@ const organization = {
   ],
 };
 
+const page = vi.hoisted(() => ({ current: undefined as Record<string, unknown> | undefined }));
+
 vi.mock("@features/plg/api/hooks", () => ({
-  useOrganization: () => ({ data: organization, isPending: false, error: null }),
+  useOrganization: () => ({ data: page.current ?? organization, isPending: false, error: null }),
   useSetOrganizationOwner: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  // The header shows the company id with a reveal; hidden, it fetches nothing.
+  useCompanyReveal: () => ({
+    identity: undefined,
+    notFound: false,
+    isFetching: false,
+    error: null,
+    reveal: () => {},
+    hide: () => {},
+  }),
 }));
 // The product tab and the owner picker fetch their own data; neither is
 // what these tests are about.
@@ -68,9 +79,18 @@ function Probe() {
   );
 }
 
+beforeEach(() => {
+  page.current = undefined;
+});
+
+function PathProbe() {
+  return <div data-testid="path">{useLocation().pathname}</div>;
+}
+
 function renderAt(path: string, state: unknown) {
   return render(
     <MemoryRouter initialEntries={[{ pathname: path, state }]}>
+      <PathProbe />
       <Routes>
         <Route path="/plg/organizations/:organizationId" element={<OrganizationDetailPage />} />
         <Route path="/plg/organizations/:organizationId/:productCode" element={<OrganizationDetailPage />} />
@@ -116,5 +136,35 @@ describe("OrganizationDetailPage: Back", () => {
     fireEvent.click(screen.getAllByText("Identity").at(-1)!);
     expect(screen.getByText("Product tab")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+  });
+});
+
+describe("OrganizationDetailPage: Cloud ids", () => {
+  const cloud = {
+    ...organization,
+    organizationName: null,
+    moesifCompanyId: "01a1ba70-b841-718f-86f2-56d0de00d195",
+    cloudUserId: "01a1ba70-b85b-703a-81f9-85f219c4456f",
+    emailClassification: "PERSONAL",
+  };
+
+  it("moves a link by record id to the Cloud organisation id, keeping the way back", () => {
+    page.current = cloud;
+    renderAt("/plg/organizations/org-1", fromViewMore);
+    expect(screen.getByTestId("path").textContent).toBe("/plg/organizations/01a1ba70-b841-718f-86f2-56d0de00d195");
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+  });
+
+  it("stays on the record id when there is no Cloud id", () => {
+    renderAt("/plg/organizations/org-1", null);
+    expect(screen.getByTestId("path").textContent).toBe("/plg/organizations/org-1");
+  });
+
+  it("shows the Cloud ids and the email classification", () => {
+    page.current = cloud;
+    renderAt("/plg/organizations/org-1", null);
+    expect(screen.getByText("01a1ba70-b85b-703a-81f9-85f219c4456f")).toBeInTheDocument();
+    expect(screen.getByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("Cloud organisation id")).toBeInTheDocument();
   });
 });

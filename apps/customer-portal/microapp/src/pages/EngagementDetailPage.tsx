@@ -184,8 +184,8 @@ export default function EngagementDetailPage() {
               <EmptyState />
             ) : (
               <>
-                {comments.map(({ id, content, createdOn, createdBy }) => (
-                  <Comment key={id} author={createdBy} timestamp={format(createdOn)}>
+                {comments.map(({ id, content, createdOn, createdBy, createdByIsInternal }) => (
+                  <Comment key={id} author={createdBy} timestamp={format(createdOn)} isInternal={createdByIsInternal}>
                     <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}

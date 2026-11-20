@@ -855,7 +855,10 @@ func (h *ScheduleHandler) CreateScheduleAbsenceKind(w http.ResponseWriter, r *ht
 }
 
 // DeleteScheduleAbsenceKind handles DELETE /team-schedule/absence-kinds/{code}
-// -- a lead deleting a tag a lead added, once nothing uses it.
+// -- a lead, rota admin or portal admin deleting a tag added from the portal,
+// once nothing uses it. A 403 (whose tag it is) and a 409 (how many entries
+// still use it) keep entity-service's reason, as every Team Schedule write
+// does, so the picker can say why.
 func (h *ScheduleHandler) DeleteScheduleAbsenceKind(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -865,7 +868,7 @@ func (h *ScheduleHandler) DeleteScheduleAbsenceKind(w http.ResponseWriter, r *ht
 
 	if _, err := h.entity.DeleteScheduleAbsenceKind(r.Context(), r.PathValue("code")); err != nil {
 		slog.ErrorContext(r.Context(), "entity DeleteScheduleAbsenceKind failed", "userID", user.UserID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to delete the tag.")
+		mapScheduleWriteError(w, err, "Failed to delete the tag.")
 		return
 	}
 

@@ -17,6 +17,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  addMonthsClamped,
+  applyListingFilters,
+  sortListings,
+  NO_LISTING_FILTERS,
+  type CatalogListing,
   buildProductCreatePayload,
   emptyProductForm,
   catalogListings,
@@ -28,7 +33,7 @@ import {
   listingFormFrom,
   normalizeProfiles,
   productDisplayCode,
-  summarizeListing,
+  showsCarbonFields,
   validateProductForm,
 } from "@features/csm-products/utils/catalogProducts";
 import { buildVersionCreatePayload, emptyVersionForm } from "@features/csm-products/utils/catalogChange";
@@ -200,6 +205,24 @@ describe("catalogListings", () => {
   });
 });
 
+describe("showsCarbonFields", () => {
+  const blank = { platformRelease: "", platformVersion: "", carbonKernelVersion: "", releaseChunk: "", kernelPatchNo: "" };
+  const carbon = { platformRelease: "Carbon 4", platformVersion: null, carbonKernelVersion: null, releaseChunk: null, kernelPatchNo: null };
+
+  it("shows them for a Carbon-based product, from its latest version", () => {
+    expect(showsCarbonFields(version({ carbon }), blank)).toBe(true);
+  });
+
+  it("hides them for a product with no Carbon data", () => {
+    expect(showsCarbonFields(version({ carbon: null }), blank)).toBe(false);
+    expect(showsCarbonFields(null, blank)).toBe(false);
+  });
+
+  it("keeps them once a field holds a value", () => {
+    expect(showsCarbonFields(null, { ...blank, releaseChunk: "Alpha" })).toBe(true);
+  });
+});
+
 describe("latestLiveVersion", () => {
   it("picks the latest release date among live rows", () => {
     const rows = [
@@ -260,17 +283,6 @@ describe("copying the publishing settings from the latest version", () => {
     const form = { ...emptyVersionForm(), version: "1.0.0" };
     expect(buildVersionCreatePayload({ ...form, ...listingFormFrom(null) })).toEqual({ version: "1.0.0" });
   });
-
-  it("summarises the settings for the collapsed section header", () => {
-    const names = new Map([["line-1", "Line A"]]);
-    expect(summarizeListing(listingFormFrom(version()), version(), false, names)).toBe(
-      "copied from 1.0.0: on Support Matrix, on Release Matrix, Line A",
-    );
-    expect(summarizeListing(listingFormFrom(null), null, false)).toBe("no earlier version to copy: not on the public feeds");
-    expect(summarizeListing({ ...listingFormFrom(version()), isPublic: false }, version(), true, names)).toBe(
-      "edited: on Support Matrix, Line A",
-    );
-  });
 });
 
 describe("product form", () => {
@@ -293,5 +305,75 @@ describe("product form", () => {
 describe("normalizeProfiles", () => {
   it("trims, drops blanks and de-duplicates", () => {
     expect(normalizeProfiles([" All In One", "", "Gateway", "All In One"])).toEqual(["All In One", "Gateway"]);
+  });
+});
+
+describe("listing filters and date sort", () => {
+  const listing = (
+    id: string,
+    productId: string,
+    status: CatalogVersion["currentSupportStatus"],
+    eol: string | null,
+    release: string | null,
+  ): CatalogListing => {
+    const row = version({ id, productId, currentSupportStatus: status, supportEolDate: eol, releaseDate: release });
+    return { key: id, product: product({ id: productId }), version: row, rows: [row], named: false };
+  };
+  const all = [
+    listing("v1", "p1", "available", "2030-01-01", "2024-01-01"),
+    listing("v2", "p1", "extended", "2026-01-01", "2022-01-01"),
+    listing("v3", "p2", "deprecated", "2027-03-01", null),
+    listing("v4", "p2", "available", null, "2025-06-01"),
+  ];
+  const keys = (rows: CatalogListing[]): string[] => rows.map((r) => r.key);
+
+  it("keeps everything with no filters", () => {
+    expect(keys(applyListingFilters(all, NO_LISTING_FILTERS, "2026-11-06"))).toEqual(["v1", "v2", "v3", "v4"]);
+  });
+
+  it("filters by product, status and EOL window", () => {
+    expect(keys(applyListingFilters(all, { ...NO_LISTING_FILTERS, productIds: ["p2"] }, "2026-11-06"))).toEqual(["v3", "v4"]);
+    expect(keys(applyListingFilters(all, { ...NO_LISTING_FILTERS, statuses: ["available"] }, "2026-11-06"))).toEqual(["v1", "v4"]);
+    expect(keys(applyListingFilters(all, { ...NO_LISTING_FILTERS, eol: "past" }, "2026-11-06"))).toEqual(["v2"]);
+    expect(keys(applyListingFilters(all, { ...NO_LISTING_FILTERS, eol: "within6Months" }, "2026-11-06"))).toEqual(["v3"]);
+    expect(keys(applyListingFilters(all, { ...NO_LISTING_FILTERS, eol: "none" }, "2026-11-06"))).toEqual(["v4"]);
+  });
+
+  it("looks 1, 3 or 6 calendar months ahead for the EOL within choices, both ends included", () => {
+    const soon = [
+      listing("today", "p1", "available", "2026-11-06", null),
+      listing("m1", "p1", "available", "2026-12-06", null),
+      listing("m1+1", "p1", "available", "2026-12-07", null),
+      listing("m3", "p1", "available", "2027-02-06", null),
+      listing("m6", "p1", "available", "2027-05-06", null),
+      listing("m6+1", "p1", "available", "2027-05-07", null),
+    ];
+    const within = (eol: "within1Month" | "within3Months" | "within6Months") =>
+      keys(applyListingFilters(soon, { ...NO_LISTING_FILTERS, eol }, "2026-11-06"));
+    expect(within("within1Month")).toEqual(["today", "m1"]);
+    expect(within("within3Months")).toEqual(["today", "m1", "m1+1", "m3"]);
+    expect(within("within6Months")).toEqual(["today", "m1", "m1+1", "m3", "m6"]);
+  });
+
+  it("clamps a window to the target month's last day instead of running into the next month", () => {
+    expect(addMonthsClamped("2027-01-31", 1)).toBe("2027-02-28");
+    expect(addMonthsClamped("2028-01-31", 1)).toBe("2028-02-29"); // leap year
+    expect(addMonthsClamped("2026-08-31", 6)).toBe("2027-02-28");
+    expect(addMonthsClamped("2026-11-30", 3)).toBe("2027-02-28");
+    expect(addMonthsClamped("2026-12-15", 1)).toBe("2027-01-15"); // across a year end
+    // 31 Jan + 1 month ends on 28 Feb: 1 and 2 March are outside the window.
+    const rows = [
+      listing("feb28", "p1", "available", "2027-02-28", null),
+      listing("mar01", "p1", "available", "2027-03-01", null),
+      listing("mar02", "p1", "available", "2027-03-02", null),
+    ];
+    expect(keys(applyListingFilters(rows, { ...NO_LISTING_FILTERS, eol: "within1Month" }, "2027-01-31"))).toEqual(["feb28"]);
+  });
+
+  it("sorts a date column either way, empty dates last", () => {
+    expect(keys(sortListings(all, { field: "releaseDate", order: "desc" }))).toEqual(["v4", "v1", "v2", "v3"]);
+    expect(keys(sortListings(all, { field: "releaseDate", order: "asc" }))).toEqual(["v2", "v1", "v4", "v3"]);
+    expect(keys(sortListings(all, { field: "supportEolDate", order: "asc" }))).toEqual(["v2", "v3", "v1", "v4"]);
+    expect(keys(sortListings(all, null))).toEqual(["v1", "v2", "v3", "v4"]);
   });
 });

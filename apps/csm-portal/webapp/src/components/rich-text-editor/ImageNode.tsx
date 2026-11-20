@@ -31,14 +31,38 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import type { JSX } from "react";
 import { deriveAltFromFilename, sanitizeImageSrc } from "@components/rich-text-editor/richTextEditor";
 
+/**
+ * The reply box (`enterInsertsLineBreak`) shows and exports images inline-block, so a `<br>`
+ * after an image ends its line like after text and ONE Enter starts the next line directly. A
+ * block image followed by `<br>` showed (and was exported) with an extra blank line. Everywhere
+ * else images stay `display:block`.
+ *
+ * The flag lives in this one set, keyed by the editor: Lexical hands the editor to every place
+ * that needs it (`createDOM(config, editor)`, `exportDOM(editor)`, `decorate(editor, config)`
+ * and plugins), while its config (`_config`) is private, and a flag in the theme would be a
+ * second copy to keep in step. `Editor` marks the editor when it is created, before any
+ * content renders; it is not undone, so the prop behind it must not change after mount.
+ */
+const inlineImageEditors = new WeakSet<LexicalEditor>();
+
+export function markInlineImageEditor(editor: LexicalEditor): void {
+  inlineImageEditors.add(editor);
+}
+
+export function editorHasInlineImages(editor: LexicalEditor): boolean {
+  return inlineImageEditors.has(editor);
+}
+
 function ImageComponent({
   src,
   altText,
   nodeKey,
+  inline,
 }: {
   src: string;
   altText: string;
   nodeKey: NodeKey;
+  inline: boolean;
 }): JSX.Element {
   const [editor] = useLexicalComposerContext();
 
@@ -49,7 +73,7 @@ function ImageComponent({
   };
 
   return (
-    <span style={{ position: "relative", display: "block" }}>
+    <span style={{ position: "relative", display: inline ? "inline-block" : "block", verticalAlign: inline ? "bottom" : undefined }}>
       <img
         src={sanitizeImageSrc(src)}
         alt={altText}
@@ -127,10 +151,11 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     };
   }
 
-  createDOM(config: EditorConfig): HTMLElement {
-    void config;
+  createDOM(_config: EditorConfig, editor: LexicalEditor): HTMLElement {
+    const inline = editorHasInlineImages(editor);
     const span = document.createElement("span");
-    span.style.display = "block";
+    span.style.display = inline ? "inline-block" : "block";
+    if (inline) span.style.verticalAlign = "bottom";
     return span;
   }
 
@@ -139,13 +164,14 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   }
 
   exportDOM(editor: LexicalEditor): { element: HTMLElement | null } {
-    void editor;
+    const inline = editorHasInlineImages(editor);
     const img = document.createElement("img");
     img.setAttribute("src", sanitizeImageSrc(this.__src));
     img.setAttribute("alt", this.__altText);
     img.style.maxWidth = "100%";
     img.style.borderRadius = "8px";
-    img.style.display = "block";
+    img.style.display = inline ? "inline-block" : "block";
+    if (inline) img.style.verticalAlign = "bottom";
     return { element: img };
   }
 
@@ -165,12 +191,13 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     };
   }
 
-  decorate(): JSX.Element {
+  decorate(editor: LexicalEditor): JSX.Element {
     return (
       <ImageComponent
         src={this.__src}
         altText={this.__altText}
         nodeKey={this.__key}
+        inline={editorHasInlineImages(editor)}
       />
     );
   }

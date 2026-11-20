@@ -107,6 +107,7 @@ import { getUserStatusColor } from "@features/project-details/utils/projectDetai
 import type { CreateProjectContactRequest } from "@features/settings/types/users";
 import type { ProjectContact } from "@features/settings/types/users";
 import type { SettingsUserManagementProps } from "@features/settings/types/settings";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 /**
  * User management section: stat cards, search, table, role permissions.
@@ -453,11 +454,8 @@ export default function SettingsUserManagement({
                       </Box>
                       <Box>
                         <Typography variant="body2">
-                          {contact.firstName && contact.lastName
-                            ? `${contact.firstName} ${contact.lastName}`
-                            : contact.firstName ||
-                              contact.lastName ||
-                              NULL_PLACEHOLDER}
+                          {joinStaffName(contact.firstName, contact.lastName) ||
+                            NULL_PLACEHOLDER}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {contact.email ?? NULL_PLACEHOLDER}
@@ -684,7 +682,7 @@ function PendingInviteRow({
   onDismiss,
 }: PendingInviteRowProps): JSX.Element {
   const { request, status, error, email } = invite;
-  const name = [request.contactFirstName, request.contactLastName].filter(Boolean).join(" ");
+  const name = joinStaffName(request.contactFirstName, request.contactLastName);
   const roleSource = {
     email,
     firstName: request.contactFirstName,

@@ -28,6 +28,7 @@ import {
   CASE_TYPE_CHIP_DISPLAY_LABEL,
   S0_SEVERITY_LABELS,
   SEVERITY_ALT_TO_LEGEND_KEY,
+  SEVERITY_CODE_TO_LEGEND_KEY,
   SEVERITY_FRIENDLY_LABEL,
   SEVERITY_LEGEND_ORDER,
 } from "@/features/dashboard/constants/dashboard";
@@ -49,7 +50,10 @@ function resolveSeverityLegendEntry(
   if (direct) {
     return direct;
   }
-  const altKey = SEVERITY_ALT_TO_LEGEND_KEY[lower];
+  // A bare code, with or without a suffix: "S2", "S4(Query)".
+  const code = lower.replace(/\s*\(.*$/, "");
+  const altKey =
+    SEVERITY_ALT_TO_LEGEND_KEY[lower] ?? SEVERITY_CODE_TO_LEGEND_KEY[code];
   switch (altKey) {
     case SeverityLegendKey.Catastrophic:
     case SeverityLegendKey.Critical:
@@ -72,7 +76,11 @@ export function isS0SeverityLabel(label?: string | null): boolean {
     case S0_SEVERITY_LABELS[2].toLowerCase():
       return true;
     default:
-      return false;
+      // A bare code ("S0"), read the way the severity legend reads it.
+      return (
+        SEVERITY_CODE_TO_LEGEND_KEY[trimmed.replace(/\s*\(.*$/, "")] ===
+        SeverityLegendKey.Catastrophic
+      );
   }
 }
 

@@ -41,6 +41,7 @@ import {
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { resolveUserInfo } from "@utils/userClaims";
+import { joinStaffName, stripStaffNameMarker } from "@utils/staffNameMarker";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { BackendApiError, useBackendApi, type BackendApi } from "@api/backend/client";
 import type {
@@ -75,7 +76,7 @@ export function useCurrentEngineer(): { id: string | undefined; name: string } {
   const { data: me } = useGetUsersMe();
   const info = resolveUserInfo(useIdTokenClaims());
   const displayName =
-    [me?.firstName, me?.lastName].filter(Boolean).join(" ") || info.fullName;
+    joinStaffName(me?.firstName, me?.lastName) || stripStaffNameMarker(info.fullName);
   return { id: me?.id, name: displayName };
 }
 

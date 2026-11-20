@@ -109,6 +109,56 @@ describe("CsmCaseCommentBubble", () => {
     mockCurrentUser.mockReturnValue(undefined);
   });
 
+  it.each([false, true])("badges internal-type authors, including public comments (compact=%s)", (compact) => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          internal: false,
+          authorUser: { id: "user-1", email: "jane@example.com", name: "Jane Doe", isInternal: true },
+        })}
+        compact={compact}
+      />,
+    );
+    const badge = screen.getByLabelText("Technical Team");
+    expect(badge).toBeInTheDocument();
+    expect(screen.queryByText("Internal note")).not.toBeInTheDocument();
+  });
+
+  it.each([false, undefined])("leaves external or unresolved authors without a badge, whatever authorRole says (isInternal=%s)", (isInternal) => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          authorRole: "wso2_engineer",
+          authorUser: { id: "user-1", email: "jane@example.com", name: "Jane Doe", isInternal },
+        })}
+      />,
+    );
+    expect(screen.queryByLabelText("Technical Team")).not.toBeInTheDocument();
+  });
+
+  it("never badges a system entry or a bot, even if the backend flagged the author", () => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          authorRole: "system",
+          authorUser: { id: null, email: "system", name: "", isInternal: true },
+        })}
+      />,
+    );
+    expect(screen.queryByLabelText("Technical Team")).not.toBeInTheDocument();
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          id: "c-bot",
+          authorRole: "chatbot",
+          authorName: "Novera",
+          authorUser: { id: null, email: "novera", name: "", isInternal: true },
+        })}
+      />,
+    );
+    expect(screen.queryByLabelText("Technical Team")).not.toBeInTheDocument();
+  });
+
   it("renders comment body HTML", () => {
     renderWithProviders(<CsmCaseCommentBubble comment={makeComment({})} />);
     expect(screen.getByText("Hello there")).toBeInTheDocument();

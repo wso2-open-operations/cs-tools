@@ -51,6 +51,15 @@ vi.mock("@features/plg/api/hooks", () => ({
   useOrganization: () => ({ data: org, isPending: false, error: null }),
   useSetOrganizationOwner: () => setOwner,
   useCSUsers: () => ({ data: engineers, isFetching: false }),
+  // The header shows the company id with a reveal; hidden, it fetches nothing.
+  useCompanyReveal: () => ({
+    identity: undefined,
+    notFound: false,
+    isFetching: false,
+    error: null,
+    reveal: () => {},
+    hide: () => {},
+  }),
 }));
 
 // The product tabs are not on the Overview.
