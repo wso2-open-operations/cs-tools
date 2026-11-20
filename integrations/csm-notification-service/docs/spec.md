@@ -537,10 +537,20 @@ team the overnight chat audience itself routes to — a deployment can point
 the two at the same team or different ones. If the fixed team's inbox turns
 out to be the same address the case's own team already received the email
 at, it is not sent a second, identical copy. Each recipient that could not be
-resolved to a real address (no assignee, no configured team inbox, or — for
-the overnight email — no fixed team configured at all) is simply skipped,
-logged, and not treated as an error: a case with no assignee, or a team with
-no configured inbox, is a normal, unremarkable state.
+resolved to a real address (no assignee, or — for the overnight email — no
+fixed team configured at all) is simply skipped, logged, and not treated as an
+error.
+
+**No CRE team inbox: the CRE head gets the team email.** When the entity
+service answers for the clock but the case's account has no CRE team (ABT), or
+its team has no inbox, the team email goes to the CRE head instead (alongside
+the onboarding team's inbox, when there is one), so an at-risk or breached SLA
+on an unassigned, team-less case still reaches a person. The CRE head is the
+one the case-alert call ladder reaches: the configured `heads.cre`, else
+whoever holds the `cre_head` role in the leadership team. With no ABT the
+Team row reads "No ABT assigned (sent to the CRE head)". A lookup that failed
+or found no clock does not count as "no team" (it says nothing about the
+team), so an entity-service outage does not send the head every case's alert.
 
 One known, accepted limitation specific to the overnight email: the fixed
 team it goes to is resolved from the same reference data the chat space's
@@ -640,7 +650,8 @@ for their due times.
    per space. A failed post is logged and not retried, so one broken space
    cannot cause repeated duplicates elsewhere.
 9. Email the case assignee and the team group, using the addresses fetched in
-   step 5. A recipient with no address (for example when that lookup failed) is
+   step 5; with no CRE team inbox, the CRE head stands in for the team (see
+   above). A recipient with no address (for example when that lookup failed) is
    skipped, and nothing is sent if no email client is configured. In debug
    mode the mail goes to the debug recipients instead, with the intended
    recipient shown in the body.
