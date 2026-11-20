@@ -270,6 +270,13 @@ window.config = {
   // turns it off; true (or leaving it unset) keeps it on.
   // CSM_PORTAL_DOWNLOAD_TO_DISK: true,
 
+  // The code approach to dashboard generation (My Dashboards' "Generate AI
+  // Code (Experimental)" button and /dashboard/my/new-code), phase 2. Off by
+  // default; only `true` turns it on. The backend and csm-ai-integration-service
+  // must have the env var of the same name set to "true" too. Off means no
+  // button and the page's URL shows the 404 page.
+  // DASHBOARD_GENERATE_CODE_ENABLED: false,
+
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded
   // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when

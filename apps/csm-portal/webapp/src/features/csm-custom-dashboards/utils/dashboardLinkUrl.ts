@@ -21,3 +21,11 @@ export const DASHBOARD_LINK_PATH = "/dashboard/shared/link";
 export function dashboardLinkUrl(linkId: string): string {
   return `${window.location.origin}${DASHBOARD_LINK_PATH}/${encodeURIComponent(linkId)}`;
 }
+
+/** The route that opens an advanced dashboard's link, without the link id: its own, so the JSON link page is untouched. */
+export const CODE_DASHBOARD_LINK_PATH = "/dashboard/shared/code-link";
+
+/** The full link the owner of an advanced dashboard copies: this portal's origin + `/dashboard/shared/code-link/<linkId>`. */
+export function codeDashboardLinkUrl(linkId: string): string {
+  return `${window.location.origin}${CODE_DASHBOARD_LINK_PATH}/${encodeURIComponent(linkId)}`;
+}

@@ -69,8 +69,11 @@ import CsmDashboardsLayout from "@features/csm-dashboard/pages/CsmDashboardsLayo
 import MyDashboardsPage from "@features/csm-custom-dashboards/pages/MyDashboardsPage";
 import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDashboardsPage";
 import OpenDashboardLinkPage from "@features/csm-custom-dashboards/pages/OpenDashboardLinkPage";
+import OpenCodeDashboardLinkPage from "@features/csm-custom-dashboards/pages/OpenCodeDashboardLinkPage";
 import GenerateDashboardPage from "@features/csm-custom-dashboards/pages/GenerateDashboardPage";
+import GenerateCodeDashboardRoute from "@features/csm-custom-dashboards/pages/GenerateCodeDashboardRoute";
 import EditCustomDashboardPage from "@features/csm-custom-dashboards/pages/EditCustomDashboardPage";
+import EditCodeDashboardPage from "@features/csm-custom-dashboards/pages/EditCodeDashboardPage";
 import CsMonitorDashboardPage from "@features/csm-dashboard/pages/CsMonitorDashboardPage";
 import DashboardWidgetPreviewPage from "@features/csm-dashboard/pages/DashboardWidgetPreviewPage";
 import CsmCasesPage from "@features/csm-cases/pages/CsmCasesPage";
@@ -497,16 +500,30 @@ export default function App(): JSX.Element {
                     />
                     <Route path="dashboard/my" element={<MyDashboardsPage />} />
                     <Route path="dashboard/my/:dashboardId" element={<MyDashboardsPage />} />
+                    {/* A saved advanced dashboard (phase 2), opened in My
+                        Dashboards: the 404 page unless the user can use
+                        advanced dashboards; static "code" outranks
+                        "my/:dashboardId". */}
+                    <Route path="dashboard/my/code/:codeDashboardId" element={<MyDashboardsPage />} />
                     <Route path="dashboard/shared" element={<SharedDashboardsPage />} />
                     <Route path="dashboard/shared/:dashboardId" element={<SharedDashboardsPage />} />
                     {/* A dashboard's link (DASHBOARD_LINK_PATH): opens it and
                         replaces itself with the dashboard. */}
                     <Route path="dashboard/shared/link/:linkId" element={<OpenDashboardLinkPage />} />
+                    {/* An advanced dashboard shared with the user, and an
+                        advanced dashboard's link (CODE_DASHBOARD_LINK_PATH),
+                        both only while advanced dashboards can be viewed. */}
+                    <Route path="dashboard/shared/code/:codeDashboardId" element={<SharedDashboardsPage />} />
+                    <Route path="dashboard/shared/code-link/:linkId" element={<OpenCodeDashboardLinkPage />} />
                   </Route>
                   {/* Generating a dashboard is its own page, outside the tab
                       strip (its Back button goes first); static "new"
                       outranks "my/:dashboardId". */}
                   <Route path="dashboard/my/new" element={<GenerateDashboardPage />} />
+                  {/* The code approach (phase 2): the 404 page unless
+                      DASHBOARD_GENERATE_CODE_ENABLED is on. */}
+                  <Route path="dashboard/my/new-code" element={<GenerateCodeDashboardRoute />} />
+                  <Route path="dashboard/my/code/:dashboardId/edit" element={<EditCodeDashboardPage />} />
                   <Route path="dashboard/my/:dashboardId/edit" element={<EditCustomDashboardPage />} />
                   {/* Dashboard widget "View more" preview — :previewSlug is
                       one of WIDGET_RESOURCE_CONFIG's own previewSlug values

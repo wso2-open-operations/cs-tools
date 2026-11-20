@@ -28,7 +28,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { LayoutDashboard, Pencil, Plus, SearchIcon, Share2, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Code, LayoutDashboard, Pencil, Plus, SearchIcon, Share2, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -36,18 +36,37 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import DashboardWidgetGrid from "@features/csm-dashboard/components/DashboardWidgetGrid";
 import {
-  type CustomDashboardSummary,
   useDeleteCustomDashboard,
   useGetCustomDashboard,
   useGetCustomDashboards,
   useRenameCustomDashboard,
 } from "@features/csm-custom-dashboards/api/useCustomDashboards";
+import {
+  type CodeDashboardSummary,
+  savedCodeDashboardPath,
+  useDeleteCodeDashboard,
+  useGetCodeDashboard,
+  useGetCodeDashboards,
+  useRenameCodeDashboard,
+} from "@features/csm-custom-dashboards/api/useCodeDashboards";
+import { CODE_DASHBOARD_SHARING } from "@features/csm-custom-dashboards/api/useCodeDashboardShares";
+import CodeDashboardFrame from "@features/csm-custom-dashboards/components/CodeDashboardFrame";
 import DashboardNameDialog from "@features/csm-custom-dashboards/components/DashboardNameDialog";
 import DeleteCustomDashboardDialog from "@features/csm-custom-dashboards/components/DeleteCustomDashboardDialog";
 import ShareCustomDashboardDialog from "@features/csm-custom-dashboards/components/ShareCustomDashboardDialog";
 import { renameErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
+import { useCanGenerateAdvancedDashboards } from "@features/csm-custom-dashboards/utils/advancedDashboardAccess";
 
 const BASE_PATH = "/dashboard/my";
+// A switcher value that opens a saved advanced dashboard, not a custom one.
+const CODE_VALUE_PREFIX = "code:";
+
+/** A dashboard of either kind: the open one, or the one the rename or delete dialog is about. */
+interface DialogTarget {
+  id: string;
+  name: string;
+  advanced: boolean;
+}
 
 /**
  * Same props as Create case (CsmCasesPage). With dashboards it sits in the
@@ -109,6 +128,44 @@ function SavedDashboardView({ id }: { id: string }): JSX.Element {
 }
 
 /**
+ * One saved advanced dashboard (`GET /dashboards/code/{id}`): its saved source
+ * run in CodeDashboardFrame (the source check and sandbox, with the viewer's
+ * own data), in a panel as tall as the advanced page's preview, since the
+ * frame fills its parent. Loading, gone and failed look as SavedDashboardView's.
+ */
+function SavedCodeDashboardView({ id }: { id: string }): JSX.Element {
+  const saved = useGetCodeDashboard(id);
+
+  const frame = { border: 1, borderColor: "divider", borderRadius: 1, p: 2 };
+  if (saved.isLoading) {
+    return (
+      <Box sx={frame}>
+        <Skeleton variant="rounded" height={200} />
+      </Box>
+    );
+  }
+  if (saved.isError || !saved.data) {
+    return (
+      <Box sx={frame}>
+        <Typography variant="body2" color="text.secondary">
+          {saved.isError
+            ? saved.error.message || "Could not load this dashboard."
+            : "This dashboard no longer exists."}
+        </Typography>
+      </Box>
+    );
+  }
+  return (
+    <Box
+      data-testid="saved-code-dashboard-panel"
+      sx={{ ...frame, height: "calc(100dvh - 240px)", minHeight: 520, display: "flex", flexDirection: "column" }}
+    >
+      <CodeDashboardFrame key={saved.data.source} source={saved.data.source} />
+    </Box>
+  );
+}
+
+/**
  * Dashboards > My Dashboards (`/dashboard/my`,
  * `/dashboard/my/:dashboardId`): the dashboards the user saved from the
  * generate page (`GET /dashboards/custom`, only their own), with a switcher
@@ -142,28 +199,49 @@ function SavedDashboardView({ id }: { id: string }): JSX.Element {
  *
  * Edit with AI opens the open dashboard in the generate page
  * (`/dashboard/my/:id/edit`, EditCustomDashboardPage) to change it by chat.
+ *
+ * For a user who can use advanced dashboards (`canGenerateAdvancedDashboards`),
+ * their saved advanced dashboards (`GET /dashboards/code`) follow in the
+ * switcher under "Advanced", filtered by the same search, with the same
+ * rename and delete icons, dialogs and banners (`useRenameCodeDashboard`,
+ * `useDeleteCodeDashboard`). Choosing one opens it on this page
+ * (`/dashboard/my/code/:codeDashboardId`) with the same header and buttons:
+ * Share with the advanced dashboards' hooks (CODE_DASHBOARD_SHARING), Edit
+ * with AI on the advanced page (`.../edit`, EditCodeDashboardPage), and
+ * Generate Dashboard; SavedCodeDashboardView draws it. With no id the first
+ * custom one opens, else the first advanced one; the empty state is for a
+ * user with neither. That route is the 404 page for everyone else; nobody
+ * else's list is read, and the page is otherwise unchanged for them.
  */
 export default function MyDashboardsPage(): JSX.Element {
-  const { dashboardId } = useParams<{ dashboardId?: string }>();
+  const { dashboardId, codeDashboardId } = useParams<{ dashboardId?: string; codeDashboardId?: string }>();
   const navigate = useNavigate();
   const dashboardList = useGetCustomDashboards();
   const customDashboards = dashboardList.data ?? [];
+  const canUseAdvanced = useCanGenerateAdvancedDashboards();
+  const codeList = useGetCodeDashboards(canUseAdvanced);
+  const codeDashboards: CodeDashboardSummary[] = codeList.data ?? [];
   const deleteDashboard = useDeleteCustomDashboard();
   const renameDashboard = useRenameCustomDashboard();
+  const deleteCodeDashboard = useDeleteCodeDashboard();
+  const renameCodeDashboard = useRenameCodeDashboard();
   const { showSuccess } = useSuccessBanner();
   const { showError } = useErrorBanner();
   const [menuOpen, setMenuOpen] = useState(false);
   const [search, setSearch] = useState("");
   // The dashboard the delete dialog asks about. Kept after the dialog closes,
   // so its name does not vanish during the closing animation.
-  const [deleteTarget, setDeleteTarget] = useState<CustomDashboardSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DialogTarget | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // The same for the rename dialog, with the reason the last rename was refused.
-  const [renameTarget, setRenameTarget] = useState<CustomDashboardSummary | null>(null);
+  const [renameTarget, setRenameTarget] = useState<DialogTarget | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const currentUserEmail = useIdTokenClaims()?.email;
+
+  // As `/dashboard/my/new-code`: the backend's routes do not exist for them either.
+  if (codeDashboardId !== undefined && !canUseAdvanced) return <Navigate to="/404" replace />;
 
   if (dashboardList.isError) {
     return (
@@ -176,9 +254,25 @@ export default function MyDashboardsPage(): JSX.Element {
     );
   }
 
-  const selected = customDashboards.find((d) => d.id === dashboardId?.toLowerCase());
+  // At most one of the two ids is in the route.
+  const selectedCustom = customDashboards.find((d) => d.id === dashboardId?.toLowerCase());
+  const selectedCode = codeDashboards.find((d) => d.id === codeDashboardId?.toLowerCase());
+  const selected: DialogTarget | undefined = selectedCustom
+    ? { id: selectedCustom.id, name: selectedCustom.name, advanced: false }
+    : selectedCode && { id: selectedCode.id, name: selectedCode.name, advanced: true };
+  // Shown wherever the advanced list would be; the custom ones still work.
+  const codeListError = codeList.isError && (
+    <Typography variant="body2" color="text.secondary">
+      Could not load your advanced dashboards.
+    </Typography>
+  );
 
-  if (dashboardList.isLoading || (dashboardId && !selected && dashboardList.isFetching)) {
+  if (
+    dashboardList.isLoading ||
+    codeList.isLoading ||
+    (dashboardId && !selectedCustom && dashboardList.isFetching) ||
+    (codeDashboardId && !selectedCode && codeList.isFetching)
+  ) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
         <Skeleton variant="rounded" height={32} width={240} />
@@ -187,7 +281,7 @@ export default function MyDashboardsPage(): JSX.Element {
     );
   }
 
-  if (customDashboards.length === 0) {
+  if (customDashboards.length === 0 && codeDashboards.length === 0) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
         <Typography variant="h5">My Dashboards</Typography>
@@ -209,23 +303,33 @@ export default function MyDashboardsPage(): JSX.Element {
           <Box sx={{ mt: 2, display: "flex", gap: 1 }}>
             <GenerateDashboardButton />
           </Box>
+          {codeListError}
         </Box>
       </Box>
     );
   }
 
   if (!selected) {
-    // No id, or one that is not a custom dashboard: open the first one.
-    return <Navigate to={`${BASE_PATH}/${encodeURIComponent(customDashboards[0].id)}`} replace />;
+    // No id, or one that is not in its list: open the first custom one, else the first advanced one.
+    return (
+      <Navigate
+        to={
+          customDashboards.length > 0
+            ? `${BASE_PATH}/${encodeURIComponent(customDashboards[0].id)}`
+            : savedCodeDashboardPath(codeDashboards[0].id)
+        }
+        replace
+      />
+    );
   }
 
   const query = search.trim().toLowerCase();
-  const matches = (d: CustomDashboardSummary): boolean => !query || d.name.toLowerCase().includes(query);
-  const noMatch = query !== "" && !customDashboards.some(matches);
+  const matches = (d: { name: string }): boolean => !query || d.name.toLowerCase().includes(query);
+  const noMatch = query !== "" && !customDashboards.some(matches) && !codeDashboards.some(matches);
 
-  const handleDelete = async (target: CustomDashboardSummary): Promise<void> => {
+  const handleDelete = async (target: DialogTarget): Promise<void> => {
     try {
-      await deleteDashboard.mutateAsync(target.id);
+      await (target.advanced ? deleteCodeDashboard : deleteDashboard).mutateAsync(target.id);
       setDeleteOpen(false);
       showSuccess(`"${target.name}" was deleted.`);
       if (target.id === selected.id) void navigate(BASE_PATH);
@@ -236,16 +340,54 @@ export default function MyDashboardsPage(): JSX.Element {
   };
 
   /** Renames `target`; a failure keeps the Rename dialog open with the error (a name already taken says so). */
-  const handleRename = async (target: CustomDashboardSummary, name: string): Promise<void> => {
+  const handleRename = async (target: DialogTarget, name: string): Promise<void> => {
     setRenameError(null);
     try {
-      await renameDashboard.mutateAsync({ id: target.id, name });
+      await (target.advanced ? renameCodeDashboard : renameDashboard).mutateAsync({ id: target.id, name });
       setRenameOpen(false);
       showSuccess(`"${target.name}" was renamed to "${name}".`);
     } catch (err) {
       setRenameError(renameErrorMessage(err, name));
     }
   };
+
+  /** A switcher entry's rename and delete icons, for either kind. */
+  const entryActions = (target: DialogTarget): JSX.Element => (
+    <Box sx={{ display: "flex", flexShrink: 0 }}>
+      <Tooltip title="Rename dashboard">
+        <IconButton
+          size="small"
+          aria-label={`Rename dashboard ${target.name}`}
+          onClick={(e) => {
+            // Not a selection: keep the open dashboard.
+            e.stopPropagation();
+            setMenuOpen(false);
+            setRenameTarget(target);
+            setRenameError(null);
+            setRenameOpen(true);
+          }}
+        >
+          <Pencil size={15} />
+        </IconButton>
+      </Tooltip>
+      <Tooltip title="Delete dashboard">
+        <IconButton
+          size="small"
+          edge="end"
+          aria-label={`Delete dashboard ${target.name}`}
+          onClick={(e) => {
+            // Not a selection: keep the open dashboard.
+            e.stopPropagation();
+            setMenuOpen(false);
+            setDeleteTarget(target);
+            setDeleteOpen(true);
+          }}
+        >
+          <Trash2 size={15} />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -267,7 +409,7 @@ export default function MyDashboardsPage(): JSX.Element {
         <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <Select
-              value={selected.id}
+              value={selected.advanced ? `${CODE_VALUE_PREFIX}${selected.id}` : selected.id}
               open={menuOpen}
               onOpen={() => setMenuOpen(true)}
               onClose={() => {
@@ -276,7 +418,14 @@ export default function MyDashboardsPage(): JSX.Element {
               }}
               // The search box takes focus, not the first entry.
               MenuProps={{ autoFocus: false, slotProps: { paper: { sx: { maxHeight: 400 } } } }}
-              onChange={(e) => navigate(`${BASE_PATH}/${encodeURIComponent(e.target.value)}`)}
+              onChange={(e) => {
+                const value = e.target.value;
+                void navigate(
+                  value.startsWith(CODE_VALUE_PREFIX)
+                    ? savedCodeDashboardPath(value.slice(CODE_VALUE_PREFIX.length))
+                    : `${BASE_PATH}/${encodeURIComponent(value)}`,
+                );
+              }}
               // The closed field shows the name only, not the entry's icons.
               renderValue={() => selected.name}
               // On the element screen readers announce: a plain aria-label
@@ -326,40 +475,26 @@ export default function MyDashboardsPage(): JSX.Element {
                   <Typography component="span" variant="inherit" noWrap>
                     {d.name}
                   </Typography>
-                  <Box sx={{ display: "flex", flexShrink: 0 }}>
-                    <Tooltip title="Rename dashboard">
-                      <IconButton
-                        size="small"
-                        aria-label={`Rename dashboard ${d.name}`}
-                        onClick={(e) => {
-                          // Not a selection: keep the open dashboard.
-                          e.stopPropagation();
-                          setMenuOpen(false);
-                          setRenameTarget(d);
-                          setRenameError(null);
-                          setRenameOpen(true);
-                        }}
-                      >
-                        <Pencil size={15} />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete dashboard">
-                      <IconButton
-                        size="small"
-                        edge="end"
-                        aria-label={`Delete dashboard ${d.name}`}
-                        onClick={(e) => {
-                          // Not a selection: keep the open dashboard.
-                          e.stopPropagation();
-                          setMenuOpen(false);
-                          setDeleteTarget(d);
-                          setDeleteOpen(true);
-                        }}
-                      >
-                        <Trash2 size={15} />
-                      </IconButton>
-                    </Tooltip>
+                  {entryActions({ id: d.id, name: d.name, advanced: false })}
+                </MenuItem>
+              ))}
+              {codeDashboards.length > 0 && codeDashboards.some(matches) && (
+                <ListSubheader sx={{ lineHeight: 2, bgcolor: "background.paper" }}>Advanced</ListSubheader>
+              )}
+              {codeDashboards.map((d) => (
+                <MenuItem
+                  key={`${CODE_VALUE_PREFIX}${d.id}`}
+                  value={`${CODE_VALUE_PREFIX}${d.id}`}
+                  disabled={!matches(d)}
+                  sx={{ justifyContent: "space-between", gap: 2, ...(matches(d) ? {} : { display: "none" }) }}
+                >
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
+                    <Code size={15} />
+                    <Typography component="span" variant="inherit" noWrap>
+                      {d.name}
+                    </Typography>
                   </Box>
+                  {entryActions({ id: d.id, name: d.name, advanced: true })}
                 </MenuItem>
               ))}
             </Select>
@@ -371,19 +506,29 @@ export default function MyDashboardsPage(): JSX.Element {
             variant="outlined"
             size="small"
             startIcon={<Pencil size={16} />}
-            onClick={() => void navigate(`${BASE_PATH}/${encodeURIComponent(selected.id)}/edit`)}
+            onClick={() =>
+              void navigate(
+                selected.advanced
+                  ? `${savedCodeDashboardPath(selected.id)}/edit`
+                  : `${BASE_PATH}/${encodeURIComponent(selected.id)}/edit`,
+              )
+            }
           >
             Edit with AI
           </Button>
           <GenerateDashboardButton />
         </Box>
       </Box>
-      <SavedDashboardView id={selected.id} />
+      {codeListError}
+      {selected.advanced ? <SavedCodeDashboardView id={selected.id} /> : <SavedDashboardView id={selected.id} />}
       <ShareCustomDashboardDialog
+        // Keyed by kind: the dialog calls the hooks it is given, so a new kind is a new dialog.
+        key={selected.advanced ? "advanced" : "custom"}
         open={shareOpen}
         dashboard={{ id: selected.id, name: selected.name }}
         currentUserEmail={currentUserEmail}
         onClose={() => setShareOpen(false)}
+        hooks={selected.advanced ? CODE_DASHBOARD_SHARING : undefined}
       />
       <DashboardNameDialog
         open={renameOpen}
@@ -391,7 +536,7 @@ export default function MyDashboardsPage(): JSX.Element {
         initialName={renameTarget?.name ?? ""}
         confirmLabel="Rename"
         busyLabel="Renaming…"
-        busy={renameDashboard.isPending}
+        busy={(renameTarget?.advanced ? renameCodeDashboard : renameDashboard).isPending}
         error={renameError}
         requireChange
         onCancel={() => setRenameOpen(false)}
@@ -402,7 +547,7 @@ export default function MyDashboardsPage(): JSX.Element {
       <DeleteCustomDashboardDialog
         open={deleteOpen}
         name={deleteTarget?.name ?? ""}
-        deleting={deleteDashboard.isPending}
+        deleting={(deleteTarget?.advanced ? deleteCodeDashboard : deleteDashboard).isPending}
         onCancel={() => setDeleteOpen(false)}
         onConfirm={() => {
           if (deleteTarget) void handleDelete(deleteTarget);

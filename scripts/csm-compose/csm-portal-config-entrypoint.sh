@@ -37,6 +37,9 @@ window.config = {
   CSM_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
   CSM_PORTAL_TOP_BANNER_ENABLED: false,
   CSM_PORTAL_MOBILE_APP_PROMPT_ENABLED: false,
+  // Phase 2 code approach to dashboard generation; "true" only when
+  // DASHBOARD_GENERATE_CODE_ENABLED is set to true for the stack.
+  DASHBOARD_GENERATE_CODE_ENABLED: "${DASHBOARD_GENERATE_CODE_ENABLED:-false}",
 };
 EOF
 
