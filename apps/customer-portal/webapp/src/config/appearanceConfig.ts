@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { companyName } from "@config/brandingConfig";
+import { companyName, resolveLogoUrl } from "@config/brandingConfig";
 
 const DEFAULT_PORTAL_NAME = "Customer Portal";
 const COMPANY_LEGAL_SUFFIX = "LLC";
@@ -29,22 +29,6 @@ const DEFAULT_LOGO_DARK_MODE_URL = "/logo-white.svg";
  */
 const optionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
-
-/**
- * Resolves a configured logo URL so a bare path such as `logos/acme.svg` is
- * read from the site root rather than relative to the current page, which
- * would break on deep links like `/projects/1/dashboard`. Absolute paths and
- * URLs with a scheme (`https:`, `data:`, ...) or a host (`//cdn/...`) are
- * returned unchanged.
- *
- * @param {string | undefined} url - Trimmed configured URL.
- * @returns {string | undefined} The URL, anchored to the site root when relative.
- */
-const resolveLogoUrl = (url: string | undefined): string | undefined => {
-  if (!url) return url;
-  if (url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
-  return `/${url.replace(/^\.\//, "")}`;
-};
 
 const logoLightModeUrl = resolveLogoUrl(
   optionalString(window.config?.CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL),

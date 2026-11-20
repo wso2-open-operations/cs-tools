@@ -88,3 +88,19 @@ export function billingEmailHref(): string {
   const at = address.lastIndexOf("@");
   return `mailto:${encodeURIComponent(address.slice(0, at))}@${address.slice(at + 1)}`;
 }
+
+/**
+ * Resolves a configured logo URL so a bare path such as `logos/acme.svg` is
+ * read from the site root rather than relative to the current page, which
+ * would break on deep links like `/projects/1/dashboard`. Absolute paths and
+ * URLs with a scheme (`https:`, `data:`, ...) or a host (`//cdn/...`) are
+ * returned unchanged.
+ *
+ * @param {string | undefined} url - Trimmed configured URL.
+ * @returns {string | undefined} The URL, anchored to the site root when relative.
+ */
+export const resolveLogoUrl = (url: string | undefined): string | undefined => {
+  if (!url) return url;
+  if (url.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  return `/${url.replace(/^\.\//, "")}`;
+};
