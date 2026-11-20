@@ -96,15 +96,21 @@ export default function AsyncEntityMultiSelect<T>({
 
   const [labelById, setLabelById] = useState<Record<string, string>>(() => knownLabels ?? {});
 
-  const selectedOptions = useMemo<AsyncEntityMultiSelectOption[]>(
-    () =>
-      values.map((v) => {
-        const match = items.find((item) => getId(item) === v);
-        const label = match ? getLabel(match) : (labelById[v] ?? v);
-        return { id: v, label };
-      }),
-    [values, items, labelById, getId, getLabel],
-  );
+  const selectedLabels = values.map((v) => {
+    const match = items.find((item) => getId(item) === v);
+    // `knownLabels` is read as it is now as well, not only as first
+    // rendered: a caller may still be loading it when this mounts.
+    return match ? getLabel(match) : (labelById[v] ?? knownLabels?.[v] ?? v);
+  });
+  // Keyed on the ids and labels themselves, so the array keeps its identity
+  // while neither changes. Autocomplete clears what is typed whenever its
+  // `value` changes identity, which a new search result (or an inline
+  // `getId`/`getLabel`) would otherwise do mid-typing.
+  const selectedKey = JSON.stringify([values, selectedLabels]);
+  const selectedOptions = useMemo<AsyncEntityMultiSelectOption[]>(() => {
+    const [ids, labels] = JSON.parse(selectedKey) as [string[], string[]];
+    return ids.map((id, i) => ({ id, label: labels[i] }));
+  }, [selectedKey]);
 
   const options = useMemo<AsyncEntityMultiSelectOption[]>(() => {
     const results = items.map((item) => ({ id: getId(item), label: getLabel(item) }));
@@ -172,7 +178,9 @@ export default function AsyncEntityMultiSelect<T>({
       onChange={(_event, next) => {
         setLabelById((prev) => {
           const merged = { ...prev };
-          for (const o of next) merged[o.id] = o.label;
+          // A label that is still just the id is not resolved yet: caching it
+          // would outrank a name `knownLabels` brings in afterwards.
+          for (const o of next) if (o.label !== o.id) merged[o.id] = o.label;
           return merged;
         });
         onChange(next.map((o) => o.id));

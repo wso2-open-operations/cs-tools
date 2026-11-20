@@ -32,7 +32,6 @@ import {
 import { ChevronDown, ChevronUp, ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import type { BeIncidentPriority } from "@api/backend/types";
-import { useTeams } from "@features/csm-dashboard/api/useTeams";
 import {
   countActiveIncidentFilters,
   incidentPriorityLabel,
@@ -61,10 +60,49 @@ import OperationsAnyOfGroups, { type AnyOfFieldDef } from "@features/csm-operati
 import { completeAnyOfGroups } from "@features/csm-operations/utils/operationsAnyOf";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
 import { useSearchItServices } from "@api/useSearchItServices";
-import { useSearchIncidentExtraGroups } from "@api/useSearchGroups";
+import {
+  useIncidentFilterGroupLabels,
+  useSearchIncidentFilterGroups,
+} from "@features/csm-operations/api/useSearchIncidentFilterGroups";
 import AsyncAssignedUserIdMultiSelect from "@features/csm-cases/components/AsyncAssignedUserIdMultiSelect";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
+
+/**
+ * Assignment group: matches the incident's assignment group. The SRE teams and
+ * the extra incident groups are listed first, then any group the search finds
+ * (see `useSearchIncidentFilterGroups`); the value is the group id, kept in the
+ * same `sreTeamIds` / `incSreTeams` state the filter has always used, so saved
+ * views and shared links still apply. The selected groups' names are looked up
+ * by id, so one restored from the URL is shown by name, not id.
+ */
+function AssignmentGroupMultiSelect({
+  id,
+  label,
+  values,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+}): JSX.Element {
+  const knownLabels = useIncidentFilterGroupLabels(values);
+  return (
+    <AsyncEntityMultiSelect
+      id={id}
+      label={label}
+      placeholder="Search groups…"
+      values={values}
+      onChange={onChange}
+      useSearch={useSearchIncidentFilterGroups}
+      getId={(g) => g.id}
+      getLabel={(g) => g.name}
+      knownLabels={knownLabels}
+      compactSelectedValues
+    />
+  );
+}
 
 /**
  * "YYYY-MM-DD" to a local-midnight Date (avoids the UTC-parse day-shift
@@ -144,34 +182,6 @@ export default function IncidentsFilterBar({
     [],
   );
 
-  // SRE Team: incidents are SRE-owned, so this is scoped to the `sre-abt`
-  // team family and listed the way the cases list lists its CRE teams. It
-  // matches the record's assignment group (the team's group id) (unlike the cases list's own "SRE Team" filter, which is
-  // deliberately scoped to `cre-abt` per an explicit, later-flagged-as-
-  // likely-mistaken product instruction — see `CasesFilterBar.tsx`'s
-  // `sreTeamOptions`. This is a fresh field on a different resource, not a
-  // copy of that decision).
-  const { data: teams } = useTeams(true, "sre-abt");
-  // The extra assignment groups an incident may carry (the security operations
-  // group) are appended after the teams, deduped by id. A loading or failed
-  // request just yields no extras: the team options never wait on it.
-  const { data: extraGroups } = useSearchIncidentExtraGroups("", true);
-  const sreTeamOptions = useMemo(() => {
-    const options = (teams ?? [])
-      .filter(
-        (t): t is typeof t & { sreGroupId: string } =>
-          Boolean(t.sreGroupId) && t.family === "sre-abt",
-      )
-      .map((t) => ({ value: t.sreGroupId, label: t.name }));
-    const seen = new Set(options.map((o) => o.value));
-    for (const g of extraGroups ?? []) {
-      if (seen.has(g.id)) continue;
-      seen.add(g.id);
-      options.push({ value: g.id, label: g.name });
-    }
-    return options;
-  }, [teams, extraGroups]);
-
   const stateOptions = useMemo(
     () => INCIDENT_STATES.map((st) => ({ value: st, label: incidentStateLabel(st) })),
     [],
@@ -217,13 +227,13 @@ export default function IncidentsFilterBar({
         />
       ),
       group: ({ id, values, onChange: set }: P) => (
-        <MultiSelectField id={id} label="Value(s)" values={values} options={sreTeamOptions} onChange={set} />
+        <AssignmentGroupMultiSelect id={id} label="Value(s)" values={values} onChange={set} />
       ),
       assignee: ({ id, values, onChange: set }: P) => (
         <AsyncAssignedUserIdMultiSelect id={id} values={values} onChange={set} />
       ),
     };
-  }, [stateOptions, priorityOptions, categoryOptions, sreTeamOptions]);
+  }, [stateOptions, priorityOptions, categoryOptions]);
 
   // Advanced offers every filter as a Field / Operator / Value row, as on the
   // service request list; each row reads and writes the same state the quick
@@ -234,7 +244,7 @@ export default function IncidentsFilterBar({
       multiAdvancedField<IncidentFilters>({ key: "priority", label: "Priority", prop: "priorities", render: pickers.priority }),
       multiAdvancedField<IncidentFilters>({ key: "category", label: "Category", prop: "categories", render: pickers.category }),
       multiAdvancedField<IncidentFilters>({ key: "service", label: "Service", prop: "serviceIds", render: pickers.service }),
-      multiAdvancedField<IncidentFilters>({ key: "group", label: "SRE Team", prop: "sreTeamIds", render: pickers.group }),
+      multiAdvancedField<IncidentFilters>({ key: "group", label: "Assignment group", prop: "sreTeamIds", render: pickers.group }),
       multiAdvancedField<IncidentFilters>({ key: "assignee", label: "Assignee", prop: "assigneeIds", render: pickers.assignee }),
       multiAdvancedField<IncidentFilters>({
         key: "product",
@@ -270,7 +280,7 @@ export default function IncidentsFilterBar({
       { field: "priority", label: "Priority", render: pickers.priority },
       { field: "category", label: "Category", render: pickers.category },
       { field: "businessServiceId", label: "Service", render: pickers.service },
-      { field: "assignmentGroupId", label: "SRE Team", render: pickers.group },
+      { field: "assignmentGroupId", label: "Assignment group", render: pickers.group },
       { field: "assignedUserId", label: "Assignee", render: pickers.assignee },
     ],
     [pickers],
@@ -460,11 +470,10 @@ export default function IncidentsFilterBar({
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <MultiSelectField
-                id="incident-filter-sre-team"
-                label="SRE Team"
+              <AssignmentGroupMultiSelect
+                id="incident-filter-assignment-group"
+                label="Assignment group"
                 values={filters.sreTeamIds}
-                options={sreTeamOptions}
                 onChange={(next) => onChange({ ...filters, sreTeamIds: next })}
               />
             </Grid>
