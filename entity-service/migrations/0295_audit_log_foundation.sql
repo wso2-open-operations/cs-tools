@@ -242,7 +242,8 @@ BEGIN
           FROM pg_index i
           CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
           JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
-         WHERE i.indrelid = table_oid AND i.indisprimary;
+         WHERE i.indrelid = table_oid AND i.indisprimary
+           AND k.ord <= i.indnkeyatts;  -- key columns only, not INCLUDE columns
     END IF;
     IF keys IS NULL THEN
         RAISE EXCEPTION 'audit: %.% has no primary key; pass p_keys', p_schema, p_table;
@@ -250,6 +251,12 @@ BEGIN
     -- The record id is built from the key columns and stored in clear.
     IF keys && (p_excluded || p_masked) THEN
         RAISE EXCEPTION 'audit: a key column of %.% cannot be excluded or masked', p_schema, p_table;
+    END IF;
+
+    -- The trigger gets these lists comma-separated, so a name with a comma would be
+    -- split and its column logged in clear.
+    IF EXISTS (SELECT 1 FROM unnest(keys || p_excluded || p_masked) AS c WHERE c LIKE '%,%') THEN
+        RAISE EXCEPTION 'audit: a column name with a comma on %.% cannot be audited', p_schema, p_table;
     END IF;
 
     SELECT array_agg(c) INTO bad_columns
@@ -266,6 +273,10 @@ BEGIN
       FROM pg_attribute a
      WHERE a.attrelid = table_oid AND a.attnum > 0 AND NOT a.attisdropped
        AND a.atttypid = 'bytea'::regtype AND NOT (a.attname = ANY (p_excluded));
+    -- A binary key would be left out of the fields but still copied into the record id.
+    IF keys && excluded THEN
+        RAISE EXCEPTION 'audit: a key column of %.% is binary and cannot be used as the record id', p_schema, p_table;
+    END IF;
 
     INSERT INTO audit_config (schema_name, table_name, key_columns, excluded_columns, masked_columns)
     VALUES (p_schema, p_table, keys, excluded, p_masked)
@@ -382,15 +393,28 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            -- The schema goes in as an argument, never into the format string.
-            EXECUTE format(
-                'CREATE TABLE %1$I.%2$I PARTITION OF %1$I.csm_audit_log FOR VALUES FROM (%3$L) TO (%4$L)',
-                __SCHEMA_LIT__, partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
-            EXECUTE format(
-                'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON %I.%I
-                   FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()',
-                __SCHEMA_LIT__, partition_name);
-            created_count := created_count + 1;
+            BEGIN
+                -- The schema goes in as an argument, never into the format string.
+                EXECUTE format(
+                    'CREATE TABLE %1$I.%2$I PARTITION OF %1$I.csm_audit_log FOR VALUES FROM (%3$L) TO (%4$L)',
+                    __SCHEMA_LIT__, partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
+                EXECUTE format(
+                    'CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON %I.%I
+                       FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change()',
+                    __SCHEMA_LIT__, partition_name);
+                created_count := created_count + 1;
+            EXCEPTION WHEN OTHERS THEN
+                -- A write into the catch-all between the check above and the CREATE makes
+                -- the CREATE fail. Skip the month only when those rows explain it, as the
+                -- check above does; any other error is raised.
+                IF EXISTS (SELECT 1 FROM csm_audit_log_default
+                            WHERE created_on >= month_start::timestamp AT TIME ZONE 'UTC'
+                              AND created_on <  month_end::timestamp AT TIME ZONE 'UTC') THEN
+                    RAISE WARNING 'audit: not creating %: rows for that month reached csm_audit_log_default first; move them', partition_name;
+                ELSE
+                    RAISE;
+                END IF;
+            END;
         END IF;
     END LOOP;
 
@@ -511,9 +535,9 @@ $fn$,
         '__SCHEMA_LIT__', quote_literal(current_schema()));
 END $install$;
 
--- Empty result = healthy. Reports rows in the catch-all partition, and any of the
--- next p_months_ahead months with no monthly partition, checked month by month so a
--- missed month is reported the day it happens. Data past retention is not reported:
+-- Empty result = healthy. Reports rows in the catch-all partition, and the current
+-- month and any of the next p_months_ahead months with no monthly partition, checked
+-- month by month so a missed month is reported the day it happens. Data past retention is not reported:
 -- a failed deletion is already an error in the weekly run. With no arguments it
 -- checks 2 months ahead.
 DROP FUNCTION IF EXISTS audit_partition_health();
@@ -535,7 +559,7 @@ BEGIN
 
     -- Named as audit_create_partitions names them, and attached to the audit log.
     SELECT string_agg(to_char(m.month_start, 'YYYY_MM'), ', ' ORDER BY m.month_start) INTO missing
-      FROM generate_series(1, p_months_ahead) AS g(n)
+      FROM generate_series(0, p_months_ahead) AS g(n)
      CROSS JOIN LATERAL (SELECT (this_month + make_interval(months => g.n))::date AS month_start) AS m
      WHERE NOT EXISTS (SELECT 1
                          FROM pg_inherits i
@@ -543,7 +567,7 @@ BEGIN
                         WHERE i.inhparent = format('%I.csm_audit_log', __SCHEMA_LIT__)::regclass
                           AND c.relname = 'csm_audit_log_' || to_char(m.month_start, 'YYYY_MM'));
     IF missing IS NOT NULL THEN
-        problem := format('missing future monthly partition(s) for the next %s months: %s', p_months_ahead, missing);
+        problem := format('missing monthly partition(s) from this month to %s months ahead: %s', p_months_ahead, missing);
         RETURN NEXT;
     END IF;
 END $$;
@@ -564,7 +588,9 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, __SCHEMA__, pg_temp AS $$
 DECLARE
     registered RECORD;
+    locked     audit_config%ROWTYPE;
     trigger_state "char";
+    trigger_matches BOOLEAN;
 BEGIN
     IF p_repair THEN
         -- Re-creating a trigger locks the business table; give up rather than queue
@@ -586,7 +612,15 @@ BEGIN
             CONTINUE;
         END IF;
 
-        SELECT g.tgenabled INTO trigger_state
+        -- The trigger must be what register_audit builds: audit_log_row_change, AFTER
+        -- UPDATE OR DELETE per row (tgtype 1 + 8 + 16), with the registered key,
+        -- excluded and masked lists as its arguments (NUL-terminated).
+        SELECT g.tgenabled,
+               g.tgfoid = 'audit_log_row_change'::regproc AND g.tgtype = 25
+               AND g.tgargs = convert_to(array_to_string(registered.key_columns, ','), 'UTF8') || '\x00'::bytea
+                           || convert_to(array_to_string(registered.excluded_columns, ','), 'UTF8') || '\x00'::bytea
+                           || convert_to(array_to_string(registered.masked_columns, ','), 'UTF8') || '\x00'::bytea
+          INTO trigger_state, trigger_matches
           FROM pg_trigger g
          WHERE g.tgrelid = registered.table_oid AND g.tgname = 'csm_audit_row_change';
 
@@ -594,6 +628,8 @@ BEGIN
             problem := 'registered table has no audit trigger';
         ELSIF trigger_state <> 'A' THEN
             problem := 'audit trigger is disabled';
+        ELSIF NOT trigger_matches THEN
+            problem := 'audit trigger differs from its registration';
         ELSE
             CONTINUE;
         END IF;
@@ -603,8 +639,16 @@ BEGIN
             -- One table that cannot be repaired must not stop the others. It stays
             -- wrong, so the next reconcile without repair reports it.
             BEGIN
-                PERFORM register_audit(registered.schema_name, registered.table_name, registered.key_columns,
-                                       registered.excluded_columns, registered.masked_columns);
+                -- Re-read the row under a lock, so a concurrent unregister_audit cannot be
+                -- undone: register_audit turns the table back on.
+                SELECT * INTO locked FROM audit_config ac
+                 WHERE ac.schema_name = registered.schema_name AND ac.table_name = registered.table_name
+                   AND ac.enabled
+                   FOR UPDATE;
+                IF FOUND THEN
+                    PERFORM register_audit(locked.schema_name, locked.table_name, locked.key_columns,
+                                           locked.excluded_columns, locked.masked_columns);
+                END IF;
             EXCEPTION WHEN OTHERS THEN
                 RAISE WARNING 'audit: could not repair the trigger on %.%: %',
                     registered.schema_name, registered.table_name, SQLERRM;
@@ -636,6 +680,7 @@ REVOKE ALL ON FUNCTION audit_create_partitions(INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_delete_expired_partitions(INT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_delete_expired_default_rows(INT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_reconcile(BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_log_row_change() FROM PUBLIC;
 
 -- New-table alert. Attaches nothing; only warns when a new table is neither
 -- registered nor excluded. SECURITY DEFINER because every role that creates a

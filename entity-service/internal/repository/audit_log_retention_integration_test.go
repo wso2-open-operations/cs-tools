@@ -310,12 +310,48 @@ func TestAuditMigration_HealthReportsAMissedFuturePartition(t *testing.T) {
 	if got := auditHealth(t, repo, have); got != "" {
 		t.Errorf("health with %d months ahead = %q, want healthy", have, got)
 	}
-	if got := auditHealth(t, repo, have+1); !strings.Contains(got, "future monthly partition") {
+	if got := auditHealth(t, repo, have+1); !strings.Contains(got, "missing monthly partition") {
 		t.Errorf("health with %d months ahead = %q, want a missing-partition problem", have+1, got)
 	}
 	// The monitoring call with no arguments keeps its old minimum of 2.
 	if n := auditCount(t, pool, "SELECT count(*) FROM audit_partition_health()"); n != 0 {
 		t.Errorf("audit_partition_health() = %d problems, want 0", n)
+	}
+}
+
+// The current month counts too: without its partition every new audit row lands in
+// the catch-all.
+func TestAuditMigration_HealthReportsAMissingCurrentMonth(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	repo := repository.NewAuditLogRepository(repository.NewScoped(pool))
+	ctx := context.Background()
+	if _, err := repo.CreatePartitions(ctx, 3); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	var current, bound string
+	if err := pool.QueryRow(ctx, `SELECT 'csm_audit_log_' || to_char(now() AT TIME ZONE 'UTC', 'YYYY_MM')`).Scan(&current); err != nil {
+		t.Fatalf("name: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT pg_get_expr(relpartbound, oid) FROM pg_class WHERE relname = $1`, current).Scan(&bound); err != nil {
+		t.Fatalf("bound of %s: %v", current, err)
+	}
+	t.Cleanup(func() {
+		var attached int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+		    WHERE i.inhparent = 'csm_audit_log'::regclass AND c.relname = $1`, current).Scan(&attached)
+		if attached == 0 {
+			_, _ = pool.Exec(ctx, "ALTER TABLE csm_audit_log ATTACH PARTITION "+current+" "+bound)
+		}
+	})
+
+	if got := auditHealth(t, repo, 3); got != "" {
+		t.Fatalf("health before the test = %q, want healthy", got)
+	}
+	auditExec(t, pool, "ALTER TABLE csm_audit_log DETACH PARTITION "+current)
+	got := auditHealth(t, repo, 3)
+	if !strings.Contains(got, strings.TrimPrefix(current, "csm_audit_log_")) {
+		t.Errorf("health = %q, want the missing current month %s reported", got, current)
 	}
 }
 
@@ -360,7 +396,7 @@ func TestAuditMigration_HealthReportsAMissingMonthDespiteADistantPartition(t *te
 	auditExec(t, pool, "CREATE TABLE "+distant+" PARTITION OF csm_audit_log FOR VALUES FROM ('"+from+"') TO ('"+to+"')")
 
 	got := auditHealth(t, repo, 3)
-	if !strings.Contains(got, "missing future monthly partition") || !strings.Contains(got, strings.TrimPrefix(next, "csm_audit_log_")) {
+	if !strings.Contains(got, "missing monthly partition") || !strings.Contains(got, strings.TrimPrefix(next, "csm_audit_log_")) {
 		t.Errorf("health = %q, want the missing month %s reported although a distant partition exists", got, next)
 	}
 }

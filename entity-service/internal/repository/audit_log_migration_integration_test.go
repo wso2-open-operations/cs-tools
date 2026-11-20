@@ -242,6 +242,11 @@ func TestAuditMigration_WorkItemTypesAreAudited(t *testing.T) {
 		"engagement", "incident", "incident_alert_task", "incident_task", "problem",
 		"problem_task", "security_report_analysis", "service_request", "standard_change_proposal",
 	} {
+		// The migration skips a type table the schema does not have yet.
+		if auditCount(t, pool, "SELECT count(*) FROM pg_class WHERE oid = to_regclass(format('%I.%I', $1::text, $2::text))", schema, table) == 0 {
+			t.Logf("%s does not exist in this schema; not expected to be registered", table)
+			continue
+		}
 		if n := auditCount(t, pool, `SELECT count(*) FROM audit_config
 		    WHERE schema_name = $1 AND table_name = $2 AND enabled`, schema, table); n != 1 {
 			t.Errorf("%s is not registered with the audit log", table)
@@ -558,5 +563,92 @@ func TestAuditMigration_UpdatedOnAndUpdatedByAreNeverLogged(t *testing.T) {
 	auditExec(t, pool, "DELETE FROM "+table+" WHERE id = 1")
 	if got := fields("DELETE"); got != "id,note" {
 		t.Errorf("delete logged %q, want id,note", got)
+	}
+}
+
+// A trigger that is on the table but is not what register_audit builds (other
+// arguments, or one that also fires on INSERT) is reported, and a repair puts the
+// registered one back.
+func TestAuditMigration_ReconcileReportsATriggerThatDiffersFromItsRegistration(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+	for name, replacement := range map[string]string{
+		"other arguments": "AFTER UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION audit_log_row_change('id', 'note', '')",
+		"fires on insert": "AFTER INSERT OR UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION audit_log_row_change('id', '', '')",
+	} {
+		table := "zz_audit_test_drift_" + strings.ReplaceAll(name, " ", "_")
+		auditTestTable(t, pool, table)
+		auditExec(t, pool, "CREATE TABLE "+table+" (id int PRIMARY KEY, note text)")
+		auditExec(t, pool, "SELECT register_audit('"+schema+"', '"+table+"')")
+		if n := auditCount(t, pool, "SELECT count(*) FROM audit_reconcile(false) WHERE table_name = $1", table); n != 0 {
+			t.Fatalf("%s: a fresh registration reports %d problem(s), want 0", name, n)
+		}
+
+		auditExec(t, pool, "DROP TRIGGER csm_audit_row_change ON "+table)
+		auditExec(t, pool, "CREATE TRIGGER csm_audit_row_change "+strings.Replace(replacement, "%s", table, 1))
+		auditExec(t, pool, "ALTER TABLE "+table+" ENABLE ALWAYS TRIGGER csm_audit_row_change")
+
+		if n := auditCount(t, pool, "SELECT count(*) FROM audit_reconcile(false) WHERE table_name = $1 AND problem LIKE '%differs%'", table); n != 1 {
+			t.Errorf("%s: reconcile reports %d difference(s), want 1", name, n)
+		}
+		auditExec(t, pool, "SELECT * FROM audit_reconcile(true)")
+		if n := auditCount(t, pool, "SELECT count(*) FROM audit_reconcile(false) WHERE table_name = $1", table); n != 0 {
+			t.Errorf("%s: %d problem(s) left after a repair, want 0", name, n)
+		}
+	}
+}
+
+func TestAuditMigration_RegisterRefusesColumnsItCannotAuditSafely(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	schema := auditSchema(t, pool)
+
+	const commaTable = "zz_audit_test_comma"
+	auditTestTable(t, pool, commaTable)
+	auditExec(t, pool, `CREATE TABLE `+commaTable+` (id int PRIMARY KEY, "a,b" text)`)
+	_, err := pool.Exec(context.Background(), "SELECT register_audit('"+schema+"', '"+commaTable+"', NULL, '{}', ARRAY['a,b'])")
+	if err == nil || !strings.Contains(err.Error(), "comma") {
+		t.Errorf("a masked column named with a comma: err = %v, want a refusal", err)
+	}
+
+	const byteaTable = "zz_audit_test_bytea_key"
+	auditTestTable(t, pool, byteaTable)
+	auditExec(t, pool, "CREATE TABLE "+byteaTable+" (id bytea PRIMARY KEY, note text)")
+	_, err = pool.Exec(context.Background(), "SELECT register_audit('"+schema+"', '"+byteaTable+"')")
+	if err == nil || !strings.Contains(err.Error(), "binary") {
+		t.Errorf("a bytea key: err = %v, want a refusal", err)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM audit_config WHERE table_name = $1", byteaTable); n != 0 {
+		t.Errorf("a refused registration left %d registry row(s)", n)
+	}
+}
+
+// A primary key with an INCLUDE column keys on the key columns only.
+func TestAuditMigration_RegisterKeysOnTheKeyColumnsNotIncludedOnes(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	const table = "zz_audit_test_include"
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+" (id int, extra text, PRIMARY KEY (id) INCLUDE (extra))")
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"')")
+
+	var keys string
+	if err := pool.QueryRow(context.Background(),
+		"SELECT array_to_string(key_columns, ',') FROM audit_config WHERE table_name = $1", table).Scan(&keys); err != nil {
+		t.Fatalf("read key columns: %v", err)
+	}
+	if keys != "id" {
+		t.Errorf("key columns = %q, want id only", keys)
+	}
+}
+
+// The trigger function is only ever called by a trigger, which needs no grant
+// at run time, so PUBLIC gets no EXECUTE on it.
+func TestAuditMigration_TriggerFunctionIsNotExecutableByPublic(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	if n := auditCount(t, pool, `SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a
+	    WHERE p.oid = 'audit_log_row_change'::regproc AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'`); n != 0 {
+		t.Errorf("audit_log_row_change has %d PUBLIC EXECUTE grant(s), want 0", n)
+	}
+	if n := auditCount(t, pool, "SELECT count(*) FROM pg_proc WHERE oid = 'audit_log_row_change'::regproc AND proacl IS NOT NULL"); n != 1 {
+		t.Errorf("audit_log_row_change still has the default (PUBLIC) privileges")
 	}
 }
