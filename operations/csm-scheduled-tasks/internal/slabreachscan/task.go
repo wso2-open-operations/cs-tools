@@ -237,7 +237,14 @@ func SendReport(reports ReportFetcher, email EmailSender, v Variant, definitions
 		if !emailsEnabled {
 			return nil
 		}
-		if len(to) == 0 {
+		// An empty audience means "switched off" only when the mail
+		// actually goes to that audience. Under debug mail mode, or a
+		// run-now that named its own recipients, the sender delivers
+		// somewhere else entirely and the configured "to" is just the
+		// name printed in the test-copy notice -- so skipping here would
+		// make the one configuration that exists to exercise this report
+		// without involving its real recipients send nothing at all.
+		if len(to) == 0 && !notify.Redirects(email) {
 			slog.Info("sla breach report has no recipients; skipping", "report", v.Key)
 			return nil
 		}

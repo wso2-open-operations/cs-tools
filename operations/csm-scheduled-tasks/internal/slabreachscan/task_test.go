@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
 )
 
@@ -349,5 +350,67 @@ func TestOnboardingStageOverrideIsIndependent(t *testing.T) {
 	}
 	if got := ApplyStageOverride(cre()).Stages; len(got) != 2 || got[0] != "PAUSED" {
 		t.Fatalf("the CRE report must be unaffected, got %#v", got)
+	}
+}
+
+// TestSendReportStillSendsUnderDebugModeWithoutRecipients is the point of
+// debug mail mode: configure a "debug" list, get the report, involve the
+// real audience in nothing. The old guard skipped on an empty "to" before
+// consulting the sender, so the one configuration that exists to try a
+// report safely sent nothing at all and looked exactly like a quiet week.
+func TestSendReportStillSendsUnderDebugModeWithoutRecipients(t *testing.T) {
+	fetch, send := &fakeFetcher{}, &fakeSender{}
+	debug := []string{"debug@example.invalid"}
+
+	err := SendReport(fetch, notify.ForReport(send, debug), cre(), defs(), nil, nil, "", true)(context.Background())
+	if err != nil {
+		t.Fatalf("SendReport: %v", err)
+	}
+	if fetch.calls != 1 {
+		t.Fatalf("fetch calls = %d, want 1: the report has to be built to be diverted", fetch.calls)
+	}
+	if send.calls != 1 {
+		t.Fatalf("send calls = %d, want 1", send.calls)
+	}
+	if len(send.to) != 1 || send.to[0] != debug[0] {
+		t.Fatalf("mail went to %#v, want the debug list %#v", send.to, debug)
+	}
+	if !strings.Contains(send.subject, "[Test copy]") {
+		t.Fatalf("a diverted report is marked as a test copy, got %q", send.subject)
+	}
+}
+
+// TestSendReportRunNowOverrideAlsoSendsWithoutRecipients: the same holds
+// for a manual run that named its own recipients. A task left with no
+// configured audience must still be runnable by hand.
+func TestSendReportRunNowOverrideAlsoSendsWithoutRecipients(t *testing.T) {
+	fetch, send := &fakeFetcher{}, &fakeSender{}
+	me := []string{"me@example.invalid"}
+
+	err := SendReport(fetch, notify.ForRunNow(send, me, nil), cre(), defs(), nil, nil, "", true)(context.Background())
+	if err != nil {
+		t.Fatalf("SendReport: %v", err)
+	}
+	if fetch.calls != 1 || send.calls != 1 {
+		t.Fatalf("fetch=%d send=%d, want 1 and 1", fetch.calls, send.calls)
+	}
+	if len(send.to) != 1 || send.to[0] != me[0] {
+		t.Fatalf("mail went to %#v, want %#v", send.to, me)
+	}
+}
+
+// TestSendReportDebugModeDoesNotOverrideAlertsEnabled: ALERTS_ENABLED=false
+// is the global kill switch and outranks a debug list. Loosening the
+// recipients guard must not have loosened this one too.
+func TestSendReportDebugModeDoesNotOverrideAlertsEnabled(t *testing.T) {
+	fetch, send := &fakeFetcher{}, &fakeSender{}
+
+	err := SendReport(fetch, notify.ForReport(send, []string{"debug@example.invalid"}),
+		cre(), defs(), nil, nil, "", false)(context.Background())
+	if err != nil {
+		t.Fatalf("SendReport: %v", err)
+	}
+	if fetch.calls != 0 || send.calls != 0 {
+		t.Fatalf("fetch=%d send=%d, want 0 and 0", fetch.calls, send.calls)
 	}
 }
