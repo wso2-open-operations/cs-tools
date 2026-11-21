@@ -926,6 +926,20 @@ Verified end to end against real staging data for one account exercising the fir
 
 **Superseded (deleted):** **Combining more than one client-side filter (region/risks/product/abtTeam) was slow — each of up to 10,000 scanned accounts computed its risk flags via a dozen+ sequential entity-service calls, one account at a time.** `filteredAccounts`' per-page account loop now delegates to `scanAccountsPage`, which evaluates the accounts of one page concurrently (`golang.org/x/sync/errgroup`, bounded to `customerHealthScanConcurrency` = 8 accounts at once) instead of sequentially. Each account's own calls still happen in the same internal order as before (intra-account parallelization was tried and reverted — it broke a test fixture that depends on `SearchCases` call order, and a real `-race` data race once two accounts' calls landed on the same connection concurrently); only the cross-account fan-out is new. Order is preserved exactly: each goroutine writes its verdict into an index-addressed slice, and the matched set is reassembled by walking that slice in the original page order afterward, so pagination stays stable across repeated identical requests (`TestPostgresCustomerHealthClient_RisksFilter_PreservesAccountOrder`). The whole scan, including `scanAccountsPage` and `customerHealthScanConcurrency`, is gone: region/risks/product/abtTeam are server-side filters of the single `POST /accounts/search` call, so there is nothing left to parallelize.
 
+## Saved case comment templates (`/users/me/case-comment-templates`, `/case-comment-templates`)
+
+`CommentTemplateHandler` (`internal/handler/comment_templates.go`) passes the comment box's saved templates
+through to entity-service's routes of the same paths (`internal/entity/comment_template.go`), bodies
+untouched. **The route permissions are the whole access check**; the handler checks only the caller, the
+`{id}` and the JSON. Listing and managing your own needs `PermCreateWorkNote`, the floor of `POST
+/cases/{id}/comments`, so everyone who can post a comment or work note gets templates. Writing a shared
+template is `PermAdmin`. entity-service keys the personal routes to the forwarded user token and answers 404
+for anyone else's template, and accepts shared writes only from this backend's client id, trusting it for the
+admin check. Create and update
+errors go through `mapUpstreamError`, so entity-service's validation and name-clash messages reach the user;
+list and delete use `mapUpstreamErrorGeneric`.
+`cmd/server/comment_template_routes_test.go` pins every route's permission.
+
 ## Custom dashboards (`/dashboards/generate`, `/dashboards/custom/*`, `/dashboards/shared/*`)
 
 A saved dashboard is the definition the user saved, stored by entity-service as opaque text

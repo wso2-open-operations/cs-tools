@@ -74,7 +74,8 @@ import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
 import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
-import { $getRoot } from "lexical";
+import { $getRoot, type RangeSelection } from "lexical";
+import { $insertHtmlAsBlocks } from "@components/rich-text-editor/insertHtmlBlocks";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import {
   KEY_ENTER_COMMAND,
@@ -227,6 +228,48 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
       });
     }
   }, [editor, resetTrigger]);
+
+  return null;
+};
+
+/**
+ * Inserts `request.html` once per `request.nonce`: at the selection when the
+ * editor has one, otherwise at the end of the content. Used to drop a saved
+ * comment template into a draft without losing what is already typed.
+ */
+const InsertHtmlPlugin = ({
+  request,
+  onInserted,
+}: {
+  request?: { html: string; nonce: number };
+  onInserted?: () => void;
+}) => {
+  const [editor] = useLexicalComposerContext();
+  const appliedNonceRef = useRef<number | null>(null);
+  // The cursor as it was last seen: opening the Templates menu blurs the
+  // editor, which drops Lexical's selection before the insert runs.
+  const lastSelectionRef = useRef<RangeSelection | null>(null);
+
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState }) => {
+        editorState.read(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) lastSelectionRef.current = selection.clone();
+        });
+      }),
+    [editor],
+  );
+
+  useEffect(() => {
+    if (!request || !request.html.trim() || appliedNonceRef.current === request.nonce) return;
+    appliedNonceRef.current = request.nonce;
+    editor.update(() => {
+      $insertHtmlAsBlocks(editor, request.html, lastSelectionRef.current);
+    });
+    editor.focus();
+    onInserted?.();
+  }, [editor, request, onInserted]);
 
   return null;
 };
@@ -564,7 +607,22 @@ const Editor = ({
   overlayElement,
   onPasteError,
   onImageUpload,
+  insertHtml,
+  onHtmlInserted,
 }: {
+  /**
+   * Inserts HTML at the cursor (or at the end when the editor has no
+   * selection) each time `nonce` changes, e.g. a saved comment template.
+   * The HTML goes through Lexical's own DOM import, so only the node types
+   * this editor knows survive; nothing is set as innerHTML.
+   */
+  insertHtml?: { html: string; nonce: number };
+  /**
+   * Called once `insertHtml` has been inserted. Clear the request there: the
+   * editor is remounted (a new `key`) on some toggles, and a request still
+   * set then would be inserted a second time.
+   */
+  onHtmlInserted?: () => void;
   onAttachmentClick?: () => void;
   attachments?: File[];
   /** The most attachments the editor takes; the attach button is off once it holds that many. */
@@ -860,6 +918,7 @@ const Editor = ({
           <InitialValuePlugin initialHtml={value} />
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
+          <InsertHtmlPlugin request={insertHtml} onInserted={onHtmlInserted} />
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>
         {imageNotice && (

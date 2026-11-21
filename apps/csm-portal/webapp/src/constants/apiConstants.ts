@@ -176,6 +176,7 @@ export const ApiQueryKeys = {
   CSM_ADMIN_CASE_DEESCALATORS: "csm-admin-case-deescalators",
   CSM_PRODUCT_REPO_MAPPING: "csm-product-repo-mapping",
   SAVED_FILTER_VIEWS: "saved-filter-views",
+  COMMENT_TEMPLATES: "comment-templates",
 } as const;
 
 // Constants for API-related mutation keys.

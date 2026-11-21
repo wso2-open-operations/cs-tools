@@ -130,6 +130,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 	}
 
+	var caseCommentTemplateHandler *handler.CaseCommentTemplateHandler
+	if db != nil {
+		caseCommentTemplateHandler = handler.NewCaseCommentTemplateHandler(
+			service.NewCaseCommentTemplateService(repository.NewCaseCommentTemplateRepository(db), userRepo, cfg.CSMPortalBackendClientID),
+		)
+	}
+
 	var customDashboardHandler *handler.CustomDashboardHandler
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
@@ -2445,6 +2452,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PATCH /users/me/saved-filter-views", savedFilterViewHandler.Save)
 		mux.HandleFunc("DELETE /users/me/saved-filter-views", savedFilterViewHandler.Delete)
 		mux.HandleFunc("POST /users/me/saved-filter-views/reorder", savedFilterViewHandler.Reorder)
+	}
+	if caseCommentTemplateHandler != nil {
+		// Saved case comment templates (CSM portal comment box). Internal
+		// callers only: the customer portal never sees them. The caller's own
+		// templates live under /users/me; the shared ones are open to any
+		// internal caller here, and the CSM portal backend limits their
+		// writes to admins.
+		mux.HandleFunc("GET /users/me/case-comment-templates", internalOnly(accessSvc, caseCommentTemplateHandler.List))
+		mux.HandleFunc("POST /users/me/case-comment-templates", internalOnly(accessSvc, caseCommentTemplateHandler.CreatePersonal))
+		mux.HandleFunc("PATCH /users/me/case-comment-templates/{id}", internalOnly(accessSvc, caseCommentTemplateHandler.UpdatePersonal))
+		mux.HandleFunc("DELETE /users/me/case-comment-templates/{id}", internalOnly(accessSvc, caseCommentTemplateHandler.DeletePersonal))
+		mux.HandleFunc("POST /case-comment-templates", internalOnly(accessSvc, caseCommentTemplateHandler.CreateShared))
+		mux.HandleFunc("PATCH /case-comment-templates/{id}", internalOnly(accessSvc, caseCommentTemplateHandler.UpdateShared))
+		mux.HandleFunc("DELETE /case-comment-templates/{id}", internalOnly(accessSvc, caseCommentTemplateHandler.DeleteShared))
 	}
 	if customDashboardHandler != nil {
 		// The caller's own saved dashboards (CSM portal My Dashboards).

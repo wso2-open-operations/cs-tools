@@ -22,6 +22,11 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router";
 
 const postMock = vi.fn();
+// The comment box's Templates menu has its own tests; its import chain reads
+// runtime config, so it is a stand-in here.
+vi.mock("@features/comment-templates/components/CommentTemplatesMenu", () => ({
+  default: () => null,
+}));
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
 }));
