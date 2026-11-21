@@ -59,17 +59,16 @@ func (m *memCaseCommentTemplateRepo) List(_ context.Context, userID string) ([]d
 	return out, nil
 }
 
-func (m *memCaseCommentTemplateRepo) Count(_ context.Context, owner *string) (int, error) {
+func (m *memCaseCommentTemplateRepo) Create(_ context.Context, owner *string, req domain.CreateCaseCommentTemplateRequest, actor string, limit int) (domain.CaseCommentTemplate, error) {
 	n := 0
 	for _, r := range m.rows {
 		if sameOwner(r.owner, owner) {
 			n++
 		}
 	}
-	return n, nil
-}
-
-func (m *memCaseCommentTemplateRepo) Create(_ context.Context, owner *string, req domain.CreateCaseCommentTemplateRequest, actor string) (domain.CaseCommentTemplate, error) {
+	if n >= limit {
+		return domain.CaseCommentTemplate{}, &apierror.ValidationError{Msg: fmt.Sprintf("at most %d templates are allowed here; delete one first", limit)}
+	}
 	m.nextID++
 	t := domain.CaseCommentTemplate{
 		ID:        fmt.Sprintf("00000000-0000-0000-0000-%012d", m.nextID),
@@ -120,8 +119,21 @@ func templateUsers() stubUserRepo {
 	}
 }
 
+const testCSMPortalClientID = "csm-portal-backend-test-client"
+
+// templateCtx is a person's own token, as any internal caller could send it.
 func templateCtx(email string) context.Context {
 	return auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: email})
+}
+
+// portalCtx is the same person reaching this service through the CSM portal
+// backend, the only client allowed to write shared templates.
+func portalCtx(email string) context.Context {
+	return auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: email, ClientID: testCSMPortalClientID})
+}
+
+func newTemplateSvc(repo *memCaseCommentTemplateRepo) CaseCommentTemplateService {
+	return NewCaseCommentTemplateService(repo, templateUsers(), testCSMPortalClientID)
 }
 
 func newTemplateReq(name string, appliesTo domain.CommentTemplateAppliesTo) domain.CreateCaseCommentTemplateRequest {
@@ -130,7 +142,7 @@ func newTemplateReq(name string, appliesTo domain.CommentTemplateAppliesTo) doma
 
 func TestCaseCommentTemplateService_PersonalTemplatesAreTheOwnersOnly(t *testing.T) {
 	repo := &memCaseCommentTemplateRepo{}
-	svc := NewCaseCommentTemplateService(repo, templateUsers())
+	svc := newTemplateSvc(repo)
 	alice, bob := templateCtx("alice@example.com"), templateCtx("bob@example.com")
 
 	mine, err := svc.CreatePersonal(alice, newTemplateReq("  Ack  ", domain.CommentTemplateAppliesToComment))
@@ -161,7 +173,7 @@ func TestCaseCommentTemplateService_PersonalTemplatesAreTheOwnersOnly(t *testing
 		t.Errorf("bob deleting alice's template: err = %v, want not found", err)
 	}
 	// The shared routes cannot reach a personal template either.
-	if err := svc.DeleteShared(bob, mine.ID); !errors.As(err, &nf) {
+	if err := svc.DeleteShared(portalCtx("bob@example.com"), mine.ID); !errors.As(err, &nf) {
 		t.Errorf("shared delete of a personal template: err = %v, want not found", err)
 	}
 	if err := svc.DeletePersonal(alice, mine.ID); err != nil {
@@ -171,8 +183,8 @@ func TestCaseCommentTemplateService_PersonalTemplatesAreTheOwnersOnly(t *testing
 
 func TestCaseCommentTemplateService_SharedTemplatesAreSeenByEveryoneAndNotReachableAsPersonal(t *testing.T) {
 	repo := &memCaseCommentTemplateRepo{}
-	svc := NewCaseCommentTemplateService(repo, templateUsers())
-	admin, engineer := templateCtx("admin@example.com"), templateCtx("eng@example.com")
+	svc := newTemplateSvc(repo)
+	admin, engineer := portalCtx("admin@example.com"), templateCtx("eng@example.com")
 
 	shared, err := svc.CreateShared(admin, newTemplateReq("Closing note", domain.CommentTemplateAppliesToBoth))
 	if err != nil {
@@ -204,7 +216,7 @@ func TestCaseCommentTemplateService_SharedTemplatesAreSeenByEveryoneAndNotReacha
 }
 
 func TestCaseCommentTemplateService_Validation(t *testing.T) {
-	svc := NewCaseCommentTemplateService(&memCaseCommentTemplateRepo{}, templateUsers())
+	svc := newTemplateSvc(&memCaseCommentTemplateRepo{})
 	ctx := templateCtx("alice@example.com")
 	long := strings.Repeat("x", domain.MaxCaseCommentTemplateNameLength+1)
 	tooBig := strings.Repeat("x", domain.MaxCaseCommentTemplateBodyLength+1)
@@ -240,7 +252,7 @@ func TestCaseCommentTemplateService_Validation(t *testing.T) {
 
 func TestCaseCommentTemplateService_CapsPersonalTemplates(t *testing.T) {
 	repo := &memCaseCommentTemplateRepo{}
-	svc := NewCaseCommentTemplateService(repo, templateUsers())
+	svc := newTemplateSvc(repo)
 	ctx := templateCtx("alice@example.com")
 	for i := 0; i < domain.MaxPersonalCaseCommentTemplates; i++ {
 		if _, err := svc.CreatePersonal(ctx, newTemplateReq(fmt.Sprintf("t%d", i), "BOTH")); err != nil {
@@ -258,7 +270,7 @@ func TestCaseCommentTemplateService_CapsPersonalTemplates(t *testing.T) {
 }
 
 func TestCaseCommentTemplateService_RequiresAUserToken(t *testing.T) {
-	svc := NewCaseCommentTemplateService(&memCaseCommentTemplateRepo{}, templateUsers())
+	svc := newTemplateSvc(&memCaseCommentTemplateRepo{})
 	var ue *apierror.UnauthorizedError
 	// A service credential alone (no user) cannot list, create a personal
 	// template, or write a shared one: there is no owner or editor to record.
@@ -268,5 +280,45 @@ func TestCaseCommentTemplateService_RequiresAUserToken(t *testing.T) {
 	}
 	if _, err := svc.CreateShared(ctx, newTemplateReq("n", "BOTH")); !errors.As(err, &ue) {
 		t.Errorf("CreateShared: err = %v, want unauthorized", err)
+	}
+}
+
+// Only the CSM portal backend (which admits admins only) may write shared
+// templates. An internal person calling this service directly with their own
+// token is refused, and so is every caller when no portal client is configured.
+func TestCaseCommentTemplateService_SharedWritesOnlyThroughTheCSMPortal(t *testing.T) {
+	repo := &memCaseCommentTemplateRepo{}
+	svc := newTemplateSvc(repo)
+	shared, err := svc.CreateShared(portalCtx("admin@example.com"), newTemplateReq("Closing", "BOTH"))
+	if err != nil {
+		t.Fatalf("CreateShared through the portal: %v", err)
+	}
+
+	var fe *apierror.ForbiddenError
+	direct := templateCtx("eng@example.com")
+	if _, err := svc.CreateShared(direct, newTemplateReq("Mine now", "BOTH")); !errors.As(err, &fe) {
+		t.Errorf("direct CreateShared: err = %v, want forbidden", err)
+	}
+	body := "<p>Changed</p>"
+	if _, err := svc.UpdateShared(direct, shared.ID, domain.UpdateCaseCommentTemplateRequest{Body: &body}); !errors.As(err, &fe) {
+		t.Errorf("direct UpdateShared: err = %v, want forbidden", err)
+	}
+	if err := svc.DeleteShared(direct, shared.ID); !errors.As(err, &fe) {
+		t.Errorf("direct DeleteShared: err = %v, want forbidden", err)
+	}
+	other := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: "eng@example.com", ClientID: "some-other-app"})
+	if _, err := svc.CreateShared(other, newTemplateReq("Other app", "BOTH")); !errors.As(err, &fe) {
+		t.Errorf("CreateShared from another client: err = %v, want forbidden", err)
+	}
+	unconfigured := NewCaseCommentTemplateService(repo, templateUsers(), "")
+	if _, err := unconfigured.CreateShared(portalCtx("admin@example.com"), newTemplateReq("No client", "BOTH")); !errors.As(err, &fe) {
+		t.Errorf("CreateShared with no portal client configured: err = %v, want forbidden", err)
+	}
+	// The personal routes stay open to any internal person.
+	if _, err := svc.CreatePersonal(direct, newTemplateReq("Personal", "BOTH")); err != nil {
+		t.Errorf("CreatePersonal with a person's own token: %v", err)
+	}
+	if len(repo.rows) != 2 {
+		t.Errorf("stored %d templates, want the portal's shared one and the personal one", len(repo.rows))
 	}
 }

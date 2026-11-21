@@ -38,8 +38,11 @@ import (
 type CaseCommentTemplateRepository interface {
 	// List is userID's personal templates, then the shared ones, each by name.
 	List(ctx context.Context, userID string) ([]domain.CaseCommentTemplate, error)
-	Count(ctx context.Context, ownerUserID *string) (int, error)
-	Create(ctx context.Context, ownerUserID *string, req domain.CreateCaseCommentTemplateRequest, actorEmail string) (domain.CaseCommentTemplate, error)
+	// Create inserts a template unless the owner (or the shared set) already
+	// holds limit templates, a ValidationError then. The count and the insert
+	// run in one transaction under a per-owner lock, so concurrent creates
+	// cannot both pass the cap.
+	Create(ctx context.Context, ownerUserID *string, req domain.CreateCaseCommentTemplateRequest, actorEmail string, limit int) (domain.CaseCommentTemplate, error)
 	Update(ctx context.Context, id string, ownerUserID *string, req domain.UpdateCaseCommentTemplateRequest, actorEmail string) (domain.CaseCommentTemplate, error)
 	Delete(ctx context.Context, id string, ownerUserID *string) error
 }
@@ -98,19 +101,33 @@ func (r *caseCommentTemplateRepo) List(ctx context.Context, userID string) ([]do
 	return templates, nil
 }
 
-func (r *caseCommentTemplateRepo) Count(ctx context.Context, ownerUserID *string) (int, error) {
-	var n int
-	err := r.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM case_comment_template WHERE owner_user_id IS NOT DISTINCT FROM $1::uuid`,
-		ownerUserID).Scan(&n)
+func (r *caseCommentTemplateRepo) Create(ctx context.Context, ownerUserID *string, req domain.CreateCaseCommentTemplateRequest, actorEmail string, limit int) (domain.CaseCommentTemplate, error) {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("count case comment templates: %w", err)
+		return domain.CaseCommentTemplate{}, fmt.Errorf("create case comment template: begin: %w", err)
 	}
-	return n, nil
-}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-func (r *caseCommentTemplateRepo) Create(ctx context.Context, ownerUserID *string, req domain.CreateCaseCommentTemplateRequest, actorEmail string) (domain.CaseCommentTemplate, error) {
-	t, err := scanCaseCommentTemplate(r.db.QueryRow(ctx,
+	// One lock per owner ("shared" for the shared set), held to commit, so a
+	// second create for the same owner waits and then sees this one's row.
+	lockKey := "case_comment_template:shared"
+	if ownerUserID != nil {
+		lockKey = "case_comment_template:" + *ownerUserID
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+		return domain.CaseCommentTemplate{}, fmt.Errorf("create case comment template: lock: %w", err)
+	}
+	var n int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM case_comment_template WHERE owner_user_id IS NOT DISTINCT FROM $1::uuid`,
+		ownerUserID).Scan(&n); err != nil {
+		return domain.CaseCommentTemplate{}, fmt.Errorf("create case comment template: count: %w", err)
+	}
+	if n >= limit {
+		return domain.CaseCommentTemplate{}, &apierror.ValidationError{Msg: fmt.Sprintf("at most %d templates are allowed here; delete one first", limit)}
+	}
+
+	t, err := scanCaseCommentTemplate(tx.QueryRow(ctx,
 		`INSERT INTO case_comment_template (owner_user_id, name, body, applies_to, created_by, updated_by)
 		 VALUES ($1::uuid, $2, $3, $4, $5, $5)
 		 RETURNING `+caseCommentTemplateColumns,
@@ -120,6 +137,9 @@ func (r *caseCommentTemplateRepo) Create(ctx context.Context, ownerUserID *strin
 			return domain.CaseCommentTemplate{}, conflict
 		}
 		return domain.CaseCommentTemplate{}, fmt.Errorf("create case comment template: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.CaseCommentTemplate{}, fmt.Errorf("create case comment template: commit: %w", err)
 	}
 	return t, nil
 }

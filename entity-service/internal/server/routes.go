@@ -133,7 +133,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseCommentTemplateHandler *handler.CaseCommentTemplateHandler
 	if db != nil {
 		caseCommentTemplateHandler = handler.NewCaseCommentTemplateHandler(
-			service.NewCaseCommentTemplateService(repository.NewCaseCommentTemplateRepository(db), userRepo),
+			service.NewCaseCommentTemplateService(repository.NewCaseCommentTemplateRepository(db), userRepo, cfg.CSMPortalBackendClientID),
 		)
 	}
 
