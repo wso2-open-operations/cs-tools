@@ -1871,6 +1871,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
     post:
       summary: Save a personal comment template.
       description: >-
@@ -1920,6 +1926,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge (the request body is over 1 MiB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
           content:
@@ -1927,6 +1939,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
   /users/me/case-comment-templates/{id}:
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
     patch:
       summary: Change one of the caller's comment templates.
       description: >-
@@ -1983,8 +2001,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge (the request body is over 1 MiB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
           content:
             application/json:
               schema:
@@ -2036,6 +2066,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
   /case-comment-templates:
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
     post:
       summary: Save a shared comment template.
       description: >-
@@ -2079,6 +2115,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge (the request body is over 1 MiB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
           content:
@@ -2086,6 +2128,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
   /case-comment-templates/{id}:
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
     patch:
       summary: Change a shared comment template.
       description: >-
@@ -2142,8 +2190,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge (the request body is over 1 MiB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
           content:
             application/json:
               schema:
@@ -2190,6 +2250,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (entity-service did not answer)
           content:
             application/json:
               schema:

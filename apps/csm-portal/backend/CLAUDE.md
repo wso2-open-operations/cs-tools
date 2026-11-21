@@ -934,7 +934,8 @@ untouched. **The route permissions are the whole access check**; the handler che
 `{id}` and the JSON. Listing and managing your own needs `PermCreateWorkNote`, the floor of `POST
 /cases/{id}/comments`, so everyone who can post a comment or work note gets templates. Writing a shared
 template is `PermAdmin`. entity-service keys the personal routes to the forwarded user token and answers 404
-for anyone else's template, and it trusts this backend for the admin check on the shared ones. Create and update
+for anyone else's template, and accepts shared writes only from this backend's client id, trusting it for the
+admin check. Create and update
 errors go through `mapUpstreamError`, so entity-service's validation and name-clash messages reach the user;
 list and delete use `mapUpstreamErrorGeneric`.
 `cmd/server/comment_template_routes_test.go` pins every route's permission.
