@@ -312,6 +312,47 @@ describe("RotaReminderSettings", () => {
     expect(lastBody()).toMatchObject({ weekendCopyTo: ["head@x.test"] });
   });
 
+  it.each(["Someone@WSO2.com", "someone@choreolabs.com"])(
+    "adds a typed whole %s address that is not a member, lower-cased and marked",
+    (typed) => {
+      settings.data = { ...LOADED, weekendCopyTo: ["head@x.test"] };
+      render(<RotaReminderSettings />);
+      pick("Cc on weekend reminders only", typed, `Add ${typed.toLowerCase()}`);
+      expect(screen.getByText(typed.toLowerCase())).toBeInTheDocument();
+      expect(screen.getByText("Not a CRE member")).toBeInTheDocument();
+      fireEvent.click(saveButton());
+      expect(lastBody()).toMatchObject({ weekendCopyTo: ["head@x.test", typed.toLowerCase()] });
+    },
+  );
+
+  it("adds a typed address with Enter, and never offers one already chosen", () => {
+    settings.data = { ...LOADED, weekendCopyTo: ["head@x.test"] };
+    render(<RotaReminderSettings />);
+    const input = screen.getByLabelText("Cc on weekend reminders only");
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "someone@wso2.com" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mutate).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "someone@wso2.com" } });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({ weekendCopyTo: ["head@x.test", "someone@wso2.com"] });
+  });
+
+  it.each(["someone@example.com", "someone@wso2.com.evil.test", "someone@wso2", "someone@"])(
+    "does not offer %s: only a whole @wso2.com or @choreolabs.com address can be typed in",
+    (typed) => {
+      render(<RotaReminderSettings />);
+      const input = copyField();
+      act(() => input.focus());
+      fireEvent.change(input, { target: { value: typed } });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No CRE member matches “" + typed + "”. Type a whole @wso2.com or @choreolabs.com address to add someone else.",
+      );
+    },
+  );
+
   it("shows the saved invitation Cc, and refuses a saved address that is not an email", () => {
     settings.data = { ...LOADED, inviteCopyTo: ["admin@x.test", "not an address"] };
     render(<RotaReminderSettings />);
