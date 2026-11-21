@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import type { BeCommentTemplate } from "@api/backend/types";
 import {
   filterTemplates,
+  hasImage,
   isBlankBody,
   templatePlainText,
   templatesForMode,
@@ -59,8 +60,21 @@ describe("templatePlainText and isBlankBody", () => {
   it("drops markup and collapses whitespace", () => {
     expect(templatePlainText("<p>First</p>\n<p>  second <b>part</b></p>")).toBe("First second part");
   });
+  it("keeps words in adjacent paragraphs and lines apart, inline elements joined", () => {
+    expect(templatePlainText("<p>Next</p><p>step</p>")).toBe("Next step");
+    expect(templatePlainText("<p>one<br>two</p>")).toBe("one two");
+    expect(templatePlainText("<p>re<b>ally</b> done</p>")).toBe("really done");
+    expect(filterTemplates([t("1", "x", "BOTH", "<p>Next</p><p>step</p>")], "next step")).toHaveLength(1);
+  });
   it("treats an empty editor paragraph as blank", () => {
     expect(isBlankBody("<p><br></p>")).toBe(true);
     expect(isBlankBody("<p>Hi</p>")).toBe(false);
+  });
+});
+
+describe("hasImage", () => {
+  it("finds an image in a draft body", () => {
+    expect(hasImage('<p>Hi</p><p><img src="blob:http://localhost/abc"></p>')).toBe(true);
+    expect(hasImage("<p>No images</p>")).toBe(false);
   });
 });

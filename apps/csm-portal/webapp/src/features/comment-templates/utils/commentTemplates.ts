@@ -42,6 +42,10 @@ export function templatesForMode(
   return templates.filter((t) => t.appliesTo === "BOTH" || t.appliesTo === wanted);
 }
 
+/** Elements whose end separates words in plain text. */
+const BLOCK_BOUNDARY_SELECTOR =
+  "p,div,br,li,ul,ol,h1,h2,h3,h4,h5,h6,blockquote,pre,table,tr,td,th,hr";
+
 /**
  * A template's text without markup, whitespace collapsed, for list previews
  * and search. Parsed with DOMParser, whose document is inert (no script runs,
@@ -50,6 +54,9 @@ export function templatesForMode(
 export function templatePlainText(html: string): string {
   if (!html) return "";
   const doc = new DOMParser().parseFromString(html, "text/html");
+  // Blocks and line breaks become a space, so "<p>Next</p><p>step</p>" reads
+  // "Next step"; inline elements (<b>, <a>) stay joined to their words.
+  doc.body.querySelectorAll(BLOCK_BOUNDARY_SELECTOR).forEach((el) => el.after(" "));
   return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
@@ -74,5 +81,14 @@ export function bodyBytes(html: string): number {
 
 /** True when an editor body holds no text (an empty paragraph counts as none). */
 export function isBlankBody(html: string): boolean {
-  return templatePlainText(html) === "" && !/<img\b/i.test(html);
+  return templatePlainText(html) === "";
+}
+
+/**
+ * True when the body holds an image. A template cannot keep one: an image in a
+ * draft is a local blob: preview until its comment is sent, and that preview
+ * is gone by the time anyone inserts the template, so the send would fail.
+ */
+export function hasImage(html: string): boolean {
+  return /<img\b/i.test(html);
 }

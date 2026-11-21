@@ -74,7 +74,8 @@ import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
 import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
-import { $getRoot, $insertNodes } from "lexical";
+import { $getRoot, type RangeSelection } from "lexical";
+import { $insertHtmlAsBlocks } from "@components/rich-text-editor/insertHtmlBlocks";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import {
   KEY_ENTER_COMMAND,
@@ -245,27 +246,26 @@ const InsertHtmlPlugin = ({
 }) => {
   const [editor] = useLexicalComposerContext();
   const appliedNonceRef = useRef<number | null>(null);
+  // The cursor as it was last seen: opening the Templates menu blurs the
+  // editor, which drops Lexical's selection before the insert runs.
+  const lastSelectionRef = useRef<RangeSelection | null>(null);
+
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState }) => {
+        editorState.read(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) lastSelectionRef.current = selection.clone();
+        });
+      }),
+    [editor],
+  );
 
   useEffect(() => {
     if (!request || !request.html.trim() || appliedNonceRef.current === request.nonce) return;
     appliedNonceRef.current = request.nonce;
     editor.update(() => {
-      const dom = new DOMParser().parseFromString(request.html, "text/html");
-      const nodes = $generateNodesFromDOM(editor, dom);
-      if (!$isRangeSelection($getSelection())) {
-        $getRoot().selectEnd();
-      }
-      // A template is its own paragraph: when the cursor's paragraph already
-      // has text, split it at the cursor first, or the template's first line
-      // is glued onto the sentence being typed ("…shortly.Thanks for…").
-      const selection = $getSelection();
-      if ($isRangeSelection(selection)) {
-        const block = selection.anchor.getNode().getTopLevelElement();
-        if (block && block.getTextContent().trim() !== "") {
-          selection.insertParagraph();
-        }
-      }
-      $insertNodes(nodes);
+      $insertHtmlAsBlocks(editor, request.html, lastSelectionRef.current);
     });
     editor.focus();
     onInserted?.();

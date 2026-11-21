@@ -677,12 +677,17 @@ user's own, `/case-comment-templates` for shared ones, which only admins write; 
 templates for the box's mode (`templatesForMode`: a public reply never gets a WORK_NOTE template), searches name and
 text, saves the draft as a template and opens the Manage dialog. The list is fetched the first time the menu opens.
 
-- **Inserting.** A picked template goes to the editor as `Editor`'s `insertHtml` (`InsertHtmlPlugin`: at the
-  selection, else at the end, through Lexical's DOM import, never innerHTML). The parent clears the request in
+- **Inserting.** A picked template goes to the editor as `Editor`'s `insertHtml` (`InsertHtmlPlugin` calls
+  `$insertHtmlAsBlocks`, `insertHtmlBlocks.ts`: at the selection, else at the end, through Lexical's DOM import,
+  never innerHTML). Mid-paragraph it splits the paragraph and puts the template between the halves, so no text
+  on either side is merged into it. The parent clears the request in
   `onHtmlInserted`: the editor is remounted on some toggles, and a request left set would be inserted again. In
   HTML-source mode the template is appended to the source text.
-- **Previews are text only** (`templatePlainText`, an inert `DOMParser` document read as `textContent`), so a
-  template's HTML is never rendered in the list.
+- **Previews are text only** (`templatePlainText`, an inert `DOMParser` document read as `textContent`, with a
+  space after each block and `<br>`), so a template's HTML is never rendered in the list.
+- **No images in a template**: a draft's image is a local `blob:` preview until its comment is sent, so the save
+  dialog refuses a body with an `<img>`. The dialog cannot be closed while its save is in flight, so a pending
+  save never closes a newer draft.
 - Tests that render `CsmCaseCommentInput` (or a page holding it) mock `CommentTemplatesMenu` to `() => null`: it needs a
   query client and the current user. Its own behaviour is in `CommentTemplatesMenu.test.tsx`.
 

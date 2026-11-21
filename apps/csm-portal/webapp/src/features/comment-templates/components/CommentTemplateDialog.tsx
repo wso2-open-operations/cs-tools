@@ -40,6 +40,7 @@ import {
   bodyBytes,
   COMMENT_TEMPLATE_BODY_MAX_BYTES,
   COMMENT_TEMPLATE_NAME_MAX,
+  hasImage,
   isBlankBody,
 } from "@features/comment-templates/utils/commentTemplates";
 
@@ -87,9 +88,17 @@ export default function CommentTemplateDialog({
       ? `Keep the name under ${COMMENT_TEMPLATE_NAME_MAX} characters.`
       : isBlankBody(body)
         ? "The template has no text."
-        : tooBig
+        : hasImage(body)
+          ? "Templates can't hold images: an image is only stored when a comment is sent. Remove it first."
+          : tooBig
           ? "The template is too long. Remove some text or images."
           : null;
+
+  // While a save is in flight the dialog stays open: closing it and opening
+  // another draft would let the pending save's completion close that one.
+  const close = () => {
+    if (!save.isPending) onClose();
+  };
 
   const onSave = async () => {
     if (problem) return;
@@ -106,7 +115,7 @@ export default function CommentTemplateDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={close} fullWidth maxWidth="md">
       <DialogTitle>{editing ? "Edit template" : "Save as template"}</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
@@ -153,7 +162,7 @@ export default function CommentTemplateDialog({
             maxHeight={360}
             toolbarVariant="full"
           />
-          {(problem && (name !== initial.name || body !== initial.body)) || tooBig ? (
+          {(problem && (name !== initial.name || body !== initial.body)) || tooBig || hasImage(body) ? (
             <Typography variant="caption" color="error">
               {problem}
             </Typography>
@@ -162,7 +171,9 @@ export default function CommentTemplateDialog({
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={close} disabled={save.isPending}>
+          Cancel
+        </Button>
         <Button
           variant="contained"
           onClick={() => {
