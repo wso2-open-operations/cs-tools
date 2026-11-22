@@ -102,6 +102,14 @@ func NewSLABreachReportRepository(db *Scoped) SLABreachReportRepository {
 //
 // `cre` is the account's CRE group -- ServiceNow's
 // account.u_integration_cs_team, the field the source report grouped on.
+//
+// The product comes from the case's DEPLOYED product first, falling back
+// to work_item.product_id. That is the path the portal itself resolves a
+// case's product by (case_repo.go joins deployed_products -> products and
+// shows nothing else), so the two now agree; keying on work_item.product_id
+// alone left the column empty for every case that carries only a deployed
+// product -- 1,195 of staging's 13,535 cases, and every row of the first
+// production run.
 const slaBreachReportQuery = `
 	SELECT
 		COALESCE(cre.name, ''),
@@ -124,7 +132,8 @@ const slaBreachReportQuery = `
 	JOIN sla_policy sp ON sp.id = s.sla_policy_id
 	JOIN work_item wi ON wi.id = s.work_item_id
 	LEFT JOIN "case" c ON c.id = wi.id
-	LEFT JOIN product prod ON prod.id = wi.product_id
+	LEFT JOIN deployed_product dprod ON dprod.id = wi.deployed_product_id
+	LEFT JOIN product prod ON prod.id = COALESCE(dprod.product_id, wi.product_id)
 	LEFT JOIN account a ON a.id = wi.account_id
 	LEFT JOIN "group" cre ON cre.id = a.cre_team_id
 	LEFT JOIN project p ON p.id = wi.project_id
