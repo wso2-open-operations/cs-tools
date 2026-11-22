@@ -56,6 +56,10 @@ const (
 	slaBreachProjectID  = "7a000000-0000-0000-0000-0000000000a3"
 	slaBreachFlatPolicy = "7a000000-0000-0000-0000-0000000000b1"
 	slaBreachBizPolicy  = "7a000000-0000-0000-0000-0000000000b2"
+	// The product reached only through a deployed product, the way a real
+	// case carries one.
+	slaBreachProductID         = "7a000000-0000-0000-0000-0000000000d1"
+	slaBreachDeployedProductID = "7a000000-0000-0000-0000-0000000000d2"
 )
 
 // seedSLABreachReport builds the six clocks the scenarios below assert on,
@@ -78,6 +82,8 @@ func seedSLABreachReport(t *testing.T, pool *pgxpool.Pool) {
 			{`DELETE FROM sla WHERE sla_policy_id IN ($1::uuid, $2::uuid)`, []any{slaBreachFlatPolicy, slaBreachBizPolicy}},
 			{`DELETE FROM "case" WHERE id IN (SELECT id FROM work_item WHERE account_id = $1::uuid)`, []any{slaBreachAccountID}},
 			{`DELETE FROM work_item WHERE account_id = $1::uuid`, []any{slaBreachAccountID}},
+			{`DELETE FROM deployed_product WHERE id = $1::uuid`, []any{slaBreachDeployedProductID}},
+			{`DELETE FROM product WHERE id = $1::uuid`, []any{slaBreachProductID}},
 			{`DELETE FROM sla_policy WHERE id IN ($1::uuid, $2::uuid)`, []any{slaBreachFlatPolicy, slaBreachBizPolicy}},
 			{`DELETE FROM project WHERE id = $1::uuid`, []any{slaBreachProjectID}},
 			{`DELETE FROM account WHERE id = $1::uuid`, []any{slaBreachAccountID}},
@@ -180,6 +186,17 @@ func seedSLABreachReport(t *testing.T, pool *pgxpool.Pool) {
 	// 7: paused AFTER it had already run past its target -- 120% frozen
 	//    at paused_on, has_breached still false. It must be reported:
 	//    PAUSED is in the CRE variant's own stage list.
+	//
+	//    It also carries its product the way a real case does: through a
+	//    deployed product, with work_item.product_id left NULL. Keying the
+	//    report on product_id alone left this column empty.
+	mustExec(`INSERT INTO product (id, created_on, updated_on, created_by, updated_by, name, category)
+		VALUES ($1::uuid, NOW(), NOW(), 'test', 'test', 'SLABRT Test Product', 'SOFTWARE')`, slaBreachProductID)
+	mustExec(`INSERT INTO deployed_product (id, created_on, updated_on, created_by, updated_by, number, product_id)
+		VALUES ($1::uuid, NOW(), NOW(), 'test', 'test', 'SLABRT-DP-1', $2::uuid)`,
+		slaBreachDeployedProductID, slaBreachProductID)
+	mustExec(`UPDATE work_item SET deployed_product_id = $2::uuid WHERE id = $1::uuid`,
+		slaBreachWorkItemID(7), slaBreachDeployedProductID)
 	insertPausedClock(7, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC), 120)
 	// 8: paused while still ON TIME -- 50% frozen. Its start + duration
 	//    lands inside the week, so a predicate that admitted every PAUSED
@@ -290,6 +307,12 @@ func TestSLABreachReportIntegrationPausedClockThatHadAlreadyBreached(t *testing.
 	}
 	if rows[0].BusinessElapsedPercent < 100 {
 		t.Fatalf("percentage = %v, want the frozen value the pause left behind", rows[0].BusinessElapsedPercent)
+	}
+	// This case carries its product only through a deployed product, with
+	// work_item.product_id NULL -- the shape every row of the first
+	// production run had, which reported an empty product column.
+	if rows[0].Product != "SLABRT Test Product" {
+		t.Fatalf("product = %q, want the name reached through the deployed product", rows[0].Product)
 	}
 }
 
