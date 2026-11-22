@@ -9275,8 +9275,9 @@ is the replacement for configuring a team's own Chat space by hand in
 `team.chat_webhook_url` (nullable TEXT, never written by the ServiceNow sync —
 same "platform-owned config, not synced vocabulary" posture as `team.key`/
 `group_email`) holds the team's own incoming-webhook URL, set directly by
-platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl}]}` for
-every team that has one set — a team with none is left out, same as today's
+platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl, key}]}` for
+every team that has one set (`key` is `team.key`, omitted when empty: an
+incident's SLA alert finds its SRE team's space by key, a case's by name) — a team with none is left out, same as today's
 "not in `GOOGLE_CHAT_SPACES`" case. **Internal-caller-only**
 (`TeamService.ListChatWebhooks` → `RequireInternalCaller`, the same gate
 `GET /sla-status` uses) — a webhook URL lets anyone holding it post
