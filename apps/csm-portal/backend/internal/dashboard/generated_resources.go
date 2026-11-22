@@ -174,9 +174,10 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		},
 		sortBy: []string{"createdOn", "updatedOn"},
 	},
-	// Accounts and projects take flat filters only and cannot group on the
-	// server; neither search takes a widget sortBy (projects sort by a small whitelist
-	// of date fields). An account's abtTeam is a team name: the generator writes the
+	// Accounts and projects take flat filters only. Accounts cannot group on
+	// the server; projects group through POST /projects/aggregate (onboarding
+	// owner, onboarding status or region). Neither search takes a widget sortBy
+	// (projects sort by a small whitelist of date fields). An account's abtTeam is a team name: the generator writes the
 	// registry key and the team resolver turns it into the name.
 	ResourceAccount: {
 		noun:   "account",
@@ -194,6 +195,11 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	ResourceProject: {
 		noun:   "project",
 		shapes: opsShapes,
+		// POST /projects/aggregate groups on the server; a project with no
+		// owner, status or region counts in "others".
+		groupBy:   []string{"onboardingOwner", "onboardingStatus", "region"},
+		groupByOn: []Shape{ShapePie, ShapeBar},
+		maxGroups: 50,
 		flat: map[string]valueRule{
 			"onboardingStatus":                      {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable"}},
 			"closureStatus":                         {kind: valuesScalarEnum, values: []string{"Open", "Suspended", "Restricted"}},
@@ -202,6 +208,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"regions":                               {kind: valuesText},
 			"onboardingOwnerIds":                    onlyMe,
 			"onboardingOwnerEmails":                 {kind: valuesEmail},
+			"onboardingOwnerTeamIds":                {kind: valuesTeamNames},
 			"endDateFrom":                           aDate,
 			"endDateTo":                             aDate,
 			"onboardingStartDateFrom":               aDate,

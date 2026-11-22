@@ -1778,6 +1778,12 @@ type SearchProjectsRequest struct {
 	// the person but not their id. ANDed with OnboardingOwnerIDs when both are
 	// set. Postgres data sources only; rejected on the legacy data source.
 	OnboardingOwnerEmails []string `json:"onboardingOwnerEmails,omitempty"`
+	// OnboardingOwnerTeamIDs keeps projects whose onboarding owner is a
+	// current member (team_member) of any of these teams, by team id (the
+	// Team Schedule's team id, as time cards' TeamIDs). A project with no
+	// owner matches none. ANDed with the other owner filters. Postgres data
+	// sources only; rejected on the legacy data source.
+	OnboardingOwnerTeamIDs []string `json:"onboardingOwnerTeamIds,omitempty"`
 	// ExcludeClosureStates filters out projects whose closure state (see
 	// ProjectClosureFields.ClosureState — "Open"/"Suspended"/"Restricted") is
 	// any of the given values, e.g. ["Restricted", "Suspended"]. Unlike
@@ -1838,6 +1844,27 @@ type SearchProjectsRequest struct {
 	OnboardingExpiryDateTo                string `json:"onboardingExpiryDateTo"`
 	ProductionReadinessCompletionDateFrom string `json:"productionReadinessCompletionDateFrom"`
 	ProductionReadinessCompletionDateTo   string `json:"productionReadinessCompletionDateTo"`
+}
+
+// Project aggregate groupings (AggregateProjectsRequest.GroupBy).
+const (
+	ProjectGroupByOnboardingOwner  = "onboardingOwner"
+	ProjectGroupByOnboardingStatus = "onboardingStatus"
+	ProjectGroupByRegion           = "region"
+)
+
+// AggregateProjectsRequest is the input for POST /projects/aggregate: the
+// projects POST /projects/search would match for Filters, counted per
+// GroupBy value. Filters' pagination and sort are not used. A project with
+// no value for the grouping (no owner, status or region) counts in
+// AggregateResponse.OthersCount, never in a bucket. Postgres data sources only.
+type AggregateProjectsRequest struct {
+	Filters SearchProjectsRequest `json:"filters"`
+	// GroupBy is one of the ProjectGroupBy* values.
+	GroupBy string `json:"groupBy"`
+	// MaxGroups caps the buckets returned (largest first); the rest fold into
+	// OthersCount. Optional, default 10, at most 50.
+	MaxGroups int `json:"maxGroups,omitempty"`
 }
 
 // ProjectSearchAccountRef is the account reference embedded in a project
@@ -3160,9 +3187,10 @@ type UserReference struct {
 	Email string  `json:"email"`
 	Name  string  `json:"name"`
 	// IsInternal is true when the person resolved to an INTERNAL-type user
-	// (WSO2 staff). Only comment authors set it today; everywhere else it is
-	// omitted, so absent means "not known to be internal", never "known
-	// external".
+	// (WSO2 staff). Comment authors, and the creator and watch-list users of a
+	// case read from PostgreSQL, set it; the ServiceNow data source has no
+	// user_type on its case payload and omits it. Absent means "not known to be
+	// internal", never "known external".
 	IsInternal bool `json:"isInternal,omitempty"`
 }
 
@@ -6444,6 +6472,10 @@ type SearchTeamsResponse struct {
 type TeamChatWebhook struct {
 	Name           string `json:"name"`
 	ChatWebhookURL string `json:"chatWebhookUrl"`
+	// Key is the team's key (team.key): csm-notification-service keys an
+	// incident's SRE team SLA space by it, the key the SRE ladder resolves an
+	// assignment group to. Additive; case routing still reads Name.
+	Key string `json:"key,omitempty"`
 }
 
 // ListTeamChatWebhooksResponse is the response for GET /teams/chat-webhooks
@@ -9458,6 +9490,17 @@ type SLAClockState struct {
 	// other, so it sends to TeamEmail and OnboardingTeamEmail together
 	// rather than this service picking one.
 	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
+	// AssignmentGroupName is an incident's assignment group as it is now
+	// (empty for every other work item type): csm-notification-service routes
+	// an incident's SLA alert by it, so a reassigned incident alerts its new
+	// group, whose group_email/manager TeamEmail/TeamLeadName already carry.
+	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
+	// AssignmentGroupTeamKey is the key of the team whose id the incident's
+	// current assignment group has (empty when none, and for every other
+	// type): a specialist handoff escalates an incident to its SME team's
+	// group, which shares that team's id (EnsureTeamGroups), so an incident
+	// escalated to an SME team names that team here.
+	AssignmentGroupTeamKey string `json:"assignmentGroupTeamKey,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

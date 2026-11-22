@@ -83,3 +83,18 @@ func TestTranslateIncidentSLACondition_StateCodesDifferFromCaseTranslator(t *tes
 		t.Errorf("translateIncidentSLACondition(stop) = %q, want stateINON_HOLD,RESOLVED,CLOSED", incidentResult)
 	}
 }
+
+// The decoded row (migration 0293) passes through the translator unchanged:
+// every value it would rewrite is matched by its raw numeric form only, and
+// the decoded text has none.
+func TestTranslateIncidentSLACondition_DecodedRowIsUnchanged(t *testing.T) {
+	for _, decoded := range []string{
+		decodedCloudIncidentStartCondition,
+		decodedCloudIncidentStopCondition,
+		decodedCloudIncidentCancelCondition,
+	} {
+		if got := translateIncidentSLACondition(decoded); got != decoded {
+			t.Errorf("translateIncidentSLACondition(%q) = %q, want it unchanged", decoded, got)
+		}
+	}
+}

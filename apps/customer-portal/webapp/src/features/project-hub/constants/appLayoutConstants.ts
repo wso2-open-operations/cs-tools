@@ -61,13 +61,10 @@ export const APP_SHELL_NAV_ITEMS: AppShellNavItem[] = [
 ];
 
 // URL for privacy policy.
-export const PRIVACY_POLICY_URL: string = "https://wso2.com/privacy-policy/";
+export const PRIVACY_POLICY_URL: string = "https://choreolabs.com/privacy-policy";
 
 // URL for terms of service.
-export const TERMS_OF_SERVICE_URL: string = "https://wso2.com/terms-of-use/";
-
-// Legal suffix printed after the configured company name in the footer.
-export const COMPANY_LEGAL_SUFFIX: string = "LLC";
+export const TERMS_OF_SERVICE_URL: string = "https://choreolabs.com/terms-of-use/";
 
 // URL for join our community.
-export const JOIN_COMMUNITY_URL: string = "https://wso2.com/community";
+export const JOIN_COMMUNITY_URL: string = "https://choreolabs.com/community";

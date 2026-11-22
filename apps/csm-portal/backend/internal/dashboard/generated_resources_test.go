@@ -16,6 +16,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -204,6 +205,11 @@ func TestParseGenerated_AcceptsAccountAndProjectWidgets(t *testing.T) {
 		  "sortBy":{"field":"endDate","order":"asc"},"query":{"endDateFrom":"__startOfQuarter:0__","endDateTo":"__endOfQuarter:0__","closureStatus":"Open"}}`,
 		`{"id":"mine","displayName":"My Onboarding Projects in APAC","resourceType":"project","shape":"count","gridWidth":3,
 		  "query":{"onboardingStatus":["In-Progress"],"onboardingOwnerIds":["__current_user__"],"regions":["APAC"]}}`,
+		`{"id":"team-owners","displayName":"Onboarding Team's Projects by Owner","resourceType":"project","shape":"bar","gridWidth":6,
+		  "query":{"onboardingStatus":["In-Progress"],"onboardingOwnerTeamIds":["customer_onboarding"]},"groupBy":{"field":"onboardingOwner","maxGroups":20}}`,
+		`{"id":"by-status","displayName":"My Team's Projects by Status","resourceType":"project","shape":"pie","gridWidth":6,
+		  "query":{"onboardingOwnerTeamIds":["customer_onboarding","rigel"]},"groupBy":{"field":"onboardingStatus"}}`,
+		`{"id":"by-region","displayName":"Projects by Region","resourceType":"project","shape":"bar","gridWidth":6,"query":{},"groupBy":{"field":"region"}}`,
 		`{"id":"owners","displayName":"Onboarding by Owner","resourceType":"project","shape":"bar","gridWidth":6,"query":{"onboardingStatus":["In-Progress"]},
 		  "slices":[{"label":"Jane","query":{"onboardingOwnerEmails":["jane.doe@example.com"]}},{"label":"EU","query":{"regions":["EU"]}}]}`,
 	)
@@ -248,6 +254,58 @@ func TestParseGenerated_AcceptsProjectOnboardingDateFilters(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_TheCatalogueProjectWidgetExamplesAreValid runs every project
+// example in the AI integration service's catalogue section 5c through
+// ParseGenerated, so the catalogue cannot teach a project widget the save would
+// refuse (id, displayName and gridWidth are filled in when an example leaves
+// them out).
+func TestParseGenerated_TheCatalogueProjectWidgetExamplesAreValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "### 5c.")
+	if !ok {
+		t.Fatal("catalogue has no section 5c")
+	}
+	section, _, _ = strings.Cut(section, "\n### ")
+	found := 0
+	for rest := section; ; {
+		_, after, more := strings.Cut(rest, "```json\n")
+		if !more {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		rest = next
+		var w map[string]any
+		if err := json.Unmarshal([]byte(block), &w); err != nil {
+			t.Fatalf("section 5c example is not JSON: %v\n%s", err, block)
+		}
+		if w["resourceType"] != "project" {
+			continue
+		}
+		found++
+		for key, value := range map[string]any{"id": "example", "displayName": "Example", "gridWidth": 6} {
+			if _, set := w[key]; !set {
+				w[key] = value
+			}
+		}
+		widget, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseGenerated([]byte(opsDashboard(string(widget)))); err != nil {
+			t.Errorf("section 5c project example is refused: %v\n%s", err, block)
+		}
+	}
+	if found == 0 {
+		t.Fatal("found no project example in section 5c")
+	}
+}
+
 func TestParseGenerated_RejectsAccountAndProjectWidgetsItCannotRun(t *testing.T) {
 	acc := func(shape, rest string) string {
 		return opsDashboard(`{"id":"w","displayName":"W","resourceType":"account","shape":"` + shape + `","gridWidth":6` + rest + `}`)
@@ -271,6 +329,10 @@ func TestParseGenerated_RejectsAccountAndProjectWidgetsItCannotRun(t *testing.T)
 		{"project owner id not the viewer", proj("count", `,"query":{"onboardingOwnerIds":["5e636a12-0000-4000-8000-000000000001"]}`), `onboardingOwnerIds can only be ["__current_user__"]`},
 		{"project owner email not an email", proj("count", `,"query":{"onboardingOwnerEmails":["Jane Doe"]}`), "onboardingOwnerEmails"},
 		{"project region as a string", proj("count", `,"query":{"regions":"APAC"}`), "regions"},
+		{"project grouped by account", proj("bar", `,"query":{},"groupBy":{"field":"account"}`), "groupBy"},
+		{"project groupBy on a count", proj("count", `,"query":{},"groupBy":{"field":"onboardingOwner"}`), "groupBy"},
+		{"project too many groups", proj("bar", `,"query":{},"groupBy":{"field":"region","maxGroups":51}`), "maxGroups"},
+		{"project team ids empty", proj("count", `,"query":{"onboardingOwnerTeamIds":[]}`), "onboardingOwnerTeamIds"},
 		{"project by account", proj("count", `,"query":{"accountId":"5e636a12-0000-4000-8000-000000000001"}`), `"accountId" is not a project filter`},
 		{"project bad end date", proj("count", `,"query":{"endDateTo":"next month"}`), "endDateTo must be a date"},
 		{"project closure as a list", proj("count", `,"query":{"closureStatus":["Open"]}`), "closureStatus must be one of Open"},

@@ -129,6 +129,8 @@ func (f *fakeCaseWatcherRows) Scan(dest ...any) error {
 	*dest[1].(*string) = row.userName
 	*dest[2].(*string) = row.name
 	*dest[3].(**string) = row.email
+	*dest[4].(*bool) = false
+	*dest[5].(*bool) = row.id == "user-1"
 	return nil
 }
 
@@ -167,6 +169,10 @@ func TestFetchCaseWatchers_NullEmailDoesNotPanic(t *testing.T) {
 	}
 	if got[0].User == nil || got[0].User.Email != withEmail {
 		t.Errorf("watcher[0].User.Email = %v, want %q", got[0].User, withEmail)
+	}
+
+	if !got[0].User.IsInternal || got[1].User.IsInternal {
+		t.Fatal("watchers must carry their database user classification")
 	}
 
 	// The NULL-email row is the one that used to crash the scan.

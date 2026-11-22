@@ -325,6 +325,13 @@ func (c *CustomerEntityClient) SearchProjects(ctx context.Context, body []byte) 
 	return c.do(ctx, http.MethodPost, "/projects/search", body)
 }
 
+// AggregateProjects calls POST /projects/aggregate on the entity service:
+// project counts per onboarding owner, onboarding status or region.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) AggregateProjects(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/projects/aggregate", body)
+}
+
 // SearchProjectContacts calls POST /projects/{id}/contacts/search on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error) {

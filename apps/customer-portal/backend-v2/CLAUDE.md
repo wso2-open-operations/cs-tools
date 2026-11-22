@@ -932,6 +932,9 @@ Two more examples, both in this same "restrict, don't mirror" category:
   webapp's `CommentBubble` badges a support engineer's avatar from it. It is a plain boolean, never
   the author's user id or type, and never derived here from a name marker or an extra user lookup;
   entity-service is the one place that decides it. A system/automation author gets no flag.
+  `GET /cases/{id}` carries the same signal as `createdByIsInternal` on the case and `isInternal` on
+  each `watchList` entry (from entity-service's `createdBy.isInternal` / `watchList[].user.isInternal`),
+  so the details panel can badge the creator and show customers and support engineers as two groups.
 
 **Not every field worth restricting is a security decision — some are just an entity-service scoping
 convenience, and the path (not the body) is the more reliable source for it.**

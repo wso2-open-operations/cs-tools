@@ -22,8 +22,8 @@ import { getLegalNextIncidentStates } from "@features/csm-operations/utils/incid
 import type { BeIncidentDetail, BeIncidentState } from "@api/backend/types";
 
 // Only `getLegalNextIncidentStates` is overridden (per-test, via
-// `mockReturnValueOnce` below) so the "single-target" branch — which none of
-// today's real states happen to exercise — can still be tested directly.
+// `mockReturnValueOnce` below) so the "single-target" branch can be tested
+// independently of the real transition table.
 // Everything else (icons, labels) uses the real module. Statically mocking
 // like this, instead of `vi.resetModules()` + a dynamic `import()` of the
 // component under test, avoids the risk of that reset also evicting React
@@ -50,15 +50,13 @@ function incidentInState(state: BeIncidentState): BeIncidentDetail {
 }
 
 describe("IncidentActionBar — button set per state", () => {
-  it("NEW offers a single button per legal target (In Progress, Cancelled)", () => {
-    // NEW has two legal next states, so it renders the "Change state" menu.
+  it("NEW offers only In Progress, as a single button (no Cancelled)", () => {
     render(
       <IncidentActionBar incident={incidentInState("NEW")} isPending={false} onAction={() => {}} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /change state/i }));
-    expect(screen.getByRole("menuitem", { name: /in progress/i })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /cancelled/i })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: /^new$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /change state/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /in progress/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancelled/i })).not.toBeInTheDocument();
   });
 
   it("IN_PROGRESS offers On Hold, Resolved, Cancelled via a Change-state menu", () => {
@@ -130,26 +128,24 @@ describe("IncidentActionBar — dispatch", () => {
   it("calls onAction with the target BeIncidentState when a menu item is clicked", () => {
     const onAction = vi.fn();
     render(
-      <IncidentActionBar incident={incidentInState("NEW")} isPending={false} onAction={onAction} />,
+      <IncidentActionBar incident={incidentInState("IN_PROGRESS")} isPending={false} onAction={onAction} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /change state/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /in progress/i }));
-    expect(onAction).toHaveBeenCalledWith("IN_PROGRESS");
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancelled/i }));
+    expect(onAction).toHaveBeenCalledWith("CANCELLED");
   });
 
   it("disables the primary/change-state button while a transition is pending", () => {
     render(
-      <IncidentActionBar incident={incidentInState("NEW")} isPending={true} onAction={() => {}} />,
+      <IncidentActionBar incident={incidentInState("IN_PROGRESS")} isPending={true} onAction={() => {}} />,
     );
     expect(screen.getByRole("button", { name: /change state/i })).toBeDisabled();
   });
 });
 
 describe("IncidentActionBar — single-target rendering (no menu needed)", () => {
-  // None of today's real states happen to have exactly one legal next state
-  // (see incidents.test.ts), but the bar still supports it — exercise that
-  // branch directly by overriding the transition table for this test only,
-  // via the hoisted mock above.
+  // Exercised through the hoisted mock so this stays independent of the real
+  // transition table.
   it("renders one contained button (no 'Change state' menu) and dispatches on click", () => {
     vi.mocked(getLegalNextIncidentStates).mockReturnValueOnce(["NEW", "IN_PROGRESS"]);
     const onAction = vi.fn();

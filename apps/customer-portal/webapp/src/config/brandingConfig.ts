@@ -53,13 +53,15 @@ export function hasConfiguredCompanyName(): boolean {
 }
 
 /** Billing email used when `CUSTOMER_PORTAL_BILLING_EMAIL` is not set. */
-export const DEFAULT_BILLING_EMAIL = "billing@wso2.com";
+export const DEFAULT_BILLING_EMAIL = "billing@choreolabs.com";
 
 /**
  * One plain address: an unquoted local part (no whitespace and none of RFC
- * 5322's specials, so no "mailto:" prefix either), "@", and a hostname.
+ * 5322's specials, so no "mailto:" prefix either) whose dots each sit between
+ * two non-empty parts, "@", and a hostname.
  */
-const PLAIN_EMAIL = /^[^\s()<>[\]:;@\\,"]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/;
+const PLAIN_EMAIL =
+  /^[^\s()<>[\]:;@\\,".]+(\.[^\s()<>[\]:;@\\,".]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/;
 
 /**
  * Billing team's email address shown on the suspended-project notice

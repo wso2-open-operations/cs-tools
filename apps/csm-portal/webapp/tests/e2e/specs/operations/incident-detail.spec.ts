@@ -75,8 +75,8 @@ test.describe("incident detail — edit fields", () => {
     const editedSubject = `${subject} [edited]`;
     await detail.subjectField().fill(editedSubject);
     // Resolution code/notes only render once the incident's State is
-    // "Resolved"/"Closed" — this build's State select only ever offers
-    // "New" / "In Progress" / "Cancelled" (confirmed live, 2026-07-26), so
+    // "Resolved"/"Closed" — a New incident's State select only offers
+    // "New" / "In Progress", so
     // those fields never appear here. "Internal work note" is always
     // present and optional, same as the resolution fields would have been.
     await detail.workNoteField().fill("[E2E] work note added by incident-detail.spec.ts");

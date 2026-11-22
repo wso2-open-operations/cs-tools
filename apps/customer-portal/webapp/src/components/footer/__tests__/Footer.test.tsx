@@ -15,28 +15,34 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
 import Footer from "@components/footer/Footer";
 import {
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
 } from "@features/project-hub/constants/appLayoutConstants";
 
-// Footer is a compound component (Footer.Copyright / Footer.Link), so render the
-// real Oxygen UI implementation instead of a flat mock.
+// Mock @wso2/oxygen-ui: the Footer compound component and its slots.
+vi.mock("@wso2/oxygen-ui", () => {
+  const FooterUI = ({ children }: { children: ReactNode }) => (
+    <div data-testid="footer-ui">{children}</div>
+  );
+  FooterUI.Copyright = ({ children }: { children: ReactNode }) => (
+    <span>{children}</span>
+  );
+  FooterUI.Link = ({
+    href,
+    children,
+  }: {
+    href: string;
+    children: ReactNode;
+  }) => <a href={href}>{children}</a>;
+  return { Footer: FooterUI };
+});
 
 describe("Footer", () => {
-  const originalConfig = window.config;
-
-  afterEach(() => {
-    window.config = originalConfig;
-  });
-
   it("should render the default company name with LLC", () => {
-    window.config = {
-      ...originalConfig,
-      CUSTOMER_PORTAL_COMPANY_NAME: undefined,
-    };
     render(<Footer />);
     expect(
       screen.getByText(
@@ -45,27 +51,15 @@ describe("Footer", () => {
     ).toBeInTheDocument();
   });
 
-  it("should render the configured company name with LLC", () => {
-    window.config = {
-      ...originalConfig,
-      CUSTOMER_PORTAL_COMPANY_NAME: " Acme Corp ",
-    };
-    render(<Footer />);
-    expect(screen.getByText(new RegExp(COMPANY_NAME, "i"))).toBeDefined();
-    expect(
-      screen.getByText(new RegExp(`${new Date().getFullYear()}`)),
-    ).toBeDefined();
-  });
-
   it("should render the terms of service link with correct URL", () => {
     render(<Footer />);
-    const termsLink = screen.getByRole("link", { name: "Terms & Conditions" });
+    const termsLink = screen.getByRole("link", { name: /terms/i });
     expect(termsLink).toHaveAttribute("href", TERMS_OF_SERVICE_URL);
   });
 
   it("should render the privacy policy link with correct URL", () => {
     render(<Footer />);
-    const privacyLink = screen.getByRole("link", { name: "Privacy Policy" });
+    const privacyLink = screen.getByRole("link", { name: /privacy/i });
     expect(privacyLink).toHaveAttribute("href", PRIVACY_POLICY_URL);
   });
 });

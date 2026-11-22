@@ -37,7 +37,7 @@ import {
   TagsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
-import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
+import { useSearchUsersByName } from "@api/useSearchUsersByName";
 import type {
   DeletedAttachmentsTab,
   WatchListMember,
@@ -82,10 +82,10 @@ function AttachmentsWidgetHarness({
 }
 
 vi.mock("@api/useSearchUsersByName", () => ({
-  useSearchInternalUsersByName: vi.fn(),
+  useSearchUsersByName: vi.fn(),
 }));
 
-const mockUseSearchUsersByName = vi.mocked(useSearchInternalUsersByName);
+const mockUseSearchUsersByName = vi.mocked(useSearchUsersByName);
 
 /** Two searchable people, one of whom (`WATCHER_TWO_ID`) is already watching. */
 function mockCandidates(): void {
@@ -386,6 +386,28 @@ function removeButton(name: string): HTMLElement {
 }
 
 describe("WatchersWidget", () => {
+  it.each(["Jane Doe Ⓦ", "Jane ⓦ Doe", "Jane Doe Ⓦ\uFE0F\u200B"])("removes staff markers before adding the current-user suffix (%s)", (name) => {
+    renderWithRouter(<WatchersWidget entityKind="case" watchers={[
+      { id: "me", name, isMe: true },
+    ]} />);
+    expect(screen.getByText("Jane Doe (you)")).toBeInTheDocument();
+    expect(screen.queryByText(/[Ⓦⓦ]/u)).not.toBeInTheDocument();
+  });
+
+  it("alphabetizes one watch list and badges internal users using the backend flag", () => {
+    const watchers: WatchListMember[] = [
+      { id: "s-z", name: "Zara ⓦ", user: { id: "s-z", email: "z@example.com", name: "Zara", isInternal: true } },
+      { id: "e-z", name: "Zoe" },
+      { id: "s-a", name: "alice Ⓦ", user: { id: "s-a", email: "a@example.com", name: "alice", isInternal: true } },
+      { id: "e-a", name: "Amy" },
+    ];
+    renderWithRouter(<WatchersWidget entityKind="case" watchers={watchers} />);
+    const list = screen.getByRole("list", { name: "Watchers" });
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["alice", "Amy", "Zara", "Zoe"]);
+    expect(within(list).getAllByRole("img", { name: "Technical Team" })).toHaveLength(2);
+    expect(screen.queryByText("External Users")).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     mockCandidates();
   });

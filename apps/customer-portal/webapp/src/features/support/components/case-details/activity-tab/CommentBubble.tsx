@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
 import type { CommentBubbleProps } from "@features/support/types/supportComponents";
 import {
   Avatar,
@@ -27,7 +28,6 @@ import {
   Tooltip,
   Typography,
   alpha,
-  colors,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
@@ -38,7 +38,6 @@ import {
   FileArchive,
   FileText,
   Image,
-  Headset,
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
@@ -177,28 +176,7 @@ export default function CommentBubble({
   // The backend resolves the author's own user type and sends it as a plain
   // flag; nothing here looks the author up or infers it from the name.
   const isTechnicalTeam = !isNovera && !!comment.createdByIsInternal;
-  const technicalTeamBadge = (
-    <Box
-      component="span"
-      role="img"
-      aria-label="Technical Team"
-      sx={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        position: "relative",
-        width: 18,
-        height: 18,
-        borderRadius: "50%",
-        bgcolor: "common.white",
-        color: colors.blue[700],
-        boxShadow: 1,
-        flexShrink: 0,
-      }}
-    >
-      <Headset size={14} strokeWidth={2.5} />
-    </Box>
-  );
+  const technicalTeamBadge = <TechnicalTeamBadge />;
   const isAttachmentEntry = comment.type?.toLowerCase() === "attachment";
   const attachmentCategory = getAttachmentFileCategory(
     comment.fileName ?? "",

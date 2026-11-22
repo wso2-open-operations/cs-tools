@@ -1041,6 +1041,13 @@ for the webapp. An unknown team, or a team with no group configured, is an `errD
 the reason), as for a case's team filter. Only the generator checks these keys, so no saved dashboard
 changes.
 
+**Projects by team and by onboarding owner.** A generated project widget may hold `query.onboardingOwnerTeamIds`
+(team keys or names, resolved to group ids by `WithDashboardTeams` exactly like a time card's `teamIds`: entity-service
+matches the owner through `team_member`) and may group on the server (`groupBy.field` `onboardingOwner`,
+`onboardingStatus` or `region`, through `POST /projects/aggregate`). Unlike time cards, `__current_team__` is refused
+there (`errDashboardTeam`): it resolves only on a team-based dashboard with a team picker, and on a personal
+dashboard it would quietly count nothing, so the model is taught to name the team.
+
 **Line widgets: `series`.** A `line` widget may set `series` to `["opened"]` or `["closed"]` to draw only
 that line ("new cases per day", "cases closed per day", or an Edit with AI request such as "remove the closed
 line"); without it both lines are drawn. `validateLineSeries` (`internal/dashboard/registry.go`) refuses an

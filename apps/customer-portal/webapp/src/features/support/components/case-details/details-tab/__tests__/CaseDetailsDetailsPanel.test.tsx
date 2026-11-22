@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -25,6 +25,16 @@ import { formatDateOnly } from "@features/support/utils/support";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
+
+const patchCase = vi.fn();
+vi.mock("@features/support/api/usePatchCase", () => ({
+  usePatchCase: () => ({ mutate: patchCase, isPending: false }),
+}));
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [
+    { firstName: "Amy", lastName: "Customer", email: "amy@example.com", isPortalUser: true },
+  ], isLoading: false, isError: false }),
+}));
 
 const mockCaseDetails: Partial<CaseDetails> = {
   id: "case-001",
@@ -63,6 +73,7 @@ function renderDetailsPanel(
     data?: Partial<CaseDetails>;
     isError?: boolean;
     isServiceRequest?: boolean;
+    caseId?: string;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -81,6 +92,7 @@ function renderDetailsPanel(
                     <SuccessBannerProvider>
                       <CaseDetailsDetailsPanel
                         data={(props.data ?? mockCaseDetails) as CaseDetails}
+                        caseId={props.caseId}
                         isError={props.isError ?? false}
                         isServiceRequest={props.isServiceRequest ?? false}
                       />
@@ -97,6 +109,86 @@ function renderDetailsPanel(
 }
 
 describe("CaseDetailsDetailsPanel", () => {
+  it("preserves mandatory stakeholders when removing other watchers", () => {
+    patchCase.mockClear();
+    renderDetailsPanel({ caseId: "case-001", data: {
+      ...mockCaseDetails,
+      watchList: [
+        { name: "Mandatory Staff Ⓦ", email: "staff@example.com", isInternal: true, locked: true },
+        { name: "Amy Customer", email: "amy@example.com", isInternal: false },
+      ],
+    } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const lockedChip = screen.getByText("Mandatory Staff").closest(".MuiChip-root")!;
+    expect(lockedChip.querySelector(".MuiChip-deleteIcon")).toBeNull();
+    const customerChip = screen.getByText("Amy Customer").closest(".MuiChip-root")!;
+    fireEvent.click(customerChip.querySelector(".MuiChip-deleteIcon")!);
+    expect(screen.getByText("Mandatory Staff")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(patchCase).toHaveBeenCalledWith(
+      { watchList: ["staff@example.com"] }, expect.anything(),
+    );
+  });
+
+  it("uses one editor for internal and external watchers and allows either to be removed and re-added", () => {
+    renderDetailsPanel({ caseId: "case-001", data: {
+      ...mockCaseDetails,
+      watchList: [
+        { name: "Staff Ⓦ", email: "staff@example.com", isInternal: true },
+        { name: "Amy Customer", email: "amy@example.com", isInternal: false },
+      ],
+    } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const staffChip = screen.getByText("Staff").closest(".MuiChip-root")!;
+    expect(within(staffChip as HTMLElement).getByRole("img", { name: "Technical Team" })).toBeInTheDocument();
+    fireEvent.click(staffChip.querySelector(".MuiChip-deleteIcon")!);
+    const input = screen.getByRole("combobox", { name: "Watch List" });
+    fireEvent.mouseDown(input);
+    fireEvent.click(screen.getByRole("option", { name: /Staff/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(patchCase).toHaveBeenCalledWith(
+      expect.objectContaining({ watchList: expect.arrayContaining(["staff@example.com", "amy@example.com"]) }),
+      expect.anything(),
+    );
+  });
+
+  it.each([true, false])("cleans the creator name and badges only backend-confirmed internal creators (%s)", (createdByIsInternal) => {
+    renderDetailsPanel({ data: {
+      ...mockCaseDetails,
+      createdBy: "Jane Ⓦ Doe",
+      createdByIsInternal,
+    } });
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText(/[Ⓦⓦ]/u)).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("img", { name: "Technical Team" })).toHaveLength(createdByIsInternal ? 1 : 0);
+  });
+
+  it.each([true, false])("omits the divider when all watchers have the same user type (%s)", (isInternal) => {
+    renderDetailsPanel({ data: {
+      ...mockCaseDetails,
+      watchList: [{ name: "Amy", email: "amy@example.com", isInternal }],
+    } });
+    expect(within(screen.getByLabelText("Watch list")).queryByRole("separator")).not.toBeInTheDocument();
+  });
+
+  it("shows customers first, then a divider and internal users, sorting each group alphabetically", () => {
+    renderDetailsPanel({ data: {
+      ...mockCaseDetails,
+      watchList: [
+        { email: "z-staff@example.com", name: "Zara ⓦ", isInternal: true },
+        { email: "z-customer@example.com", name: "Zoe" },
+        { email: "a-staff@example.com", name: "alice Ⓦ", isInternal: true },
+        { email: "a-customer@example.com", name: "Amy", isInternal: false },
+      ],
+    } });
+    const list = screen.getByLabelText("Watch list");
+    expect(list.textContent).toBe("AmyZoealiceZara");
+    expect(within(list).getByRole("separator")).toBeInTheDocument();
+    expect(within(list).getAllByRole("img", { name: "Technical Team" })).toHaveLength(2);
+    expect(screen.queryByText("External Users")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ⓦ|Ⓦ/)).not.toBeInTheDocument();
+  });
+
   it("should render Case Overview card as first section with title", () => {
     renderDetailsPanel();
     expect(screen.getByText("Case Overview")).toBeInTheDocument();
