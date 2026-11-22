@@ -117,7 +117,7 @@ func seedSLABreachReport(t *testing.T, pool *pgxpool.Pool) {
 		       ($2::uuid, NOW(), NOW(), 'test', 'test', 'SLABRT - Response (Test)', TRUE, 'RESPONSE', INTERVAL '24 hours', 'WSO2 Business days')`,
 		slaBreachFlatPolicy, slaBreachBizPolicy)
 
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= 8; i++ {
 		mustExec(`INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id, wso2_id)
 			VALUES ($1::uuid, NOW(), NOW(), 'test', 'test', $2, 'sla breach fixture', 'CASE', $3::uuid, $4::uuid, $5)`,
 			slaBreachWorkItemID(i), "SLABRT-NUM-"+strconv.Itoa(i), slaBreachAccountID, slaBreachProjectID, "SLABRT-"+strconv.Itoa(i))
@@ -136,9 +136,12 @@ func seedSLABreachReport(t *testing.T, pool *pgxpool.Pool) {
 	}
 
 	// 1: the previous system's own synced row -- a recorded instant,
-	//    which must keep winning over any derivation.
+	//    which must keep winning over any derivation. The instant is
+	//    deliberately NOT start_on + the policy's 48 hours (which would
+	//    be the 18th): an instant that matched the derivation would make
+	//    RecordedInstantWins pass even with the precedence removed.
 	insertClock(1, slaBreachFlatPolicy, "COMPLETED", time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC), true,
-		time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC))
+		time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC))
 	// 2: engine clock, still running, 24x7, due inside the week. The
 	//    case this whole change exists for: no recorded instant, stored
 	//    has_breached still false.
@@ -158,6 +161,30 @@ func seedSLABreachReport(t *testing.T, pool *pgxpool.Pool) {
 	// 6: cancelled clock. Breached, inside the week, but CANCELLED was
 	//    not in the source report's stage filter and must stay out.
 	insertClock(6, slaBreachFlatPolicy, "CANCELLED", time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC), true, nil)
+
+	// 7 and 8 are engine clocks that were PAUSED, which sla_live never
+	// recomputes: live_has_breached returns the stored flag, and pausing
+	// never writes it. The frozen business_elapsed_percentage is the only
+	// thing that separates them.
+	insertPausedClock := func(n int, startOn time.Time, frozenPercentage float64) {
+		mustExec(`INSERT INTO sla (id, created_on, updated_on, created_by, updated_by, work_item_id, sla_policy_id,
+			schedule, is_active, stage, start_on, paused_on, duration, business_elapsed_percentage,
+			business_duration, remaining_business_duration, has_breached, original_breached_on)
+			SELECT gen_random_uuid(), NOW(), NOW(), 'test', 'test', $1::uuid, $2::uuid,
+			       sp.schedule, FALSE, 'PAUSED'::sla_stage_enum, $3::timestamptz, NOW(), sp.duration, $4,
+			       INTERVAL '0', sp.duration, FALSE, NULL
+			FROM sla_policy sp WHERE sp.id = $2::uuid`,
+			slaBreachWorkItemID(n), slaBreachFlatPolicy, startOn, frozenPercentage)
+	}
+
+	// 7: paused AFTER it had already run past its target -- 120% frozen
+	//    at paused_on, has_breached still false. It must be reported:
+	//    PAUSED is in the CRE variant's own stage list.
+	insertPausedClock(7, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC), 120)
+	// 8: paused while still ON TIME -- 50% frozen. Its start + duration
+	//    lands inside the week, so a predicate that admitted every PAUSED
+	//    row rather than testing the frozen value would report it.
+	insertPausedClock(8, time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC), 50)
 }
 
 func slaBreachWorkItemID(n int) string {
@@ -188,14 +215,15 @@ func TestSLABreachReportIntegrationReportsEngineWrittenBreaches(t *testing.T) {
 	for _, r := range rows {
 		got[r.WSO2CaseID] = true
 	}
-	for _, want := range []string{"SLABRT-1", "SLABRT-2", "SLABRT-3", "SLABRT-5"} {
+	for _, want := range []string{"SLABRT-1", "SLABRT-2", "SLABRT-3", "SLABRT-5", "SLABRT-7"} {
 		if !got[want] {
 			t.Errorf("%s is missing from the report: %#v", want, got)
 		}
 	}
-	// A clock that stopped on time, and a cancelled one, are not breaches
-	// of this week however their instant derives.
-	for _, unwanted := range []string{"SLABRT-4", "SLABRT-6"} {
+	// A clock that stopped on time, a cancelled one, and one paused while
+	// still on time are not breaches of this week however their instant
+	// derives.
+	for _, unwanted := range []string{"SLABRT-4", "SLABRT-6", "SLABRT-8"} {
 		if got[unwanted] {
 			t.Errorf("%s must not be reported: %#v", unwanted, got)
 		}
@@ -220,13 +248,49 @@ func TestSLABreachReportIntegrationRecordedInstantWins(t *testing.T) {
 		if r.WSO2CaseID != "SLABRT-1" {
 			continue
 		}
-		want := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
+		// The derivation would put this clock on the 18th; the recorded
+		// instant is the 19th, so the two cannot be confused.
+		want := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
 		if !r.BreachedOn.Equal(want) {
 			t.Fatalf("recorded instant = %s, want %s", r.BreachedOn, want)
 		}
 		return
 	}
 	t.Fatal("the synced row is missing from the report")
+}
+
+// TestSLABreachReportIntegrationPausedClockThatHadAlreadyBreached: the
+// CRE variant lists PAUSED among its stages, but sla_live only recomputes
+// live_has_breached for raw stage IN_PROGRESS and pausing never writes
+// the stored flag, so an engine clock that ran past its target and was
+// then paused reads has_breached = FALSE forever. Its frozen
+// business_elapsed_percentage is what says it breached; a clock paused
+// while still on time keeps that value under 100 and stays out.
+func TestSLABreachReportIntegrationPausedClockThatHadAlreadyBreached(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedSLABreachReport(t, pool)
+
+	repo := repository.NewSLABreachReportRepository(repository.NewScoped(pool))
+	rows, err := repo.ListBreaches(context.Background(), slaBreachWeekFrom, slaBreachWeekTo,
+		[]string{"SLABRT - Resolution (Test)"}, []string{"PAUSED"}, nil, nil)
+	if err != nil {
+		t.Fatalf("ListBreaches: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want only the clock that breached before it paused: %#v", len(rows), rows)
+	}
+	if rows[0].WSO2CaseID != "SLABRT-7" {
+		t.Fatalf("reported %s, want SLABRT-7", rows[0].WSO2CaseID)
+	}
+	// Derived from start_on + the policy's 48 hours: the clock has no
+	// recorded instant, and the open pause is not part of the budget.
+	want := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	if !rows[0].BreachedOn.Equal(want) {
+		t.Fatalf("breached on %s, want %s", rows[0].BreachedOn, want)
+	}
+	if rows[0].BusinessElapsedPercent < 100 {
+		t.Fatalf("percentage = %v, want the frozen value the pause left behind", rows[0].BusinessElapsedPercent)
+	}
 }
 
 // TestSLABreachReportIntegrationBusinessDayInstantSkipsTheWeekend pins the
