@@ -7369,7 +7369,14 @@ paths:
     post:
       summary: Create a GitHub issue from a case.
       description: |
-        By default the request is forwarded to the entity service (ServiceNow data source only).
+        With `GIT_INTERNALS_ENABLED=true` the request is forwarded to the entity service's
+        product-work-items endpoint, which builds the issue body and labels, writes the work note
+        and, for a Type/Patch issue, the `patch` case tag. The response then also carries `kind`
+        (`PRODUCT_ISSUE` or `UNTRACKED_PATCH`) and `workItem` (null for a patch), and a replay of
+        an earlier identical request answers 201 as well. A 400 or 409 carries the reason in
+        `message`.
+
+        Otherwise, by default the request is forwarded to the entity service (ServiceNow data source only).
         When the backend is configured with an engineering entity service, the issue is filed
         through it. The repository and product label are resolved from the case product via
         product_repo_mapping (`GET /products/github-repo`). A product with no mapping returns
@@ -7379,6 +7386,17 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: |
+            Only used when `GIT_INTERNALS_ENABLED=true`: 1 to 200 printable characters naming this
+            request. Repeating the request with the same key never files a second issue. When
+            absent, the backend generates a new key per request.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
         - name: id
           in: path
           required: true
@@ -7431,6 +7449,336 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/product-work-items:
+    get:
+      summary: List the product issues linked to a case.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. Untracked patches (Type/Patch issues) are not listed.
+      operationId: listCaseProductWorkItems
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The linked product issues, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/product-work-items/links:
+    post:
+      summary: Link a product issue to a case.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body gives exactly one of `workItemId`, or `owner`, `repository` and
+        `issueNumber`. Answers 200 for a created or an already existing link. A 409 carries
+        `errorCode` `already_linked` or `request_in_progress` with the reason in `message`.
+      operationId: linkCaseProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: The product issue summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/product-work-items/{workItemId}/link:
+    delete:
+      summary: Unlink a product issue from a case.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The product issue then appears among the unmatched issues of
+        POST /product-work-items/search.
+      operationId: unlinkCaseProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+        - name: workItemId
+          in: path
+          required: true
+          description: UUID of the product issue work item.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Unlinked. No response body.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict. The message carries the reason and `errorCode` its stable name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/{id}:
+    get:
+      summary: Get one product issue with its conversation and status history.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. Raw base64 inline images in the conversation are redacted for a caller
+        without the attachment download permission.
+      operationId: getProductWorkItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the product issue work item.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-work-items/search:
+    post:
+      summary: Search product issues.
+      description: |
+        Registered only when the backend runs with `GIT_INTERNALS_ENABLED=true`; otherwise the path does not exist (404). The entity service re-checks that the caller is internal. The body is one JSON object of filters (it may be empty); the entity
+        service validates them.
+      operationId: searchProductWorkItems
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWorkItemPassthrough'
+      responses:
+        "200":
+          description: A page of product issues, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductWorkItemPassthrough'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not an internal caller).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream unavailable.
           content:
             application/json:
               schema:
@@ -31265,6 +31613,11 @@ components:
           type: string
           description: GitHub priority label for a Discussion. Sent as Priority/Critical(P1), Priority/High(P2), or Priority/Medium(P3). Bare Priority/Critical (etc.) is rewritten to the (Pn) form. Discussion also gets Type/Incident.
 
+    ProductWorkItemPassthrough:
+      type: object
+      additionalProperties: true
+      description: A JSON object passed through unchanged from the entity service's product work item routes (see its openapi.yaml for the fields).
+
     CreateCaseGithubIssueResponse:
       type: object
       properties:
@@ -31283,6 +31636,20 @@ components:
             repo:
               type: string
               description: Repository where the issue was created. "owner/repo" when the backend files the issue through the engineering entity service.
+        kind:
+          type: string
+          enum: [PRODUCT_ISSUE, UNTRACKED_PATCH]
+          description: Present only with GIT_INTERNALS_ENABLED=true.
+        workItem:
+          type: object
+          nullable: true
+          description: The registered product issue (`id`, `number`); null for an untracked patch. Present only with GIT_INTERNALS_ENABLED=true.
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
 
     ConversationMessage:
       type: object

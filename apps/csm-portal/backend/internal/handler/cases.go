@@ -99,6 +99,10 @@ type entityCaseClient interface {
 	SearchAllCallRequests(ctx context.Context, body []byte) ([]byte, error)
 	PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 	CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	// CreateCaseProductWorkItem calls POST /cases/{id}/product-work-items on the
+	// entity service -- the target of POST /cases/{id}/github-issues when
+	// GIT_INTERNALS_ENABLED is on (see WithGitInternals).
+	CreateCaseProductWorkItem(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	AddCaseTag(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	RemoveCaseTag(ctx context.Context, caseID, tagID string) ([]byte, error)
 	SearchTags(ctx context.Context, body []byte) ([]byte, error)
@@ -124,6 +128,10 @@ type CaseHandler struct {
 	// engineering, when non-nil, files GitHub issues from a case instead of
 	// the entity service — see WithEngineeringClient.
 	engineering engineeringGitIssueClient
+	// gitInternals, when true, sends POST /cases/{id}/github-issues to the
+	// entity service's product-work-items endpoint ahead of both other paths --
+	// see WithGitInternals.
+	gitInternals bool
 	// access backs the security-report type check in SearchCases -- see
 	// WithAccessGuard. nil fails that check closed (denied), never open:
 	// unlike UsersHandler's own optional use of this field (a display-only
@@ -2040,6 +2048,11 @@ func (h *CaseHandler) CreateCaseGithubIssue(w http.ResponseWriter, r *http.Reque
 
 	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if h.gitInternals {
+		h.createGitHubIssueViaProductWorkItems(w, r, user, caseID, body)
 		return
 	}
 

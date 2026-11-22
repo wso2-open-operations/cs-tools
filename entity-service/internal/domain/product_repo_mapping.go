@@ -24,4 +24,9 @@ type ProductRepoMapping struct {
 	Owner        string  `json:"owner"`
 	Repository   string  `json:"repository"`
 	GithubLabel  string  `json:"githubLabel"`
+	// BoardProjectNumber is the GitHub project board issues for this product
+	// are tracked on. Omitted when unset.
+	BoardProjectNumber *int `json:"boardProjectNumber,omitempty"`
+	// IsInternal is true when the repository is private to WSO2.
+	IsInternal bool `json:"isInternal"`
 }
