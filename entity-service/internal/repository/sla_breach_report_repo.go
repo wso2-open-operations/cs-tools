@@ -69,12 +69,30 @@ func NewSLABreachReportRepository(db *Scoped) SLABreachReportRepository {
 // is_active is deliberately NOT filtered: a clock on a closed case is
 // exactly what "what breached last week" exists to show.
 //
+// A PAUSED clock is admitted separately. live_has_breached is only
+// recomputed for raw stage IN_PROGRESS; for every other stage the view
+// returns the stored has_breached, and SetPaused freezes a clock's
+// elapsed values without ever writing that flag. An engine clock that
+// ran past its target and was then paused therefore reads
+// has_breached = FALSE forever, and the CRE variant -- which lists
+// PAUSED among its stages -- would never see it. Its frozen
+// business_elapsed_percentage, which live_elapsed_percentage falls back
+// to for exactly these rows, is the breach test the flag should have
+// been: >= 100 means it had already breached when it paused. The open
+// pause is not counted, since the frozen value stopped advancing at
+// paused_on, and a clock stopped on time still reads under 100 and
+// stays out.
+//
 // The window predicate is in two halves. A row with a recorded instant
 // is filtered on that instant directly. A row without one is admitted on
 // start_on -- a cheap, index-friendly bound, since a clock cannot breach
 // before it starts and a business-day one cannot take more wall-clock
-// time than twice its duration plus a week of weekends. Those candidates
-// are narrowed to the exact week in Go.
+// time than twice its duration plus a week of weekends. Pause is part of
+// that bound because it is part of the derived instant below: a clock
+// that spent a month paused breaches a month further from its start_on
+// than its duration alone allows for, and a bound that ignored that
+// would drop it from the candidate set before Go ever saw it. Those
+// candidates are narrowed to the exact week in Go.
 //
 // The join set mirrors activeSLAStatusFromJoins' own account/product/
 // project joins, minus the ones only live status needs. caseLikeJoins is
@@ -111,12 +129,17 @@ const slaBreachReportQuery = `
 	LEFT JOIN "group" cre ON cre.id = a.cre_team_id
 	LEFT JOIN project p ON p.id = wi.project_id
 	WHERE wi.type = ANY(` + caseLikeWorkItemTypes + `)
-	  AND s.live_has_breached IS TRUE
+	  AND (s.live_has_breached IS TRUE
+	       OR (s.live_stage::TEXT = 'PAUSED' AND COALESCE(s.live_elapsed_percentage, 0) >= 100))
 	  AND ((s.original_breached_on >= $1 AND s.original_breached_on < $2)
 	       OR (s.original_breached_on IS NULL
 	           AND s.start_on IS NOT NULL
 	           AND s.start_on < $2
-	           AND s.start_on >= $1::timestamptz - (sp.duration * 2 + INTERVAL '7 days')))
+	           AND s.start_on >= $1::timestamptz
+	               - ((sp.duration
+	                   + COALESCE(s.pause_duration, INTERVAL '0')
+	                   + COALESCE(s.business_pause_duration, INTERVAL '0')) * 2
+	                  + INTERVAL '7 days')))
 	  AND sp.name = ANY($3)
 	  AND ($4::TEXT[] IS NULL OR cardinality($4::TEXT[]) = 0 OR s.live_stage::TEXT = ANY($4))
 	  AND ($5::TEXT[] IS NULL OR cardinality($5::TEXT[]) = 0 OR p.onboarding_status::TEXT = ANY($5))
