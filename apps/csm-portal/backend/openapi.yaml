@@ -1938,13 +1938,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /users/me/case-comment-templates/{id}:
         "503":
           description: ServiceUnavailable (entity-service did not answer)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /users/me/case-comment-templates/{id}:
     patch:
       summary: Change one of the caller's comment templates.
       description: >-
@@ -2065,13 +2065,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /case-comment-templates:
         "503":
           description: ServiceUnavailable (entity-service did not answer)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /case-comment-templates:
     post:
       summary: Save a shared comment template.
       description: >-
@@ -2127,13 +2127,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /case-comment-templates/{id}:
         "503":
           description: ServiceUnavailable (entity-service did not answer)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /case-comment-templates/{id}:
     patch:
       summary: Change a shared comment template.
       description: >-

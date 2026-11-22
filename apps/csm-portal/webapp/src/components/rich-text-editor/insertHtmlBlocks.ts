@@ -15,6 +15,7 @@
 // under the License.
 
 import { $generateNodesFromDOM } from "@lexical/html";
+import { $findMatchingParent } from "@lexical/utils";
 import {
   $createParagraphNode,
   $getNodeByKey,
@@ -51,6 +52,8 @@ function pointStillFits(point: PointType): boolean {
  * cursor is merged into it ($insertNodes alone would glue the text after the
  * cursor onto the inserted last line). The HTML goes through Lexical's DOM
  * import, so only node types the editor knows survive; nothing is innerHTML.
+ * Inside a list the template goes after the whole list, since a paragraph
+ * can't be a direct child of a list.
  *
  * `lastSelection` is where the cursor was before the editor lost focus: picking
  * from a menu blurs the editor and Lexical then has no selection, so without
@@ -73,8 +76,26 @@ export function $insertHtmlAsBlocks(
     $getRoot().selectEnd();
   }
   const selection = $getSelection();
-  const block = $isRangeSelection(selection) ? selection.anchor.getNode().getTopLevelElement() : null;
-  if (!$isRangeSelection(selection) || !block || block.getTextContent().trim() === "") {
+  if (!$isRangeSelection(selection)) {
+    $insertNodes(nodes);
+    return;
+  }
+  const anchor = selection.anchor.getNode();
+  const block = anchor.getTopLevelElement();
+  const nearest = $findMatchingParent(anchor, (n) => $isElementNode(n) && !n.isInline());
+  if (block && nearest && nearest !== block) {
+    // The cursor is in a nested block (a list item): splitting it would put the
+    // template's paragraphs inside the list, so they go after the whole list.
+    const blocks = asBlocks(nodes);
+    let prev: LexicalNode = block;
+    blocks.forEach((b) => {
+      prev.insertAfter(b);
+      prev = b;
+    });
+    selectEndOf(blocks);
+    return;
+  }
+  if (!block || block.getTextContent().trim() === "") {
     $insertNodes(nodes);
     return;
   }
@@ -83,6 +104,17 @@ export function $insertHtmlAsBlocks(
     $insertNodes(nodes);
     return;
   }
+  const blocks = asBlocks(nodes);
+  blocks.forEach((b) => after.insertBefore(b));
+  // The cursor was at the end of its paragraph: the empty second half goes.
+  if (after.getTextContent() === "" && after.getChildrenSize() === 0) {
+    after.remove();
+  }
+  selectEndOf(blocks);
+}
+
+/** Top-level blocks for `nodes`: inline content (bare text, a link) gets a paragraph of its own. */
+function asBlocks(nodes: LexicalNode[]): LexicalNode[] {
   const blocks: LexicalNode[] = [];
   let loose: ParagraphNode | null = null;
   for (const node of nodes) {
@@ -90,7 +122,6 @@ export function $insertHtmlAsBlocks(
       loose = null;
       blocks.push(node);
     } else {
-      // Inline content (bare text, a link) needs a paragraph of its own.
       if (!loose) {
         loose = $createParagraphNode();
         blocks.push(loose);
@@ -98,11 +129,10 @@ export function $insertHtmlAsBlocks(
       loose.append(node);
     }
   }
-  blocks.forEach((b) => after.insertBefore(b));
-  // The cursor was at the end of its paragraph: the empty second half goes.
-  if (after.getTextContent() === "" && after.getChildrenSize() === 0) {
-    after.remove();
-  }
+  return blocks;
+}
+
+function selectEndOf(blocks: LexicalNode[]): void {
   const last = blocks[blocks.length - 1];
   if ($isElementNode(last)) last.selectEnd();
 }

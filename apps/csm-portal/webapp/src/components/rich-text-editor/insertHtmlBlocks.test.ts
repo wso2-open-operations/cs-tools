@@ -15,6 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
+import { $createListItemNode, $createListNode, $isListNode, ListItemNode, ListNode } from "@lexical/list";
 import {
   $createParagraphNode,
   $createTextNode,
@@ -84,6 +85,53 @@ describe("$insertHtmlAsBlocks", () => {
     const editor = editorWith(["BeforeAfter"], "Before".length);
     insert(editor, "Just text");
     expect(paragraphs(editor)).toEqual(["Before", "Just text", "After"]);
+  });
+});
+
+describe("$insertHtmlAsBlocks inside a list", () => {
+  /** A paragraph, then a bulleted list of `items`, cursor at `offset` in item `at`. */
+  function listEditor(items: string[], at: number, offset: number): LexicalEditor {
+    const editor = createEditor({
+      namespace: "test",
+      nodes: [ListNode, ListItemNode],
+      onError: (e) => { throw e; },
+    });
+    editor.update(
+      () => {
+        const p = $createParagraphNode();
+        p.append($createTextNode("Intro."));
+        const list = $createListNode("bullet");
+        items.forEach((text, i) => {
+          const item = $createListItemNode();
+          const t = $createTextNode(text);
+          item.append(t);
+          list.append(item);
+          if (i === at) t.select(offset, offset);
+        });
+        $getRoot().append(p, list);
+      },
+      { discrete: true },
+    );
+    return editor;
+  }
+
+  it("puts the template after the whole list, never inside it", () => {
+    const editor = listEditor(["One", "TwoThree"], 1, "Two".length);
+    insert(editor, "<p>Template.</p>");
+    const shape = editor.getEditorState().read(() =>
+      $getRoot()
+        .getChildren()
+        .map((n) => ({
+          type: n.getType(),
+          text: n.getTextContent(),
+          kids: $isListNode(n) ? n.getChildren().map((c) => c.getType()) : [],
+        })),
+    );
+    expect(shape).toEqual([
+      { type: "paragraph", text: "Intro.", kids: [] },
+      { type: "list", text: "One\n\nTwoThree", kids: ["listitem", "listitem"] },
+      { type: "paragraph", text: "Template.", kids: [] },
+    ]);
   });
 });
 
