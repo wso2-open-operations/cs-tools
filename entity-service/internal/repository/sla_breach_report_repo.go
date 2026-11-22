@@ -172,12 +172,26 @@ const slaBreachReportQuery = `
 // A recorded instant always wins, so the previous system's own synced
 // history reports exactly as it did before this derivation existed.
 //
-// Caveat, deliberate: a clock paused AFTER it breached has that later
-// pause folded into the budget, which pushes the derived instant later
-// than the real one. Nothing in the row distinguishes pause taken before
-// the breach from pause taken after it, and a recorded instant always
-// wins anyway, so the approximation only ever applies to clocks that
-// would otherwise have no instant at all.
+// Caveat, deliberate, and it costs more than precision: a clock paused
+// AFTER it breached has that later pause folded into the budget, which
+// pushes the derived instant later than the real one -- far enough to
+// change which week the clock is reported in. A 48-hour clock started on
+// the 16th breaches on the 18th and is mailed in that week's report; if
+// it then pauses from the 24th to the 30th, pause_duration grows on
+// resume, the derived instant moves to the 24th, and the NEXT week's
+// report mails the same breach again. Two sends, one breach.
+//
+// It is not fixable from here. Nothing in the row distinguishes pause
+// taken before the breach from pause taken after it -- only the
+// aggregate survives -- so recovering the first instant means writing it
+// when the engine detects the breach, which is a write to `sla` from the
+// SLA engine and not something a report may do.
+//
+// What bounds it: a recorded instant always wins, so none of the synced
+// history this report has been mailing is affected; a clock that is
+// still paused has pause_duration excluding the open pause, so its
+// derived instant is right; and the duplicate is across two weekly
+// sends, never within one report.
 func slaBreachedOn(recorded *time.Time, startOn *time.Time, durationSecs, pauseSecs, businessPauseSecs float64, schedule string) (time.Time, bool) {
 	if recorded != nil {
 		return *recorded, true
