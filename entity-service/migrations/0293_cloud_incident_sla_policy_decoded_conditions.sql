@@ -35,22 +35,38 @@
 --   state    3, 6, 7, 8  -> ON_HOLD, RESOLVED, CLOSED, CANCELED
 --   category service_interruption -> SERVICE_INTERRUPTION
 --
+-- The policy is never paused: On Hold ends the clock as met rather than
+-- pausing it. The pause and resume conditions are cleared explicitly, so
+-- that holds whatever the raw row carried in them.
+--
 -- The engine's read-time translation of raw codes leaves decoded text
 -- unchanged, so the row evaluates the same whether or not it has been
 -- rewritten; what the rewrite changes is the service gate, and what it
 -- gives the row is the same readable form the case policies have.
 --
+-- The row is the one and only incident policy on staging, matched by its
+-- id as 0269 matches its rows (the id comes from the sync and is the same
+-- in every environment); its pause and resume conditions were already
+-- NULL there.
+--
+-- NOTE: applied directly to staging (not through `make migrate`), so it is
+-- not recorded in csm_migration_applied_migration there; re-running it
+-- through `make migrate` is a no-op. Not applied to production as part of
+-- this change.
+--
 -- Backup of the row, pre-change, kept in sla_policy_backup_0293, never
 -- dropped. Safe to re-run: the backup is created once and the UPDATE sets
--- the same text again.
+-- the same values again.
 
 CREATE TABLE IF NOT EXISTS sla_policy_backup_0293 AS
-SELECT id, name, start_condition, stop_condition, cancel_condition
+SELECT id, name, start_condition, stop_condition, cancel_condition, pause_condition, resume_condition
 FROM sla_policy
-WHERE name = 'Cloud Incident - High Priority';
+WHERE id = '5b117191-87ec-fd50-dcc8-c998cebb354d'; -- Cloud Incident - High Priority
 
 UPDATE sla_policy
 SET start_condition  = 'priorityINCRITICAL,HIGH^category=SERVICE_INTERRUPTION',
     stop_condition   = 'stateINON_HOLD,RESOLVED,CLOSED',
-    cancel_condition = 'state=CANCELED^NQcategory!=SERVICE_INTERRUPTION^NQpriorityNOT INCRITICAL,HIGH'
-WHERE name = 'Cloud Incident - High Priority';
+    cancel_condition = 'state=CANCELED^NQcategory!=SERVICE_INTERRUPTION^NQpriorityNOT INCRITICAL,HIGH',
+    pause_condition  = NULL,
+    resume_condition = NULL
+WHERE id = '5b117191-87ec-fd50-dcc8-c998cebb354d'; -- Cloud Incident - High Priority
