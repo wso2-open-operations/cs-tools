@@ -120,3 +120,40 @@ func isBusinessDay(t time.Time) bool {
 		return true
 	}
 }
+
+// Add is the exact inverse of Elapsed: it returns the instant at which d
+// of business time has passed since start, so that
+//
+//	Elapsed(start, Add(start, d)) == d
+//
+// holds for every start and every d >= 0. It walks the same day segments
+// Elapsed does, in the same location, counting the same weekdays, so the
+// two can never disagree about where a weekend begins -- a change to one
+// belongs in the other.
+//
+// It exists so a breach instant can be recovered for a clock that has no
+// recorded one: the moment its elapsed time reached its policy's
+// duration. Deriving that with flat wall-clock arithmetic would place a
+// Friday-afternoon breach on the Saturday, and a weekly report would
+// attribute it to the wrong week.
+//
+// A non-positive d returns start unchanged, matching Elapsed's own
+// "nothing has elapsed yet" boundary.
+func Add(start time.Time, d time.Duration) time.Time {
+	if d <= 0 {
+		return start
+	}
+	cur := start.In(location)
+	remaining := d
+	for {
+		nextDay := startOfNextDay(cur)
+		if isBusinessDay(cur) {
+			segment := nextDay.Sub(cur)
+			if remaining <= segment {
+				return cur.Add(remaining)
+			}
+			remaining -= segment
+		}
+		cur = nextDay
+	}
+}

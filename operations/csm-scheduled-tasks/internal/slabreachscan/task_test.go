@@ -62,13 +62,30 @@ func cre() Variant     { return CREVariant() }
 func someTo() []string { return []string{"recipient@example.invalid"} }
 
 // TestCREVariantFilters pins the CRE report's own filter set: the source
-// selects stages Paused and Completed and EXCLUDES onboarding statuses
+// selects "a clock no longer running" and EXCLUDES onboarding statuses
 // In-Progress and Not-Started. It must not carry an "is one of" status
 // filter -- that belongs to the other report.
+//
+// The stage list is the source's {Paused, Completed} translated into
+// this engine's vocabulary (ACHIEVED is its "Completed"; BREACHED is a
+// clock that breached and is still running) -- see CREVariant's own doc
+// comment for why a literal copy reports nothing. CANCELLED must stay
+// out: it was out of the source filter too.
 func TestCREVariantFilters(t *testing.T) {
 	v := cre()
-	if len(v.Stages) != 2 || v.Stages[0] != "PAUSED" || v.Stages[1] != "COMPLETED" {
-		t.Fatalf("stages = %#v", v.Stages)
+	wantStages := []string{"PAUSED", "COMPLETED", "ACHIEVED", "BREACHED"}
+	if len(v.Stages) != len(wantStages) {
+		t.Fatalf("stages = %#v, want %#v", v.Stages, wantStages)
+	}
+	for i, want := range wantStages {
+		if v.Stages[i] != want {
+			t.Fatalf("stages = %#v, want %#v", v.Stages, wantStages)
+		}
+	}
+	for _, s := range v.Stages {
+		if s == "CANCELLED" {
+			t.Fatalf("a cancelled clock was not in the source filter: %#v", v.Stages)
+		}
 	}
 	if len(v.ExcludeOnboardingStatuses) != 2 ||
 		v.ExcludeOnboardingStatuses[0] != "IN_PROGRESS" || v.ExcludeOnboardingStatuses[1] != "NOT_STARTED" {
@@ -156,7 +173,7 @@ func TestSendReportPassesEveryFilterThrough(t *testing.T) {
 	if len(fetch.gotDefs) != 10 {
 		t.Fatalf("definitions = %d, want the 10 the source reports name", len(fetch.gotDefs))
 	}
-	if len(fetch.gotStage) != 2 || fetch.gotStage[0] != "PAUSED" {
+	if len(fetch.gotStage) != 4 || fetch.gotStage[0] != "PAUSED" {
 		t.Fatalf("stages = %v", fetch.gotStage)
 	}
 	if len(fetch.gotExclude) != 2 {
@@ -277,8 +294,10 @@ func onboarding() Variant { return OnboardingVariant() }
 // two are separate tasks rather than two sections of one.
 func TestOnboardingVariantFilters(t *testing.T) {
 	v := onboarding()
-	if len(v.Stages) != 1 || v.Stages[0] != "IN_PROGRESS" {
-		t.Fatalf("stages = %#v, want [IN_PROGRESS]", v.Stages)
+	// The source's single "In progress" is two values here: a running
+	// clock reads IN_PROGRESS until it breaches and BREACHED after.
+	if len(v.Stages) != 2 || v.Stages[0] != "IN_PROGRESS" || v.Stages[1] != "BREACHED" {
+		t.Fatalf("stages = %#v, want [IN_PROGRESS BREACHED]", v.Stages)
 	}
 	if len(v.OnboardingStatuses) != 1 || v.OnboardingStatuses[0] != "IN_PROGRESS" {
 		t.Fatalf("onboarding statuses = %#v, want [IN_PROGRESS]", v.OnboardingStatuses)
@@ -326,7 +345,7 @@ func TestOnboardingSendReportPassesItsOwnFilters(t *testing.T) {
 	if err := SendReport(fetch, send, onboarding(), defs(), someTo(), nil, "", true, time.Time{})(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
-	if len(fetch.gotStage) != 1 || fetch.gotStage[0] != "IN_PROGRESS" {
+	if len(fetch.gotStage) != 2 || fetch.gotStage[0] != "IN_PROGRESS" || fetch.gotStage[1] != "BREACHED" {
 		t.Fatalf("stages = %v", fetch.gotStage)
 	}
 	if len(fetch.gotOnboarding) != 1 || fetch.gotOnboarding[0] != "IN_PROGRESS" {
@@ -348,7 +367,7 @@ func TestOnboardingStageOverrideIsIndependent(t *testing.T) {
 	if got := ApplyStageOverride(onboarding()).Stages; len(got) != 1 || got[0] != "BREACHED" {
 		t.Fatalf("onboarding stages = %#v", got)
 	}
-	if got := ApplyStageOverride(cre()).Stages; len(got) != 2 || got[0] != "PAUSED" {
+	if got := ApplyStageOverride(cre()).Stages; len(got) != 4 || got[0] != "PAUSED" {
 		t.Fatalf("the CRE report must be unaffected, got %#v", got)
 	}
 }
