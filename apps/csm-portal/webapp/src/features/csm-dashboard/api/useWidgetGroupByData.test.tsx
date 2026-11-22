@@ -301,6 +301,54 @@ describe("useWidgetGroupByData", () => {
     ]);
   });
 
+  it("groups a team's onboarding projects by owner through the project aggregate, each bar opening that owner's projects", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "11111111-0000-4000-8000-000000000001", label: "Jane Doe", count: 4 },
+        { key: "11111111-0000-4000-8000-000000000002", label: "John Roe", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+    const filters = {
+      onboardingStatus: ["In-Progress"],
+      onboardingOwnerTeamIds: ["22222222-0000-4000-8000-000000000001"],
+      // A scalar the preview URL round trip turned into a list is unwrapped.
+      closureStatus: ["Open"],
+    };
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("by-owner", "project", filters, { field: "onboardingOwner", maxGroups: 20 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/projects/aggregate",
+      {
+        filters: { ...filters, closureStatus: "Open" },
+        groupBy: "onboardingOwner",
+        maxGroups: 20,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query])).toEqual([
+      ["Jane Doe", 4, { onboardingOwnerIds: ["11111111-0000-4000-8000-000000000001"] }],
+      ["John Roe", 2, { onboardingOwnerIds: ["11111111-0000-4000-8000-000000000002"] }],
+    ]);
+  });
+
+  it.each([
+    ["onboardingStatus", "In-Progress", { onboardingStatus: ["In-Progress"] }],
+    ["region", "apac", { regions: ["apac"] }],
+  ] as const)("opens the projects of a %s bucket", async (field, key, want) => {
+    postMock.mockResolvedValue({ groups: [{ key, label: key, count: 1 }], othersCount: 0, totalRecords: 1 });
+    const { result } = renderHook(() => useWidgetGroupByData("w", "project", {}, { field }), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.slices[0].query).toEqual(want);
+  });
+
   it("keeps the groupBy field as the filter field outside the case family", async () => {
     postMock.mockResolvedValue({ groups: [{ key: "acme", label: "Acme", count: 2 }], othersCount: 0, totalRecords: 2 });
 

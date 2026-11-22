@@ -35,7 +35,7 @@ describe("billingEmail", () => {
   it("is the WSO2 billing address when none is set", () => {
     setBillingEmail(undefined);
     expect(billingEmail()).toBe(DEFAULT_BILLING_EMAIL);
-    expect(DEFAULT_BILLING_EMAIL).toBe("billing@wso2.com");
+    expect(DEFAULT_BILLING_EMAIL).toBe("billing@choreolabs.com");
   });
 
   it("uses the configured address, trimmed", () => {
@@ -52,10 +52,18 @@ describe("billingEmail", () => {
       "a@b@c",
       "mailto:billing@acme.example",
       "billing@acme.example?subject=hi",
+      ".billing@acme.example",
+      "billing.@acme.example",
+      "billing..accounts@acme.example",
     ]) {
       setBillingEmail(value);
       expect(billingEmail()).toBe(DEFAULT_BILLING_EMAIL);
     }
+  });
+
+  it("accepts dots between non-empty parts of the local part", () => {
+    setBillingEmail("billing.accounts@acme.example");
+    expect(billingEmail()).toBe("billing.accounts@acme.example");
   });
 
   it("accepts a # in the local part, which RFC 5322 allows unquoted", () => {
@@ -71,7 +79,7 @@ describe("billingEmailHref", () => {
 
   it("links the default address as is", () => {
     setBillingEmail(undefined);
-    expect(billingEmailHref()).toBe("mailto:billing@wso2.com");
+    expect(billingEmailHref()).toBe("mailto:billing@choreolabs.com");
   });
 
   it("percent-encodes characters that would end the recipient", () => {

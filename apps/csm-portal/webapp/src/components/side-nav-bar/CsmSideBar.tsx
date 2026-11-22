@@ -43,8 +43,8 @@ import { useNavTransition } from "@hooks/useNavTransition";
 const wipTooltip = (label: string): string =>
   `${label} — this section is still under construction`;
 
-const TERMS_OF_SERVICE_URL = "https://wso2.com/terms-of-use/";
-const PRIVACY_POLICY_URL = "https://wso2.com/privacy-policy/";
+const TERMS_OF_SERVICE_URL = "https://choreolabs.com/terms-of-use/";
+const PRIVACY_POLICY_URL = "https://choreolabs.com/privacy-policy";
 
 // Persists the last resolved section across a full page reload, and is the
 // single home for it — no in-component ref/state mirror, so nothing is read

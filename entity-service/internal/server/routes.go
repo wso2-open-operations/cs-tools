@@ -2717,6 +2717,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	// Counts per onboarding owner / status / region for dashboard widgets; the
+	// project table is Postgres, so the legacy data source has no aggregate.
+	if cfg.DataSource != config.DataSourceServiceNow && db != nil {
+		projectAggregateHandler := handler.NewProjectAggregateHandler(service.NewProjectAggregateService(repository.NewProjectAggregateRepository(repository.NewScoped(db)), accessSvc))
+		mux.HandleFunc("POST /projects/aggregate", projectAggregateHandler.AggregateProjects)
+	}
 	// Product-consumption provisioning state, internal callers only: the status
 	// carries the project's client secret and HMAC secret keys, and the update
 	// replaces them. The caller is the subscription service (its client id in

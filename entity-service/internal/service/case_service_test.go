@@ -64,15 +64,16 @@ func (s stubAccessServiceWithScope) ResolveScope(context.Context) (AccessScope, 
 // an unsupported field happens before the Postgres backend ever reaches the
 // repository, not merely that the repository ignores the field.
 type stubCaseRepo struct {
-	aggregateCases              func(ctx context.Context, req domain.SearchCasesRequest, groupBy string) ([]domain.AggregateBucket, error)
-	caseVolumeTrend             func(ctx context.Context, req domain.SearchCasesRequest, days []string) (map[string]domain.CaseVolumeDayCount, error)
-	searchCases                 func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
-	searchCaseAttachments       func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
-	searchWorkItemAttachments   func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
-	searchDeploymentAttachments func(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
-	addCaseWatcherIfAbsent      func(ctx context.Context, caseID, userID string) error
-	searchCaseComments          func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
-	updateCase                  func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error)
+	aggregateCases                func(ctx context.Context, req domain.SearchCasesRequest, groupBy string) ([]domain.AggregateBucket, error)
+	caseVolumeTrend               func(ctx context.Context, req domain.SearchCasesRequest, days []string) (map[string]domain.CaseVolumeDayCount, error)
+	searchCases                   func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
+	searchCaseAttachments         func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	searchWorkItemAttachments     func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	searchDeploymentAttachments   func(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	addCaseWatcherIfAbsent        func(ctx context.Context, caseID, userID string) error
+	addCaseWatcherByEmailIfAbsent func(ctx context.Context, caseID, email string) error
+	searchCaseComments            func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
+	updateCase                    func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error)
 	// updateCasePrev, when set, takes precedence over updateCase and also
 	// reports the repository's under-lock previous state.
 	updateCasePrev                func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, *domain.CaseState, error)
@@ -275,6 +276,15 @@ func (s *stubCaseRepo) SetCaseWatchList(ctx context.Context, caseID string, user
 func (s *stubCaseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error {
 	if s.addCaseWatcherIfAbsent != nil {
 		return s.addCaseWatcherIfAbsent(ctx, caseID, userID)
+	}
+	return nil
+}
+
+// AddCaseWatcherByEmailIfAbsent defaults to a no-op for the same reason
+// AddCaseWatcherIfAbsent does, just above.
+func (s *stubCaseRepo) AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, email string) error {
+	if s.addCaseWatcherByEmailIfAbsent != nil {
+		return s.addCaseWatcherByEmailIfAbsent(ctx, caseID, email)
 	}
 	return nil
 }
@@ -2868,7 +2878,7 @@ func TestCaseService_UpdateCase_AdminReopen_RejectedForInternalCallerNotThePorta
 
 	adminReopen := true
 	for name, ctx := range map[string]context.Context{
-		"no client id at all": context.Background(),
+		"no client id at all":             context.Background(),
 		"a different internal M2M caller": auth.WithIdentity(context.Background(), auth.Identity{ClientID: "csm-integration-service"}),
 	} {
 		t.Run(name, func(t *testing.T) {

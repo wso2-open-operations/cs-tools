@@ -4456,7 +4456,10 @@ already use — no route path, request, or response shape changed.
   defaults every non-bot, non-system case comment to `"wso2_engineer"`, so a
   badge keyed on it marked customers as staff too (reported live). An
   automation/system author resolves to no `"user"` row (or a `SYSTEM` type)
-  and gets no flag.
+  and gets no flag. `GET /cases/{id}` carries the same flag on `createdBy` and on
+  each `watchList[].user` (`fetchCaseWatchers` reads `user_type` for the persisted
+  and the stakeholder rows alike), so a portal can badge the creator and sort or
+  group watchers by staff/customer from the response alone.
 - **Adding a comment to a case stamps its `updated_on`/`updated_by`.** A comment
   is activity on a case — ServiceNow advances `sys_updated_on` for any journal
   entry — and the lists' Updated column, the `updatedOn` search filter (relative
@@ -4805,6 +4808,39 @@ changed.
   still forwarded to ServiceNow as part of the create request the normal
   way, this addition is purely about what the Postgres mirror also
   guarantees.
+
+  **The case's own creator is always added as a watcher on create, on
+  every data source and every case-like type** (`subscribeCreatorToWatchList`,
+  called from both `CreateCase`'s plain-Postgres branch and
+  `createCaseSNFirst`, right alongside `addRequestedWatchers`) — via
+  `CaseRepository.AddCaseWatcherByEmailIfAbsent`, a single insert statement
+  that matches `"user"` by EITHER id (as text) or email, whichever
+  `c.CreatedBy` turns out to hold. It can't be assumed to already be a
+  resolved platform id the way `subscribeCommenterToWatchList`'s own
+  `AddCaseWatcherIfAbsent` call can (that one always has a real id, from its
+  own `userRepo.GetUserByEmail` call): on `createCaseSNFirst`, `c.CreatedBy`
+  is ServiceNow's own raw actor string, forwarded as-is into the VARCHAR
+  `work_item.created_by` column with no lookup; on the plain-Postgres path it
+  is normally `req.CreatedBy` resolved from the caller's token, but a real
+  staging case showed the same column holding an email there too — this
+  isn't reliably one shape across every create path or deployment. Matching
+  either way in one statement means an identity that resolves to no platform
+  user simply inserts nothing rather than guessing or failing on a type
+  mismatch against the real UUID `user_id` column (caught on review, then
+  found live for the plain path too, before this shipped as one robust
+  method rather than two shape-specific ones). Unconditional either way: the
+  creator is added whether or not they named themselves (or anyone else) in
+  `watchList`, and regardless of whether they are internal or external —
+  that distinction has no bearing on whether they're a watcher at all (it
+  only changes which portal link csm-notification-service embeds in the
+  email it already sends every watcher, not the email's content or whether
+  it's sent). Because this writes a real `work_item_watcher` row, it flows
+  through `fetchCaseWatchers` below like any other watcher — including that
+  CTE's own `EXTERNAL`-watcher caveat:
+  an external creator shows up on the case's "Watchers" list only while
+  they are still a live, non-`DEACTIVATED` `project_contact` of that
+  project (true at creation time, since they just acted on it, but not
+  guaranteed to stay true forever).
 
   **The account's four named stakeholders are never persisted into
   `work_item_watcher` at all, on either the create or the update path —
@@ -9940,8 +9976,9 @@ is the replacement for configuring a team's own Chat space by hand in
 `team.chat_webhook_url` (nullable TEXT, never written by the ServiceNow sync —
 same "platform-owned config, not synced vocabulary" posture as `team.key`/
 `group_email`) holds the team's own incoming-webhook URL, set directly by
-platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl}]}` for
-every team that has one set — a team with none is left out, same as today's
+platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl, key}]}` for
+every team that has one set (`key` is `team.key`, omitted when empty: an
+incident's SLA alert finds its SRE team's space by key, a case's by name) — a team with none is left out, same as today's
 "not in `GOOGLE_CHAT_SPACES`" case. **Internal-caller-only**
 (`TeamService.ListChatWebhooks` → `RequireInternalCaller`, the same gate
 `GET /sla-status` uses) — a webhook URL lets anyone holding it post

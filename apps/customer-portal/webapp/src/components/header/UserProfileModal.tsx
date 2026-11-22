@@ -46,7 +46,7 @@ import { getRoleLabel } from "@features/settings/utils/settings";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import { joinStaffName } from "@utils/staffNameMarker";
 
-const PASSWORD_RESET_URL = "https://wso2.com/user/password";
+const PASSWORD_RESET_URL = "https://choreolabs.com/user/password";
 
 /**
  * Formats epoch timestamp to localized date string in user's timezone.

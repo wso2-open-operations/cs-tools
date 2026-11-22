@@ -34,6 +34,7 @@ type entityProjectClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
 	GetProjectMetadata(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
+	AggregateProjects(ctx context.Context, body []byte) ([]byte, error)
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
 	GetProjectContact(ctx context.Context, projectID, contactID string) ([]byte, error)
 	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
@@ -228,6 +229,29 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// TODO: Unmarshal result and filter to only the fields required by the frontend.
+	writeJSON(w, http.StatusOK, result)
+}
+
+// AggregateProjects handles POST /projects/aggregate: project counts per
+// onboarding owner, onboarding status or region, for dashboard widgets. The
+// body ({filters, groupBy, maxGroups}) is forwarded as is and checked by the
+// entity service, which also narrows the counts to what the caller may see.
+func (h *ProjectHandler) AggregateProjects(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.entity.AggregateProjects(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AggregateProjects failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to aggregate projects.")
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

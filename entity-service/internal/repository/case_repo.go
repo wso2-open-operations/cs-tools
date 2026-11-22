@@ -612,6 +612,16 @@ type CaseRepository interface {
 	// deeper, already-surfaced problem, not something to fail subscription
 	// over).
 	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
+	// AddCaseWatcherByEmailIfAbsent is AddCaseWatcherIfAbsent for a caller
+	// that doesn't already have the watcher's resolved platform id -- only
+	// an identity string of unverified shape, matched as EITHER a user id
+	// or an email (see the implementation's own doc comment for why this
+	// can't assume one shape). work_item.created_by is exactly such a
+	// string: not reliably a platform id across every create path and
+	// deployment. A caseID or identity that resolves to no real row is a
+	// no-op, not an error -- never a guess, and never two round trips for
+	// something this cheap to resolve-and-insert in one.
+	AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, identity string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
 	// named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
@@ -1794,6 +1804,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		sreTeamID, sreTeamName                   *string
 		creatorEmail                             string
 		creatorID, creatorName                   *string
+		creatorInternal                          bool
 		bestCaseEta, mostLikelyEta, worstCaseEta *time.Time
 		etaSharedOn                              *time.Time
 		autoclosureStep                          *string
@@ -1819,6 +1830,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta, wi.eta_shared_on,
 		        `+caseLikeAutoclosureStepColumn+`, `+caseLikeAutoclosureStateOnColumn+`,
 		        wi.created_by, creator.id, COALESCE(creator.name, NULLIF(TRIM(CONCAT_WS(' ', creator.first_name, creator.last_name)), '')),
+		        COALESCE(creator.user_type = 'INTERNAL'::user_type_enum, false),
 		        p.id, p.name,
 		        d.id, d.name,
 		        dp.id, prod.name || COALESCE(' ' || pv.version, ''),
@@ -1861,7 +1873,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&cv.Subject,
 		&bestCaseEta, &mostLikelyEta, &worstCaseEta, &etaSharedOn,
 		&autoclosureStep, &autoclosureStateOn,
-		&creatorEmail, &creatorID, &creatorName,
+		&creatorEmail, &creatorID, &creatorName, &creatorInternal,
 		&projID, &projName,
 		&depID, &depName,
 		&dpID, &dpDisplayName,
@@ -2054,6 +2066,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		id2 = *creatorID
 	}
 	cv.CreatedBy = domain.NewUserReference(id2, creatorEmail, name)
+	if cv.CreatedBy != nil {
+		cv.CreatedBy.IsInternal = creatorInternal
+	}
 	if aeID != nil {
 		aName := ""
 		if aeName != nil {
@@ -4274,7 +4289,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 		),
 		persisted AS (
 			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
-			       false AS locked
+			       false AS locked, COALESCE(u.user_type = 'INTERNAL'::user_type_enum, false) AS is_internal
 			FROM work_item_watcher w
 			JOIN "user" u ON u.id = w.user_id
 			WHERE w.work_item_id = $1
@@ -4291,7 +4306,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 		),
 		stakeholders AS (
 			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
-			       true AS locked
+			       true AS locked, COALESCE(u.user_type = 'INTERNAL'::user_type_enum, false) AS is_internal
 			FROM case_context cc
 			JOIN "user" u ON u.id IN (
 			    cc.technical_owner_id, cc.secondary_technical_owner_id,
@@ -4300,7 +4315,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			)
 		),
 		deduped AS (
-			SELECT DISTINCT ON (id) id, user_name, name, email, locked
+			SELECT DISTINCT ON (id) id, user_name, name, email, locked, is_internal
 			FROM (
 			    SELECT * FROM persisted
 			    UNION ALL
@@ -4308,7 +4323,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			) combined
 			ORDER BY id, locked DESC
 		)
-		SELECT id, user_name, name, email, locked FROM deduped
+		SELECT id, user_name, name, email, locked, is_internal FROM deduped
 		ORDER BY user_name`, caseID)
 	if err != nil {
 		return nil, fmt.Errorf("query case watch list: %w", err)
@@ -4319,9 +4334,13 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 	for rows.Next() {
 		var id, userName, name string
 		var email *string
-		var locked bool
-		if err := rows.Scan(&id, &userName, &name, &email, &locked); err != nil {
+		var locked, isInternal bool
+		if err := rows.Scan(&id, &userName, &name, &email, &locked, &isInternal); err != nil {
 			return nil, fmt.Errorf("scan case watcher: %w", err)
+		}
+		user := domain.NewUserReference("", stringOrEmpty(email), name)
+		if user != nil {
+			user.IsInternal = isInternal
 		}
 		watchers = append(watchers, domain.WatchListUser{
 			ID:       id,
@@ -4334,7 +4353,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			// not guaranteed to point at a user record"). Pass "" rather
 			// than id so NewUserReference omits it, even though this
 			// particular row is known to resolve to a real user.
-			User: domain.NewUserReference("", stringOrEmpty(email), name),
+			User: user,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -4404,6 +4423,34 @@ func (r *caseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID st
 		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, userID)
 	if err != nil {
 		return fmt.Errorf("add case watcher if absent: %w", err)
+	}
+	return nil
+}
+
+// AddCaseWatcherByEmailIfAbsent implements CaseRepository.
+func (r *caseRepo) AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, identity string) error {
+	// Same ON CONFLICT DO NOTHING shape as AddCaseWatcherIfAbsent, with the
+	// identity-to-"user".id resolution folded into the same statement (a
+	// join, not a prior lookup). identity is matched as EITHER a user id
+	// (u.id::text, never cast the other way -- casting an arbitrary string
+	// to uuid raises rather than failing the WHERE, which a plain email
+	// would trip on every call) OR an email, case-insensitively: callers of
+	// this method pass whatever work_item.created_by actually holds for
+	// the case's own data source, which in practice is not consistently
+	// one shape or the other (confirmed live: a dual-write create's
+	// createdBy is ServiceNow's own raw actor string; a same-looking column
+	// on another path can already be a resolved id). Either way, an
+	// identity matching no user, like a caseID that doesn't exist, simply
+	// inserts zero rows rather than erroring or guessing.
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO work_item_watcher (id, work_item_id, user_id)
+		SELECT gen_random_uuid(), wi.id, u.id
+		FROM work_item wi
+		JOIN "user" u ON u.id::text = $2 OR LOWER(u.email) = LOWER($2)
+		WHERE wi.id = $1
+		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, identity)
+	if err != nil {
+		return fmt.Errorf("add case watcher by email if absent: %w", err)
 	}
 	return nil
 }

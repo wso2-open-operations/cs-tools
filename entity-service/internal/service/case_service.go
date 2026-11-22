@@ -863,6 +863,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		callerEmail, _ := emailFromJWT(middleware.UserIDTokenFromContext(ctx))
 		s.addRequestedWatchers(ctx, c.ID, callerEmail, watcherIDs)
 	}
+	s.subscribeCreatorToWatchList(ctx, c.ID, c.CreatedBy)
 	// Publish case.created here too -- previously only createCaseSNFirst
 	// (the SN-mirror path, reached when s.snMirror != nil) did this, so a
 	// deployment with no ServiceNow mirror at all never published
@@ -1023,6 +1024,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// reassignment is reflected on the very next notification rather than
 	// staying stuck on whoever held the role at creation time.
 	s.addRequestedWatchers(ctx, c.ID, c.CreatedBy, watcherIDs)
+	s.subscribeCreatorToWatchList(ctx, c.ID, c.CreatedBy)
 
 	// SLA-clock registration runs BEFORE the publish below, not after --
 	// this order is load-bearing (see CreateCase's own doc comment on the
@@ -1269,6 +1271,42 @@ func (s *caseService) addRequestedWatchers(ctx context.Context, caseID, callerEm
 	}
 	if _, _, err := s.repo.SetCaseWatchList(ctx, caseID, requestedWatcherIDs, callerEmail); err != nil {
 		slog.ErrorContext(ctx, "create case: adding requested watchers failed", "caseId", caseID, "error", err)
+	}
+}
+
+// subscribeCreatorToWatchList adds the case's own creator as a watcher, so
+// whoever created it always sees its updates whether or not they named
+// themselves in watchList -- same reasoning as subscribeCommenterToWatchList,
+// applied at creation instead of on comment. Internal or external makes no
+// difference here: that distinction has no bearing on whether the creator
+// belongs on the watch list.
+//
+// creatorIdentity is c.CreatedBy, whatever shape it actually has -- NOT
+// reliably a resolved platform user id. The plain-Postgres path's is one
+// only when req.CreatedBy arrived empty and was resolved from the caller's
+// own token; in practice (confirmed live on a real deployment) it can
+// already be an email by the time CreateCase runs, and the ServiceNow-mirror
+// path's is always ServiceNow's own raw actor string (also, in practice, an
+// email) -- see CreateCaseFromServiceNow's own doc comment. Binding either
+// straight into work_item_watcher's real UUID user_id column the way
+// AddCaseWatcherIfAbsent (the commenter-subscribe path, which always does
+// have a resolved id from its own userRepo.GetUserByEmail call) does would
+// fail silently and leave the creator unsubscribed -- caught on review once
+// for the ServiceNow-mirror path specifically, then found live for the
+// plain-Postgres path too. AddCaseWatcherByEmailIfAbsent resolves either
+// shape itself, in the same insert statement, and skips -- never guesses --
+// when it matches no real user row.
+//
+// Additive and idempotent, so this never disturbs whatever addRequestedWatchers
+// already wrote from an explicit watchList -- in either call order.
+// Best-effort and silent on failure: the case has already been created by
+// the time this runs, so a write failure here must never fail the request.
+func (s *caseService) subscribeCreatorToWatchList(ctx context.Context, caseID, creatorIdentity string) {
+	if creatorIdentity == "" {
+		return
+	}
+	if err := s.repo.AddCaseWatcherByEmailIfAbsent(ctx, caseID, creatorIdentity); err != nil {
+		slog.ErrorContext(ctx, "create case: subscribe creator to watch list failed", "caseId", caseID, "error", err)
 	}
 }
 

@@ -58,6 +58,7 @@ import {
   isIncidentTerminal,
 } from "@features/csm-operations/utils/incidents";
 import { INCIDENT_RESOLUTION_CODES, INCIDENT_RESOLUTION_CODE_LABELS } from "@features/csm-operations/utils/incidentResolution";
+import CancelIncidentDialog from "@features/csm-operations/components/CancelIncidentDialog";
 import {
   BULK_WATCH_LIST_MODES,
   type BulkIncidentEdit,
@@ -162,6 +163,8 @@ export default function BulkEditIncidentsDialog({ incidents, isApplying, onClose
   const [resolutionCode, setResolutionCode] = useState<BeIncidentResolutionCode | "">(NO_CHANGE);
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [incidentReport, setIncidentReport] = useState("");
+  // Cancelled is terminal: an edit that sets it confirms first, as on the detail page.
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   // One closed or cancelled since it was picked is skipped by the run, so it does not narrow the states.
   const editable = useMemo(() => incidents.filter((i) => !isIncidentTerminal(i.state)), [incidents]);
@@ -619,10 +622,26 @@ export default function BulkEditIncidentsDialog({ incidents, isApplying, onClose
         <Button color="inherit" onClick={onClose} disabled={isApplying}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={() => onApply(edit)} disabled={!canApply}>
+        <Button
+          variant="contained"
+          onClick={() => (edit.patch.state === "CANCELLED" ? setConfirmCancel(true) : onApply(edit))}
+          disabled={!canApply}
+        >
           {isApplying ? "Applying…" : `Apply to ${count} ${noun}`}
         </Button>
       </DialogActions>
+      {/* Counts the ones the run will move: one closed since it was picked is skipped. */}
+      {confirmCancel && (
+        <CancelIncidentDialog
+          incidentNumber={editable.length === 1 ? editable[0].number : undefined}
+          incidentCount={editable.length}
+          isSubmitting={isApplying}
+          onClose={() => {
+            if (!isApplying) setConfirmCancel(false);
+          }}
+          onConfirm={() => onApply(edit)}
+        />
+      )}
     </Dialog>
   );
 }

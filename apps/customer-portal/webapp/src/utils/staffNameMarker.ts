@@ -23,27 +23,21 @@
  * whitespace, at the end of the name — and, in a rarer case, as the entire
  * string when there was no real name to attach it to.
  */
-const STAFF_NAME_MARKER = /\s*[Ⓦⓦ]\s*$/u;
+const STAFF_NAME_MARKER = /[Ⓦⓦ][\uFE0E\uFE0F\u200B\u200C\u200D]*/gu;
 
 /**
- * Strips the trailing circled-W marker (see {@link STAFF_NAME_MARKER}) from a
+ * Strips circled-W markers (see {@link STAFF_NAME_MARKER}) from a
  * display name, so avatars/initials and rendered text only ever show the
  * person's actual first and last name. Safe to call on any string — a name
  * without the marker passes through unchanged (aside from trimming).
  */
 export function stripStaffNameMarker(name: string | null | undefined): string {
   if (!name) return "";
-  return name.replace(STAFF_NAME_MARKER, "").trim();
+  return name.replace(STAFF_NAME_MARKER, "").replace(/\s+/gu, " ").trim();
 }
 
 /**
- * Strips each of `firstName`/`lastName` individually, then joins the
- * non-empty ones with a space. Deliberately NOT `stripStaffNameMarker(
- * \`${firstName} ${lastName}\`)` — stripping only once, after joining,
- * misses the marker whenever it's actually a trailing word of `firstName`
- * (e.g. firstName "Jane Ⓦ", lastName "Doe" joins to "Jane Ⓦ Doe", with the
- * marker now in the middle of the combined string, past where the
- * trailing-anchored regex looks).
+ * Cleans each name part before joining the non-empty parts with a space.
  */
 export function joinStaffName(
   firstName: string | null | undefined,

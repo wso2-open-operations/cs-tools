@@ -30,9 +30,9 @@ describe("ProjectSuspendedNoticePage", () => {
     render(<ProjectSuspendedNoticePage project={project} />);
     expect(screen.getByText("Project Suspension Notice")).toBeInTheDocument();
     expect(screen.getByText(/This project has been suspended/i)).toBeInTheDocument();
-    expect(screen.getByText("billing@wso2.com")).toHaveAttribute(
+    expect(screen.getByText("billing@choreolabs.com")).toHaveAttribute(
       "href",
-      "mailto:billing@wso2.com",
+      "mailto:billing@choreolabs.com",
     );
     // The reasons block only appears when the backend supplies reasons.
     expect(screen.queryByText(/suspended for the following reasons/i)).toBeNull();
@@ -57,10 +57,10 @@ describe("ProjectSuspendedNoticePage", () => {
     expect(screen.getByText(/Payment overdue/)).toBeInTheDocument();
   });
 
-  it("names WSO2 and its billing address when nothing is configured", () => {
+  it("names WSO2 and the default billing address when nothing is configured", () => {
     render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
     expect(screen.getByText(/contact your WSO2 Account\s+Manager/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "billing@wso2.com" })).toHaveAttribute("href", "mailto:billing@wso2.com");
+    expect(screen.getByRole("link", { name: "billing@choreolabs.com" })).toHaveAttribute("href", "mailto:billing@choreolabs.com");
   });
 
   it("names the configured company and billing address", () => {

@@ -56,6 +56,22 @@ func ForRunNow(inner Sender, to, cc []string) Sender {
 	return &redirected{inner: inner, debug: cleanAddresses(to), cc: cleanAddresses(cc), runNow: true}
 }
 
+// Redirects reports whether s delivers somewhere other than the audience
+// it is handed: debug mail mode (ForReport with a debug list) or a
+// run-now recipient override (ForRunNow). A plain *Client returns false.
+//
+// A report task uses this to decide whether an empty configured audience
+// is really "nobody to send to". Without it, a task whose audience comes
+// only from its "to" skips before it builds anything, so configuring a
+// debug list WITHOUT a "to" -- the natural way to try a report without
+// involving its real recipients at all -- silently sends nothing. The
+// skip is still right for a plain sender: an empty "to" there is a
+// deliberate, valid way to leave a report switched off.
+func Redirects(s Sender) bool {
+	_, ok := s.(*redirected)
+	return ok
+}
+
 type redirected struct {
 	inner Sender
 	debug []string

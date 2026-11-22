@@ -3500,6 +3500,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /projects/aggregate:
+    post:
+      summary: Count projects per onboarding owner, onboarding status or region.
+      description: >
+        Forwarded as is to the entity service, which checks the filters exactly
+        as POST /projects/search does and counts only projects the caller may
+        see. A project with no value for the grouping counts in othersCount.
+        Postgres data sources only.
+      operationId: postProjectsAggregate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [groupBy]
+              properties:
+                filters:
+                  description: The project search filters (pagination and sort are not used).
+                  allOf:
+                    - $ref: '#/components/schemas/ProjectSearchPayload'
+                groupBy:
+                  type: string
+                  enum: [onboardingOwner, onboardingStatus, region]
+                maxGroups:
+                  type: integer
+                  minimum: 0
+                  maximum: 50
+                  description: Largest buckets returned (default 10); the rest fold into othersCount.
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /announcements/audience/search:
     post:
       summary: Resolve the "All customer projects" audience for a customer announcement.
@@ -28011,6 +28072,15 @@ components:
           description: >
             Only projects whose onboarding owner's email is any of these
             (case-insensitive). Postgres data sources only.
+        onboardingOwnerTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            Only projects whose onboarding owner is a current member of any of
+            these teams (team ids, as time cards' teamIds). Postgres data
+            sources only.
         sortBy:
           type: string
           enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]

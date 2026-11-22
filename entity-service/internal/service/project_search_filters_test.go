@@ -122,16 +122,17 @@ func TestSearchProjects_OnboardingFiltersReachRepository(t *testing.T) {
 // source must answer a 400, not silently ignore the option, before any upstream call.
 func TestSearchProjects_LegacySourceRejectsPostgresOnlyOptions(t *testing.T) {
 	cases := map[string]domain.SearchProjectsRequest{
-		"closureStates":         {ClosureStates: []string{"Open"}},
-		"regions":               {Regions: []string{"APAC"}},
-		"onboardingOwnerIds":    {OnboardingOwnerIDs: []string{"11111111-1111-1111-1111-111111111111"}},
-		"onboardingOwnerEmails": {OnboardingOwnerEmails: []string{"owner@example.com"}},
-		"onboardingStartDate":   {OnboardingStartDateFrom: "2026-01-01"},
-		"goLivePlanDate":        {GoLivePlanDateTo: "2026-01-01"},
-		"goLiveDate":            {GoLiveDateFrom: "2026-01-01"},
-		"onboardingExpiryDate":  {OnboardingExpiryDateTo: "2026-01-01"},
-		"productionReadiness":   {ProductionReadinessCompletionDateFrom: "2026-01-01"},
-		"sortBy goLiveDate":     {SortBy: "goLiveDate"},
+		"closureStates":          {ClosureStates: []string{"Open"}},
+		"regions":                {Regions: []string{"APAC"}},
+		"onboardingOwnerIds":     {OnboardingOwnerIDs: []string{"11111111-1111-1111-1111-111111111111"}},
+		"onboardingOwnerEmails":  {OnboardingOwnerEmails: []string{"owner@example.com"}},
+		"onboardingOwnerTeamIds": {OnboardingOwnerTeamIDs: []string{"11111111-1111-1111-1111-111111111111"}},
+		"onboardingStartDate":    {OnboardingStartDateFrom: "2026-01-01"},
+		"goLivePlanDate":         {GoLivePlanDateTo: "2026-01-01"},
+		"goLiveDate":             {GoLiveDateFrom: "2026-01-01"},
+		"onboardingExpiryDate":   {OnboardingExpiryDateTo: "2026-01-01"},
+		"productionReadiness":    {ProductionReadinessCompletionDateFrom: "2026-01-01"},
+		"sortBy goLiveDate":      {SortBy: "goLiveDate"},
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
