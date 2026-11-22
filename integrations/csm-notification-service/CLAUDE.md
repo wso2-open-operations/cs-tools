@@ -276,7 +276,8 @@ Critical/High, service interruption, 4 h resolution) and alerts at the same
   before any entity-service read and `sendBreachAlert` consumes a due
   incident tier without sending (the same "counts as alerted" posture as
   `SLA_EMAIL_SENDING_ENABLED=false`, so enabling later replays nothing);
-  `cmd/server` then also skips `WithIncidentSLATeams` and the startup hold.
+  `cmd/server` then also skips `WithIncidentSLATeams`, the startup hold and
+  the by-key `GET /teams/chat-webhooks` fetch on every refresh.
   Cases are tracked and alerted identically with it on or off: every
   incident branch below is keyed on `ClockMeta.CaseType == "INCIDENT"`, which
   no case clock has. It is off by default because the alert needs every SRE

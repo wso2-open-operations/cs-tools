@@ -808,15 +808,19 @@ func main() {
 				// The SRE teams' incident SLA spaces: the same
 				// team.chat_webhook_url, keyed by team key (an incident's
 				// assignment group resolves to a key). Its own fetch, so the
-				// case spaces above are untouched by it.
-				slaSpacesCtx, cancelSLASpaces := context.WithTimeout(ctx, 30*time.Second)
-				byKey, byKeyErr := customerEntityClient.GetTeamChatWebhooksByKey(slaSpacesCtx)
-				cancelSLASpaces()
-				if byKeyErr != nil {
-					slog.Error("slaengine: failed to refresh SRE team incident SLA chat spaces from entity-service; keeping the previous set", "err", byKeyErr)
-				} else {
-					googleChatClient.SetIncidentSLATeamSpaces(byKey)
-					incidentLookups.slaSpacesLoaded()
+				// case spaces above are untouched by it. Only with incident
+				// SLA alerts on: off, nothing reads these spaces, so the
+				// request (and its 30 s budget on the initial load) is skipped.
+				if incidentSLAAlertsEnabled {
+					slaSpacesCtx, cancelSLASpaces := context.WithTimeout(ctx, 30*time.Second)
+					byKey, byKeyErr := customerEntityClient.GetTeamChatWebhooksByKey(slaSpacesCtx)
+					cancelSLASpaces()
+					if byKeyErr != nil {
+						slog.Error("slaengine: failed to refresh SRE team incident SLA chat spaces from entity-service; keeping the previous set", "err", byKeyErr)
+					} else {
+						googleChatClient.SetIncidentSLATeamSpaces(byKey)
+						incidentLookups.slaSpacesLoaded()
+					}
 				}
 			}
 

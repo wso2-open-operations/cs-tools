@@ -413,7 +413,7 @@ the steps until the code or documentation is reconciled.
 | `REDIS_PASSWORD` | none | Password for `REDIS_ADDR`; ignored with `REDIS_URL`. | |
 | `SLA_TICK_INTERVAL` | `5m` | How often the wake-index is scanned. | `1m` |
 | `SLA_EMAIL_SENDING_ENABLED` | `true` | Killswitch for all SLA messages (breach Chat card). Events still publish and tiers still advance. | `false` |
-| `INCIDENT_SLA_ALERTS_ENABLED` | `false` | Turns on incident SLA clock tracking and its 50/75/100% alerts to the holding team's Chat space and group email. Only the literal `true` enables it; set the SRE and SME teams' `chat_webhook_url`/`group_email` rows first. Case SLA alerts are unaffected either way. | `true` |
+| `INCIDENT_SLA_ALERTS_ENABLED` | `false` | Turns on incident SLA clock tracking and its 50/75/100% alerts to the holding team's Chat space and group email. Only `true` (as `envBool` reads it: trimmed, any case) enables it; set the SRE and SME teams' `chat_webhook_url`/`group_email` rows first. Case SLA alerts are unaffected either way. | `true` |
 
 ### Call-escalation ladder
 

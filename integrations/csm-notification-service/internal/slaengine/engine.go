@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/businessdays"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
@@ -1680,7 +1681,14 @@ func (e *Engine) sendIncidentBreachAlert(ctx context.Context, meta ClockMeta, in
 	}
 	for _, audience := range audiences {
 		if err := e.chat.SendIncidentSLAAlert(ctx, audience, alert); err != nil {
-			slog.ErrorContext(ctx, "slaengine: failed to send incident sla alert to chat space, not retrying", "incidentId", incidentID, "clockType", clockType, "tier", tier, "chatSpace", audience, "err", err)
+			// Status code or error type only, never err's text: a Chat error
+			// body can echo the submitted card (title, group) back.
+			var apiErr *apierror.Error
+			if errors.As(err, &apiErr) {
+				slog.ErrorContext(ctx, "slaengine: failed to send incident sla alert to chat space, not retrying", "incidentId", incidentID, "clockType", clockType, "tier", tier, "chatSpace", audience, "statusCode", apiErr.StatusCode)
+			} else {
+				slog.ErrorContext(ctx, "slaengine: failed to send incident sla alert to chat space, not retrying", "incidentId", incidentID, "clockType", clockType, "tier", tier, "chatSpace", audience, "errType", fmt.Sprintf("%T", err))
+			}
 		}
 	}
 
