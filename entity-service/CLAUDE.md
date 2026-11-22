@@ -3309,6 +3309,17 @@ the Query/SecReport Analysis family) on no severity at all.
   `active_escalation.*`/`escalation_severity`/`source_table`) and the
   space-containing `NOT IN` operator are parsed defensively — never panic,
   an unknown clause just always evaluates false.
+- **The one incident policy, "Cloud Incident - High Priority", is stored
+  decoded too (migration `0293`)**: `priorityINCRITICAL,HIGH^category=SERVICE_INTERRUPTION`
+  starts its 4 h, 24 x 7 resolution clock for an incident of **any** service;
+  On Hold, Resolved and Closed stop it as met; Canceled, a category change
+  or a priority drop below High cancel it. The raw row's two
+  `business_service` clauses (a gate on two named services) were dropped on
+  purpose, so `isIncidentPolicy` now also recognises a row by a
+  `category=`/`category!=` clause, not only by `business_service`.
+  `translateIncidentSLACondition` still runs over the row at read time and
+  leaves decoded text unchanged, so an environment that has not applied
+  `0293` yet keeps evaluating the raw, service-gated row as before.
 - **`repository.SLAEngineRepository.GetCaseFacts`** reads a case's current
   `state`/`priority`/`case_type`/`project_type`/`product`/
   `cs_engineer_response_comment`/workaround-provided/fix-ETA-shared/

@@ -157,23 +157,30 @@ func isCasePolicy(conditions ...string) bool {
 }
 
 // slaPolicyIncidentFieldMarkers names condition fields confirmed, against
-// the real sla_policy table, to appear ONLY on an incident-targeting row --
-// "business_service" is the one marker every real incident policy carries
-// today (ServiceNow's own business-service picklist has no case-policy
-// equivalent at all). Mirrors slaPolicyCaseFieldMarkers' own role for
-// isCasePolicy. A future incident policy conditioned purely on
-// "priority"/"state"/"category" with no "business_service" clause at all
-// would NOT be classified as an incident policy by this check -- those three
-// field names are shared with case policies (see this package's own
-// translateIncidentSLACondition doc comment) and are deliberately not
-// treated as incident-exclusive markers for the same reason
-// isCasePolicy's own doc comment gives for excluding "priority"/"state"
-// there: a generic field name alone is not enough to classify a policy's
-// entity type. If that shape of policy is ever added for real, this list
-// (and isIncidentPolicy) needs a new, genuinely incident-exclusive marker to
-// go with it, not a guess at "priority"/"state" alone.
+// the real sla_policy table, to appear ONLY on an incident-targeting row.
+// Mirrors slaPolicyCaseFieldMarkers' own role for isCasePolicy.
+//
+//   - "business_service": the previous system's business-service picklist,
+//     which no case policy has an equivalent of. The raw "Cloud Incident -
+//     High Priority" row carried it; its decoded form (migration 0293) no
+//     longer does, since the policy stopped being gated on a service.
+//   - "category=" / "category!=": an incident's category, a column no
+//     case-like work item has, and the one clause the decoded row still
+//     carries. It is also in slaPolicySkipFieldMarkers for exactly that
+//     reason -- a case policy can never carry it -- and an escalation row is
+//     already rejected first by slaPolicyIncidentSkipFieldMarkers, so a row
+//     with a category clause and no escalation marker is an incident policy.
+//
+// "priority"/"state" are deliberately not here: both are generic field
+// names case policies use too (see this package's own
+// translateIncidentSLACondition doc comment), and isCasePolicy's own doc
+// comment gives the reason a generic field name alone must never classify a
+// policy's entity type. A future incident policy conditioned on nothing but
+// those two would need a new, genuinely incident-exclusive marker here.
 var slaPolicyIncidentFieldMarkers = []string{
 	"business_service",
+	"category=",
+	"category!=",
 }
 
 // slaPolicyIncidentSkipFieldMarkers names condition fields confirmed to
