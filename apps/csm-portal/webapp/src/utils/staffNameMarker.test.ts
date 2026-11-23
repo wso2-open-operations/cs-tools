@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { hasStaffNameMarker, stripStaffNameMarker } from "./staffNameMarker";
+import { hasStaffNameMarker, stripStaffNameMarker, withoutStaffNameMarker } from "./staffNameMarker";
 
 describe("hasStaffNameMarker", () => {
   it("finds either circled W, wherever it sits", () => {
@@ -38,5 +38,21 @@ describe("stripStaffNameMarker", () => {
   it("removes the marker and tidies the spaces", () => {
     expect(stripStaffNameMarker("Jane Doe Ⓦ")).toBe("Jane Doe");
     expect(stripStaffNameMarker("Jane ⓦ Doe")).toBe("Jane Doe");
+  });
+});
+
+describe("withoutStaffNameMarker", () => {
+  it("cleans a marked name", () => {
+    expect(withoutStaffNameMarker("Jane  Doe Ⓦ")).toBe("Jane Doe");
+  });
+
+  it("returns a name without the marker exactly as given", () => {
+    expect(withoutStaffNameMarker("Jane  Doe")).toBe("Jane  Doe");
+    expect(withoutStaffNameMarker("山田\u3000太郎")).toBe("山田\u3000太郎");
+  });
+
+  it("is empty for no name", () => {
+    expect(withoutStaffNameMarker(undefined)).toBe("");
+    expect(withoutStaffNameMarker(null)).toBe("");
   });
 });
