@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type { JSX, ReactElement } from "react";
@@ -421,7 +421,7 @@ describe("CasesList optional columns", () => {
     expect(screen.getByText("John Reporter")).toBeInTheDocument();
   });
 
-  it("shows a staff assignee and reporter without the circled W, with the staff badge", () => {
+  it("shows a staff assignee and reporter as the plain name, without the circled W or a badge", () => {
     renderWithProviders(
       <Routes>
         <Route
@@ -440,10 +440,9 @@ describe("CasesList optional columns", () => {
     );
 
     expect(screen.queryByText(/[Ⓦⓦ]/u)).not.toBeInTheDocument();
-    const assignee = screen.getByText("Jane Doe").parentElement!;
-    expect(within(assignee).getByRole("img", { name: "Technical Team" })).toBeInTheDocument();
-    const reporter = screen.getByText("Sam Customer").parentElement!;
-    expect(within(reporter).queryByRole("img", { name: "Technical Team" })).not.toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByText("Sam Customer")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Technical Team" })).not.toBeInTheDocument();
   });
 
   it("shows an em dash for Issue type/Reporter when the row carries neither", () => {
