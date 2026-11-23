@@ -51,10 +51,6 @@ export interface PieSliceResult extends BeDashboardPieSlice {
    * `DashboardWidgetTile` uses it as the id when building that OTHER
    * resourceType's own `detailHref`, instead of this slice's own `query`. */
   linkId?: string;
-  /** The bucket is a person whose stored name carries the staff marker; the
-   * `label` has the marker removed and the chart shows the staff badge with
-   * it. Only set by `useWidgetGroupByData`. */
-  isStaff?: boolean;
 }
 
 export interface WidgetPieData {
