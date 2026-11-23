@@ -267,7 +267,7 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		isRostered[id] = true
 	}
 	// AN ALLOCATION DOES NOT HIDE A ROTATION TURN. The roster shows both
-	// on the same day (docs/team-schedule.md, "Two tags in one day"), and
+	// on the same day (docs/specs/team-schedule.md, "Two tags in one day"), and
 	// an engineer allocated to a customer still works their 6-9 morning,
 	// 6-9 evening or weekend turn and logs time against it. The daily used
 	// to drop every allocated person outright, so that rota time appeared

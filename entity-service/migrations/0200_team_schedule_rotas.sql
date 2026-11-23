@@ -159,7 +159,7 @@ UPDATE team_schedule_zone SET weekend_zone_id = id, updated_on = NOW()
 -- it in SaaS's picker; the catalogue serves only active windows, so while that
 -- portal may still be live -- this migration can run before the new webapp
 -- ships -- IaaS must not be one. Switch them on once the rota-aware webapp is
--- deployed, with the IaaS teams' team.type (docs/team-schedule.md, Rotas):
+-- deployed, with the IaaS teams' team.type (docs/specs/team-schedule.md, Rotas):
 --   UPDATE team_schedule_shift SET is_active = TRUE, updated_on = NOW()
 --    WHERE code IN ('SRE_IAAS_DAY', 'SRE_IAAS_NIGHT');
 -- SME's windows need no such wait: that portal knows only CRE and SRE, and

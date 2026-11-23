@@ -159,7 +159,9 @@ type IncidentReportTx interface {
 //
 // Unlike ClaimChanges (cr_notice_repo.go), a row is marked published only in
 // the transaction that applied its effect, never at claim time: a crash or a
-// failed write leaves the row unpublished and the next pass retries it. See
+// failed write leaves the row unpublished and the next pass retries it. That
+// is atomic for database writes only; an event published inside the effect is
+// not rolled back, so it is delivered at least once. See
 // migration 0181 for why the incident flows need that and the notices do not.
 type IncidentReportRepository interface {
 	// PendingChanges lists unpublished incident outbox ids that are due,
@@ -168,9 +170,12 @@ type IncidentReportRepository interface {
 	// claiming.
 	PendingChanges(ctx context.Context, limit int) ([]int64, error)
 	// ProcessChange locks one outbox row and, if it is still unpublished,
-	// runs fn and marks the row published in one transaction. It returns
-	// false without calling fn when another replica holds or has already
-	// processed the row.
+	// runs fn and marks the row published in one transaction. Database
+	// writes in fn commit or roll back with the mark; an event published
+	// from fn does not, so if the commit then fails the event can be
+	// published again on the retry (at-least-once). It returns false without
+	// calling fn when another replica holds or has already processed the
+	// row.
 	ProcessChange(ctx context.Context, outboxID int64, fn func(ctx context.Context, tx IncidentReportTx, c IncidentReportChange) error) (bool, error)
 	// RecordFailure counts a failed attempt and stores the error. Once
 	// attempts reach maxAttempts the row is marked published so it stops
