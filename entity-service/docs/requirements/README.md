@@ -1,9 +1,8 @@
 # Entity service — requirements
 
-Plain-language requirements for what the entity service does, **reverse-engineered from
-the implemented code**. They describe current behaviour, not original intent. Where the
-code does something a product owner should confirm, the document says so (**Confirm**)
-and lists it under "Open questions".
+Plain-language requirements for what the entity service does. They describe current
+behaviour, not original intent. Where the code does something a product owner should
+confirm, the document says so (**Confirm**) and lists it under "Open questions".
 
 The code stays the source of truth. If a requirement here and the code disagree, fix
 this document in the same change.
@@ -11,8 +10,13 @@ this document in the same change.
 ## How to read a requirement
 
 Each requirement has an ID, a "the service shall…" statement, and where useful a
-**Check**: a simple way to see it is true. IDs are stable (`ESC-012`); when behaviour
-changes, edit the requirement rather than renumbering.
+**Check**: a simple way to see it is true.
+
+An ID is a short **prefix for the feature area** plus a **number**: in `ESC-041`, `ESC`
+is case escalation and `041` is one requirement (here, that a customer-triggered
+escalation never emails the customer). Numbers are grouped by topic in tens (`010`s are
+escalating, `020`s de-escalating, and so on). IDs are stable; when behaviour changes,
+edit the requirement rather than renumbering.
 
 Each document ends with a "Where this is implemented" table pointing at the code, routes,
 migrations, settings and tests, so a requirement can be traced to both.

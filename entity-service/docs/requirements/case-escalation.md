@@ -1,17 +1,16 @@
 # Case escalation and de-escalation — requirements
 
-**Status:** reverse-engineered from the implemented code (pilot). Describes what the
-service does today, not what anyone planned. Items marked **Confirm** are things the
-code does that a product owner should check are intended; they are collected in
-section 13.
+**Status:** pilot. Describes what the service does today, not what anyone planned.
+Items marked **Confirm** are things the code does that a product owner should check
+are intended; they are collected in section 13.
 
-**Audience:** product owners, support leads, QA, and engineers new to the service.
+**Audience:** product owners, CS leads, QA, and engineers new to the service.
 
 ---
 
 ## 1. Purpose
 
-Support staff can raise a case to a higher management level when it needs more
+CS engineers can raise a case to a higher management level when it needs more
 attention (an escalation), and bring it back down once the pressure is off (a
 de-escalation). Each step is recorded, the right internal people are told, and the case
 shows its current level.
@@ -24,7 +23,7 @@ except where they decide who is allowed to act (section 6).
 
 | Who | What they do |
 |---|---|
-| Support engineer / CSM staff | Escalate a case, or de-escalate it if allowed (section 6). |
+| CS engineer | Escalate a case, or de-escalate it if allowed (section 6). |
 | Customer user | Can escalate a case in a project they belong to (section 7). |
 | Team lead of the case's account team | May de-escalate cases for their account (section 6). |
 | CSM admin | Names extra people who may de-escalate any case (section 8). |
@@ -155,7 +154,7 @@ escalation also reaches everyone an EL1 and EL2 escalation would.
 |---|---|
 | EL1 | The account team's leads; a configured set of regional team leads; the account owner; the technical owner; the renewal account manager; the secondary technical owner. |
 | EL2 | A configured set of regional technical contacts, plus one product contact chosen from the case's product (below). |
-| EL3 | The head of the support team, plus the account's customer success manager. |
+| EL3 | The CRE head, plus the account's customer success manager. |
 | EL4 | Everyone holding the `case_escalation_el4` role. |
 | EL5 | Everyone holding the `case_escalation_el5` role. |
 
