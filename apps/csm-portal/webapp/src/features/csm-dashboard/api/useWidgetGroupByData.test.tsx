@@ -95,7 +95,7 @@ describe("useWidgetGroupByData", () => {
     postMock.mockResolvedValue({
       groups: [
         { key: "u-1", label: "Jane Doe Ⓦ", count: 3 },
-        { key: "u-2", label: "Sam Customer", count: 1 },
+        { key: "u-2", label: "Sam  Customer", count: 1 },
         { key: "u-3", label: "Ⓦ", count: 2 },
       ],
       othersCount: 0,
@@ -109,8 +109,9 @@ describe("useWidgetGroupByData", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // A name that is only the marker reads "Unnamed".
-    expect(result.current.slices.map((slice) => slice.label)).toEqual(["Jane Doe", "Sam Customer", "Unnamed"]);
+    // A name without the marker is left exactly as sent (its double space
+    // included); a name that is only the marker reads "Unnamed".
+    expect(result.current.slices.map((slice) => slice.label)).toEqual(["Jane Doe", "Sam  Customer", "Unnamed"]);
   });
 
   it("scopes a resourceType with no case-DSL/filter-array/named-array field (e.g. incident_task) to a flat top-level key", async () => {
