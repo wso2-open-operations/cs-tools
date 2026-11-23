@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it, vi } from "vitest";
-import { uploadPastedDataImages } from "@components/rich-text-editor/pastedDataImages";
+import { dropDataImagesMatchingFiles, uploadPastedDataImages } from "@components/rich-text-editor/pastedDataImages";
 
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
 const room = { count: 0, bytes: 0 };
@@ -60,5 +60,29 @@ describe("uploadPastedDataImages", () => {
     uploadPastedDataImages(doc, { count: 5, bytes: 0 }, () => "blob:x", refused);
     expect(refused).toHaveBeenCalledWith("count");
     expect(doc.querySelector("img")).toBeNull();
+  });
+
+  it("sizes an image by its payload without the whitespace in it", () => {
+    // PNG is 8 bytes here; line breaks in the base64 must not make it look bigger.
+    const doc = dom(`<img src="data:image/png;base64,iVBORw0K\nGgo=">`);
+    const upload = vi.fn((file: File) => (file ? "blob:x" : ""));
+    uploadPastedDataImages(doc, room, upload, vi.fn());
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("dropDataImagesMatchingFiles", () => {
+  it("drops only the image that is the HTML copy of a clipboard file", () => {
+    const doc = dom(`<img src="${PNG}"><img src="data:image/png;base64,AAAAAAAAAAAAAAAA">`);
+    dropDataImagesMatchingFiles(doc, [{ type: "image/png", size: 8 }]);
+    const left = doc.querySelectorAll("img");
+    expect(left).toHaveLength(1);
+    expect(left[0].getAttribute("src")).toBe("data:image/png;base64,AAAAAAAAAAAAAAAA");
+  });
+
+  it("keeps every image when no clipboard file matches", () => {
+    const doc = dom(`<img src="${PNG}">`);
+    dropDataImagesMatchingFiles(doc, [{ type: "image/png", size: 999 }]);
+    expect(doc.querySelectorAll("img")).toHaveLength(1);
   });
 });

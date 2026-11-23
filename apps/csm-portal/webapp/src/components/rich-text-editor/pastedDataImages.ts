@@ -26,6 +26,38 @@ import type { ImageUploadHandler } from "@components/rich-text-editor/richTextEd
 
 const DATA_IMAGE = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/\s]*={0,2})$/i;
 
+/** The decoded size of a `data:...;base64,` image from its length (whitespace ignored), or null. */
+function dataImageBytes(src: string): { type: string; bytes: number } | null {
+  const match = DATA_IMAGE.exec(src.trim());
+  if (!match) return null;
+  const payload = match[2].replace(/\s/g, "");
+  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+  return { type: match[1].toLowerCase(), bytes: Math.floor((payload.length * 3) / 4) - padding };
+}
+
+/** The type and size of a picture file the clipboard carries. */
+export interface ClipboardImageFile {
+  type: string;
+  size: number;
+}
+
+/**
+ * Removes the `data:` images that are the HTML copy of a picture file the clipboard
+ * also carries (same type and size, each file taken by one image), so it is not stored
+ * twice. Any other `data:` image stays for {@link uploadPastedDataImages}.
+ */
+export function dropDataImagesMatchingFiles(dom: Document, files: ClipboardImageFile[]): void {
+  const unmatched = [...files];
+  for (const img of Array.from(dom.querySelectorAll("img"))) {
+    const info = dataImageBytes(img.getAttribute("src") ?? "");
+    if (!info) continue;
+    const at = unmatched.findIndex((f) => f.type.toLowerCase() === info.type && f.size === info.bytes);
+    if (at === -1) continue;
+    unmatched.splice(at, 1);
+    img.remove();
+  }
+}
+
 /** The image a `data:...;base64,` address holds as a file, or null when it is not one. */
 function dataUriToFile(src: string): File | null {
   const match = DATA_IMAGE.exec(src.trim());
@@ -65,8 +97,10 @@ export function uploadPastedDataImages(
       refuse("disabled");
       continue;
     }
-    // Reject by encoded length first: a huge image is not worth decoding.
-    if ((src.length * 3) / 4 > inlineImageMaxBytes() + 1024) {
+    // Reject by decoded length first (whitespace in the payload does not count):
+    // a huge image is not worth decoding.
+    const estimate = dataImageBytes(src);
+    if (estimate && estimate.bytes > inlineImageMaxBytes()) {
       refuse("size");
       continue;
     }

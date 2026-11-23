@@ -53,7 +53,11 @@ import {
   type ImagePasteRefusal,
   type InlineImageRoom,
 } from "@components/rich-text-editor/inlineImageLimits";
-import { uploadPastedDataImages } from "@components/rich-text-editor/pastedDataImages";
+import {
+  dropDataImagesMatchingFiles,
+  uploadPastedDataImages,
+  type ClipboardImageFile,
+} from "@components/rich-text-editor/pastedDataImages";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -376,8 +380,8 @@ const PasteNormalizationPlugin = ({
   const [pendingPaste, setPendingPaste] = useState<{
     html: string;
     text: string;
-    /** The clipboard also carries the picture file, which ClipboardImagePlugin stores. */
-    hasImageFile: boolean;
+    /** The picture files the clipboard carries, which ClipboardImagePlugin stores. */
+    imageFiles: ClipboardImageFile[];
   } | null>(null);
 
   useEffect(() => {
@@ -400,6 +404,11 @@ const PasteNormalizationPlugin = ({
         const hasImageFile = Array.from(clipboardData.items ?? []).some((item) =>
           item.type.startsWith("image/"),
         );
+        const imageFiles = Array.from(clipboardData.items ?? []).flatMap((item) => {
+          if (!item.type.startsWith("image/")) return [];
+          const file = item.getAsFile();
+          return file ? [{ type: file.type, size: file.size }] : [];
+        });
         if (hasImageFile && isImageOnlyHtml(html)) {
           event.preventDefault();
           return true;
@@ -407,7 +416,7 @@ const PasteNormalizationPlugin = ({
 
         if (html.trim()) {
           event.preventDefault();
-          setPendingPaste({ html, text, hasImageFile });
+          setPendingPaste({ html, text, imageFiles });
           return true;
         }
 
@@ -450,12 +459,9 @@ const PasteNormalizationPlugin = ({
     collapseEmptyParagraphElements(dom);
     // A picture the pasted HTML carries as base64 is uploaded like a pasted
     // picture file (or dropped), never embedded in the comment.
-    if (pendingPaste.hasImageFile) {
-      // That picture is stored from its file; the HTML copy of it is dropped.
-      dom.querySelectorAll("img").forEach((img) => {
-        if (/^data:/i.test((img.getAttribute("src") ?? "").trim())) img.remove();
-      });
-    }
+    // A picture that is also on the clipboard as a file is stored from that file;
+    // only its HTML copy is dropped. Other base64 images go to the uploader below.
+    dropDataImagesMatchingFiles(dom, pendingPaste.imageFiles);
     uploadPastedDataImages(dom, inlineImagesInEditor(editor), onImageUpload, (reason) =>
       onPasteError?.(reason),
     );
