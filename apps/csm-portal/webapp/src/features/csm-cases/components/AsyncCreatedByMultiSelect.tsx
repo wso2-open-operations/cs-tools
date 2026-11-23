@@ -29,9 +29,6 @@ import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
 
-/** WSO2 orange, fixed so the chips stay orange whichever theme is chosen. */
-const CHIP_ORANGE = "#FF7300";
-
 interface CreatedByOption {
   email: string;
   name: string;
@@ -170,15 +167,17 @@ export default function AsyncCreatedByMultiSelect({
                 label={option.name}
                 title={option.email}
                 {...tagProps}
-                sx={{
+                // The theme's main colour, so the chips match whichever theme
+                // the user picked.
+                sx={(theme) => ({
                   borderRadius: "10px",
-                  bgcolor: alpha(CHIP_ORANGE, 0.14),
-                  border: `1px solid ${alpha(CHIP_ORANGE, 0.5)}`,
+                  bgcolor: alpha(theme.palette.primary.main, 0.14),
+                  border: `1px solid ${alpha(theme.palette.primary.main, 0.5)}`,
                   "& .MuiChip-deleteIcon": {
-                    color: CHIP_ORANGE,
-                    "&:hover": { color: alpha(CHIP_ORANGE, 0.7) },
+                    color: theme.palette.primary.main,
+                    "&:hover": { color: alpha(theme.palette.primary.main, 0.7) },
                   },
-                }}
+                })}
               />
             );
           });
