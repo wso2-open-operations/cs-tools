@@ -174,8 +174,8 @@ function fileSignature(f: File): string {
 const MAX_COMMENT_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
 
-/** An `<img>` the editor counts toward the image limit: a local preview or a stored image. */
-const COUNTED_IMG = /<img\b[^>]*\bsrc\s*=\s*["'](?:blob:|\/[0-9a-f-]{8,}["'])/gi;
+/** Every `<img>` in the draft counts toward the image limit, whatever its source. */
+const IMG_TAG = /<img\b/gi;
 
 /** Strip tags + collapse whitespace to decide if the editor is effectively empty. */
 function isEmpty(html: string): boolean {
@@ -451,7 +451,7 @@ export default function CsmCaseCommentInput({
 
   // The editor refuses an image that would pass the limit, but a draft can still
   // hold too many (HTML source mode), so Send checks the draft itself too.
-  const overImageLimit = (html.match(COUNTED_IMG)?.length ?? 0) > MAX_COMMENT_IMAGES;
+  const overImageLimit = (html.match(IMG_TAG)?.length ?? 0) > MAX_COMMENT_IMAGES;
 
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
