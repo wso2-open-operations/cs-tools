@@ -21,7 +21,6 @@ import { useState, type JSX, type SyntheticEvent } from "react";
 import type { BeWidgetPaletteColor } from "@api/backend/types";
 import type { PieSliceResult } from "@features/csm-dashboard/api/useWidgetPieData";
 import { useDarkMode } from "@utils/useDarkMode";
-import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
 
 // Taller than a plain single-line-label bar chart would need: the extra
 // room (over the library's own default margin.bottom) goes to the two-line
@@ -41,13 +40,6 @@ const MAX_X_AXIS_LABEL_LINES = 2;
  * `tooltip` always shows the full, untruncated name on hover, so nothing is
  * actually lost, just not all shown at once under every bar. */
 const MAX_X_AXIS_LABEL_LINE_CHARS = 11;
-
-/** The staff badge's size (TechnicalTeamBadge is 18px). */
-const STAFF_BADGE_PX = 18;
-/** Room below the bars for two label lines, and for the staff badge under
- * them when any bar is a staff person. */
-const BOTTOM_MARGIN_PX = 40;
-const BOTTOM_MARGIN_WITH_BADGE_PX = 58;
 
 /**
  * Word-wraps label onto at most `MAX_X_AXIS_LABEL_LINES` lines of at most
@@ -166,34 +158,18 @@ export default function DashboardBarChart({
   // own tick-renderer contract: called with that tick's `x`/`y` anchor point
   // and `payload.value` (the category label), everything else about the
   // axis passed through (unused here).
-  //
-  // A staff person's bar (`slice.isStaff`) also gets the staff badge, centred
-  // under the label: an HTML badge, so it sits in a `foreignObject`.
-  function renderAxisTick(props: {
-    x?: number;
-    y?: number;
-    payload?: { value?: unknown; index?: number };
-  }): JSX.Element {
+  function renderAxisTick(props: { x?: number; y?: number; payload?: { value?: unknown } }): JSX.Element {
     const { x = 0, y = 0, payload } = props;
     const label = typeof payload?.value === "string" ? payload.value : "";
     const lines = wrapAxisLabel(label);
-    const isStaff = payload?.index !== undefined && !!slices[payload.index]?.isStaff;
-    const lastBaseline = 14 + 13 * (lines.length - 1);
     return (
-      <g>
-        <text x={x} y={y} textAnchor="middle" fontSize={11} fill={axisTickColor}>
-          {lines.map((line, i) => (
-            <tspan key={i} x={x} dy={i === 0 ? 14 : 13}>
-              {line}
-            </tspan>
-          ))}
-        </text>
-        {isStaff && (
-          <foreignObject x={x - STAFF_BADGE_PX / 2} y={y + lastBaseline + 4} width={STAFF_BADGE_PX} height={STAFF_BADGE_PX}>
-            <TechnicalTeamBadge />
-          </foreignObject>
-        )}
-      </g>
+      <text x={x} y={y} textAnchor="middle" fontSize={11} fill={axisTickColor}>
+        {lines.map((line, i) => (
+          <tspan key={i} x={x} dy={i === 0 ? 14 : 13}>
+            {line}
+          </tspan>
+        ))}
+      </text>
     );
   }
 
@@ -285,12 +261,7 @@ export default function DashboardBarChart({
           // widened past the library's own default to fit up to two lines
           // of horizontal category label below (less than a rotated label
           // needed, since there's no diagonal sweep to clear any more).
-          margin={{
-            top: 24,
-            right: 8,
-            bottom: slices.some((slice) => slice.isStaff) ? BOTTOM_MARGIN_WITH_BADGE_PX : BOTTOM_MARGIN_PX,
-            left: 0,
-          }}
+          margin={{ top: 24, right: 8, bottom: 40, left: 0 }}
           // cursor: false drops the library's default full-height highlight
           // box behind the hovered bar — the bar's own hover color/border is
           // enough of a highlight on its own.
