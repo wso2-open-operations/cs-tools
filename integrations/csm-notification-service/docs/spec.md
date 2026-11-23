@@ -547,7 +547,8 @@ its team has no inbox, the team email goes to the CRE head instead (alongside
 the onboarding team's inbox, when there is one), so an at-risk or breached SLA
 on an unassigned, team-less case still reaches a person. The CRE head is the
 one the case-alert call ladder reaches: the configured `heads.cre`, else
-whoever holds the `cre_head` role in the leadership team. With no ABT the
+whoever holds the `cre_head` role in the leadership team. A `heads.cre` with
+only a phone gets no email (the role holders are not emailed in its place). With no ABT the
 Team row reads "No ABT assigned (sent to the CRE head)". A lookup that failed
 or found no clock does not count as "no team" (it says nothing about the
 team), so an entity-service outage does not send the head every case's alert.

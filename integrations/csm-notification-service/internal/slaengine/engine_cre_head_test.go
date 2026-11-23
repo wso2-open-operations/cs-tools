@@ -1,8 +1,10 @@
 package slaengine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -146,6 +148,26 @@ func TestTick_BreachEmail_CREHeadLookupFails_StillEmailsTheAssignee(t *testing.T
 
 	if len(email.calls) != 1 || !slices.Equal(email.calls[0].to, []string{"jane@example.com"}) {
 		t.Errorf("email calls = %+v, want 1 to the assignee only", email.calls)
+	}
+}
+
+// A token or transport error's text can carry the upstream response body, so
+// the failed lookup logs only the error's type.
+func TestTick_BreachEmail_CREHeadLookupFails_LogsTheTypeNotTheText(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	heads := &fakeCREHeads{err: errors.New(`oauth2: cannot fetch token: 400 Response: {"secret-body":1}`)}
+	creHeadTestEngine(t, clockState{Found: true}, ClockMeta{}, heads)
+
+	out := logs.String()
+	if !strings.Contains(out, "failed to resolve the cre head") || !strings.Contains(out, "errType=*errors.errorString") {
+		t.Fatalf("log = %q, want the failure logged with its error type", out)
+	}
+	if strings.Contains(out, "secret-body") {
+		t.Errorf("log = %q, carries the error's text", out)
 	}
 }
 

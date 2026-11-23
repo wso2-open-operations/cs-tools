@@ -32,6 +32,19 @@ func TestCREHeads_ConfiguredHeadWinsWithoutALookup(t *testing.T) {
 	}
 }
 
+func TestCREHeads_PhoneOnlyHeadGetsNoEmailAndNoRoleLookup(t *testing.T) {
+	entity := &fakeTeamMembers{members: []teamMember{{Email: "someone-else@example.com"}}}
+	h := CREHeads{head: Person{Name: "Head", Phone: "+10000000000"}, leadership: defaultLeadershipTeamKey, entity: entity}
+
+	got, err := h.CREHeadEmails(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("CREHeadEmails() = %v, %v; want nothing, nil", got, err)
+	}
+	if entity.keys != nil {
+		t.Error("entity-service was asked although heads.cre is configured (phone only)")
+	}
+}
+
 func TestCREHeads_FallsBackToTheLeadershipTeamsCREHeadRole(t *testing.T) {
 	entity := &fakeTeamMembers{members: []teamMember{
 		{Email: "A@example.com"}, {Email: "a@example.com"}, {Email: ""}, {Email: "b@example.com"},

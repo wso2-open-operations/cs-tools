@@ -18,6 +18,8 @@ review catches it too.
       summaries only.
 - [ ] No raw upstream error body echoed to a log — a Google Chat error response can echo back part
       of the submitted card (title/text) verbatim; log ids and status codes, never the error body.
+      That includes the fallback branch for errors that are not `*apierror.Error`: an OAuth token
+      error's text carries the token endpoint's response body too, so log its type, not `err`.
 - [ ] New behavior has a test exercising it, not just a happy-path smoke test — this service has
       an unusually high density of named regression tests for exactly this reason (real,
       live-observed duplicate-send/race bugs each got one).

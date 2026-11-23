@@ -44,9 +44,16 @@ func NewCREHeads(cfg LadderConfig, entity *EntityClient) CREHeads {
 // CREHeadEmails returns the CRE head's address(es), lower-cased, each once.
 // An empty result with a nil error means nobody is configured or holds the
 // role; an error means entity-service could not be asked.
+//
+// A heads.cre with a phone but no email is still the head (the call ladder
+// rings it), so it gets no email rather than one sent to the cre_head role
+// holders, who may be different people.
 func (h CREHeads) CREHeadEmails(ctx context.Context) ([]string, error) {
-	if email := strings.TrimSpace(h.head.Email); email != "" {
-		return []string{strings.ToLower(email)}, nil
+	if h.head.Set() {
+		if email := strings.TrimSpace(h.head.Email); email != "" {
+			return []string{strings.ToLower(email)}, nil
+		}
+		return nil, nil
 	}
 	if h.entity == nil {
 		return nil, nil

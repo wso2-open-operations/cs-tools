@@ -413,14 +413,15 @@ func (e *Engine) creHeadEmails(ctx context.Context, caseID, clockType string, ti
 	defer cancel()
 	emails, err := r.CREHeadEmails(ctx)
 	if err != nil {
-		// An upstream error's text carries its response body; log only its
-		// status code, never the body.
+		// An upstream error's text carries its response body, and so does an
+		// OAuth token error's; log only the status code, or the error's type,
+		// never the text.
 		attrs := []any{"caseId", caseID, "clockType", clockType, "tier", tier}
 		var apiErr *apierror.Error
 		if errors.As(err, &apiErr) {
 			attrs = append(attrs, "statusCode", apiErr.StatusCode)
 		} else {
-			attrs = append(attrs, "err", err)
+			attrs = append(attrs, "errType", fmt.Sprintf("%T", err))
 		}
 		slog.ErrorContext(ctx, "slaengine: failed to resolve the cre head for a case with no cre team email", attrs...)
 		return nil
