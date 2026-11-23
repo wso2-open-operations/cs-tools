@@ -155,7 +155,11 @@ apiClient.interceptors.response.use(
             return apiClient(originalRequest);
           })
           .catch((err) => {
-            return Promise.reject(err);
+            // This request was waiting on another request's refresh. A missing
+            // session still rejects with a string, and this request's own 401
+            // has to reach the gate. The same rule as the request that started
+            // the refresh.
+            return Promise.reject(errorAfterFailedRefresh(error, err));
           });
       }
 

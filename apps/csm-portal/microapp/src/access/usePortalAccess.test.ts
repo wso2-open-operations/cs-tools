@@ -15,8 +15,13 @@
 // under the License.
 
 import { AxiosError, AxiosHeaders } from "axios";
-import { describe, expect, it } from "vitest";
-import { rolesForPortalAccess } from "./usePortalAccess";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  denialStillStands,
+  portalRolesFromQuery,
+  resetRememberedPortalDenial,
+  rolesForPortalAccess,
+} from "./usePortalAccess";
 
 function axiosError(status: number): AxiosError {
   return new AxiosError("failed", "ERR", undefined, undefined, {
@@ -31,6 +36,10 @@ function axiosError(status: number): AxiosError {
 describe("rolesForPortalAccess", () => {
   const profile = { roles: ["admin"] };
 
+  beforeEach(() => {
+    resetRememberedPortalDenial();
+  });
+
   it("uses the roles from a successful profile", () => {
     expect(rolesForPortalAccess({ isSuccess: true, isError: false, data: profile, error: null })).toEqual(["admin"]);
   });
@@ -42,14 +51,33 @@ describe("rolesForPortalAccess", () => {
   });
 
   it("keeps the cached profile when the refetch is a 503", () => {
-    expect(
-      rolesForPortalAccess({ isSuccess: false, isError: true, data: profile, error: axiosError(503) }),
-    ).toEqual(["admin"]);
+    expect(rolesForPortalAccess({ isSuccess: false, isError: true, data: profile, error: axiosError(503) })).toEqual([
+      "admin",
+    ]);
   });
 
   it("grants nothing when the first request fails and there is no profile", () => {
     expect(
       rolesForPortalAccess({ isSuccess: false, isError: true, data: undefined, error: axiosError(503) }),
     ).toBeUndefined();
+  });
+
+  it("stays closed when a 503 follows a 401, until a profile succeeds", () => {
+    const denied = { isSuccess: false, isError: true, data: profile, error: axiosError(401) };
+    const later = { isSuccess: false, isError: true, data: profile, error: axiosError(503) };
+    const restored = { isSuccess: true, isError: false, data: profile, error: null };
+
+    expect(denialStillStands(false, denied)).toBe(true);
+    expect(portalRolesFromQuery(denied)).toBeUndefined();
+    expect(denialStillStands(true, later)).toBe(true);
+    expect(portalRolesFromQuery(later)).toBeUndefined();
+    expect(denialStillStands(true, restored)).toBe(false);
+    expect(portalRolesFromQuery(restored)).toEqual(["admin"]);
+  });
+
+  it("keeps a cached profile when a 503 never followed a refusal", () => {
+    const later = { isSuccess: false, isError: true, data: profile, error: axiosError(503) };
+    expect(denialStillStands(false, later)).toBe(false);
+    expect(portalRolesFromQuery(later)).toEqual(["admin"]);
   });
 });

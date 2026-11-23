@@ -48,35 +48,72 @@ export interface PortalAccessState {
   refetch: () => void;
 }
 
-/**
- * Roles the gate may trust. A successful profile, or a failed refetch that is
- * not a 401/403 and still has the last profile, contribute their roles. A
- * 401/403 drops them even when the cache still holds an admin profile.
- */
-export function rolesForPortalAccess(query: {
+export interface ProfileQuerySnapshot {
   isSuccess: boolean;
   isError: boolean;
   data: { roles?: string[] } | undefined;
   error: unknown;
-}): string[] | undefined {
-  const denied = query.isError && isNotAuthorizedError(query.error);
-  if (query.isSuccess || (query.isError && query.data !== undefined && !denied)) {
+}
+
+/**
+ * Whether a 401/403 is still in force. A later 5xx replaces the query error
+ * but must not reopen a session the portal already refused. Only a successful
+ * profile clears it. A 5xx that never followed a refusal leaves the flag as
+ * it was, so a profile that was allowed stays allowed.
+ */
+export function denialStillStands(remembered: boolean, query: ProfileQuerySnapshot): boolean {
+  if (query.isSuccess) return false;
+  if (query.isError && isNotAuthorizedError(query.error)) return true;
+  return remembered;
+}
+
+/**
+ * Roles the gate may trust. A successful profile, or a failed refetch that is
+ * not a 401/403 and still has the last profile, contribute their roles. A
+ * 401/403 drops them even when the cache still holds an admin profile, and
+ * `deniedUntilSuccess` keeps them dropped when a later failure is not itself
+ * a 401/403.
+ */
+export function rolesForPortalAccess(query: ProfileQuerySnapshot, deniedUntilSuccess = false): string[] | undefined {
+  if (deniedUntilSuccess || (query.isError && isNotAuthorizedError(query.error))) {
+    return undefined;
+  }
+  if (query.isSuccess || (query.isError && query.data !== undefined)) {
     return query.data?.roles;
   }
   return undefined;
 }
 
 /**
+ * The query cache keeps the last profile across errors, and it outlives a
+ * remount of this hook. The refusal has to outlive that remount too, or a
+ * 503 after a 403 would hand the cached admin roles back.
+ */
+let deniedUntilSuccess = false;
+
+/** Isolates the remembered refusal between tests. */
+export function resetRememberedPortalDenial(): void {
+  deniedUntilSuccess = false;
+}
+
+/** Roles for this profile snapshot, remembering a refusal until a success. */
+export function portalRolesFromQuery(query: ProfileQuerySnapshot): string[] | undefined {
+  deniedUntilSuccess = denialStillStands(deniedUntilSuccess, query);
+  return rolesForPortalAccess(query, deniedUntilSuccess);
+}
+
+/**
  * The signed-in user's portal access, from `GET /users/me` roles. It reads the same query the
  * profile and time-card pages use, so the profile is fetched once, not once per use. A user whose
  * roles have not loaded, or whose profile comes back 401/403, is granted nothing. A later
- * retryable failure keeps the last profile, so a page already open is not treated as a role change.
+ * retryable failure keeps the last profile, so a page already open is not treated as a role change,
+ * unless that profile was already refused: a 401/403 stays closed until a profile succeeds.
  * See {@link getPortalAccess}.
  */
 export function usePortalAccess(): PortalAccessState {
   const query = useQuery(users.me());
   return {
-    access: getPortalAccess(rolesForPortalAccess(query)),
+    access: getPortalAccess(portalRolesFromQuery(query)),
     isLoading: query.isPending,
     isError: query.isError,
     hasProfile: query.data !== undefined,

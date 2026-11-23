@@ -24,8 +24,9 @@ import { Logger } from "@utils/logger";
 /**
  * Lets the app's pages render only once the signed-in user's roles are known and include at least
  * one portal role. Mirrors the webapp's AuthGuard: no portal role, or a 401/403 from
- * `GET /users/me`, shows the "no access" screen; any other failure (a 5xx, the network) is not a
- * verdict on the user, so it offers a retry instead of locking them out.
+ * `GET /users/me`, shows the "no access" screen. The role check still applies when a later refetch
+ * fails. Any other failure with no profile yet offers a retry. A retryable failure after an
+ * allowed profile has loaded keeps the page mounted and offers a retry beside it.
  */
 export function AccessGate({ children }: { children: ReactNode }) {
   const { access, isLoading, isError, error, hasProfile, refetch } = usePortalAccess();
@@ -41,15 +42,22 @@ export function AccessGate({ children }: { children: ReactNode }) {
     Logger.warn("Portal access check was rejected", { status: errorStatus(error) });
     return <NoPortalAccess status={errorStatus(error)} />;
   }
-  // A refetch that fails after a profile was already loaded must not unmount the
-  // page: a New Case draft lives in that page. The first check, with nothing
-  // loaded yet, still waits on Retry rather than guessing a role.
-  if (isError && !hasProfile) {
-    return <ErrorState onRetry={refetch} />;
-  }
-  if (!isError && !access.hasAnyRole) {
+  // The webapp checks the role whenever the user record is present, including
+  // when a later refetch failed. The first check, with nothing loaded yet,
+  // still waits on Retry rather than guessing a role.
+  if (!access.hasAnyRole) {
+    if (isError && !hasProfile) {
+      return <ErrorState onRetry={refetch} />;
+    }
     Logger.warn("Signed-in user holds no portal role");
     return <NoPortalAccess />;
   }
-  return <>{children}</>;
+  // A refetch that fails after an allowed profile loaded must not unmount the
+  // page: a New Case draft lives in that page. Retry stays available.
+  return (
+    <>
+      {isError ? <ErrorState onRetry={refetch} /> : null}
+      {children}
+    </>
+  );
 }

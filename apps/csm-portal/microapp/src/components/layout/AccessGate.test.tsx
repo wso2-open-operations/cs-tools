@@ -116,7 +116,7 @@ describe("AccessGate", () => {
     }
   });
 
-  it("keeps the page when a retryable failure happens after a profile loaded", () => {
+  it("keeps the page and still offers a retry when a retryable failure follows an allowed profile", () => {
     const html = render({
       isError: true,
       error: axiosError(503),
@@ -124,6 +124,17 @@ describe("AccessGate", () => {
       access: getPortalAccess(["cs_engineer"]),
     });
     expect(html).toContain("the pages");
-    expect(html).not.toContain("Retry");
+    expect(html).toContain("Retry");
+  });
+
+  it("keeps a user with no portal role out when a later refetch fails", () => {
+    const html = render({
+      isError: true,
+      error: axiosError(503),
+      hasProfile: true,
+      access: getPortalAccess([]),
+    });
+    expect(html).not.toContain("the pages");
+    expect(html).toContain("don&#x27;t have access");
   });
 });
