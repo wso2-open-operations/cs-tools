@@ -1859,6 +1859,9 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 		{name: "an added queue in another region", change: func(c *Config) {
 			c.AlertSQSStandardQueueURLs = append(c.AlertSQSStandardQueueURLs, "https://sqs.eu-west-1.amazonaws.com/123456789012/standard-queue-2")
 		}, wantErr: true},
+		{name: "two accounts' queues sharing a name", change: func(c *Config) {
+			c.AlertSQSStandardQueueURLs = append(c.AlertSQSStandardQueueURLs, "https://sqs.us-east-1.amazonaws.com/210987654321/priority-queue")
+		}, wantErr: true},
 		{name: "one queue listed in both tiers", change: func(c *Config) {
 			c.AlertSQSStandardQueueURLs = append(c.AlertSQSStandardQueueURLs, "https://us-east-1.queue.amazonaws.com/123456789012/priority-queue")
 		}, wantErr: true},
@@ -1902,6 +1905,33 @@ func TestLoad_AlertQueueLists(t *testing.T) {
 		if !slices.Equal(tc.got, tc.want) {
 			t.Errorf("%s = %q, want %q", name, tc.got, tc.want)
 		}
+	}
+}
+
+func TestLoad_AQueueListThatNamesNoQueue(t *testing.T) {
+	t.Setenv("ALERT_SQS_PRIORITY_QUEUE_URLS", ",,,")
+	t.Setenv("ALERT_SQS_STANDARD_QUEUE_URLS", " , ")
+	c := Load()
+	c.AlertingVersion = AlertingVersionV2
+	c.DBUser, c.DBPassword, c.DBName = "u", "p", "db"
+	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
+	c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "sbns-example", "tenant", "client", "secret"
+	if err := c.validateAlertConsumer(); err == nil || !strings.Contains(err.Error(), "names no queue") {
+		t.Fatalf("validateAlertConsumer() = %v, want an error for a list of only commas", err)
+	}
+	c.AlertingVersion = AlertingVersionV1
+	if err := c.validateAlertConsumer(); err != nil {
+		t.Fatalf("validateAlertConsumer() = %v, want v1 to leave queue settings alone", err)
+	}
+}
+
+func TestLoad_UnsetQueueListsStayValid(t *testing.T) {
+	for _, key := range []string{"ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", "ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", "ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_PRIORITY_QUEUE"} {
+		t.Setenv(key, "")
+	}
+	c := Load()
+	if c.alertQueueListErr != nil || len(c.AlertSQSPriorityQueueURLs) != 0 || !slices.Equal(c.AlertServiceBusPriorityQueues, []string{"priority-queue"}) {
+		t.Fatalf("err %v, sqs %q, service bus %q; want unset AWS and the default Service Bus queue", c.alertQueueListErr, c.AlertSQSPriorityQueueURLs, c.AlertServiceBusPriorityQueues)
 	}
 }
 

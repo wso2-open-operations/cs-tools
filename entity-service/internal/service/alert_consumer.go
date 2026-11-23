@@ -112,6 +112,9 @@ const defaultLockRenewMargin = 15 * time.Second
 // settleLockMargin is the lock a message must have left before settling, so a settlement that takes its full timeout still holds the lock.
 const settleLockMargin = settleTimeout + 5*time.Second
 
+// defaultLockRenewCallTimeout bounds one renewal call, shorter than defaultLockRenewMargin so a hung call ends while the lock still holds.
+const defaultLockRenewCallTimeout = 10 * time.Second
+
 // minLockRenewWait keeps renewal from spinning when a lock is already close to expiry.
 const minLockRenewWait = time.Second
 
@@ -176,6 +179,8 @@ type AlertConsumer struct {
 	now             func() time.Time
 	sleep           func(ctx context.Context, d time.Duration) bool
 	lockRenewMargin time.Duration
+	// lockRenewCallTimeout bounds each renewal call made while a message waits or is processed.
+	lockRenewCallTimeout time.Duration
 }
 
 // NewAlertConsumer wires every priority queue into the priority tier and every standard queue into the standard tier; each queue holds at most its share of one message per worker.
@@ -191,14 +196,15 @@ func NewAlertConsumer(
 		domain.AlertTierDefault: newAlertLane(domain.AlertTierDefault, standardQueues, workers),
 	}
 	return &AlertConsumer{
-		repo:            repo,
-		transforms:      transforms,
-		lanes:           lanes,
-		scheduler:       newScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
-		workers:         workers,
-		now:             time.Now,
-		sleep:           sleepContext,
-		lockRenewMargin: defaultLockRenewMargin,
+		repo:                 repo,
+		transforms:           transforms,
+		lanes:                lanes,
+		scheduler:            newScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
+		workers:              workers,
+		now:                  time.Now,
+		sleep:                sleepContext,
+		lockRenewMargin:      defaultLockRenewMargin,
+		lockRenewCallTimeout: defaultLockRenewCallTimeout,
 	}
 }
 
@@ -309,7 +315,7 @@ func (c *AlertConsumer) handle(ctx context.Context, tier domain.AlertTier, queue
 		return
 	}
 	stopRenewing := c.keepLock(processCtx, queue, message)
-	decision := c.process(processCtx, tier, message)
+	decision := c.process(processCtx, tier, queue.Name(), message)
 	stopRenewing()
 	// Renewal stops before settling, so the two never touch the message at once; the last renewal leaves room for a settlement that takes its full timeout.
 	renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
@@ -349,7 +355,10 @@ func (c *AlertConsumer) keepLock(ctx context.Context, queue AlertQueue, message 
 				return
 			case <-timer.C:
 			}
-			if err := queue.RenewLock(ctx, message); err != nil {
+			callCtx, cancelCall := context.WithTimeout(ctx, c.lockRenewCallTimeout)
+			err := queue.RenewLock(callCtx, message)
+			cancelCall()
+			if err != nil {
 				slog.WarnContext(ctx, "alert consumer: lock renewal failed", "messageId", message.ID, "queue", queue.Name(), "err", err)
 				return
 			}
@@ -362,7 +371,7 @@ func (c *AlertConsumer) keepLock(ctx context.Context, queue AlertQueue, message 
 }
 
 // process stores one message's alerts and decides how to settle it; bad payloads are dead-lettered, store failures retried.
-func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, message *domain.AlertQueueMessage) alertDecision {
+func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage) alertDecision {
 	source := strings.ToLower(strings.TrimSpace(message.Properties[alertPropertySource]))
 	if source == "" {
 		return alertDeadLetterDecision(alertDeadLetterMissingSource, "the message has no source property")
@@ -391,7 +400,7 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 
-	rows, err := c.buildRows(source, tier, message, alerts, ids)
+	rows, err := c.buildRows(source, tier, queueName, message, alerts, ids)
 	if errors.Is(err, errUnstorableAlert) {
 		return alertDeadLetterDecision(alertDeadLetterUnstorable, err.Error())
 	}
@@ -420,7 +429,8 @@ func safeTransform(transform alertsource.Transform, body []byte) (alerts []model
 }
 
 // buildRows gives each alert its id and fingerprint the way alert-ingestion does: an alert with no identifier takes its own id.
-func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
+func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
+	messageKey := alertMessageKey(queueName, message.ID)
 	receivedOn := c.receivedOn(message)
 	rows := make([]domain.NewAlert, len(alerts))
 	for i, alert := range alerts {
@@ -440,12 +450,17 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message 
 			Alert:        body,
 			Fingerprint:  model.Fingerprint(alert),
 			Tier:         tier,
-			MessageID:    message.ID,
+			MessageID:    messageKey,
 			MessageIndex: i,
 			ReceivedOn:   receivedOn,
 		}
 	}
 	return rows, nil
+}
+
+// alertMessageKey is the stored message id: the queue's name and the message's own id, so a redelivery from one queue matches its earlier rows while the same id from another queue never collides with them.
+func alertMessageKey(queueName, messageID string) string {
+	return queueName + "/" + messageID
 }
 
 // hasEscapedNUL reports whether encoded JSON holds a \u0000 escape, skipping escaped backslashes so a literal "\\u0000" does not count.

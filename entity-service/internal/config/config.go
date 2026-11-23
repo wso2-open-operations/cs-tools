@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -1006,13 +1007,22 @@ type Config struct {
 	// loadErr records the first unparsable environment value seen by Load,
 	// which has no error return. Validate reports it.
 	loadErr error
+	// alertQueueListErr records a set queue list that names no queue; it is reported only when the consumer runs.
+	alertQueueListErr error
 }
 
 // Load reads configuration from environment variables and returns a populated
 // Config. Missing variables fall back to sensible defaults; callers should
 // validate required fields (e.g. DBUser, DBPassword, DBName) before use.
 func Load() *Config {
-	var loadErr error
+	var loadErr, alertQueueListErr error
+	queueList := func(listKey, singleKey, defaultQueue string) []string {
+		queues, err := envQueueList(listKey, singleKey, defaultQueue)
+		if err != nil && alertQueueListErr == nil {
+			alertQueueListErr = err
+		}
+		return queues
+	}
 	duration := func(key string, def time.Duration) time.Duration {
 		d, err := getDurationOrDefault(key, def)
 		if err != nil && loadErr == nil {
@@ -1130,12 +1140,12 @@ func Load() *Config {
 		AlertServiceBusTenantID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_TENANT_ID")),
 		AlertServiceBusClientID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CLIENT_ID")),
 		AlertServiceBusClientSecret:                   os.Getenv("ALERT_SERVICEBUS_CLIENT_SECRET"),
-		AlertServiceBusPriorityQueues:                 envQueueList("ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
-		AlertServiceBusStandardQueues:                 envQueueList("ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
+		AlertServiceBusPriorityQueues:                 queueList("ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
+		AlertServiceBusStandardQueues:                 queueList("ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
 		AlertConsumerPriorityWeight:                   envPositiveInt("ALERT_CONSUMER_PRIORITY_WEIGHT", 4),
-		AlertSQSPriorityQueueURLs:                     envQueueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
-		AlertSQSStandardQueueURLs:                     envQueueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),
+		AlertSQSPriorityQueueURLs:                     queueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
+		AlertSQSStandardQueueURLs:                     queueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),
 		AlertSQSDeadLetterQueueURL:                    strings.TrimSpace(os.Getenv("ALERT_SQS_DEAD_LETTER_QUEUE_URL")),
 		AlertSQSAccessKeyID:                           strings.TrimSpace(os.Getenv("ALERT_SQS_ACCESS_KEY_ID")),
 		AlertSQSSecretAccessKey:                       os.Getenv("ALERT_SQS_SECRET_ACCESS_KEY"),
@@ -1181,6 +1191,7 @@ func Load() *Config {
 		RequestTimeout:                                duration("REQUEST_TIMEOUT", DefaultRequestTimeout),
 		UpstreamClientTimeout:                         duration("UPSTREAM_CLIENT_TIMEOUT", DefaultUpstreamClientTimeout),
 		loadErr:                                       loadErr,
+		alertQueueListErr:                             alertQueueListErr,
 	}
 	cfg.M2MClientIDs = ParseInternalClientIDs(cfg.M2MClientIDsRaw)
 	if cfg.CustomerPortalBackendClientID != "" && cfg.M2MClientIDs[cfg.CustomerPortalBackendClientID] {
@@ -1277,14 +1288,14 @@ func getInt32OrDefault(key string, defaultVal int32, allowZero bool) (int32, err
 	return int32(n), nil
 }
 
-// envQueueList reads a comma separated queue list from listKey, falling back to the older single-queue singleKey and then to defaultQueue.
-func envQueueList(listKey, singleKey, defaultQueue string) []string {
-	raw := os.Getenv(listKey)
+// envQueueList reads a comma separated queue list from listKey, falling back to the older single-queue singleKey and then to defaultQueue; a set value that names no queue, such as ",,", is an error rather than an empty list.
+func envQueueList(listKey, singleKey, defaultQueue string) ([]string, error) {
+	key, raw := listKey, os.Getenv(listKey)
 	if strings.TrimSpace(raw) == "" {
-		raw = os.Getenv(singleKey)
+		key, raw = singleKey, os.Getenv(singleKey)
 	}
 	if strings.TrimSpace(raw) == "" {
-		raw = defaultQueue
+		key, raw = "", defaultQueue
 	}
 	var queues []string
 	for _, queue := range strings.Split(raw, ",") {
@@ -1292,7 +1303,10 @@ func envQueueList(listKey, singleKey, defaultQueue string) []string {
 			queues = append(queues, queue)
 		}
 	}
-	return queues
+	if len(queues) == 0 && key != "" {
+		return nil, fmt.Errorf("%s is set to %q, which names no queue", key, raw)
+	}
+	return queues, nil
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -2059,6 +2073,9 @@ func (c *Config) validateAlertConsumer() error {
 	default:
 		return fmt.Errorf("ALERTING_VERSION must be v1, v2 or hybrid, got %q", c.AlertingVersion)
 	}
+	if c.alertQueueListErr != nil {
+		return c.alertQueueListErr
+	}
 	if !c.HasDatabase() {
 		return fmt.Errorf("ALERTING_VERSION %s needs DB_USER, DB_PASSWORD and DB_NAME, because alerts are stored in the database", c.AlertingVersion)
 	}
@@ -2137,6 +2154,15 @@ func (c *Config) validateAlertSQS() error {
 		if other != region {
 			return fmt.Errorf("%s has a queue in %s, but the first priority queue is in %s; every SQS queue must be in one region", q.name, other, region)
 		}
+	}
+	// A stored alert's message id starts with its queue's name, so two queues sharing a name, even in different accounts, could not be told apart.
+	names := map[string]string{}
+	for _, q := range inputs {
+		name := path.Base(sqsQueuePath(q.url))
+		if other, taken := names[name]; taken {
+			return fmt.Errorf("SQS queues %q and %q share the name %q; every SQS queue needs its own name", other, q.url, name)
+		}
+		names[name] = q.url
 	}
 	for i, a := range inputs {
 		for _, b := range inputs[i+1:] {
