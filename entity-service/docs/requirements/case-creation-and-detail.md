@@ -200,8 +200,9 @@ entry failed.
 
 **CAS-081** The list must be all emails or all user ids, not a mix.
 
-**CAS-082** The creator shall always be added as a watcher, whether or not they named
-themselves.
+**CAS-082** The creator shall be added as a watcher, whether or not they named themselves.
+This is best effort: a failure to add them is logged and does not fail case creation (see
+COL-323).
 
 ## 11. What happens right after creation
 

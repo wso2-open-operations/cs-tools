@@ -31,8 +31,11 @@ process reads that log and applies the follow-up.
 **CHG-400** The service shall act on every recorded change, however late it is read. A
 change that arrives after downtime is still acted on; there is no "off" setting.
 
-**CHG-401** Each change shall be applied together with marking it done, so the effect and
-the mark both happen or neither does.
+**CHG-401** Each change shall be applied together with marking it done, so that changes
+the service makes in its own database (tasks, problems) and the mark both happen or neither
+does. Sending a message (the special-ops alert, CHG-464) cannot be undone, so it is delivered
+**at least once**: if the message goes out and the commit then fails, the change is read again
+and the message is sent again.
 
 **CHG-402** If a change fails, it shall be retried with growing waits, up to 10 attempts
 (about three hours in total). After that it is **parked** with the reason kept on the log
@@ -134,7 +137,9 @@ from the team schedule on demand, so a handoff is never missed because of a star
 timing problem. If that lookup fails the change is retried (CHG-402).
 
 **CHG-464** A failure to publish shall be retried like any other (CHG-402), and parked in
-the end.
+the end. The alert is published before the change is marked done, so it is delivered at least
+once and can repeat after a failed commit (CHG-401); the notification service should tolerate
+a repeated alert for the same incident.
 
 ## 6. Ranks for the call-escalation ladder
 
@@ -192,7 +197,9 @@ have no narrower scope a customer could be given.
    field to read in the portal, so that follow-up never happens.
 5. **Parked changes need a manual reset.** After ten failures a change stops, and only a
    direct edit to the change log restarts it. Who watches for parked rows?
-6. **A group change that matches several teams** alerts the first one when no note names
+6. **The special-ops alert can be sent twice.** It goes out before the change is marked done, so a
+   failed commit means the next pass sends it again. Should repeats be suppressed per change?
+7. **A group change that matches several teams** alerts the first one when no note names
    one. A warning is the only trace.
 
 ## 8. Where this is implemented

@@ -202,9 +202,10 @@ left out, and each value outside its set shall be refused with a message:
 
 **SLA-373** The week shall be a Monday-to-Monday window in the **Asia/Colombo** time zone.
 With no `week`, it is the full calendar week **before** the one now falls in, so a late run
-or a retry reports the same week. With `week` given (a date as `YYYY-MM-DD`), it is the
-week **containing** that date, which is how a missed run is re-sent. Any other format is
-refused.
+or a retry within the same week reports the same week. A run or retry after the next Monday
+selects a different week, so for a delayed run or a retry the intended `week` should be given.
+With `week` given (a date as `YYYY-MM-DD`), it is the week **containing** that date, which is
+how a missed run is re-sent. Any other format is refused.
 
 **SLA-374** A clock shall be included if it has breached and the moment it breached falls
 in the week. This covers clocks still running past their time and clocks paused after they
@@ -247,8 +248,10 @@ never fail or undo the case change
 that caused it.
 
 **SLA-383** The notification service shall be able to read the active clocks (section 4) at
-start-up and to re-check a single clock (section 5) just before alerting, so a restart or a
-lost signal does not lose a breach.
+start-up and to re-check a single clock (section 5) just before alerting. A restart recovers a
+clock whose creation signal was lost. A clock whose creation signal is lost after start-up is not
+recovered until the next restart or an admin-triggered SLA recalculation, so its breach can go
+unalerted.
 
 ## 10. Service offerings
 

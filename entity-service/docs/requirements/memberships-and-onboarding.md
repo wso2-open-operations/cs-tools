@@ -18,7 +18,10 @@ A customer or partner gets access to a project by being a **member** of it (a pr
 contact). This document covers how a person is invited, how they become registered when
 they first sign in, how their roles are changed or removed, and how each step of that
 journey is tracked. Memberships are kept in two places, the customer database and
-Salesforce, and every write here updates both.
+Salesforce, and every write here updates both, with one exception: when Salesforce is
+unavailable and the safeguard in section 12 is on, a first invitation is saved in the customer
+database first and handed to Salesforce afterwards, and a removal may then be made in the customer
+database only (USR-280, USR-284).
 
 ## 2. Who is involved
 
@@ -101,7 +104,10 @@ customer, taken from their own token. A customer cannot name someone else as inv
 
 **USR-213** These routes exist only when the feature is enabled, Postgres is the main data
 source and the Salesforce connection is complete. Otherwise they answer "not found", so a
-portal never writes one system and not the other.
+portal does not write one system without the other. The exception is the deferred-write safeguard
+in section 12: when Salesforce is unavailable and that safeguard is on, a first invitation is
+written to the customer database first (USR-280), and a removal may be local-only if its deferred
+write failed (USR-284).
 
 **USR-214** Writes for the same project and email shall be handled one at a time.
 

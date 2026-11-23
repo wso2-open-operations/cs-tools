@@ -65,6 +65,8 @@ incident id is refused as "case not found".
 
 **CSR-214** If the card names a project, it must be the case's own project, otherwise it
 is refused. If no project is named, the card has none (it is not filled in from the case).
+This applies to the native data source. When the legacy case system is the data source, a
+create request without a project is refused, and it must also name at least one approver.
 
 **CSR-215** A case the caller is not allowed to see shall be reported as "case not found",
 never as forbidden, so its existence is not revealed.
@@ -115,15 +117,18 @@ state is refused as a conflict.
 **CSR-233** Approving shall record who approved it. A rejection's comment is shown on the
 card as its rejection reason.
 
-**CSR-234** If a request carries a state and also field changes, the state change is made
-and the field changes are ignored. **Confirm** (see 10.2).
+**CSR-234** If a request carries a state and also field changes, the native data source
+validates the ids it was given, makes the state change and ignores the field changes. When
+the legacy case system is the data source, such a request is refused. **Confirm** (see 10.2).
 
 **CSR-235** Only "approved" and "rejected" are accepted as a state to move to.
 
 **CSR-236** After an approval or rejection the service shall refresh the project's
 allocated, consumed and remaining hours, and those of the other projects that share an
 opportunity with it, because the hours pool is shared. If this fails the decision still
-stands, the problem is logged, and the regular hourly refresh corrects the figures.
+stands, the problem is logged, and the regular hourly refresh corrects the figures. The
+refresh is skipped when the card has no project, or when no refresh is configured, so an
+immediate refresh is not guaranteed for every decision.
 
 ## 7. Deleting a card
 
@@ -147,7 +152,8 @@ who approved, a work-date range and states.
 
 **CSR-253** The **team** filter shall match cards submitted by the **current** members of
 any of the teams, even if the person was in another team when they logged the card. A
-filter may name at most 100 teams.
+filter may name at most 100 teams. This filter exists only on the native data source: when
+the legacy case system is the data source, a search that names any team is refused.
 
 **CSR-254** The **approver** filter shall find the cards the person is eligible to decide,
 and shall always leave out the person's own cards.
@@ -174,7 +180,8 @@ date until callers stop using it. It is not the time the record was made.
 
 **CSR-260** The service shall group the cards a search would find and give the **count and
 the total minutes** per group. The groupings are **state, user, project, day** and
-**team**.
+**team**. This is available only on the native data source: when the legacy case system is
+the data source, every grouping is refused.
 
 **CSR-261** The groups shall be ranked by count (the default) or by minutes, the top ten
 shown unless the caller chooses another number, and all the rest added together into
@@ -183,14 +190,16 @@ is refused.
 *Check:* 14 projects, top 10 shown; "others" holds the other 4 projects' cards and minutes.
 
 **CSR-262** A card with **no project** has no project group; it is counted in "others", so
-every grouping gives the same totals.
+every grouping except *by team* gives the same totals (see CSR-264 for why team totals can
+differ).
 
 **CSR-263** *By day* needs both a start and an end date, the end not before the start and the
 window no longer than **31 days**. It returns one group per day, in date order, **including
 days with no cards at zero**. Ranking and the number of groups do not apply.
 
-**CSR-264** *By team* needs the teams to be named. It returns one group per named team,
-labelled with the team's name, a team with no cards at zero. A card counts once in **every
+**CSR-264** *By team* needs the teams to be named. It returns one group per named team that
+exists, labelled with the team's name, a team with no cards at zero. A team id that is valid
+but names no team gets no group. A card counts once in **every
 named team its engineer is currently in**, so the groups can add up to more than the
 number of cards. Without a chosen number of groups every named team is shown.
 
@@ -211,8 +220,9 @@ cases, not cards.
 1. **Customers can read time cards.** A customer sees the cards, with the engineer's name,
    minutes, work log comment and rejection reason, on cases of their projects. Is that
    intended, or are time cards internal?
-2. **State and edits in one request.** The state change wins and the edits are silently
-   dropped. Should the request be refused instead? (CSR-234)
+2. **State and edits in one request.** On the native data source the state change wins and
+   the edits are silently dropped; the legacy case system refuses such a request. Should the
+   native data source refuse it too? (CSR-234)
 3. **Admins can approve any card** (except their own), not only named approvers. Is this
    "approve by exception" still wanted?
 4. **Unknown issue complexity.** A value other than N/A, Low, Medium or High is not checked

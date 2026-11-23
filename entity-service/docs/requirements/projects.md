@@ -36,7 +36,9 @@ authorised callers change a small set of their fields.
 
 **PRJ-010** A person who is not internal staff shall see only the projects they belong to,
 in every project read, list and count. A project outside their membership shall be reported
-as "not found", never as "forbidden", so they cannot learn that it exists.
+as "not found", never as "forbidden", so they cannot learn that it exists. **Project metadata
+is the exception**: it has no membership check, so any signed-in caller can read it for any
+project id they know (section 10; **Confirm**, see 12.7).
 *Check:* ask for another customer's project by its id; the answer is "project not found".
 
 **PRJ-011** Which fields a caller is *allowed* to change is decided by the portals, not by

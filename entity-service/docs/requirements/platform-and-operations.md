@@ -246,16 +246,16 @@ Durations use Go style (`30s`, `5m`). "Together" means all or none. Placeholders
 | Database user, password and name | none | Required in database and dual-write modes; all three or none in every mode. |
 | Database SSL mode | none (driver default) | Set explicitly: `disable` locally, `require` or stricter remotely. |
 | Database schema | user name, then public | The search path. |
-| Pool: maximum / minimum connections | 20 / 2 | Maximum must be positive; minimum may be zero; bad values fall back to default. |
+| Pool: maximum / minimum connections | 20 / 2 | Only an **unset** value uses the default. Maximum must be a positive whole number; minimum may be zero. A value that is not a number, or is out of range, stops start-up. |
 | Pool: maximum lifetime / idle time | 30m / 5m | Connection recycling. |
 
 ### Data source and legacy connection
 
 | Setting | Default | Purpose |
 |---|---|---|
-| Data source | database | One of database, legacy, dual-write (see data-sources-and-scheduled-tasks.md). |
-| SLA data source | database | Overrides the source for SLA reads. |
-| Product-usage read mode | database | `legacy` only matters in dual-write mode. |
+| Data source (`DATA_SOURCE`) | `postgres` | One of `postgres` (database mode), `servicenow` (legacy mode) or `postgres-servicenow-dual-write` (dual-write mode); any other value stops start-up. See data-sources-and-scheduled-tasks.md. |
+| SLA data source (`SLA_DATA_SOURCE`) | `postgres` | `postgres` or `servicenow`; overrides the source for SLA reads. |
+| Product-usage read mode | `postgres` | `legacy` restores the legacy routing and only matters in dual-write mode. |
 | Legacy integration address, token address, client id, client secret | none | Needed when the data source or SLA source is legacy or dual-write; the secret is a secret. |
 
 ### Authentication and callers
@@ -312,7 +312,7 @@ project reopening. Project reopening also starts in dry run until its dry-run se
 `false`. The escalation-email switch is on unless set to `false`. The migration switches in
 section 9 are on unless set to `false` (**Confirm**, see 12.2).
 
-**PLT-083** A server timeout or pool duration that cannot be read shall stop start-up. A polling
+**PLT-083** A server timeout, a pool duration or a pool size that is set but cannot be read (or is out of range) shall stop start-up; only an unset value uses its default. A polling
 interval or similar optional duration that cannot be read, or is not positive, shall fall back to
 its default without stopping the service. An unreadable Salesforce retry interval shall turn that
 job off with a warning.

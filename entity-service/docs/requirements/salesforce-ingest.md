@@ -287,9 +287,10 @@ account (kept when Salesforce names none), start and end dates, description, pro
 compliance violation date, and go-live date. It shall never touch closure states, hour
 counters, onboarding fields, credentials, number or active flag.
 
-**INT-072** By default the ingest only **updates** projects the CSM already has. A project
-the CSM lacks is a "not found" recorded as failed and retried later (section 12). When
-project insert is also on, such a project is created, active.
+**INT-072** The ingest always **updates** projects the CSM already has. A project the CSM lacks
+is created, active, when project insert is on, which it is unless set to `false` (section 4).
+When project insert is off, such a project is a "not found" recorded as failed and retried later
+(section 12).
 
 **INT-073** When the data source is dual-write (see data-sources-and-scheduled-tasks.md),
 a project the ingest must create shall take the id the legacy system already uses for it, so
@@ -391,8 +392,10 @@ shall never be skipped (in the last case a warning is logged and the idempotent 
 **INT-102** The record shall only move forward: a write recording an older version shall not
 replace a newer one, except that a delete always replaces it.
 
-**INT-103** A failed attempt shall be recorded and the original error returned so the sender
-delivers the notice again.
+**INT-103** A failed attempt shall be recorded. When the failure may clear on its own, the
+original error shall be returned so the sender delivers the notice again. A failure that no retry
+can fix, such as a project with no subscription key (INT-074), shall be recorded as failed and
+acknowledged without a retry.
 
 **INT-104** A **delayed-retry job** shall run in the background when the membership switch is
 on and its interval is above zero (default five minutes; zero or an invalid value turns it

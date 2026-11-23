@@ -105,12 +105,16 @@ refused. A blank value counts as not sent.
 
 **CHG-211** If none is sent, the incident shall get the **support group of its service**.
 
-**CHG-212** If the service has no support group (or does not exist), the support group of
-the **default service** (a setting) shall be used and a warning logged.
+**CHG-212** If the service has no support group, the support group of the **default
+service** (a setting) shall be used and a warning logged. A service id that names **no
+service at all** is not rescued by this step: the group is still looked up as above, but the
+incident is then refused as a bad request ("one or more referenced IDs do not exist"), because
+the service id is saved as sent and must refer to a real service. No incident is created.
 
-**CHG-213** If there is no default service, or it has none or does not exist, the
-incident shall be created **unassigned** and an error logged (a misconfiguration, not a
-bad request). If a lookup itself fails the incident is not created.
+**CHG-213** If the service exists but has no support group, and there is no default service,
+or it has none or does not exist, the incident shall be created **unassigned** and an error
+logged (a misconfiguration, not a bad request). If a lookup itself fails the incident is not
+created.
 
 **CHG-214** The decision shall be recorded as an internal work note appended after the
 caller's own notes ("Assignment group chosen by …", "set from service …'s support group",

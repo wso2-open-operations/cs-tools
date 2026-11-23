@@ -337,7 +337,10 @@ and clone it.
 
 **CHG-071** After New the two customer boxes are add-only: turning one on is allowed
 until the gate it controls has passed, and only on a change that has a Customer Project;
-turning one off is always refused.
+turning one off is always refused. Once the change has been approved (CHG-073, which starts
+at Customer Approval) both boxes are read-only, so in practice a box can be turned on only
+before approval, even though the review gate itself is still ahead in Customer Approval.
+*Check:* in Customer Approval, turn on "customer review required"; refused as read-only.
 
 **CHG-072** A new **requester** after Request Approval shall be judged with the new
 requester in place of the old one, and refused when nobody would be left to ask about a

@@ -27,8 +27,10 @@ customers which known issues affect which product versions.
 members of the project it belongs to. Anyone else shall get "not found" or an empty list.
 
 **PRJ-211** A project member, and internal staff, shall be able to create and change
-deployments and deployed products in their project. Only internal staff shall be able to
-remove one, and in practice nothing is removed: items are deactivated instead (see 3.2 and 4.2).
+deployments and deployed products in their project, **including deactivating them**
+(deactivating is a change, see 3.2 and 4.2). Only internal staff could ever delete one
+outright, and no route does: nothing is deleted, items are deactivated instead. So a project
+member can deactivate their project's items (see 8.3).
 
 **PRJ-212** A deployed product shall always agree with its deployment: it cannot be saved
 with one project's id beside a different project's deployment.

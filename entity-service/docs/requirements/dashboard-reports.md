@@ -190,8 +190,9 @@ Info or Solution Proposed, and change requests in Customer Approval or Customer 
 **CSR-144** **Active chats** counts conversations that are open or active.
 
 **CSR-145** A customer's counts shall include only what they may see. In particular a
-customer sees a change request only if it was **designated** to them (see 6.1), and the
-counts apply that same rule, so the count matches the list the customer sees.
+customer sees a change request only if it was **designated** to them, or if it is an older
+change request that stays visible without designation (the exception in CSR-152, see 6.1), and
+the counts apply that same rule, so the count matches the list the customer sees.
 
 **CSR-146** If working out the counts fails, the project list shall still be returned with
 the three counts at zero and the problem logged, because the list is the way into a project.

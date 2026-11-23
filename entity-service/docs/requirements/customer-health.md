@@ -56,8 +56,10 @@ at-risk one and it becomes "at risk".
 the ids of every account whose overall health is a chosen value. An account that has never had tracking
 started appears in none of the three lists. A chosen value other than the three is refused.
 
-**CUS-814** The filter by health and the status shown for an account shall always agree, because both come
-from the same calculation over the projects' statuses.
+**CUS-814** The filter by health and the status shown for an account shall agree, because both come
+from the same calculation over the projects' statuses. The one exception is an account that has never had
+tracking started: its status reads as **to be reviewed**, but it appears in none of the three lists (CUS-813),
+so filtering by "to be reviewed" does not return it.
 
 ## 4. Risks
 
@@ -72,8 +74,9 @@ naming the open one. Two people opening a risk at the same moment cannot both su
 **CUS-822** The service shall let a person close a risk. A comment is required. The risk must be open; a
 risk that is not is refused. The risk's closing comment, person and time are recorded.
 
-**CUS-823** A risk **cannot be closed while any of its action items is still open or in progress**. The
-refusal says how many are. Items that are resolved or cancelled do not block it.
+**CUS-823** A risk **cannot be closed through the close-risk action while any of its action items is still
+open or in progress**. The refusal says how many are. (Confirming a project healthy, CUS-825, closes a risk
+without this check.) Items that are resolved or cancelled do not block it.
 *Check:* close a risk with one open item; refused with "1 action item(s) are still open".
 
 **CUS-824** Closing a risk shall set the project's status back to **To be reviewed** (not Healthy) and clear
@@ -81,7 +84,8 @@ who reviewed it, so someone must confirm it again.
 
 **CUS-825** The service shall let a person confirm a project **healthy**. This shall set its status to
 **Healthy** with the reviewer and time, close any risk still open on it (with the comment given, or
-"Reviewed and confirmed healthy" if none), and leave a closed entry in its risk history saying it was
+"Reviewed and confirmed healthy" if none) **even when that risk still has open or in-progress action items**,
+which are left as they are, and leave a closed entry in its risk history saying it was
 marked healthy. The project must exist, but need not have been tracked before.
 
 **CUS-826** The service shall let a person revert a project to **To be reviewed**. A project with no status
@@ -143,7 +147,10 @@ health) belongs to the accounts requirements.
    project can go straight to healthy from any state. Is that the intended review flow?
 4. **An account with no tracked projects reads as "to be reviewed" in its overall health,** yet appears in
    none of the by-health lists. The two views disagree for such accounts.
-5. **The account action-item list hides items on closed risks,** so a resolved piece of work on a closed
+5. **Confirming health closes a risk that still has open action items.** Closing through the close-risk
+   action refuses in that case; confirming health does not, and the items stay open on the closed risk. Should
+   both paths follow the same rule?
+6. **The account action-item list hides items on closed risks,** so a resolved piece of work on a closed
    risk can only be found through the project's risk history.
 
 ## 10. Where this is implemented

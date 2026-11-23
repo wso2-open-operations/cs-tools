@@ -73,7 +73,9 @@ refused with a message naming the limit. A negative start position is treated as
 asks otherwise. The caller may sort by created time, updated time, severity, state or
 assignee name, ascending or descending. Any other field or direction is refused.
 Cases with no value for the sort field come last. Ties are broken in a fixed order, so
-paging never repeats or skips a case.
+paging returns each case once only while the set of matching cases does not change. Cases
+added, removed or re-sorted between page requests can shift page positions and repeat or
+skip a case.
 
 **CSR-023** Free-text search shall match part of the case's title, its case number or its
 internal case id, ignoring letter case. The text may be at most 200 characters.
@@ -207,7 +209,9 @@ to compute.
 
 **CSR-073** *Leave out description.* A caller may ask for the description to be left out of
 every row, for lists that never show it. The description comes back empty, and the
-database does not read it. Searching on it is unaffected. Any other field name is refused.
+database does not read it. Leaving it out does not change which fields the free-text search
+matches (title, case number and internal case id only, see CSR-023). Any other field name is
+refused.
 
 **CSR-074** *Group by a fixed list.* A caller may ask for counts per value of one field
 instead of cases. The groupable fields are state, severity, type, engagement type, issue

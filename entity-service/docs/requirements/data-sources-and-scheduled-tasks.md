@@ -22,8 +22,10 @@ runner claim, retry and clear periodic jobs safely.
 ## 2. Data-source modes
 
 **INT-300** The service shall run in exactly one of three modes, chosen at start-up by one
-setting: **database** (the default), **legacy**, or **dual-write**. Any other value shall stop
-the service from starting.
+setting (`DATA_SOURCE`). The accepted values are `postgres` (the default; called **database**
+mode here), `servicenow` (**legacy** mode) and `postgres-servicenow-dual-write` (**dual-write**
+mode). Any other value shall stop the service from starting. The shorthand names in this document
+are not valid setting values.
 
 **INT-301** In **database** mode the CSM database is the system of record for every read and
 write. No legacy system is called for them.
@@ -47,27 +49,33 @@ set together or not at all in every mode.
 scheduled-task runs, SLA status, failure records and similar) shall always be stored in the
 database whatever the mode, and shall be offered only when a database is configured.
 
-**INT-306** SLA reads shall be selectable separately (database or legacy), so SLA can move at its
-own pace. SLA status and clock-state reads have no legacy equivalent and always use the database.
+**INT-306** SLA reads shall be selectable separately (`postgres` or `servicenow`, by their own
+setting), so SLA can move at its own pace. SLA status and clock-state reads have no legacy equivalent and always use the database.
 
 ## 3. Copying writes to the legacy system (dual-write)
 
 **INT-310** Every dual-write copy shall be made **after** the CSM database write has committed.
 The caller's request shall never wait for the legacy system and shall be answered from the
-database result.
+database result. (The one wait is the local failure-record write in INT-313.)
 
 **INT-311** The copy shall run in the background on a small fixed pool, with a ten-second limit
 per copy. Copies for the **same record** shall be applied in the order they were made, one at a
 time, so an older change cannot overwrite a newer one; copies for different records run in
 parallel.
 
-**INT-312** A copy shall be tried **once**. On failure, a failure record (record kind, record id,
-the operation, the payload and the error) shall be stored and a warning logged. The failure shall
-never be shown to the caller, and the copy shall not be repeated automatically.
+**INT-312** A copy shall be tried **once**. On failure, the service shall try to store a failure
+record (record kind, record id, the operation, the payload and the error) and shall log a warning.
+Storing the record can itself fail; the service then only logs the error and carries on, so the
+failure records are **not guaranteed to be a complete replay list** and operators must also check
+the logs. The failure shall never be shown to the caller, and the copy shall not be repeated
+automatically.
 
-**INT-313** If more copies are waiting than the queue can hold (256), the service shall not
-block the request: it shall record the dropped copy as a failure immediately instead, so it can
-still be replayed.
+**INT-313** The queue limit (256) shall count **distinct records** waiting for a worker, not
+copies. A later copy for a record that is already queued or running shall wait in that record's own
+queue, which has no size limit. When the queue is full, the service shall not call the legacy
+system for the dropped copy: it shall record it as a failure with a synchronous write to the CSM
+database, so it can still be replayed. The caller waits for that local write (but never for the
+legacy system).
 
 **INT-314** The kinds of record copied are: cases and case tags, comments (including case
 comments), time cards, change requests, projects, deployments and deployed products,
@@ -93,7 +101,7 @@ Turning either on without turning the legacy flow off emails the same people twi
 ## 4. Reads in dual-write mode
 
 **INT-320** Instance and usage reads shall come from the CSM database by default. A deployment
-can set them to **legacy**, which sends those reads to the legacy system in dual-write mode, to
+can set them to `legacy` (the product-usage read setting; its other value is `postgres`), which sends those reads to the legacy system in dual-write mode, to
 restore the earlier routing. The setting has no effect in the other two modes (legacy mode
 always reads the legacy system; database mode always reads the database).
 
@@ -138,6 +146,9 @@ be refused.
 **INT-335** An outcome report shall be accepted only if the record is still open **and** the
 reported attempt count still matches. A runner that stalled and was reclaimed by another therefore
 cannot overwrite the newer attempt; its report is refused as "not found or no longer active".
+This does **not** make a job run exactly once: a runner that is still working when its claim goes
+stale can be overtaken by a second attempt, and both may perform the work. Jobs must therefore
+tolerate duplicate effects.
 
 **INT-336** The service shall list run records, optionally only failed, succeeded or superseded
 ones. Any other filter shall be refused. The list is not paged, and is meant for monitoring, not

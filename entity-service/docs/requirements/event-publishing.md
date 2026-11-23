@@ -26,8 +26,8 @@ delivery (emails, chat, calls, retries) in one place.
 **INT-200** Publishing shall be off unless **both** a message-hub address is configured and
 publishing is explicitly switched on (the word `true`, exactly). A deployment can therefore
 have the hub fully configured and still publish nothing until someone turns it on. With
-publishing off, every action still works; nothing is published and nothing is recorded as
-failed.
+publishing off, every action still works except the admin "Recalculate SLA" request, which
+answers "not available"; nothing is published and nothing is recorded as failed.
 *Check:* configure the hub but leave the publishing switch off; create a case; the case is
 created and no event is sent.
 
@@ -94,7 +94,9 @@ new request would be posted with no card announcing it.
 
 **INT-220** When the hub does not acknowledge a publish, the service shall store a **failure
 record**: the event type, the entity id, the full payload, and the error. It shall be written
-with its own ten-second limit, and if even that fails, both errors are logged.
+with its own ten-second limit, and if even that fails, both errors are logged. This applies to
+every publish except those made by the back-to-open notice job (INT-224), which leave no failure
+record, so those attempts will not appear in the failure-record list.
 
 **INT-221** With no database configured there is nowhere to record a failure; the service
 shall log the failure and return the original error.
@@ -141,9 +143,9 @@ says when this service publishes each one.
 | Event | When it is published |
 |---|---|
 | Incident created | After an incident is created; starts the call-escalation ladder. |
-| Priority elevated | When an incident's priority is raised; starts the ladder for the new priority. |
+| Priority elevated | On the legacy data source only, when an incident's priority is raised; starts the ladder for the new priority. The native data source does not publish it. |
 | Acknowledged | When an incident leaves the new state; stops the ladder started by creation. |
-| Comment added | After a comment or work note on an incident; says whether it was public, because a public comment is what stops a ladder started by an elevation. |
+| Comment added | On the legacy data source only, after a comment or work note on an incident; says whether it was public, because a public comment is what stops a ladder started by an elevation. The native data source does not publish it. |
 | Assigned | When an engineer is set as the incident's assignee; stops the on-call ladder. |
 | Special-operations alert | When an incident's assignment group changes to a Special Ops team's group, however it changed. Needs the operations topic and a valid hand-off configuration. |
 
@@ -225,8 +227,10 @@ copy. The notification service reads events strictly: a new field is accepted on
 service knows it, and an unknown event type is rejected and retried. When a new event type or
 field is added, the notification service shall be deployed **first**.
 
-**INT-251** Email events shall carry final recipients, wording and links; the notification
-service adds its own layout and any copy list but shall not decide who is told.
+**INT-251** Email events shall carry final recipients and wording, and the ids of what they are
+about, but no links. The notification service builds each recipient's portal link from those ids,
+adds its own layout and any copy list, and shall not decide who is told. A publisher shall not add
+a link field, because the notification service rejects fields it does not know (INT-250).
 
 ## 8. Open questions for the product owner
 

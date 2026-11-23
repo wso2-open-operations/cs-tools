@@ -114,9 +114,9 @@ Unpublished banners sit after the stack.
 and every banner at that position or lower shall move down by one.
 *Check:* with banners at 0, 1, 2, saving a new one at 1 makes the old 1 and 2 become 2 and 3.
 
-**CUS-141** A requested position below zero is treated as the first place, and one beyond the
-end as the last place of the stack. The position actually assigned is returned and may differ
-from the one asked for.
+**CUS-141** A requested position below zero is refused, as CUS-131 requires. A requested
+position beyond the end is treated as the last place of the stack. The position actually
+assigned is returned and may differ from the one asked for.
 
 **CUS-142** Saving a banner as unpublished shall move it behind the whole stack, and the
 banners it leaves behind shall close up so there is no gap.

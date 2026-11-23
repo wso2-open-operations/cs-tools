@@ -142,9 +142,9 @@ and an incident that is on hold are the same number).
 - It is **never paused**. On hold ends the clock as met rather than pausing it.
 (**Confirm**, 9.2)
 
-**SLA-261** A change of the affected service alone shall not start or cancel this
-clock. The service condition that used to restrict it to two named services was
-removed.
+**SLA-261** A change of the affected service alone revises this clock: it is cancelled
+and registered again, as SLA-100 states. The service condition that used to restrict
+it to two named services was removed.
 
 **SLA-262** No response or workaround policy exists for incidents today, so incidents
 carry no response or workaround clock.
