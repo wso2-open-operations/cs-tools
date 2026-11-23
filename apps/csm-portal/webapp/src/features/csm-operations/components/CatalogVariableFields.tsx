@@ -118,6 +118,7 @@ export default function CatalogVariableFields({
                   label={label}
                   required={required}
                   disabled={readOnly}
+                  compactSelectedValues={false}
                   roleIds={INTERNAL_USER_ROLES}
                   active
                   values={splitListCollectorValue(value)}

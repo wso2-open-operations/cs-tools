@@ -421,10 +421,20 @@ describe("CatalogVariableFields — List Collector", () => {
     expect(onChange).toHaveBeenCalledWith(PEOPLE.id, "alice@wso2.com, bob@wso2.com");
   });
 
-  it("shows the people already picked by name", () => {
+  it("shows each person already picked as their own chip", () => {
     renderFields([PEOPLE], { [PEOPLE.id]: "alice@wso2.com, bob@wso2.com" });
 
-    expect(screen.getByText("Alice Perera, Bob Silva")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Alice Perera" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bob Silva" })).toBeInTheDocument();
+  });
+
+  it("removes only the person whose chip is closed", () => {
+    const { onChange } = renderFields([PEOPLE], { [PEOPLE.id]: "alice@wso2.com, bob@wso2.com" });
+
+    const aliceChip = screen.getByRole("button", { name: "Alice Perera" });
+    fireEvent.click(within(aliceChip).getByTestId("CancelIcon"));
+
+    expect(onChange).toHaveBeenCalledWith(PEOPLE.id, "bob@wso2.com");
   });
 
   it("is disabled when the question is read-only", () => {

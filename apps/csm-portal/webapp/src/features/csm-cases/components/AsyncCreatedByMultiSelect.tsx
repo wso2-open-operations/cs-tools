@@ -14,11 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Box, Checkbox, ListItemText, TextField, Tooltip } from "@wso2/oxygen-ui";
+import {
+  Autocomplete,
+  Box,
+  Checkbox,
+  Chip,
+  ListItemText,
+  TextField,
+  Tooltip,
+  alpha,
+} from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
+
+/** WSO2 orange, fixed so the chips stay orange whichever theme is chosen. */
+const CHIP_ORANGE = "#FF7300";
 
 interface CreatedByOption {
   email: string;
@@ -43,6 +55,11 @@ interface AsyncCreatedByMultiSelectProps {
   label?: string;
   required?: boolean;
   disabled?: boolean;
+  /**
+   * True (the default, for the narrow filter row): the picked names as one
+   * comma-separated line. False: one removable chip per person.
+   */
+  compactSelectedValues?: boolean;
 }
 
 /**
@@ -63,6 +80,7 @@ export default function AsyncCreatedByMultiSelect({
   label = "Value(s)",
   required = false,
   disabled = false,
+  compactSelectedValues = true,
 }: AsyncCreatedByMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -141,7 +159,30 @@ export default function AsyncCreatedByMultiSelect({
             ? "Loading…"
             : "No matches"
       }
-      renderTags={(value) => {
+      renderTags={(value, getTagProps) => {
+        if (!compactSelectedValues) {
+          return value.map((option, index) => {
+            const { key, ...tagProps } = getTagProps({ index });
+            return (
+              <Chip
+                key={key}
+                size="small"
+                label={option.name}
+                title={option.email}
+                {...tagProps}
+                sx={{
+                  borderRadius: "10px",
+                  bgcolor: alpha(CHIP_ORANGE, 0.14),
+                  border: `1px solid ${alpha(CHIP_ORANGE, 0.5)}`,
+                  "& .MuiChip-deleteIcon": {
+                    color: CHIP_ORANGE,
+                    "&:hover": { color: alpha(CHIP_ORANGE, 0.7) },
+                  },
+                }}
+              />
+            );
+          });
+        }
         const displayText = value.map((o) => o.name).join(", ");
         const content = (
           <Box
