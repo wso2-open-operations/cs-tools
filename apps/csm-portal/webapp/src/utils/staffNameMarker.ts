@@ -59,3 +59,14 @@ export function joinStaffName(
 export function hasStaffNameMarker(name: string | null | undefined): boolean {
   return !!name && /[Ⓦⓦ]/u.test(name);
 }
+
+/**
+ * A name for display without the staff marker, changing nothing else: a name
+ * without the marker comes back exactly as given (its spacing included), and
+ * only a marked name goes through {@link stripStaffNameMarker}'s clean-up.
+ * Empty for no name.
+ */
+export function withoutStaffNameMarker(name: string | null | undefined): string {
+  if (!name) return "";
+  return hasStaffNameMarker(name) ? stripStaffNameMarker(name) : name;
+}
