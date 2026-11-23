@@ -49,6 +49,11 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
   const [text, setText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether the server last said this reader may edit. It does not depend on
+  // the year, so the section stays (year picker included) while another year
+  // loads or fails; only an answer of canEdit: false hides it.
+  const [mayEdit, setMayEdit] = useState(false);
+  if (list.data && list.data.canEdit !== mayEdit) setMayEdit(list.data.canEdit);
 
   const countries = list.data?.countries ?? [];
   const choice = countryChoice ?? countries.find((c) => c === "Sri Lanka") ?? countries[0] ?? OTHER;
@@ -59,18 +64,20 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
     [list.data, country],
   );
 
-  if (!list.data?.canEdit) return null;
+  if (!(list.data ? list.data.canEdit : mayEdit)) return null;
 
   const canAdd = country !== "" && parsed.holidays.length > 0 && parsed.errors.length === 0 && !add.isPending;
 
   const submit = (): void => {
     setMessage(null);
     setError(null);
+    const sent = text;
     add.mutate(
       { country, holidays: parsed.holidays },
       {
         onSuccess: (res) => {
-          setText("");
+          // Clear the paste that was sent, not one typed while it was being added.
+          setText((current) => (current === sent ? "" : current));
           setMessage(`Added ${res.stored} holiday${res.stored === 1 ? "" : "s"} for ${country}.`);
         },
         onError: (e) => setError(e.message || "The holidays were not added. Try again."),
@@ -146,7 +153,18 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
         </p>
       ) : null}
 
-      {country ? (
+      {!list.data && list.isError ? (
+        <div className="ra-err" role="alert">
+          The holidays for {year} could not be loaded.{" "}
+          <button type="button" className="btn sm ghost" onClick={() => void list.refetch()}>
+            Try again
+          </button>
+        </div>
+      ) : !list.data ? (
+        <p className="cp-help" role="status">
+          Loading the holidays for {year}…
+        </p>
+      ) : country ? (
         <table className="ra-tbl phe-tbl" aria-label={`${country} public holidays in ${year}`}>
           <thead>
             <tr>

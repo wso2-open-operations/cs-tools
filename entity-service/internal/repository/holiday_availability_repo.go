@@ -18,9 +18,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -121,6 +123,20 @@ func (r *holidayAvailabilityRepository) PlaceHolidayTag(ctx context.Context, p d
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('team-schedule-holiday-tag:' || $1))`, p.UserID); err != nil {
 		return false, fmt.Errorf("lock holiday tag: %w", err)
 	}
+	// The run that called this read its holidays earlier, and the day may have
+	// been removed since. Tag only a day still stored, and hold it (FOR SHARE)
+	// until this tag is committed: a removal then waits, and the cleanup it
+	// starts sees this tag, instead of the tag landing after that cleanup ran.
+	var stored int
+	switch err := tx.QueryRow(ctx, `
+		SELECT 1 FROM team_schedule_public_holiday
+		 WHERE country = $1 AND holiday_date = $2::date
+		   FOR SHARE`, p.Country, p.Date).Scan(&stored); {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("check holiday still stored: %w", err)
+	}
 	var placedBefore, tagged bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM team_schedule_holiday_tag_placed
@@ -219,12 +235,20 @@ func (r *holidayAvailabilityRepository) RemoveCancelledHolidayTags(ctx context.C
 			return 0, fmt.Errorf("remove cancelled holiday tag: %w", err)
 		}
 	}
+	// Forget the placements of removed holidays, except one whose tag is still
+	// standing untouched: a placement committed after the read above, whose tag
+	// this run did not remove. Forgetting it would leave its tag with no record,
+	// and no later run could find it; kept, the next run removes both.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM team_schedule_holiday_tag_placed p
 		 WHERE p.holiday_date >= $1::date
 		   AND NOT EXISTS (SELECT 1 FROM team_schedule_public_holiday h
-		                    WHERE h.country = p.country AND h.holiday_date = p.holiday_date)`,
-		onOrAfter); err != nil {
+		                    WHERE h.country = p.country AND h.holiday_date = p.holiday_date)
+		   AND NOT EXISTS (SELECT 1 FROM team_schedule_absence a
+		                    WHERE a.id = p.absence_id
+		                      AND a.created_by = $2 AND a.updated_by = $2
+		                      AND a.starts_on = p.holiday_date AND a.ends_on = p.holiday_date)`,
+		onOrAfter, domain.HolidayTagActor); err != nil {
 		return 0, fmt.Errorf("forget cancelled holidays: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

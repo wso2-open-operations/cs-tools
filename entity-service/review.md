@@ -122,3 +122,7 @@ failure class turns up during review that isn't on this list, add it here in the
       call's own success alone — two in-flight calls for the same record is a real, recurring race
       in this codebase, and releasing too early lets a losing call's retry resend something a
       still-in-flight winner already sent.
+- [ ] A cleanup that reads rows, acts on them, then deletes by a broader predicate does not delete
+      rows committed in between (Read Committed gives each statement a new snapshot) — the holiday
+      tag cleanup forgot a placement whose tag it never saw, orphaning the tag; a writer acting on
+      data read earlier rechecks it (and locks it) in its own transaction.

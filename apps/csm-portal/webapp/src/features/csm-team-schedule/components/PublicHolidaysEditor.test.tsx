@@ -23,12 +23,13 @@ import type { PublicHolidaysList } from "../types";
 // vi.mock below is hoisted above this import, so the editor gets the mocks.
 import PublicHolidaysEditor from "./PublicHolidaysEditor";
 
-const list: { data: PublicHolidaysList | undefined } = { data: undefined };
+const list: { data: PublicHolidaysList | undefined; isError: boolean } = { data: undefined, isError: false };
+const refetch = vi.fn();
 const addMutate = vi.fn();
 const removeMutate = vi.fn();
 
 vi.mock("../api/usePublicHolidayEditor", () => ({
-  usePublicHolidayList: () => ({ data: list.data, isLoading: false }),
+  usePublicHolidayList: () => ({ data: list.data, isLoading: !list.data && !list.isError, isError: list.isError, refetch }),
   useAddPublicHolidays: () => ({ mutate: addMutate, isPending: false }),
   useRemovePublicHoliday: () => ({ mutate: removeMutate, isPending: false }),
 }));
@@ -44,6 +45,8 @@ const editable = (holidays: PublicHolidaysList["holidays"] = []): PublicHolidays
 describe("PublicHolidaysEditor", () => {
   beforeEach(() => {
     list.data = undefined;
+    list.isError = false;
+    refetch.mockReset();
     addMutate.mockReset();
     removeMutate.mockReset();
   });
@@ -121,6 +124,45 @@ describe("PublicHolidaysEditor", () => {
       ),
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Only a portal admin or a rota admin");
+  });
+
+  it("is not shown while nothing says the reader may edit, even when the list fails", () => {
+    list.isError = true;
+    const { container } = render(<PublicHolidaysEditor />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps the section, year picker included, while another year loads or fails", () => {
+    list.data = editable();
+    render(<PublicHolidaysEditor />);
+
+    list.data = undefined;
+    fireEvent.change(screen.getByLabelText("Year"), { target: { value: String(new Date().getFullYear() + 1) } });
+    expect(screen.getByRole("status")).toHaveTextContent(/Loading the holidays/);
+    expect(screen.getByLabelText("Year")).toBeInTheDocument();
+
+    list.isError = true;
+    fireEvent.change(screen.getByLabelText("Year"), { target: { value: String(new Date().getFullYear() + 2) } });
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not be loaded/);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refetch).toHaveBeenCalled();
+
+    // A later answer that the reader may not edit hides it.
+    list.isError = false;
+    list.data = { holidays: [], countries: [], canEdit: false };
+    fireEvent.change(screen.getByLabelText("Year"), { target: { value: String(new Date().getFullYear()) } });
+    expect(screen.queryByRole("heading", { name: "Public holidays" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a paste typed while the previous one was being added", () => {
+    list.data = editable();
+    render(<PublicHolidaysEditor />);
+    const box = screen.getByLabelText("Holidays to add, one per line");
+    fireEvent.change(box, { target: { value: "2027-01-14, Tamil Thai Pongal Day" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add holidays" }));
+    fireEvent.change(box, { target: { value: "2027-02-04, Independence Day" } });
+    act(() => (addMutate.mock.calls[0][1] as Callbacks).onSuccess?.({ stored: 1 }));
+    expect(box).toHaveValue("2027-02-04, Independence Day");
   });
 
   it("removes one day", () => {
