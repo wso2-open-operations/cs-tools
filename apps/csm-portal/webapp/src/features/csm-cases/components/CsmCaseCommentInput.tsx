@@ -163,18 +163,6 @@ function fileSignature(f: File): string {
   return `${f.name}-${f.size}-${f.lastModified}`;
 }
 
-// Deliberately stricter than the BE's own request-body cap for
-// POST /cases/{id}/comments (handler `maxCommentBodyBytes = 10 << 20`, i.e.
-// 10 MiB). Comments carry inline images as base64 data URIs, so the body can
-// get large fast; this FE-only ceiling nudges users toward attachments well
-// before they'd hit the BE's much larger 413 threshold, and matches the same
-// 1 MiB guard applied to the customer-portal webapp for consistency across
-// both portals.
-const MAX_COMMENT_BODY_BYTES = 1 * 1024 * 1024;
-// Reserve headroom for the JSON envelope ({ type, content }) + string escaping
-// so the FE blocks before the BE rejects with 413.
-const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
-
 /** Strip tags + collapse whitespace to decide if the editor is effectively empty. */
 function isEmpty(html: string): boolean {
   const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
@@ -437,19 +425,6 @@ export default function CsmCaseCommentInput({
   // per mount).
   const [editorMountKey, setEditorMountKey] = useState(0);
 
-  // UTF-8 byte size of the comment body. The BE caps the whole request body, so
-  // mirror it here to fail fast with a clear message instead of a 413.
-  const bodyBytes = useMemo(
-    () => new TextEncoder().encode(html).length,
-    [html],
-  );
-  const overSizeLimit = bodyBytes > MAX_COMMENT_CONTENT_BYTES;
-  const sizeError = overSizeLimit
-    ? `Comment is too large (${formatBytes(bodyBytes)}). Maximum is ${formatBytes(
-        MAX_COMMENT_BODY_BYTES,
-      )} — upload large images as attachments instead of embedding them inline.`
-    : null;
-
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
     // Allow an attachment-only post (no text) — the case still gets the files.
@@ -462,10 +437,6 @@ export default function CsmCaseCommentInput({
     // hit with a doomed request.
     if (!internal && publicCommentDisabledReason && !isEmpty(html)) {
       setError(publicCommentDisabledReason);
-      return;
-    }
-    if (overSizeLimit) {
-      setError(sizeError);
       return;
     }
     // Pre-validate file sizes before posting anything: the send is multi-step
@@ -576,8 +547,6 @@ export default function CsmCaseCommentInput({
     internal,
     publicCommentDisabledReason,
     onSubmit,
-    overSizeLimit,
-    sizeError,
     submitting,
     api,
     imageUploadParentId,
@@ -824,15 +793,14 @@ export default function CsmCaseCommentInput({
         <Typography
           variant="caption"
           color={
-            sizeError || error
+            error
               ? "error"
               : showBottomLockReason
                 ? "warning.main"
                 : "text.secondary"
           }
         >
-          {sizeError ??
-            error ??
+          {error ??
             (uploadingImages
               ? "Uploading images…"
               : showBottomLockReason
@@ -841,13 +809,6 @@ export default function CsmCaseCommentInput({
                 ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
                 : "Ctrl/Cmd + Enter to send.")}
         </Typography>
-        <Tooltip
-          title={
-            overSizeLimit
-              ? "Comment is too large — upload large images as attachments instead of embedding them inline."
-              : ""
-          }
-        >
           <span>
             <Button
               variant="contained"
@@ -859,7 +820,6 @@ export default function CsmCaseCommentInput({
                 submitting ||
                 uploadingImages ||
                 (isBlank(html) && attachments.length === 0) ||
-                overSizeLimit ||
                 // Safety net: a public reply with text while replies are locked.
                 // Normally unreachable — the toggle is forced to work-note mode.
                 (!internal && publicReplyLocked && !isEmpty(html))
@@ -875,7 +835,6 @@ export default function CsmCaseCommentInput({
                   : "Send to customer"}
             </Button>
           </span>
-        </Tooltip>
       </Box>
     </Box>
   );
