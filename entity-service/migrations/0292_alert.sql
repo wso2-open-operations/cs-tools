@@ -33,16 +33,16 @@ CREATE TABLE IF NOT EXISTS alert (
     -- When the gateway accepted the request, which dedup windows are measured on.
     received_on      TIMESTAMPTZ NOT NULL,
     created_on       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- Claim columns for the processor, which takes unprocessed rows with FOR UPDATE SKIP LOCKED.
+    -- Claim columns for the alert processor, which takes unprocessed rows with FOR UPDATE SKIP LOCKED.
     claimed_by       TEXT,
     claim_expires_on TIMESTAMPTZ,
     processed_on     TIMESTAMPTZ,
     CONSTRAINT alert_message_key UNIQUE (message_id, message_index)
 ) WITH (fillfactor = 85, autovacuum_vacuum_scale_factor = 0.05, autovacuum_vacuum_insert_scale_factor = 0.05);
 
--- The processor seeds a claim from the oldest unprocessed ids.
+-- The alert processor seeds a claim from the oldest unprocessed ids.
 CREATE INDEX IF NOT EXISTS alert_unprocessed_idx ON alert (id) WHERE processed_on IS NULL;
--- The processor pulls the rest of a fingerprint into the same claim, so one incident's alerts fold together.
+-- The alert processor pulls the rest of a fingerprint into the same claim, so one incident's alerts fold together.
 CREATE INDEX IF NOT EXISTS alert_unprocessed_fingerprint_idx ON alert (fingerprint) WHERE processed_on IS NULL;
 
 COMMENT ON TABLE alert IS

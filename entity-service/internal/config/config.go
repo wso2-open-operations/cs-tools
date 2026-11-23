@@ -752,16 +752,16 @@ type Config struct {
 	AlertServiceBusTenantID     string
 	AlertServiceBusClientID     string
 	AlertServiceBusClientSecret string
-	// AlertPriorityQueue and AlertStandardQueue are the two queue names (ALERT_SERVICEBUS_PRIORITY_QUEUE, ALERT_SERVICEBUS_STANDARD_QUEUE).
-	AlertPriorityQueue string
-	AlertStandardQueue string
+	// AlertServiceBusPriorityQueues and AlertServiceBusStandardQueues are the Service Bus queue names of each tier (ALERT_SERVICEBUS_PRIORITY_QUEUES, ALERT_SERVICEBUS_STANDARD_QUEUES, comma separated).
+	AlertServiceBusPriorityQueues []string
+	AlertServiceBusStandardQueues []string
 	// AlertConsumerConcurrency is how many alert messages are processed at once (ALERT_CONSUMER_CONCURRENCY, default 8).
 	AlertConsumerConcurrency int
 	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT, default 4).
 	AlertConsumerPriorityWeight int
-	// AlertSQSPriorityQueueURL and AlertSQSStandardQueueURL are the AWS gateway's two SQS standard queues; empty leaves AWS out.
-	AlertSQSPriorityQueueURL string
-	AlertSQSStandardQueueURL string
+	// AlertSQSPriorityQueueURLs and AlertSQSStandardQueueURLs are the SQS standard queue URLs of each tier (ALERT_SQS_PRIORITY_QUEUE_URLS, ALERT_SQS_STANDARD_QUEUE_URLS, comma separated); none leaves AWS out.
+	AlertSQSPriorityQueueURLs []string
+	AlertSQSStandardQueueURLs []string
 	// AlertSQSDeadLetterQueueURL is where an SQS message that can never be stored is moved with its reason; empty leaves it to the redrive policy.
 	AlertSQSDeadLetterQueueURL string
 	// AlertSQSAccessKeyID and AlertSQSSecretAccessKey sign in to SQS; empty uses the default AWS credential chain.
@@ -1130,12 +1130,12 @@ func Load() *Config {
 		AlertServiceBusTenantID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_TENANT_ID")),
 		AlertServiceBusClientID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CLIENT_ID")),
 		AlertServiceBusClientSecret:                   os.Getenv("ALERT_SERVICEBUS_CLIENT_SECRET"),
-		AlertPriorityQueue:                            getEnvOrDefault("ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
-		AlertStandardQueue:                            getEnvOrDefault("ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
+		AlertServiceBusPriorityQueues:                 envQueueList("ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
+		AlertServiceBusStandardQueues:                 envQueueList("ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
 		AlertConsumerPriorityWeight:                   envPositiveInt("ALERT_CONSUMER_PRIORITY_WEIGHT", 4),
-		AlertSQSPriorityQueueURL:                      strings.TrimSpace(os.Getenv("ALERT_SQS_PRIORITY_QUEUE_URL")),
-		AlertSQSStandardQueueURL:                      strings.TrimSpace(os.Getenv("ALERT_SQS_STANDARD_QUEUE_URL")),
+		AlertSQSPriorityQueueURLs:                     envQueueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
+		AlertSQSStandardQueueURLs:                     envQueueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),
 		AlertSQSDeadLetterQueueURL:                    strings.TrimSpace(os.Getenv("ALERT_SQS_DEAD_LETTER_QUEUE_URL")),
 		AlertSQSAccessKeyID:                           strings.TrimSpace(os.Getenv("ALERT_SQS_ACCESS_KEY_ID")),
 		AlertSQSSecretAccessKey:                       os.Getenv("ALERT_SQS_SECRET_ACCESS_KEY"),
@@ -1275,6 +1275,24 @@ func getInt32OrDefault(key string, defaultVal int32, allowZero bool) (int32, err
 		return defaultVal, fmt.Errorf("invalid %s %q: must be %s", key, v, want)
 	}
 	return int32(n), nil
+}
+
+// envQueueList reads a comma separated queue list from listKey, falling back to the older single-queue singleKey and then to defaultQueue.
+func envQueueList(listKey, singleKey, defaultQueue string) []string {
+	raw := os.Getenv(listKey)
+	if strings.TrimSpace(raw) == "" {
+		raw = os.Getenv(singleKey)
+	}
+	if strings.TrimSpace(raw) == "" {
+		raw = defaultQueue
+	}
+	var queues []string
+	for _, queue := range strings.Split(raw, ",") {
+		if queue = strings.TrimSpace(queue); queue != "" {
+			queues = append(queues, queue)
+		}
+	}
+	return queues
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -2004,12 +2022,15 @@ func (c *Config) HasAlertServiceBus() bool {
 
 // HasAlertSQS reports whether the alert consumer receives from AWS SQS.
 func (c *Config) HasAlertSQS() bool {
-	return c.AlertSQSPriorityQueueURL != "" || c.AlertSQSStandardQueueURL != "" || c.AlertSQSDeadLetterQueueURL != "" || c.AlertSQSAccessKeyID != "" || c.AlertSQSSecretAccessKey != ""
+	return len(c.AlertSQSPriorityQueueURLs) > 0 || len(c.AlertSQSStandardQueueURLs) > 0 || c.AlertSQSDeadLetterQueueURL != "" || c.AlertSQSAccessKeyID != "" || c.AlertSQSSecretAccessKey != ""
 }
 
-// AlertSQSRegion is the region the SQS queues live in, read from the priority queue URL.
+// AlertSQSRegion is the region the SQS queues live in, read from the first priority queue URL.
 func (c *Config) AlertSQSRegion() string {
-	region, _ := SQSRegionFromQueueURL(c.AlertSQSPriorityQueueURL)
+	if len(c.AlertSQSPriorityQueueURLs) == 0 {
+		return ""
+	}
+	region, _ := SQSRegionFromQueueURL(c.AlertSQSPriorityQueueURLs[0])
 	return region
 }
 
@@ -2068,41 +2089,64 @@ func (c *Config) validateAlertServiceBus() error {
 	if c.AlertServiceBusNamespace == "" || c.AlertServiceBusTenantID == "" || c.AlertServiceBusClientID == "" || c.AlertServiceBusClientSecret == "" {
 		return fmt.Errorf("ALERT_SERVICEBUS_NAMESPACE, ALERT_SERVICEBUS_TENANT_ID, ALERT_SERVICEBUS_CLIENT_ID and ALERT_SERVICEBUS_CLIENT_SECRET must be set together")
 	}
-	if c.AlertPriorityQueue == c.AlertStandardQueue {
-		return fmt.Errorf("ALERT_SERVICEBUS_PRIORITY_QUEUE and ALERT_SERVICEBUS_STANDARD_QUEUE must name different queues")
+	if len(c.AlertServiceBusPriorityQueues) == 0 || len(c.AlertServiceBusStandardQueues) == 0 {
+		return fmt.Errorf("ALERT_SERVICEBUS_PRIORITY_QUEUES and ALERT_SERVICEBUS_STANDARD_QUEUES each need at least one queue")
+	}
+	// Service Bus entity names ignore case, so a name repeated in another case is the same queue.
+	seen := map[string]bool{}
+	for _, queue := range append(append([]string{}, c.AlertServiceBusPriorityQueues...), c.AlertServiceBusStandardQueues...) {
+		key := strings.ToLower(queue)
+		if seen[key] {
+			return fmt.Errorf("Service Bus queue %q is listed more than once across ALERT_SERVICEBUS_PRIORITY_QUEUES and ALERT_SERVICEBUS_STANDARD_QUEUES", queue)
+		}
+		seen[key] = true
 	}
 	return nil
 }
 
 // validateAlertSQS rejects a partial or inconsistent AWS SQS configuration.
 func (c *Config) validateAlertSQS() error {
-	if c.AlertSQSPriorityQueueURL == "" || c.AlertSQSStandardQueueURL == "" {
-		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URL and ALERT_SQS_STANDARD_QUEUE_URL must be set together")
-	}
-	if c.AlertSQSPriorityQueueURL == c.AlertSQSStandardQueueURL {
-		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URL and ALERT_SQS_STANDARD_QUEUE_URL must name different queues")
+	if len(c.AlertSQSPriorityQueueURLs) == 0 || len(c.AlertSQSStandardQueueURLs) == 0 {
+		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URLS and ALERT_SQS_STANDARD_QUEUE_URLS must be set together")
 	}
 	if (c.AlertSQSAccessKeyID == "") != (c.AlertSQSSecretAccessKey == "") {
 		return fmt.Errorf("ALERT_SQS_ACCESS_KEY_ID and ALERT_SQS_SECRET_ACCESS_KEY must be set together")
 	}
-	region, err := SQSRegionFromQueueURL(c.AlertSQSPriorityQueueURL)
-	if err != nil {
-		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URL: %w", err)
+	type namedURL struct{ name, url string }
+	var inputs []namedURL
+	for _, u := range c.AlertSQSPriorityQueueURLs {
+		inputs = append(inputs, namedURL{"ALERT_SQS_PRIORITY_QUEUE_URLS", u})
 	}
-	for name, queueURL := range map[string]string{"ALERT_SQS_STANDARD_QUEUE_URL": c.AlertSQSStandardQueueURL, "ALERT_SQS_DEAD_LETTER_QUEUE_URL": c.AlertSQSDeadLetterQueueURL} {
-		if queueURL == "" {
-			continue
-		}
-		other, err := SQSRegionFromQueueURL(queueURL)
+	for _, u := range c.AlertSQSStandardQueueURLs {
+		inputs = append(inputs, namedURL{"ALERT_SQS_STANDARD_QUEUE_URLS", u})
+	}
+	// One SQS client serves every queue, so all of them must be in the first priority queue's region.
+	region, err := SQSRegionFromQueueURL(inputs[0].url)
+	if err != nil {
+		return fmt.Errorf("%s: %w", inputs[0].name, err)
+	}
+	checks := inputs
+	if c.AlertSQSDeadLetterQueueURL != "" {
+		checks = append(append([]namedURL{}, inputs...), namedURL{"ALERT_SQS_DEAD_LETTER_QUEUE_URL", c.AlertSQSDeadLetterQueueURL})
+	}
+	for _, q := range checks {
+		other, err := SQSRegionFromQueueURL(q.url)
 		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
+			return fmt.Errorf("%s: %w", q.name, err)
 		}
 		if other != region {
-			return fmt.Errorf("%s is in %s, but the priority queue is in %s; every SQS queue must be in one region", name, other, region)
+			return fmt.Errorf("%s has a queue in %s, but the first priority queue is in %s; every SQS queue must be in one region", q.name, other, region)
 		}
 	}
-	if dlq := c.AlertSQSDeadLetterQueueURL; dlq != "" && (sameSQSQueue(dlq, c.AlertSQSPriorityQueueURL) || sameSQSQueue(dlq, c.AlertSQSStandardQueueURL)) {
-		return fmt.Errorf("ALERT_SQS_DEAD_LETTER_QUEUE_URL must not name an input queue, or every rejected message would be received again")
+	for i, a := range inputs {
+		for _, b := range inputs[i+1:] {
+			if sameSQSQueue(a.url, b.url) {
+				return fmt.Errorf("SQS queue %q is listed more than once across ALERT_SQS_PRIORITY_QUEUE_URLS and ALERT_SQS_STANDARD_QUEUE_URLS", b.url)
+			}
+		}
+		if c.AlertSQSDeadLetterQueueURL != "" && sameSQSQueue(c.AlertSQSDeadLetterQueueURL, a.url) {
+			return fmt.Errorf("ALERT_SQS_DEAD_LETTER_QUEUE_URL must not name an input queue, or every rejected message would be received again")
+		}
 	}
 	return nil
 }

@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1760,8 +1761,8 @@ func alertConsumerConfig() Config {
 	c.AlertServiceBusTenantID = "tenant"
 	c.AlertServiceBusClientID = "client"
 	c.AlertServiceBusClientSecret = "secret"
-	c.AlertPriorityQueue = "priority-queue"
-	c.AlertStandardQueue = "standard-queue"
+	c.AlertServiceBusPriorityQueues = []string{"priority-queue"}
+	c.AlertServiceBusStandardQueues = []string{"standard-queue"}
 	c.AlertConsumerConcurrency = 8
 	c.AlertConsumerPriorityWeight = 4
 	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
@@ -1782,7 +1783,13 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
 		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
 		{name: "no default service", change: func(c *Config) { c.IncidentDefaultServiceID = "" }, wantErr: true},
-		{name: "same queue twice", change: func(c *Config) { c.AlertStandardQueue = c.AlertPriorityQueue }, wantErr: true},
+		{name: "same queue twice", change: func(c *Config) { c.AlertServiceBusStandardQueues = c.AlertServiceBusPriorityQueues }, wantErr: true},
+		{name: "same queue in another case", change: func(c *Config) { c.AlertServiceBusStandardQueues = []string{"standard-queue", "Priority-Queue"} }, wantErr: true},
+		{name: "several queues per tier", change: func(c *Config) {
+			c.AlertServiceBusPriorityQueues = []string{"priority-queue", "eu-priority-queue"}
+			c.AlertServiceBusStandardQueues = []string{"standard-queue", "eu-standard-queue"}
+		}},
+		{name: "a tier with no queue", change: func(c *Config) { c.AlertServiceBusStandardQueues = nil }, wantErr: true},
 		{name: "concurrency takes the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 20 }, wantErr: true},
 		{name: "concurrency above the cap", change: func(c *Config) { c.DBPoolMaxConns = 200; c.AlertConsumerConcurrency = 65 }, wantErr: true},
 	}
@@ -1799,15 +1806,15 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 }
 
 func TestLoad_AlertConsumerDefaults(t *testing.T) {
-	for _, key := range []string{"ALERTING_VERSION", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT"} {
+	for _, key := range []string{"ALERTING_VERSION", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT"} {
 		t.Setenv(key, "")
 	}
 	c := Load()
 	if c.AlertingVersion != AlertingVersionV1 || c.AlertConsumerEnabled() {
 		t.Errorf("ALERTING_VERSION = %q with the consumer on %v by default, want v1 with it off", c.AlertingVersion, c.AlertConsumerEnabled())
 	}
-	if c.AlertPriorityQueue != "priority-queue" || c.AlertStandardQueue != "standard-queue" {
-		t.Errorf("queues = %q and %q, want the gateway's priority-queue and standard-queue", c.AlertPriorityQueue, c.AlertStandardQueue)
+	if !slices.Equal(c.AlertServiceBusPriorityQueues, []string{"priority-queue"}) || !slices.Equal(c.AlertServiceBusStandardQueues, []string{"standard-queue"}) {
+		t.Errorf("queues = %q and %q, want the gateway's priority-queue and standard-queue", c.AlertServiceBusPriorityQueues, c.AlertServiceBusStandardQueues)
 	}
 	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 4 {
 		t.Errorf("concurrency %d and weight %d, want 8 and 4", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
@@ -1817,8 +1824,8 @@ func TestLoad_AlertConsumerDefaults(t *testing.T) {
 func sqsOnlyConfig() Config {
 	c := alertConsumerConfig()
 	c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "", "", "", ""
-	c.AlertSQSPriorityQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"
-	c.AlertSQSStandardQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/standard-queue"
+	c.AlertSQSPriorityQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"}
+	c.AlertSQSStandardQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/standard-queue"}
 	return c
 }
 
@@ -1837,18 +1844,28 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 			a := alertConsumerConfig()
 			c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = a.AlertServiceBusNamespace, a.AlertServiceBusTenantID, a.AlertServiceBusClientID, a.AlertServiceBusClientSecret
 		}},
-		{name: "no cloud at all", change: func(c *Config) { c.AlertSQSPriorityQueueURL, c.AlertSQSStandardQueueURL = "", "" }, wantErr: true},
-		{name: "only one SQS queue", change: func(c *Config) { c.AlertSQSStandardQueueURL = "" }, wantErr: true},
-		{name: "the same SQS queue twice", change: func(c *Config) { c.AlertSQSStandardQueueURL = c.AlertSQSPriorityQueueURL }, wantErr: true},
+		{name: "no cloud at all", change: func(c *Config) { c.AlertSQSPriorityQueueURLs, c.AlertSQSStandardQueueURLs = nil, nil }, wantErr: true},
+		{name: "only one SQS queue", change: func(c *Config) { c.AlertSQSStandardQueueURLs = nil }, wantErr: true},
+		{name: "the same SQS queue twice", change: func(c *Config) { c.AlertSQSStandardQueueURLs = c.AlertSQSPriorityQueueURLs }, wantErr: true},
 		{name: "half a key pair", change: func(c *Config) { c.AlertSQSAccessKeyID = "id" }, wantErr: true},
-		{name: "not a queue url", change: func(c *Config) { c.AlertSQSPriorityQueueURL = "priority-queue" }, wantErr: true},
+		{name: "not a queue url", change: func(c *Config) { c.AlertSQSPriorityQueueURLs = []string{"priority-queue"} }, wantErr: true},
 		{name: "queues in two regions", change: func(c *Config) {
-			c.AlertSQSStandardQueueURL = "https://sqs.eu-west-1.amazonaws.com/123456789012/standard-queue"
+			c.AlertSQSStandardQueueURLs = []string{"https://sqs.eu-west-1.amazonaws.com/123456789012/standard-queue"}
+		}, wantErr: true},
+		{name: "several queues per tier", change: func(c *Config) {
+			c.AlertSQSPriorityQueueURLs = append(c.AlertSQSPriorityQueueURLs, "https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue-2")
+			c.AlertSQSStandardQueueURLs = append(c.AlertSQSStandardQueueURLs, "https://us-east-1.queue.amazonaws.com/123456789012/standard-queue-2")
+		}},
+		{name: "an added queue in another region", change: func(c *Config) {
+			c.AlertSQSStandardQueueURLs = append(c.AlertSQSStandardQueueURLs, "https://sqs.eu-west-1.amazonaws.com/123456789012/standard-queue-2")
+		}, wantErr: true},
+		{name: "one queue listed in both tiers", change: func(c *Config) {
+			c.AlertSQSStandardQueueURLs = append(c.AlertSQSStandardQueueURLs, "https://us-east-1.queue.amazonaws.com/123456789012/priority-queue")
 		}, wantErr: true},
 		{name: "dead-letter queue in another region", change: func(c *Config) {
 			c.AlertSQSDeadLetterQueueURL = "https://sqs.eu-west-1.amazonaws.com/123456789012/alerts-dead-letter"
 		}, wantErr: true},
-		{name: "dead-letter queue is the standard input queue", change: func(c *Config) { c.AlertSQSDeadLetterQueueURL = c.AlertSQSStandardQueueURL }, wantErr: true},
+		{name: "dead-letter queue is the standard input queue", change: func(c *Config) { c.AlertSQSDeadLetterQueueURL = c.AlertSQSStandardQueueURLs[0] }, wantErr: true},
 		{name: "dead-letter queue is the priority input queue in the other hostname form", change: func(c *Config) {
 			c.AlertSQSDeadLetterQueueURL = "https://us-east-1.queue.amazonaws.com/123456789012/priority-queue/"
 		}, wantErr: true},
@@ -1863,6 +1880,28 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 				t.Fatalf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_AlertQueueLists(t *testing.T) {
+	t.Setenv("ALERT_SERVICEBUS_PRIORITY_QUEUES", " priority-queue , eu-priority-queue ,")
+	t.Setenv("ALERT_SERVICEBUS_PRIORITY_QUEUE", "ignored-when-the-list-is-set")
+	t.Setenv("ALERT_SERVICEBUS_STANDARD_QUEUES", "")
+	t.Setenv("ALERT_SERVICEBUS_STANDARD_QUEUE", "legacy-standard")
+	t.Setenv("ALERT_SQS_PRIORITY_QUEUE_URLS", "")
+	t.Setenv("ALERT_SQS_PRIORITY_QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/1/p")
+	t.Setenv("ALERT_SQS_STANDARD_QUEUE_URLS", "https://sqs.us-east-1.amazonaws.com/1/s1,https://sqs.us-east-1.amazonaws.com/1/s2")
+	t.Setenv("ALERT_SQS_STANDARD_QUEUE_URL", "")
+	c := Load()
+	for name, tc := range map[string]struct{ got, want []string }{
+		"service bus priority": {c.AlertServiceBusPriorityQueues, []string{"priority-queue", "eu-priority-queue"}},
+		"service bus standard": {c.AlertServiceBusStandardQueues, []string{"legacy-standard"}},
+		"sqs priority":         {c.AlertSQSPriorityQueueURLs, []string{"https://sqs.us-east-1.amazonaws.com/1/p"}},
+		"sqs standard":         {c.AlertSQSStandardQueueURLs, []string{"https://sqs.us-east-1.amazonaws.com/1/s1", "https://sqs.us-east-1.amazonaws.com/1/s2"}},
+	} {
+		if !slices.Equal(tc.got, tc.want) {
+			t.Errorf("%s = %q, want %q", name, tc.got, tc.want)
+		}
 	}
 }
 
@@ -1918,7 +1957,7 @@ func TestLoad_AlertingVersionIgnoresCase(t *testing.T) {
 func TestConfig_AlertingVersionV1IgnoresIncompleteQueueSettings(t *testing.T) {
 	c := baseValidConfig()
 	c.AlertingVersion = AlertingVersionV1
-	c.AlertSQSPriorityQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"
+	c.AlertSQSPriorityQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"}
 	if err := c.validateAlertConsumer(); err != nil {
 		t.Fatalf("validateAlertConsumer() = %v, want v1 to leave queue settings alone", err)
 	}

@@ -366,18 +366,21 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		if err != nil {
 			log.Fatalf("alert consumer: %v", err)
 		}
-		priority, err := servicebus.NewQueue(client, cfg.AlertPriorityQueue)
-		if err != nil {
-			log.Fatalf("alert consumer: %v", err)
+		// Every listed queue is wired the same way, so adding one is a configuration change.
+		addServiceBus := func(names []string, into *[]service.AlertQueue) {
+			for _, name := range names {
+				queue, err := servicebus.NewQueue(client, name)
+				if err != nil {
+					log.Fatalf("alert consumer: %v", err)
+				}
+				*into = append(*into, queue)
+				closers = append(closers, queue.Close)
+			}
 		}
-		standard, err := servicebus.NewQueue(client, cfg.AlertStandardQueue)
-		if err != nil {
-			log.Fatalf("alert consumer: %v", err)
-		}
-		priorityQueues = append(priorityQueues, priority)
-		standardQueues = append(standardQueues, standard)
-		closers = append(closers, priority.Close, standard.Close, client.Close)
-		log.Printf("alert consumer: Azure Service Bus %s and %s on %s", cfg.AlertPriorityQueue, cfg.AlertStandardQueue, servicebus.FullyQualifiedNamespace(cfg.AlertServiceBusNamespace))
+		addServiceBus(cfg.AlertServiceBusPriorityQueues, &priorityQueues)
+		addServiceBus(cfg.AlertServiceBusStandardQueues, &standardQueues)
+		closers = append(closers, client.Close)
+		log.Printf("alert consumer: Azure Service Bus priority %v and standard %v on %s", cfg.AlertServiceBusPriorityQueues, cfg.AlertServiceBusStandardQueues, servicebus.FullyQualifiedNamespace(cfg.AlertServiceBusNamespace))
 	}
 
 	if cfg.HasAlertSQS() {
@@ -389,11 +392,17 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		if err != nil {
 			log.Fatalf("alert consumer: %v", err)
 		}
-		priority := sqsqueue.NewQueue(client, cfg.AlertSQSPriorityQueueURL, cfg.AlertSQSDeadLetterQueueURL)
-		standard := sqsqueue.NewQueue(client, cfg.AlertSQSStandardQueueURL, cfg.AlertSQSDeadLetterQueueURL)
-		priorityQueues = append(priorityQueues, priority)
-		standardQueues = append(standardQueues, standard)
-		log.Printf("alert consumer: AWS SQS %s and %s in %s", priority.Name(), standard.Name(), cfg.AlertSQSRegion())
+		var names []string
+		addSQS := func(urls []string, into *[]service.AlertQueue) {
+			for _, queueURL := range urls {
+				queue := sqsqueue.NewQueue(client, queueURL, cfg.AlertSQSDeadLetterQueueURL)
+				*into = append(*into, queue)
+				names = append(names, queue.Name())
+			}
+		}
+		addSQS(cfg.AlertSQSPriorityQueueURLs, &priorityQueues)
+		addSQS(cfg.AlertSQSStandardQueueURLs, &standardQueues)
+		log.Printf("alert consumer: AWS SQS %v in %s", names, cfg.AlertSQSRegion())
 	}
 
 	consumer := service.NewAlertConsumer(

@@ -604,6 +604,41 @@ func TestAlertConsumerHandle_SkipsAMessageWhoseLockIsAlreadyLost(t *testing.T) {
 	}
 }
 
+// ackCheckingQueue records whether the alert row already existed when the message was completed.
+type ackCheckingQueue struct {
+	*fakeAlertQueue
+	repo            *fakeAlertRepo
+	rowsAtComplete  int
+	completeChecked bool
+}
+
+func (q *ackCheckingQueue) Complete(ctx context.Context, m *domain.AlertQueueMessage) error {
+	q.rowsAtComplete, q.completeChecked = q.repo.rowCount(), true
+	return q.fakeAlertQueue.Complete(ctx, m)
+}
+
+func TestAlertConsumerHandle_AcksOnlyAfterTheAlertIsSaved(t *testing.T) {
+	repo := newFakeAlertRepo()
+	queue := &ackCheckingQueue{fakeAlertQueue: newFakeAlertQueue("priority"), repo: repo}
+	c := newTestConsumer(t, repo, []AlertQueue{queue}, nil, 1, 4)
+
+	c.handle(context.Background(), domain.AlertTierHigh, queue, alertMessage("m-1", "servicenow", canonicalAlert))
+	if !queue.completeChecked || queue.rowsAtComplete != 1 {
+		t.Fatalf("completed with %d rows saved (completed %v), want the alert saved before the ack", queue.rowsAtComplete, queue.completeChecked)
+	}
+}
+
+func TestAlertConsumerHandle_NeverAcksAnAlertThatWasNotSaved(t *testing.T) {
+	repo := newFakeAlertRepo()
+	repo.failInserts = 99
+	c, priority := singleQueueConsumer(t, repo)
+
+	c.handle(context.Background(), domain.AlertTierHigh, priority, alertMessage("m-1", "servicenow", canonicalAlert))
+	if priority.completedCount() != 0 || len(priority.abandoned) != 1 {
+		t.Fatalf("completed %v, abandoned %v; want the unsaved alert handed back, not acked", priority.completed, priority.abandoned)
+	}
+}
+
 func TestAlertConsumerSettle_DeadLettersWithTheReason(t *testing.T) {
 	c, priority := singleQueueConsumer(t, newFakeAlertRepo())
 	c.settle(context.Background(), priority, alertMessage("m-1", "nagios", canonicalAlert), alertDeadLetterDecision(alertDeadLetterUnknownSource, "no transform"))
