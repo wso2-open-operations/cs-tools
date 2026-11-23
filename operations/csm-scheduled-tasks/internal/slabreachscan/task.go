@@ -59,16 +59,35 @@ type Variant struct {
 // CREVariant is the plain "Weekly SLA Breach Report": the CRE team's
 // cases.
 //
-// Stage {PAUSED, COMPLETED} and onboarding status not one of
-// {IN_PROGRESS, NOT_STARTED}, exactly as the source report's filter is
-// configured.
+// Onboarding status not one of {IN_PROGRESS, NOT_STARTED}, exactly as
+// the source report's filter is configured.
+//
+// The stage list is the one place this variant does NOT reproduce that
+// filter literally. The source report asked for {Paused, Completed},
+// which in the previous system meant "a clock that is no longer
+// running" -- there, a case's own lifecycle moved a breached clock out
+// of "In progress", so those two stages held essentially every recorded
+// breach. The CSM SLA engine does not: it leaves a breached clock at
+// IN_PROGRESS indefinitely and only ever writes a terminal stage of
+// ACHIEVED or CANCELLED (COMPLETED exists in the enum but nothing
+// writes it). Reproduced literally, this filter therefore matches
+// almost nothing -- in production it matched zero rows in a week where
+// the portal showed ~130 breached cases.
+//
+// So the list is the previous system's intent translated into this
+// engine's vocabulary: ACHIEVED is its "Completed", and BREACHED is how
+// entity-service's sla_live reports a clock that has breached and is
+// still running. COMPLETED stays for the synced rows that still carry
+// it, and CANCELLED stays out, as it was out of the source filter.
+// SLA_BREACH_REPORT_CRE_STAGES overrides the whole list if a deployment
+// wants the literal two back.
 func CREVariant() Variant {
 	return Variant{
 		Key:                       "cre",
 		Subject:                   "Weekly SLA Breach Report",
 		Heading:                   "Weekly SLA Breach Report",
 		Intro:                     "Cases handled by the CRE team.",
-		Stages:                    []string{"PAUSED", "COMPLETED"},
+		Stages:                    []string{"PAUSED", "COMPLETED", "ACHIEVED", "BREACHED"},
 		ExcludeOnboardingStatuses: []string{"IN_PROGRESS", "NOT_STARTED"},
 	}
 }
@@ -76,9 +95,15 @@ func CREVariant() Variant {
 // OnboardingVariant is "Weekly SLA Breach Report (Onboarding)": the
 // cases the Onboarding team handles.
 //
-// Stage {IN_PROGRESS} and onboarding status IS one of {IN_PROGRESS} --
-// both differ from CREVariant's, and this is an "is one of" where the
-// CRE report uses "is not one of".
+// Stage "still running" and onboarding status IS one of {IN_PROGRESS}
+// -- both differ from CREVariant's, and this is an "is one of" where
+// the CRE report uses "is not one of".
+//
+// The source report's single stage, "In progress", is two values in
+// this engine's vocabulary: a running clock reads IN_PROGRESS until it
+// breaches and BREACHED (via sla_live) after, so both are listed for
+// the one source value. See CREVariant for why the stage lists are
+// translated rather than copied.
 //
 // The two are NOT complements. The CRE report also excludes
 // NOT_STARTED, which this one does not include, so a NOT_STARTED case
@@ -93,7 +118,7 @@ func OnboardingVariant() Variant {
 		Subject:            "Weekly SLA Breach Report (Onboarding)",
 		Heading:            "Weekly SLA Breach Report (Onboarding)",
 		Intro:              "Cases handled by the Onboarding team.",
-		Stages:             []string{"IN_PROGRESS"},
+		Stages:             []string{"IN_PROGRESS", "BREACHED"},
 		OnboardingStatuses: []string{"IN_PROGRESS"},
 	}
 }
@@ -237,7 +262,14 @@ func SendReport(reports ReportFetcher, email EmailSender, v Variant, definitions
 		if !emailsEnabled {
 			return nil
 		}
-		if len(to) == 0 {
+		// An empty audience means "switched off" only when the mail
+		// actually goes to that audience. Under debug mail mode, or a
+		// run-now that named its own recipients, the sender delivers
+		// somewhere else entirely and the configured "to" is just the
+		// name printed in the test-copy notice -- so skipping here would
+		// make the one configuration that exists to exercise this report
+		// without involving its real recipients send nothing at all.
+		if len(to) == 0 && !notify.Redirects(email) {
 			slog.Info("sla breach report has no recipients; skipping", "report", v.Key)
 			return nil
 		}

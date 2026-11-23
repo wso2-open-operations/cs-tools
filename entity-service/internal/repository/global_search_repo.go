@@ -68,6 +68,10 @@ type SearchScope struct {
 	Unrestricted bool
 	ProjectIDs   []string
 	ViewerEmail  string
+	// AuditActor is the person behind a scope that WithSystemIdentity escalated:
+	// the escalated scope has no ViewerEmail, but the audit log should still name
+	// the person who made the change. Empty on every other scope; see auditActor.
+	AuditActor string
 	// HasInternalAccess is true whenever the caller's email has an active
 	// INTERNAL "user" row, even when Unrestricted is false because the same
 	// email ALSO has an active EXTERNAL row (accessService.scopeForUser's

@@ -41,6 +41,9 @@ func TestSetLogoURL_ReplacesEveryBakedLogo(t *testing.T) {
 	if !strings.Contains(worklogsReportTemplate, "https://example.test/logo.png") || strings.Contains(worklogsReportTemplate, wso2LogoURL) {
 		t.Errorf("logo not replaced in worklogsReportTemplate")
 	}
+	if !strings.Contains(slaBreachReportTemplate, "https://example.test/logo.png") || strings.Contains(slaBreachReportTemplate, wso2LogoURL) {
+		t.Errorf("logo not replaced in slaBreachReportTemplate")
+	}
 }
 
 func TestSetLogoURL_EmptyKeepsDefault(t *testing.T) {
@@ -81,6 +84,13 @@ func TestSetCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	}
 	if !strings.Contains(migrationCaseReportTemplate, "Acme ID</th>") || !strings.Contains(migrationCaseReportTemplate, "Acme Product</th>") {
 		t.Errorf("\"ID\"/\"Product\" column headers not replaced in migrationCaseReportTemplate")
+	}
+	// The SLA breach report was baked like every other template but left out
+	// of logoTemplates, so neither SetCompanyName nor SetLogoURL reached it:
+	// it was the one report that kept saying WSO2 after a rebrand, and the
+	// first production run showed exactly that.
+	if !strings.Contains(slaBreachReportTemplate, "Acme Case Id") || !strings.Contains(slaBreachReportTemplate, "Acme Product</th>") {
+		t.Errorf("\"Case Id\"/\"Product\" column headers not replaced in slaBreachReportTemplate")
 	}
 	// The Apache license header every raw template carries as a leading HTML
 	// comment also contains the literal text "WSO2 LLC" -- unrelated to the

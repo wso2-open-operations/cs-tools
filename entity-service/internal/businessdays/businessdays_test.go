@@ -138,3 +138,48 @@ func TestElapsed_InputInDifferentZoneIsNormalized(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+// TestAddIsTheExactInverseOfElapsed is the property that matters: a
+// derived breach instant has to measure back to exactly the duration it
+// was derived from, or the report puts a breach in the wrong week.
+// Sampled across a full year so weekends and both DST transitions are
+// covered.
+func TestAddIsTheExactInverseOfElapsed(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for hour := 0; hour < 365*24; hour += 7 {
+		at := start.Add(time.Duration(hour) * time.Hour)
+		for _, d := range []time.Duration{
+			time.Hour, 4 * time.Hour, 6 * time.Hour, 24 * time.Hour,
+			48 * time.Hour, 72 * time.Hour, 120 * time.Hour,
+		} {
+			if got := Elapsed(at, Add(at, d)); got != d {
+				t.Fatalf("Elapsed(%s, Add(%s, %s)) = %s, want %s", at, at, d, got, d)
+			}
+		}
+	}
+}
+
+// TestAddSkipsTheWeekend pins the case flat arithmetic gets wrong: a
+// clock starting Friday morning with 24 business hours left is due
+// Monday, not Saturday.
+func TestAddSkipsTheWeekend(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	friday := time.Date(2026, 11, 13, 7, 0, 0, 0, ny)
+	got := Add(friday, 24*time.Hour).In(ny)
+	want := time.Date(2026, 11, 16, 7, 0, 0, 0, ny)
+	if !got.Equal(want) {
+		t.Fatalf("Add(Friday 07:00, 24h) = %s, want %s", got, want)
+	}
+}
+
+// TestAddOfZeroIsTheStart: a zero budget has nothing to advance past,
+// including from a Saturday, where no business time exists at all.
+func TestAddOfZeroIsTheStart(t *testing.T) {
+	saturday := time.Date(2026, 11, 21, 15, 0, 0, 0, time.UTC)
+	if got := Add(saturday, 0); !got.Equal(saturday) {
+		t.Fatalf("Add(start, 0) = %s, want %s", got, saturday)
+	}
+}

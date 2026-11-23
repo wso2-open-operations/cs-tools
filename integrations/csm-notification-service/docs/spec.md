@@ -579,7 +579,7 @@ alert, it never risks sending a duplicate or a false one.
 #### 3.2.1 When an SLA alert fires, and what is checked before it is sent
 
 (Where the clocks themselves are stored and how they pause, resume and
-breach: the core entity service's SLA document, `entity-service/docs/sla.md`.)
+breach: the core entity service's SLA document, `entity-service/docs/specs/sla.md`.)
 
 **Alert points.** Each clock is alerted at 50%, 75% and 100% of its duration.
 This service keeps its own schedule of those moments in Redis rather than

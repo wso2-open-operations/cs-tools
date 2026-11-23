@@ -44,6 +44,7 @@ import (
 	acpnotify "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/auditlog"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
@@ -313,6 +314,27 @@ func main() {
 		}
 	}
 
+	// The audit log upkeep's own client: the same deployment and credentials, one
+	// service-only endpoint. Off by default: entity-service needs
+	// CSM_AUDIT_LOG_ENABLED=true (else the endpoint answers 404), migration 0295
+	// applied and the database role granted EXECUTE on the audit functions first,
+	// or every daily run fails.
+	auditLogMaintenanceEnabled := envBool("AUDIT_LOG_MAINTENANCE_ENABLED", false)
+	var auditLogClient *auditlog.Client
+	if auditLogMaintenanceEnabled {
+		auditLogClient, err = auditlog.NewClient(auditlog.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service audit log client", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// The usage rollups' own client: the same deployment and credentials, two
 	// internal-only endpoints. Off by default for the reason documented on the
 	// task registration below.
@@ -521,6 +543,9 @@ func main() {
 
 	const availabilityTaskName = "availability_recalculation"
 	availabilityTo, availabilityCc := recipientsFor(recipientOverrides, availabilityTaskName)
+
+	const auditLogMaintenanceTaskName = "audit_log_maintenance"
+	auditLogMaintenanceTo, auditLogMaintenanceCc := recipientsFor(recipientOverrides, auditLogMaintenanceTaskName)
 
 	const usageRollupDailyTaskName = "usage_rollup_daily"
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
@@ -776,6 +801,8 @@ func main() {
 	rotaWeekendTo, rotaWeekendCc := recipientsFor(recipientOverrides, rotaWeekendTaskName)
 	const rotaWeekendReminderTaskName = "rota_weekend_reminder"
 	rotaWeekendReminderTo, rotaWeekendReminderCc := recipientsFor(recipientOverrides, rotaWeekendReminderTaskName)
+	const rotaMarkCheckTaskName = "rota_weekday_mark_check"
+	rotaMarkCheckTo, rotaMarkCheckCc := recipientsFor(recipientOverrides, rotaMarkCheckTaskName)
 	const rotaManualTaskName = "rota_manual_reminder"
 	rotaManualTo, rotaManualCc := recipientsFor(recipientOverrides, rotaManualTaskName)
 	const holidayReminderTaskName = "holiday_availability_reminder"
@@ -1088,6 +1115,21 @@ func main() {
 		})
 	}
 
+	// The audit log's weekly upkeep: creates the coming monthly partitions, checks
+	// the log's health and puts back missing audit triggers, all inside entity-service.
+	// Mondays at 01:00 UTC. It is safe to repeat, so a failed run is simply tried again.
+	// It fails, and so is mailed, when it found a health problem, repaired a trigger
+	// (its history had a gap) or could not repair one.
+	if auditLogMaintenanceEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     auditLogMaintenanceTaskName,
+			Schedule: scheduleFor(scheduleOverrides, auditLogMaintenanceTaskName, "0 1 * * 1"),
+			Handler:  auditlog.Maintenance(auditLogClient),
+			To:       auditLogMaintenanceTo,
+			Cc:       auditLogMaintenanceCc,
+		})
+	}
+
 	// Rebuilds the daily and monthly usage rows from the hourly and daily ones --
 	// the Go replacement for ServiceNow's UsageAggregator. The arithmetic is
 	// set-based SQL in entity-service (migration 0245); these tasks only trigger it.
@@ -1139,7 +1181,10 @@ func main() {
 	//     (on Monday when it is already marked); until then the rota admins
 	//     are asked every morning;
 	//   - rota_weekend_reminder, Fri: the weekend summary again, the
-	//     invitations as updates, and cancellations.
+	//     invitations as updates, and cancellations;
+	//   - rota_weekday_mark_check, Sat-Wed at 17:00 Colombo (scheduled
+	//     below): the evening before each weekday reminder, tells the rota
+	//     admins about a weekday rotation that is short of people.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
 	if rotaRemindersAvailable {
@@ -1160,6 +1205,10 @@ func main() {
 		}
 		weekendRequired := parseRequired("ROTA_REMINDER_WEEKEND_REQUIRED",
 			envString("ROTA_REMINDER_WEEKEND_REQUIRED", "CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1"))
+		// How many people each weekday rotation needs, checked by
+		// rota_weekday_mark_check the evening before the reminders.
+		weekdayRequired := parseRequired("ROTA_REMINDER_WEEKDAY_REQUIRED",
+			envString("ROTA_REMINDER_WEEKDAY_REQUIRED", "CRE_EVENING=7"))
 		// Each task's config carries its schedule's period (the run's rota
 		// days are counted from it, so a retry announces what the scheduled
 		// run would have) and the engine's failure audience for it (a run in
@@ -1185,24 +1234,25 @@ func main() {
 				copied = append(append(copied, to...), cc...)
 			}
 			return rotareminder.Config{
-				Family:         family,
-				Rotations:      rotations,
-				Copy:           copied,
-				RedirectTo:     splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
-				ScheduleURL:    scheduleURL,
-				Invites:        invites,
-				OrganizerEmail: organizer,
-				Required:       weekendRequired,
-				Support:        rotaSupport,
-				Windows:        rotaWindows,
-				Settings:       teamScheduleClient,
-				EmailsEnabled:  alertsEnabled,
-				Zone:           rotaZone,
-				Now:            time.Now,
-				Anchor:         periodStart(sched),
-				Task:           task,
-				AlertTo:        append(append([]string{}, to...), alertRecipients...),
-				AlertCc:        cc,
+				Family:          family,
+				Rotations:       rotations,
+				Copy:            copied,
+				RedirectTo:      splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
+				ScheduleURL:     scheduleURL,
+				Invites:         invites,
+				OrganizerEmail:  organizer,
+				Required:        weekendRequired,
+				WeekdayRequired: weekdayRequired,
+				Support:         rotaSupport,
+				Windows:         rotaWindows,
+				Settings:        teamScheduleClient,
+				EmailsEnabled:   alertsEnabled,
+				Zone:            rotaZone,
+				Now:             time.Now,
+				Anchor:          periodStart(sched),
+				Task:            task,
+				AlertTo:         append(append([]string{}, to...), alertRecipients...),
+				AlertCc:         cc,
 			}
 		}
 		weekdayRotations := parseRotations("ROTA_REMINDER_WEEKDAY_SHIFTS",
@@ -1215,14 +1265,31 @@ func main() {
 		// "Send now" requests are picked up at every run: the schedule is finer
 		// than the driver, so it is due at each tick.
 		rotaManualSchedule := scheduleFor(scheduleOverrides, rotaManualTaskName, "*/5 * * * *")
+		// 11:30 UTC = 17:00 Colombo, Saturday to Wednesday: the evening before
+		// each rota_weekday_reminder run (Sun-Thu), so the rota admins hear of
+		// an incomplete weekday rota with a working evening to fix it.
+		rotaMarkCheckSchedule := scheduleFor(scheduleOverrides, rotaMarkCheckTaskName, "30 11 * * 0-3,6")
+		// The weekday reminders, scheduled and "Send now", copy the rota admins.
+		withAdmins := func(cfg rotareminder.Config) rotareminder.Config {
+			cfg.Admins = teamScheduleClient
+			return cfg
+		}
 		tasks = append(tasks,
 			registry.Task{
 				Name:     rotaWeekdayTaskName,
 				Schedule: rotaWeekdaySchedule,
 				Handler: rotareminder.WeekdayReminder(teamScheduleClient, emailClient,
-					rotaConfig(rotaWeekdayTaskName, rotaWeekdaySchedule, weekdayRotations, rotaWeekdayTo, rotaWeekdayCc)),
+					withAdmins(rotaConfig(rotaWeekdayTaskName, rotaWeekdaySchedule, weekdayRotations, rotaWeekdayTo, rotaWeekdayCc))),
 				To: rotaWeekdayTo,
 				Cc: rotaWeekdayCc,
+			},
+			registry.Task{
+				Name:     rotaMarkCheckTaskName,
+				Schedule: rotaMarkCheckSchedule,
+				Handler: rotareminder.WeekdayMarkCheck(teamScheduleClient, teamScheduleClient, emailClient,
+					rotaConfig(rotaMarkCheckTaskName, rotaMarkCheckSchedule, weekdayRotations, rotaMarkCheckTo, rotaMarkCheckCc)),
+				To: rotaMarkCheckTo,
+				Cc: rotaMarkCheckCc,
 			},
 			registry.Task{
 				Name:     rotaWeekendTaskName,
@@ -1244,7 +1311,7 @@ func main() {
 				Name:     rotaManualTaskName,
 				Schedule: rotaManualSchedule,
 				Handler: rotareminder.ManualReminder(teamScheduleClient, teamScheduleClient, teamScheduleClient, emailClient,
-					rotaConfig(rotaManualTaskName, rotaManualSchedule, weekdayRotations, rotaManualTo, rotaManualCc),
+					withAdmins(rotaConfig(rotaManualTaskName, rotaManualSchedule, weekdayRotations, rotaManualTo, rotaManualCc)),
 					rotaConfig(rotaManualTaskName, rotaManualSchedule, weekendRotations, rotaManualTo, rotaManualCc)),
 				To: rotaManualTo,
 				Cc: rotaManualCc,

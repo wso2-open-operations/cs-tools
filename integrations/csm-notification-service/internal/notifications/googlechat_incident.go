@@ -56,6 +56,34 @@ type IncidentRoutes struct {
 	// SRE ladder (paging.KnownSRETeam); nil until the paging configuration is
 	// loaded, when every group counts as unknown.
 	knownSRETeam func(group string) bool
+	// sreTeams resolves an assignment group to its SRE team keys
+	// (paging.SRETeamsForGroup); nil until the paging configuration is
+	// loaded, when every group has none.
+	sreTeams func(group string) []string
+}
+
+// SetSRETeams sets how an assignment group resolves to its SRE team keys
+// (paging.SRETeamsForGroup over the merged SRE ladder configuration).
+func (r *IncidentRoutes) SetSRETeams(teams func(group string) []string) {
+	r.mu.Lock()
+	r.sreTeams = teams
+	r.mu.Unlock()
+}
+
+// SRETeams is the SRE team keys an incident's assignment group belongs to,
+// whose team.chat_webhook_url and team.group_email its SLA alert reaches, as
+// a case's reaches its CRE team's. None before SetSRETeams, or for a nil r.
+func (r *IncidentRoutes) SRETeams(group string) []string {
+	if r == nil || strings.TrimSpace(group) == "" {
+		return nil
+	}
+	r.mu.RLock()
+	teams := r.sreTeams
+	r.mu.RUnlock()
+	if teams == nil {
+		return nil
+	}
+	return teams(group)
 }
 
 // SetKnownSRETeam sets the SRE ladder's known-team check (paging.KnownSRETeam).
@@ -170,6 +198,17 @@ func IncidentAudiences(routes *IncidentRoutes, env map[string][]string, group st
 		return []string{IncidentFallbackAudience}, true
 	}
 	return audiences, false
+}
+
+// IncidentSLAAudiencePrefix namespaces an SRE team's incident SLA space: the
+// team's own team.chat_webhook_url (GoogleChatClient.SetIncidentSLATeamSpaces),
+// apart from the paging-config rooms that get the incident's cards.
+const IncidentSLAAudiencePrefix = "incident-sla/"
+
+// IncidentSLAAudience is the Chat audience key of an SRE team's incident SLA
+// space, by team key.
+func IncidentSLAAudience(teamKey string) string {
+	return IncidentSLAAudiencePrefix + strings.ToLower(strings.TrimSpace(teamKey))
 }
 
 // IncidentGroups is the assignment groups whose INCIDENT_CHAT_SPACES spaces get a group's incident messages: its INCIDENT_CHAT_FANOUT list, else the group itself.

@@ -559,6 +559,15 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // AssigneeEmail, and the Stage/HasBreached/etc. clock state itself) is
 // completely unaffected by onboarding status.
 //
+// AssignmentGroupName is an INCIDENT's current assignment group (NULL, so
+// empty, for every other type -- the joins are restricted to incidents):
+// csm-notification-service resolves it to the incident's SRE team(s), whose
+// team.group_email/chat_webhook_url its incident SLA alert uses.
+// AssignmentGroupTeamKey is the team whose id that group has: an SME team's
+// escalation group shares its team's id (SpecialistHandoffGroupRepository.
+// EnsureTeamGroups), so an incident escalated to an SME team names it. TeamEmail/
+// TeamLeadName stay the account CRE team's for every type, as before.
+//
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
 // live_elapsed_percentage for every row: that view has no business-day
@@ -604,7 +613,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		       COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
 		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
-		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END,
+		       incident_group.name, incident_group_team.key
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -618,6 +628,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 			LIMIT 1
 		) lead_tm ON TRUE
 		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
+		LEFT JOIN "group" incident_group ON incident_group.id = wi.assignment_group_id AND wi.type = 'INCIDENT'
+		LEFT JOIN team incident_group_team ON incident_group_team.id = wi.assignment_group_id AND wi.type = 'INCIDENT'
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		LEFT JOIN project p ON p.id = wi.project_id
 		LEFT JOIN project_type pt ON pt.id = p.project_type_id
@@ -638,14 +650,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail, assignmentGroupName, assignmentGroupTeamKey *string
 	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.ID, &state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
-		&onboardingStatus, &isEvaluation, &onboardingTeamEmail,
+		&onboardingStatus, &isEvaluation, &onboardingTeamEmail, &assignmentGroupName, &assignmentGroupTeamKey,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -669,6 +681,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
 	state.IsEvaluationAccount = isEvaluation
 	state.OnboardingTeamEmail = stringOrEmpty(onboardingTeamEmail)
+	state.AssignmentGroupName = stringOrEmpty(assignmentGroupName)
+	state.AssignmentGroupTeamKey = stringOrEmpty(assignmentGroupTeamKey)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

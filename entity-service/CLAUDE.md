@@ -79,6 +79,9 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_ACP_REOPEN_TEST_PROJECT_SF_ID` | no | — | When set, the reopen check acts on this one Salesforce project only (15- or 18-character id). For staging tests |
 | `ACP_INTERNAL_EMAIL_DOMAINS` | no | `@wso2.com` | Comma-separated domains the "Back to Open state" notice may go to. Each must start with `@` (it is matched as a suffix, so `wso2.com` would admit `someone@notwso2.com`); `Validate` refuses anything else. Add a domain here, not in code, when internal addresses move to another one |
 | `ACP_REACTIVATION_POLL_INTERVAL` | no | `5s` | How often `ProjectReactivationDrainer` looks for queued "Back to Open state" notices. Its own setting, so tuning `INCIDENT_REPORT_POLL_INTERVAL` never changes it |
+| `CSM_AUDIT_LOG_ENABLED` | no | `false` | Registers `POST /audit-log/maintenance`, the audit log's upkeep (see "Audit log maintenance" below). Off = the route is not registered and answers 404, and nothing runs. Parsed as a boolean; an unparseable value keeps it off, with a warning. Turn it on only once migration `0295` is applied and the database role has `EXECUTE` on the audit functions, then turn on csm-scheduled-tasks' `AUDIT_LOG_MAINTENANCE_ENABLED` |
+| `CSM_AUDIT_LOG_MONTHS_AHEAD` | no | `3` | Months past the current one that get an audit log partition when `POST /audit-log/maintenance` runs (see "Audit log maintenance" below). Must be 2 to 24: below 2 the log's own health check reports a problem every day. Any other value falls back to 3, with a warning naming it |
+| `CSM_AUDIT_LOG_RETENTION_MONTHS` | no | `18` | How long audit rows are kept. Each weekly `POST /audit-log/maintenance` run deletes (detaches and drops) the monthly partitions that ended at least this many months ago; nothing is archived. Must be 12 to 120: the floor stops a typo from deleting recent history. Any other value falls back to 18, with a warning naming it |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
 | `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
@@ -179,6 +182,125 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
     leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
     (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
+
+## Audit log maintenance
+
+Migration `0295_audit_log_foundation.sql` adds the field-level audit log: `csm_audit_log` (one row per changed field, one partition per UTC month) and `audit_config` (the tables that are audited). A table is audited only after `register_audit()` is called for it, normally in the migration that creates it.
+
+### What is logged
+
+- **Updates and deletes only.** Every audit trigger is `AFTER UPDATE OR DELETE`, `audit_config` included. An update logs each changed field (old and new value); a delete logs every non-NULL column.
+- **`updated_on` and `updated_by` are never logged**, on any table. `audit_log_row_change` always leaves them out: each log row already has the actor and the time, and jobs that rewrite them on every run (the Salesforce ingest) would only add noise. An update that changes only those two logs nothing.
+- **Who added or changed a row is the row's own columns** (`created_by`, `created_on`, `updated_by`, `updated_on`), not the log. An audited table must carry them or an equivalent: `work_item`'s cover the 14 type tables that share its id, `case_attachment` has `uploaded_by`, `plg_note_revision` has `edited_by` / `edited_on`.
+- **Adding the columns to a table that lacks them** goes in a migration of its own, as `0304` did: nullable, `created_on DEFAULT now()`, `created_by DEFAULT audit_actor()`, and a `BEFORE UPDATE` trigger `csm_stamp_update` (`audit_stamp_update()`) that sets `updated_on` / `updated_by`. It is an ordinary trigger, so it does not fire under `session_replication_role = replica`; the audit trigger does.
+- **`created_by` is mandatory on `role`, `team`, `team_member`, `"user"` and `user_role`** (`0305`): `NOT NULL` with `DEFAULT audit_actor()`, so an insert that leaves it out is stamped instead of failing. A table that still holds a NULL stops the migration, naming the table and the row count.
+- **Who is the actor.** The trigger reads `app.audit_actor`, then `app.viewer_email`, then the database role. `repository.WithSystemIdentity` clears the viewer, so it keeps the person in `SearchScope.AuditActor`, and `queueIdentity` / `setCallerIdentity` set `app.audit_actor` with `app.viewer_email`. `ResolveScope` fills `AuditActor` for staff on any portal and for an `M2M_CLIENT_IDS` service that forwards a user token. A job with no request has no person, so its rows name the database role.
+- The `INSERT` branch in `audit_log_row_change` and `'INSERT'` in the action check are unused but kept: a database with older INSERT triggers keeps working while it is converted.
+
+### Tables that are audited
+
+| Migration | Tables |
+|---|---|
+| `0296`, `0297` | `work_item` and its 14 types, every column |
+| `0298` | `account`, `account_contact`, `project`, `project_contact`, `project_contact_group`, `user`, `role`, `user_role`; `account.sync_time_stamp` left out |
+| `0299` | `case_attachment`, `case_escalation`, `comment`, `comment_attachment`, `customer_call`, `sla`, `time_card`, `work_item_attachment`, `work_item_feedback`, `work_item_watcher` |
+| `0300` | `deployed_product`, `deployment`, `deployment_attachment`, `product`, `product_version`, `product_vulnerability`, `project_group`, `project_group_role`, `project_role`, `project_type` |
+| `0301`, `0302` | `case_escalation_notification_list`; `team`, `team_member` |
+| `0303` | `sf_invoice`, `sf_opportunity`, `sf_opportunity_link`, `sf_opportunity_product` (`sync_time_stamp` and `updated_on` left out), `sla_policy`, `plg_note_revision` |
+
+Other tables are added in their own migration when wanted. The Salesforce ingest writes the `sf_*` tables, so a bulk run pays the audit cost per row, and its rows name the ingest's database role. A column added to an audited table later is recorded with no change. Exclusions, masks and the binary-column rule are fixed by column name at registration: a `bytea` column added later is recorded, and renaming an excluded or masked column starts recording it, so call `register_audit` again after either.
+
+### The weekly upkeep
+
+`POST /audit-log/maintenance` (`serviceOnly`; `service.AuditLogMaintenanceService`) is called by `operations/csm-scheduled-tasks`, weekly (Mondays) by default, (its `audit_log_maintenance` sub-cron, which retries a failed run and mails the failure). This service has no scheduler for it, and one must not be added.
+
+- **Off unless `CSM_AUDIT_LOG_ENABLED=true`** (default false): the route is not registered and answers 404. Turning it on does not audit any table.
+- **Steps, in order:** create the coming partitions (`CSM_AUDIT_LOG_MONTHS_AHEAD`, default 3), reconcile triggers, delete expired partitions, delete expired catch-all rows, check health. Every step runs even if an earlier one fails. The SQL functions take an advisory lock, so a repeated or concurrent call is harmless.
+- **200 means the request was handled, not that all is well.** The body lists `partitionsDeleted`, `defaultRowsDeleted`, `healthProblems`, `repairedTriggers` (were missing, disabled or different from their registration, so the history had a gap), `unresolvedTriggers` (need a person) and `stepErrors` (a step that could not run, with no database detail; the full error is in this service's log). The scheduled task turns any problem into a failure and mails it. A 500 means only that the request was cancelled.
+- **Reconcile runs twice**, with repair on and then off. What the second call still lists is unresolved. A table that cannot be repaired logs a WARNING and does not stop the others.
+- **Locks are bounded.** The partition functions and a repairing `audit_reconcile` set a 2s `lock_timeout` first, so it covers the wait for the advisory lock too. A timeout is a step error, and the next weekly run tries again.
+- **Health** (`audit_partition_health(p_months_ahead)`) reports rows in the catch-all partition, and the current month and any of the next `CSM_AUDIT_LOG_MONTHS_AHEAD` months with no monthly partition, checked month by month, so a missed month is reported on the next run. Data past retention is not reported: a failed deletion is already a step error, and a second alert would cost more than the storage it protects. `SELECT count(*) FROM audit_partition_health()` (2 months ahead) works for a monitoring role even if the scheduled task is down.
+
+### Retention: 18 months, set in configuration
+
+`CSM_AUDIT_LOG_RETENTION_MONTHS` (default 18, from 12 to 120) is the only place the period is set. The SQL functions take it as an argument. Nothing is archived, and nothing is deleted row by row.
+
+- **Old partitions:** `audit_delete_expired_partitions` detaches and drops each monthly partition that ended at least that many months ago, in one transaction, so a failed drop puts it back. A partition that ended exactly 18 months ago goes; one that ended 17 months ago stays.
+- **Catch-all rows:** `audit_delete_expired_default_rows` handles the default partition, which is not a range. The log is append-only, so a DELETE is refused. It swaps the partition instead, in one transaction: detach it, create a fresh one with its TRUNCATE guard, copy the younger rows back with one `INSERT ... SELECT`, check that kept plus expired equals the total (else roll back), and drop the old table. With no expired row, the usual case, it takes no table lock. It takes the advisory lock first, so the check and the swap are one decision.
+- **Shared rules:** `audit_retention_cutoff` refuses a retention below 1 month, which would delete everything. Younger rows stay in the catch-all and keep raising a health problem, so a missed month is still alerted.
+- **Cost:** a detach briefly blocks audit writes, so each deletion gives up after the lock timeout and retries the next day. Tables an admin detached by hand earlier are not tracked: drop them yourself.
+
+### Operating it
+
+- **Grants.** The application role needs `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health(int)`, `audit_reconcile(boolean)`, `audit_delete_expired_partitions(int, text)` and `audit_delete_expired_default_rows(int, text)`, and nothing on the audit tables. The functions are `SECURITY DEFINER` and revoked from `PUBLIC`, as is the trigger function `audit_log_row_change()` (a trigger needs no grant to run). The role must not own the audit tables, or it could drop the trigger or insert rows. Without the grants the daily run fails and mails every day. Re-running `0295` drops a function whose name or signature changed, and its grant goes with it.
+- **Who may read the log.** It holds old and new field values, so `0295` revokes everything on `csm_audit_log` and `audit_config` from `PUBLIC` and grants `SELECT` on `csm_audit_log` only to the login-less role `csm_audit_reader`. It creates that role only when the migration role has `CREATEROLE`; otherwise it prints a notice and nobody but the owner can read. In prod a DBA runs this, adding only named people, never the application role or `PUBLIC`:
+
+  ```sql
+  CREATE ROLE csm_audit_reader NOLOGIN;  -- skip if it exists
+  GRANT SELECT ON csm_audit_log TO csm_audit_reader;
+  GRANT csm_audit_reader TO <person_role>, <person_role>;
+  ```
+
+  Members read through `csm_audit_log` (new partitions are covered; a query on a partition itself is refused), cannot read `audit_config` and cannot change anything. To review access:
+
+  ```sql
+  SELECT DISTINCT grantee FROM information_schema.role_table_grants
+   WHERE table_name = 'csm_audit_log' AND privilege_type = 'SELECT';
+  SELECT member::regrole FROM pg_auth_members WHERE roleid = 'csm_audit_reader'::regrole;
+  ```
+
+- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
+
+  ```sql
+  DO $$
+  DECLARE cfgs audit_config[]; c audit_config;
+  BEGIN
+      SELECT array_agg(a) INTO cfgs FROM audit_config a WHERE a.enabled;
+      FOREACH c IN ARRAY cfgs LOOP
+          PERFORM register_audit(c.schema_name, c.table_name, c.key_columns, c.excluded_columns, c.masked_columns);
+      END LOOP;
+  END $$;
+  ```
+
+- **Rows in the catch-all block their month.** Creating a monthly partition fails while rows for that month sit in `csm_audit_log_default`, so `audit_create_partitions` skips that month with a WARNING and `healthProblems` reports the rows. An admin moves them in one transaction (rename first: the old table must not keep the name `csm_audit_log_default`):
+
+  ```sql
+  BEGIN;
+  SET LOCAL lock_timeout = '5s';
+  -- Block audit writes first, so the count below stays true until COMMIT.
+  LOCK TABLE csm_audit_log IN SHARE MODE;
+  CREATE TEMP TABLE audit_rows_before ON COMMIT DROP AS SELECT count(*) AS n FROM csm_audit_log;
+  ALTER TABLE csm_audit_log DETACH PARTITION csm_audit_log_default;
+  ALTER TABLE csm_audit_log_default RENAME TO csm_audit_log_default_old;
+  CREATE TABLE csm_audit_log_default PARTITION OF csm_audit_log DEFAULT;
+  CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_default
+      FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
+  SELECT audit_create_partitions(<months>);   -- current and coming months only
+  -- Past months: one partition each, explicit UTC bounds, with the TRUNCATE guard.
+  CREATE TABLE csm_audit_log_2026_09 PARTITION OF csm_audit_log
+      FOR VALUES FROM ('2026-09-01 00:00:00+00') TO ('2026-10-01 00:00:00+00');
+  CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_2026_09
+      FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
+  INSERT INTO csm_audit_log SELECT * FROM csm_audit_log_default_old;
+  -- Verify: this must return true, else ROLLBACK (everything above is undone).
+  SELECT count(*) = (SELECT n FROM audit_rows_before) AS all_rows_moved FROM csm_audit_log;
+  DROP TABLE csm_audit_log_default_old;
+  COMMIT;
+  ```
+
+  The lock holds audit writes (and the business writes behind them) until `COMMIT`, which is why the lock timeout is short; if it times out, run it again. `audit_create_partitions` covers only the current and coming months, so a past month with rows in the catch-all needs its own `CREATE TABLE … PARTITION OF` as above. Rows whose month still has no partition land in the new catch-all.
+
+### Rules for new code
+
+- `register_audit` refuses a key column that is also excluded or masked, or that is binary (`bytea`, which is left out of the fields but would still go into the record id): the record id is built from the key columns and stored in clear. It also refuses a column name with a comma, which the trigger's comma-separated lists would split. A key is the primary key's key columns only, not its `INCLUDE` columns. A one-column key is the plain value (`42`); a composite key is a JSON array (`["acme","prod"]`), so two keys never share an id.
+- `exclude_from_audit` on a registered table also drops its trigger, as `unregister_audit` does.
+- Every partition carries its own `csm_audit_log_no_truncate` guard, because a statement trigger on the parent does not reach them. `audit_create_partitions` adds it to each new month.
+- Everything lives in the schema the migration runs in (`current_schema()`), so the audit log works in `public` or in a `DB_SCHEMA`. The `SECURITY DEFINER` functions are installed through `DO` blocks that fill the schema into their search path and table names (`__SCHEMA__` / `__SCHEMA_LIT__`). A new function that touches the audit tables must be added the same way, never with `public` written in. Inside `format()` pass the schema as an argument (`%I`), never inside the format string. Their search path ends with `pg_temp`, so a caller's temp table cannot stand in for `audit_config`.
+- The new-table warning (an event trigger, needs superuser) watches that schema only.
+
+### Tests
+
+`audit_log_maintenance_service_test.go` (service, fake repository). Real Postgres with the migration applied, skipped without `ENTITY_TEST_DATABASE_URL`: `audit_log_migration_integration_test.go` (triggers and registration), `audit_log_retention_integration_test.go` (deletion, health, lock timeouts), `audit_log_columns_integration_test.go` (created and updated columns, the actor), and `audit_log_repo_integration_test.go`.
 
 ## Health probes
 
@@ -3175,6 +3297,17 @@ the Query/SecReport Analysis family) on no severity at all.
   `active_escalation.*`/`escalation_severity`/`source_table`) and the
   space-containing `NOT IN` operator are parsed defensively — never panic,
   an unknown clause just always evaluates false.
+- **The one incident policy, "Cloud Incident - High Priority", is stored
+  decoded too (migration `0293`)**: `priorityINCRITICAL,HIGH^category=SERVICE_INTERRUPTION`
+  starts its 4 h, 24 x 7 resolution clock for an incident of **any** service;
+  On Hold, Resolved and Closed stop it as met; Canceled, a category change
+  or a priority drop below High cancel it. The raw row's two
+  `business_service` clauses (a gate on two named services) were dropped on
+  purpose, so `isIncidentPolicy` now also recognises a row by a
+  `category=`/`category!=` clause, not only by `business_service`.
+  `translateIncidentSLACondition` still runs over the row at read time and
+  leaves decoded text unchanged, so an environment that has not applied
+  `0293` yet keeps evaluating the raw, service-gated row as before.
 - **`repository.SLAEngineRepository.GetCaseFacts`** reads a case's current
   `state`/`priority`/`case_type`/`project_type`/`product`/
   `cs_engineer_response_comment`/workaround-provided/fix-ETA-shared/
@@ -5452,7 +5585,7 @@ security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.g
 
 ## Change requests
 
-Tests: `entity-service/docs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.
+Tests: `entity-service/docs/specs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.
 
 `change_request` (migration 0043) is a shared-PK extension of `work_item`,
 same pattern as `"case"` (`change_request.id` IS `work_item.id`). `SearchChangeRequests`,
@@ -9275,8 +9408,9 @@ is the replacement for configuring a team's own Chat space by hand in
 `team.chat_webhook_url` (nullable TEXT, never written by the ServiceNow sync —
 same "platform-owned config, not synced vocabulary" posture as `team.key`/
 `group_email`) holds the team's own incoming-webhook URL, set directly by
-platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl}]}` for
-every team that has one set — a team with none is left out, same as today's
+platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl, key}]}` for
+every team that has one set (`key` is `team.key`, omitted when empty: an
+incident's SLA alert finds its SRE team's space by key, a case's by name) — a team with none is left out, same as today's
 "not in `GOOGLE_CHAT_SPACES`" case. **Internal-caller-only**
 (`TeamService.ListChatWebhooks` → `RequireInternalCaller`, the same gate
 `GET /sla-status` uses) — a webhook URL lets anyone holding it post

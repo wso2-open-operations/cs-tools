@@ -421,6 +421,30 @@ describe("CasesList optional columns", () => {
     expect(screen.getByText("John Reporter")).toBeInTheDocument();
   });
 
+  it("shows a staff assignee and reporter as the plain name, without the circled W or a badge", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[{ ...CASE, assignee: "Jane Doe Ⓦ", createdBy: "Sam Customer" }]}
+              isLoading={false}
+              optionalColumns={["assignee", "createdBy"]}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.queryByText(/[Ⓦⓦ]/u)).not.toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByText("Sam Customer")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Technical Team" })).not.toBeInTheDocument();
+  });
+
   it("shows an em dash for Issue type/Reporter when the row carries neither", () => {
     renderWithProviders(
       <Routes>
