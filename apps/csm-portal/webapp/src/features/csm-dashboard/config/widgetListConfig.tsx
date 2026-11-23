@@ -85,7 +85,6 @@ import { vulnerabilityPriorityColor } from "@features/csm-security-center/utils/
 import ProductVulnerabilityPreviewDrawer from "@features/csm-security-center/components/ProductVulnerabilityPreviewDrawer";
 import type { BeProductVulnerabilityView } from "@api/backend/types";
 import type { BeCallRequestView } from "@api/backend/types";
-import StaffName from "@components/StaffName";
 import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /** Raw item shape a dashboard widget's `/search` response resolves to —
@@ -556,7 +555,9 @@ function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
                   —
                 </Typography>
               ),
-              <StaffName key="assignedTo" name={problem.assignedTo?.name} />,
+              <Typography key="assignedTo" variant="body2" noWrap>
+                {stripStaffNameMarker(problem.assignedTo?.name) || "—"}
+              </Typography>,
             ],
           };
         })}
@@ -614,7 +615,9 @@ function IncidentTaskWidgetList({ items, isLoading }: WidgetListRendererProps): 
             <Typography key="assignmentGroup" variant="body2" noWrap>
               {task.assignmentGroup?.name || "—"}
             </Typography>,
-            <StaffName key="assignedTo" name={task.assignedTo?.name} />,
+            <Typography key="assignedTo" variant="body2" noWrap>
+              {stripStaffNameMarker(task.assignedTo?.name) || "—"}
+            </Typography>,
           ],
         };
       })}
@@ -790,7 +793,9 @@ function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps
             ))}
           </Box>,
           org.owner ? (
-            <StaffName key="owner" name={org.owner.name} />
+            <Typography key="owner" variant="body2" noWrap>
+              {stripStaffNameMarker(org.owner.name) || "—"}
+            </Typography>
           ) : (
             <Typography key="owner" variant="body2" color="warning.main">
               Unassigned
@@ -845,7 +850,9 @@ function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps
           </Typography>,
           <StatusChip key="stage" value={r.lifecycleStage} kind="lifecycle" />,
           r.owner ? (
-            <StaffName key="owner" name={r.owner.name} />
+            <Typography key="owner" variant="body2" noWrap>
+              {stripStaffNameMarker(r.owner.name) || "—"}
+            </Typography>
           ) : (
             <Typography key="owner" variant="body2" color="warning.main">
               Unassigned
@@ -958,7 +965,9 @@ function TaskWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
                 —
               </Typography>
             ),
-            <StaffName key="assignedTo" name={task.assignedTo?.name} />,
+            <Typography key="assignedTo" variant="body2" noWrap>
+              {stripStaffNameMarker(task.assignedTo?.name) || "—"}
+            </Typography>,
             <Typography key="updated" variant="caption" color="text.secondary" noWrap>
               {formatDate(task.updatedOn)}
             </Typography>,
