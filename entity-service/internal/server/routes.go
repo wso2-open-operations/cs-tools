@@ -2930,6 +2930,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		closeRedis()
 	}
 
+	// The audit log's upkeep (migration 0295), called by csm-scheduled-tasks, weekly by default.
+	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
+	// EXECUTE on the audit_* functions for the application's database role.
+	if db != nil && cfg.AuditLogEnabled {
+		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
+			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead, cfg.AuditLogRetentionMonths))
+		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))
+	}
+
 	// PLG Customer Success Portal. Every repository, service, handler and route
 	// it needs is in plg_routes.go — this is the only part of entity-service's
 	// own wiring the merge touches.

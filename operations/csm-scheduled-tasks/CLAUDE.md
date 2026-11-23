@@ -954,6 +954,16 @@ the run-now is safe beside the scheduled run for the reason above: entity-servic
 `AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
 the logs (`run-now: ...`).
 
+## Audit log maintenance
+
+**`audit_log_maintenance`** (default `0 1 * * 1`, Mondays at 01:00 UTC) is the weekly upkeep of entity-service's field-level audit log (its migration `0295`). It is a trigger, not a calculator: `internal/auditlog.Client` calls `POST /audit-log/maintenance` (service credentials only: this component's client id must be in entity-service's `M2M_CLIENT_IDS`), and the work runs in the database. Entity-service creates the coming monthly partitions, checks the log's health and puts back audit triggers that were missing, disabled or different from their registration; its own CLAUDE.md ("Audit log maintenance") has the details. This is the only scheduler of that upkeep: entity-service has none of its own.
+
+A 200 from entity-service means the steps ran, not that all is well, so `auditlog.Maintenance` reads the lists in the response and **returns an error for any of them**: a step that could not run (`stepErrors`), a health problem (rows in the catch-all partition, a missing monthly partition from this month to the months entity-service creates ahead), a trigger that was repaired (the history had a gap while it was off) or one still wrong after the repair. The error names each, the engine mails it, and the next tick retries. The upkeep is safe to repeat, so the retry succeeds once nothing is wrong any more, which is also how a repaired trigger stops alerting.
+
+**Off unless `AUDIT_LOG_MAINTENANCE_ENABLED=true`** (default false): neither the client nor the task is created otherwise. Turn it on only once entity-service has `CSM_AUDIT_LOG_ENABLED=true` (without it the endpoint answers 404), migration `0295` applied and its database role has `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health(int)`, `audit_reconcile(boolean)`, `audit_delete_expired_partitions(int, text)` and `audit_delete_expired_default_rows(int, text)`; before that every run fails and mails. A failed audit write fails the business write, so once the audit log is in use, a stopped upkeep is an outage a few months out: alert on `SELECT count(*) FROM audit_partition_health()` too, which does not depend on this task.
+
+Deleting audit data older than 18 months is part of the same entity-service call (its last step, `CSM_AUDIT_LOG_RETENTION_MONTHS`): the response lists the dropped partitions as `partitionsDeleted` and the expired catch-all rows as `defaultRowsDeleted`, which this task ignores because a deletion is the expected outcome, not a problem. A step that could not run still arrives in `stepErrors` and fails the run like any other (see entity-service's CLAUDE.md).
+
 ## Usage rollups
 
 Two sub-crons that rebuild the usage summary tables: **`usage_rollup_daily`** (default `30 0 * * *`)
@@ -1141,6 +1151,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

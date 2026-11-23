@@ -88,7 +88,21 @@ var ErrNoCallerIdentity = errors.New("scoped query: no caller identity on contex
 // preserves context values) must never quietly upgrade to unrestricted just
 // because whoever wrote that call site didn't think about it.
 func WithSystemIdentity(ctx context.Context) context.Context {
-	return WithCallerIdentity(ctx, SearchScope{Unrestricted: true})
+	scope := SearchScope{Unrestricted: true}
+	// Escalating must not erase who is acting: the audit log names that person.
+	if previous, ok := CallerIdentityFromContext(ctx); ok {
+		scope.AuditActor = previous.auditActor()
+	}
+	return WithCallerIdentity(ctx, scope)
+}
+
+// auditActor is the person an audit row should name for this scope: the
+// escalated-from person if there is one, else the viewer.
+func (s SearchScope) auditActor() string {
+	if s.AuditActor != "" {
+		return s.AuditActor
+	}
+	return s.ViewerEmail
 }
 
 // Scoped wraps a *pgxpool.Pool so every statement it runs against a
@@ -173,7 +187,9 @@ func identityArgs(scope SearchScope) (isInternal, viewerEmail string) {
 func queueIdentity(batch *pgx.Batch, scope SearchScope) {
 	isInternal, viewerEmail := identityArgs(scope)
 	batch.Queue("SELECT set_config('app.is_internal', $1, true)", isInternal)
-	batch.Queue("SELECT set_config('app.viewer_email', $1, true)", viewerEmail)
+	// app.audit_actor rides in the same statement (no extra round trip): see
+	// SearchScope.AuditActor.
+	batch.Queue("SELECT set_config('app.viewer_email', $1, true), set_config('app.audit_actor', $2, true)", viewerEmail, scope.auditActor())
 	if scope.Unrestricted {
 		batch.Queue("SELECT set_config('app.viewer_project_ids', '{}', true)")
 	} else {
