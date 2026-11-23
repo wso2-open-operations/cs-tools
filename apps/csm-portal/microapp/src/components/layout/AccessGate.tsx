@@ -28,7 +28,7 @@ import { Logger } from "@utils/logger";
  * verdict on the user, so it offers a retry instead of locking them out.
  */
 export function AccessGate({ children }: { children: ReactNode }) {
-  const { access, isLoading, isError, error, refetch } = usePortalAccess();
+  const { access, isLoading, isError, error, hasProfile, refetch } = usePortalAccess();
 
   if (isLoading) {
     return (
@@ -37,14 +37,17 @@ export function AccessGate({ children }: { children: ReactNode }) {
       </Stack>
     );
   }
-  if (isError) {
-    if (isNotAuthorizedError(error)) {
-      Logger.warn("Portal access check was rejected", { status: errorStatus(error) });
-      return <NoPortalAccess status={errorStatus(error)} />;
-    }
+  if (isError && isNotAuthorizedError(error)) {
+    Logger.warn("Portal access check was rejected", { status: errorStatus(error) });
+    return <NoPortalAccess status={errorStatus(error)} />;
+  }
+  // A refetch that fails after a profile was already loaded must not unmount the
+  // page: a New Case draft lives in that page. The first check, with nothing
+  // loaded yet, still waits on Retry rather than guessing a role.
+  if (isError && !hasProfile) {
     return <ErrorState onRetry={refetch} />;
   }
-  if (!access.hasAnyRole) {
+  if (!isError && !access.hasAnyRole) {
     Logger.warn("Signed-in user holds no portal role");
     return <NoPortalAccess />;
   }

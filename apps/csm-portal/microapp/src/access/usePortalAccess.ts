@@ -36,26 +36,51 @@ export function isNotAuthorizedError(error: unknown): boolean {
 export interface PortalAccessState {
   /** What the signed-in user's roles allow. Nothing is allowed until the roles have loaded. */
   access: PortalAccess;
-  /** True while the first `GET /users/me` is in flight. */
+  /**
+   * True until the first profile result, including while that request is paused
+   * offline. `isLoading` alone is false in that pause, because nothing is fetching.
+   */
   isLoading: boolean;
   isError: boolean;
+  /** A profile is already in hand, including one kept after a failed refetch. */
+  hasProfile: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
 /**
+ * Roles the gate may trust. A successful profile, or a failed refetch that is
+ * not a 401/403 and still has the last profile, contribute their roles. A
+ * 401/403 drops them even when the cache still holds an admin profile.
+ */
+export function rolesForPortalAccess(query: {
+  isSuccess: boolean;
+  isError: boolean;
+  data: { roles?: string[] } | undefined;
+  error: unknown;
+}): string[] | undefined {
+  const denied = query.isError && isNotAuthorizedError(query.error);
+  if (query.isSuccess || (query.isError && query.data !== undefined && !denied)) {
+    return query.data?.roles;
+  }
+  return undefined;
+}
+
+/**
  * The signed-in user's portal access, from `GET /users/me` roles. It reads the same query the
  * profile and time-card pages use, so the profile is fetched once, not once per use. A user whose
- * roles have not loaded (or whose request failed) is granted nothing, so controls fail closed.
+ * roles have not loaded, or whose profile comes back 401/403, is granted nothing. A later
+ * retryable failure keeps the last profile, so a page already open is not treated as a role change.
  * See {@link getPortalAccess}.
  */
 export function usePortalAccess(): PortalAccessState {
-  const { data, isLoading, isError, error, refetch } = useQuery(users.me());
+  const query = useQuery(users.me());
   return {
-    access: getPortalAccess(data?.roles),
-    isLoading,
-    isError,
-    error: error ?? null,
-    refetch: () => void refetch(),
+    access: getPortalAccess(rolesForPortalAccess(query)),
+    isLoading: query.isPending,
+    isError: query.isError,
+    hasProfile: query.data !== undefined,
+    error: query.error ?? null,
+    refetch: () => void query.refetch(),
   };
 }

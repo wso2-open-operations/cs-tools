@@ -59,6 +59,7 @@ function render(over: Record<string, unknown>): string {
     access: getPortalAccess(undefined),
     isLoading: false,
     isError: false,
+    hasProfile: false,
     error: null,
     refetch: vi.fn(),
     ...over,
@@ -113,5 +114,16 @@ describe("AccessGate", () => {
       expect(html).not.toContain("don&#x27;t have access");
       expect(html).toContain("Retry");
     }
+  });
+
+  it("keeps the page when a retryable failure happens after a profile loaded", () => {
+    const html = render({
+      isError: true,
+      error: axiosError(503),
+      hasProfile: true,
+      access: getPortalAccess(["cs_engineer"]),
+    });
+    expect(html).toContain("the pages");
+    expect(html).not.toContain("Retry");
   });
 });
