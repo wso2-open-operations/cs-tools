@@ -171,7 +171,7 @@ type AlertConsumer struct {
 	repo            AlertStore
 	transforms      AlertTransforms
 	lanes           map[domain.AlertTier]*alertLane
-	scheduler       *priorityScheduler[queuedMessage]
+	scheduler       *scheduler[queuedMessage]
 	workers         int
 	now             func() time.Time
 	sleep           func(ctx context.Context, d time.Duration) bool
@@ -194,7 +194,7 @@ func NewAlertConsumer(
 		repo:            repo,
 		transforms:      transforms,
 		lanes:           lanes,
-		scheduler:       newPriorityScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
+		scheduler:       newScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
 		workers:         workers,
 		now:             time.Now,
 		sleep:           sleepContext,

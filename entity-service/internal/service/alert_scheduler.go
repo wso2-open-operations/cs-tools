@@ -23,8 +23,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// priorityScheduler gives each free worker a waiting high item first, but after weight high items in a row a waiting standard item, so standard gets at least 1 in weight+1 picks.
-type priorityScheduler[T any] struct {
+// scheduler gives each free worker a waiting high item first, but after weight high items in a row a waiting standard item, so standard gets at least 1 in weight+1 picks.
+type scheduler[T any] struct {
 	mu       sync.Mutex
 	high     <-chan T
 	standard <-chan T
@@ -32,15 +32,15 @@ type priorityScheduler[T any] struct {
 	streak   int
 }
 
-func newPriorityScheduler[T any](high, standard <-chan T, weight int) *priorityScheduler[T] {
+func newScheduler[T any](high, standard <-chan T, weight int) *scheduler[T] {
 	if weight < 1 {
 		weight = 1
 	}
-	return &priorityScheduler[T]{high: high, standard: standard, weight: weight}
+	return &scheduler[T]{high: high, standard: standard, weight: weight}
 }
 
 // next blocks until an item is available and returns it with its tier, or returns false once ctx is done.
-func (s *priorityScheduler[T]) next(ctx context.Context) (T, domain.AlertTier, bool) {
+func (s *scheduler[T]) next(ctx context.Context) (T, domain.AlertTier, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -79,7 +79,7 @@ func (s *priorityScheduler[T]) next(ctx context.Context) (T, domain.AlertTier, b
 	}
 }
 
-func (s *priorityScheduler[T]) picked(item T, tier domain.AlertTier) (T, domain.AlertTier, bool) {
+func (s *scheduler[T]) picked(item T, tier domain.AlertTier) (T, domain.AlertTier, bool) {
 	if tier == domain.AlertTierHigh {
 		s.streak++
 	} else {

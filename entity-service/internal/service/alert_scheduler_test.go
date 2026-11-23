@@ -32,7 +32,7 @@ func filled(n int, prefix string) chan string {
 	return ch
 }
 
-func drainPicks(t *testing.T, s *priorityScheduler[string], n int) []domain.AlertTier {
+func drainPicks(t *testing.T, s *scheduler[string], n int) []domain.AlertTier {
 	t.Helper()
 	tiers := make([]domain.AlertTier, 0, n)
 	for range n {
@@ -45,8 +45,8 @@ func drainPicks(t *testing.T, s *priorityScheduler[string], n int) []domain.Aler
 	return tiers
 }
 
-func TestPriorityScheduler_HighGoesFirstWhileStandardIsEmpty(t *testing.T) {
-	s := newPriorityScheduler(filled(10, "h"), make(chan string), 4)
+func TestScheduler_HighGoesFirstWhileStandardIsEmpty(t *testing.T) {
+	s := newScheduler(filled(10, "h"), make(chan string), 4)
 	for i, tier := range drainPicks(t, s, 10) {
 		if tier != domain.AlertTierHigh {
 			t.Fatalf("pick %d: got %s, want high", i, tier)
@@ -54,8 +54,8 @@ func TestPriorityScheduler_HighGoesFirstWhileStandardIsEmpty(t *testing.T) {
 	}
 }
 
-func TestPriorityScheduler_StandardGetsOneTurnAfterWeightHighPicks(t *testing.T) {
-	s := newPriorityScheduler(filled(12, "h"), filled(3, "s"), 4)
+func TestScheduler_StandardGetsOneTurnAfterWeightHighPicks(t *testing.T) {
+	s := newScheduler(filled(12, "h"), filled(3, "s"), 4)
 	got := drainPicks(t, s, 15)
 	want := []domain.AlertTier{"high", "high", "high", "high", "default", "high", "high", "high", "high", "default", "high", "high", "high", "high", "default"}
 	for i := range want {
@@ -65,8 +65,8 @@ func TestPriorityScheduler_StandardGetsOneTurnAfterWeightHighPicks(t *testing.T)
 	}
 }
 
-func TestPriorityScheduler_StandardRunsFreelyWhenHighIsIdle(t *testing.T) {
-	s := newPriorityScheduler(make(chan string), filled(6, "s"), 4)
+func TestScheduler_StandardRunsFreelyWhenHighIsIdle(t *testing.T) {
+	s := newScheduler(make(chan string), filled(6, "s"), 4)
 	for i, tier := range drainPicks(t, s, 6) {
 		if tier != domain.AlertTierDefault {
 			t.Fatalf("pick %d: got %s, want default", i, tier)
@@ -74,9 +74,9 @@ func TestPriorityScheduler_StandardRunsFreelyWhenHighIsIdle(t *testing.T) {
 	}
 }
 
-func TestPriorityScheduler_HighArrivingLaterJumpsWaitingStandard(t *testing.T) {
+func TestScheduler_HighArrivingLaterJumpsWaitingStandard(t *testing.T) {
 	high := make(chan string, 1)
-	s := newPriorityScheduler(high, filled(5, "s"), 4)
+	s := newScheduler(high, filled(5, "s"), 4)
 	if _, tier, _ := s.next(context.Background()); tier != domain.AlertTierDefault {
 		t.Fatalf("first pick = %s, want default", tier)
 	}
@@ -86,9 +86,9 @@ func TestPriorityScheduler_HighArrivingLaterJumpsWaitingStandard(t *testing.T) {
 	}
 }
 
-func TestPriorityScheduler_BlocksUntilAnItemArrives(t *testing.T) {
+func TestScheduler_BlocksUntilAnItemArrives(t *testing.T) {
 	standard := make(chan string, 1)
-	s := newPriorityScheduler(make(chan string), standard, 4)
+	s := newScheduler(make(chan string), standard, 4)
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		standard <- "late"
@@ -99,8 +99,8 @@ func TestPriorityScheduler_BlocksUntilAnItemArrives(t *testing.T) {
 	}
 }
 
-func TestPriorityScheduler_StopsWhenContextIsDone(t *testing.T) {
-	s := newPriorityScheduler(make(chan string), make(chan string), 4)
+func TestScheduler_StopsWhenContextIsDone(t *testing.T) {
+	s := newScheduler(make(chan string), make(chan string), 4)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, _, ok := s.next(ctx); ok {
@@ -108,8 +108,8 @@ func TestPriorityScheduler_StopsWhenContextIsDone(t *testing.T) {
 	}
 }
 
-func TestPriorityScheduler_WeightBelowOneActsAsOne(t *testing.T) {
-	s := newPriorityScheduler(filled(4, "h"), filled(4, "s"), 0)
+func TestScheduler_WeightBelowOneActsAsOne(t *testing.T) {
+	s := newScheduler(filled(4, "h"), filled(4, "s"), 0)
 	got := drainPicks(t, s, 4)
 	want := []domain.AlertTier{"high", "default", "high", "default"}
 	for i := range want {
@@ -119,9 +119,9 @@ func TestPriorityScheduler_WeightBelowOneActsAsOne(t *testing.T) {
 	}
 }
 
-func TestPriorityScheduler_StopsWhenContextIsDoneEvenWithWaitingItems(t *testing.T) {
+func TestScheduler_StopsWhenContextIsDoneEvenWithWaitingItems(t *testing.T) {
 	high, standard := filled(3, "h"), filled(3, "s")
-	s := newPriorityScheduler(high, standard, 4)
+	s := newScheduler(high, standard, 4)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, _, ok := s.next(ctx); ok {
