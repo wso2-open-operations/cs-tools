@@ -49,7 +49,7 @@ import {
 } from "@features/csm-cases/utils/caseType";
 import { ISSUE_TYPE_LABEL } from "@features/csm-cases/utils/caseIssueType";
 import { effectiveWorkState } from "@features/csm-cases/utils/caseWorkState";
-import StaffName from "@components/StaffName";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import {
   CASE_OPTIONAL_COLUMNS,
   type CaseOptionalColumnId,
@@ -171,11 +171,15 @@ function renderOptionalCell(id: CaseOptionalColumnId, c: CsmCaseRow): JSX.Elemen
       );
     case "assignee":
       return (
-        <StaffName name={c.assignee} fallback="" />
+        <Typography variant="body2" noWrap title={stripStaffNameMarker(c.assignee) || undefined}>
+          {stripStaffNameMarker(c.assignee)}
+        </Typography>
       );
     case "createdBy":
       return (
-        <StaffName name={c.createdBy} />
+        <Typography variant="body2" noWrap title={stripStaffNameMarker(c.createdBy) || undefined}>
+          {stripStaffNameMarker(c.createdBy) || "—"}
+        </Typography>
       );
     case "customer":
       return (
