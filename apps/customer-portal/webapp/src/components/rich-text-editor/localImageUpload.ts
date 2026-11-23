@@ -81,6 +81,27 @@ export function imageRefusal(editor: LexicalEditor, size: number): "count" | "si
 }
 
 /**
+ * Starts storing an image and returns the blob: preview URL it is shown under, without
+ * inserting it: the caller puts the URL into the content itself (pasted HTML keeps its
+ * pictures where they were). If the upload fails the image is taken out of the editor
+ * again and the URL released.
+ */
+export function startImageUpload(
+  editor: LexicalEditor,
+  file: File,
+  onImageUpload: ImageUploadHandler,
+): string {
+  const previewUrl = URL.createObjectURL(file);
+  previewSizes.set(previewUrl, file.size);
+  onImageUpload(file, previewUrl).catch(() => {
+    editor.update(() => $removeImagesBySrc($getRoot(), previewUrl));
+    previewSizes.delete(previewUrl);
+    URL.revokeObjectURL(previewUrl);
+  });
+  return previewUrl;
+}
+
+/**
  * Adds an image to the editor without reading it into the page as base64: it is
  * shown from a local blob: URL while `onImageUpload` stores it. If that fails the
  * image is taken out of the editor again and the URL released.
@@ -91,12 +112,6 @@ export function insertImageWithUpload(
   altText: string,
   onImageUpload: ImageUploadHandler,
 ): void {
-  const previewUrl = URL.createObjectURL(file);
-  previewSizes.set(previewUrl, file.size);
-  editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src: previewUrl, altText });
-  onImageUpload(file, previewUrl).catch(() => {
-    editor.update(() => $removeImagesBySrc($getRoot(), previewUrl));
-    previewSizes.delete(previewUrl);
-    URL.revokeObjectURL(previewUrl);
-  });
+  const src = startImageUpload(editor, file, onImageUpload);
+  editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText });
 }
