@@ -1848,6 +1848,10 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 		{name: "dead-letter queue in another region", change: func(c *Config) {
 			c.AlertSQSDeadLetterQueueURL = "https://sqs.eu-west-1.amazonaws.com/123456789012/alerts-dead-letter"
 		}, wantErr: true},
+		{name: "dead-letter queue is the standard input queue", change: func(c *Config) { c.AlertSQSDeadLetterQueueURL = c.AlertSQSStandardQueueURL }, wantErr: true},
+		{name: "dead-letter queue is the priority input queue in the other hostname form", change: func(c *Config) {
+			c.AlertSQSDeadLetterQueueURL = "https://us-east-1.queue.amazonaws.com/123456789012/priority-queue/"
+		}, wantErr: true},
 		{name: "partial Azure next to complete AWS", change: func(c *Config) { c.AlertServiceBusNamespace = "sbns-example" }, wantErr: true},
 	}
 	for _, tt := range tests {
@@ -1872,7 +1876,7 @@ func TestSQSRegionFromQueueURL(t *testing.T) {
 			t.Errorf("SQSRegionFromQueueURL(%q) = %q, %v; want %q", queueURL, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "priority-queue", "http://sqs.us-east-1.amazonaws.com/1/q", "https://example.com/1/q", "https://sqs.us-east-1.amazonaws.com"} {
+	for _, bad := range []string{"", "priority-queue", "http://sqs.us-east-1.amazonaws.com/1/q", "https://example.com/1/q", "https://sqs.us-east-1.amazonaws.com", "https://sqs..amazonaws.com/1/q", "https://.queue.amazonaws.com/1/q"} {
 		if _, err := SQSRegionFromQueueURL(bad); err == nil {
 			t.Errorf("SQSRegionFromQueueURL(%q) accepted a bad url", bad)
 		}

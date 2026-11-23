@@ -17,8 +17,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -77,7 +79,11 @@ const (
 	alertDeadLetterUnknownSource   = "UnknownSource"
 	alertDeadLetterTransformFailed = "TransformFailed"
 	alertDeadLetterTooManyAlerts   = "TooManyAlerts"
+	alertDeadLetterUnstorable      = "UnstorableAlert"
 )
+
+// errUnstorableAlert marks an alert PostgreSQL refuses on every attempt, so it is dead-lettered instead of retried.
+var errUnstorableAlert = errors.New("the alert holds a NUL character, which PostgreSQL jsonb cannot store")
 
 // maxAlertsPerMessage bounds one message's alerts, far above any real batch but low enough for one insert.
 const maxAlertsPerMessage = 1000
@@ -103,6 +109,9 @@ const processTimeout = 45 * time.Second
 // defaultLockRenewMargin is how long before a message lock expires it is renewed.
 const defaultLockRenewMargin = 15 * time.Second
 
+// settleLockMargin is the lock a message must have left before settling, so a settlement that takes its full timeout still holds the lock.
+const settleLockMargin = settleTimeout + 5*time.Second
+
 // minLockRenewWait keeps renewal from spinning when a lock is already close to expiry.
 const minLockRenewWait = time.Second
 
@@ -127,13 +136,34 @@ type alertDecision struct {
 type queuedMessage struct {
 	message *domain.AlertQueueMessage
 	queue   AlertQueue
+	// release frees the receive slot the message holds on its queue.
+	release func()
+	// stopRenewing stops the lock renewal that has run since the message was received.
+	stopRenewing func()
+}
+
+// takeOver stops the receipt-time renewal and frees the receive slot, so the caller alone handles the message from here.
+func (q queuedMessage) takeOver() {
+	if q.stopRenewing != nil {
+		q.stopRenewing()
+	}
+	if q.release != nil {
+		q.release()
+	}
 }
 
 // alertLane is one tier: every queue of that tier, on every cloud, feeds its buffer.
 type alertLane struct {
-	tier     domain.AlertTier
-	queues   []AlertQueue
+	tier   domain.AlertTier
+	queues []AlertQueue
+	// share is how many messages each queue may hold received but not yet taken by a worker, so one queue cannot fill the tier.
+	share    int
 	messages chan queuedMessage
+}
+
+func newAlertLane(tier domain.AlertTier, queues []AlertQueue, workers int) *alertLane {
+	share := max(workers/max(len(queues), 1), 1)
+	return &alertLane{tier: tier, queues: queues, share: share, messages: make(chan queuedMessage, share*max(len(queues), 1))}
 }
 
 // AlertConsumer streams alerts from the priority and standard queues of every configured cloud into the alert table.
@@ -148,7 +178,7 @@ type AlertConsumer struct {
 	lockRenewMargin time.Duration
 }
 
-// NewAlertConsumer wires every priority queue into the priority tier and every standard queue into the standard tier; each tier buffers at most one message per worker.
+// NewAlertConsumer wires every priority queue into the priority tier and every standard queue into the standard tier; each queue holds at most its share of one message per worker.
 func NewAlertConsumer(
 	repo AlertStore,
 	transforms AlertTransforms,
@@ -157,8 +187,8 @@ func NewAlertConsumer(
 ) *AlertConsumer {
 	workers := max(cfg.Concurrency, 1)
 	lanes := map[domain.AlertTier]*alertLane{
-		domain.AlertTierHigh:    {tier: domain.AlertTierHigh, queues: priorityQueues, messages: make(chan queuedMessage, workers)},
-		domain.AlertTierDefault: {tier: domain.AlertTierDefault, queues: standardQueues, messages: make(chan queuedMessage, workers)},
+		domain.AlertTierHigh:    newAlertLane(domain.AlertTierHigh, priorityQueues, workers),
+		domain.AlertTierDefault: newAlertLane(domain.AlertTierDefault, standardQueues, workers),
 	}
 	return &AlertConsumer{
 		repo:            repo,
@@ -190,13 +220,24 @@ func (c *AlertConsumer) Run(ctx context.Context) {
 	}
 }
 
-// receive keeps waiting on one queue and asks for as many messages as its tier has room for.
+// receive keeps waiting on one queue and asks for as many messages as the queue has free slots; a message holds its slot until a worker takes it.
 func (c *AlertConsumer) receive(ctx context.Context, lane *alertLane, queue AlertQueue) {
+	slots := make(chan struct{}, lane.share)
+	release := func() { <-slots }
 	backoff := receiveBackoffMin
 	for ctx.Err() == nil {
-		room := max(cap(lane.messages)-len(lane.messages), 1)
-		messages, err := queue.Receive(ctx, room)
+		reserved := reserveSlots(ctx, slots)
+		if reserved == 0 {
+			return
+		}
+		messages, err := queue.Receive(ctx, reserved)
+		for range reserved - len(messages) {
+			release()
+		}
 		if err != nil {
+			for range messages {
+				release()
+			}
 			if ctx.Err() != nil {
 				c.abandonAll(queue, messages)
 				return
@@ -209,15 +250,42 @@ func (c *AlertConsumer) receive(ctx context.Context, lane *alertLane, queue Aler
 			continue
 		}
 		backoff = receiveBackoffMin
+		// Renewal starts at receipt, so a message keeps its lock while it waits for a worker.
+		queued := make([]queuedMessage, len(messages))
 		for i, message := range messages {
+			queued[i] = queuedMessage{message: message, queue: queue, release: release, stopRenewing: c.keepLock(context.WithoutCancel(ctx), queue, message)}
+		}
+		for i := range queued {
 			select {
-			case lane.messages <- queuedMessage{message: message, queue: queue}:
+			case lane.messages <- queued[i]:
 			case <-ctx.Done():
-				c.abandonAll(queue, messages[i:])
+				for _, rest := range queued[i:] {
+					rest.takeOver()
+					c.abandonAll(queue, []*domain.AlertQueueMessage{rest.message})
+				}
 				return
 			}
 		}
 	}
+}
+
+// reserveSlots waits for one free slot, then takes every other free one, and returns how many it holds; 0 means ctx is done.
+func reserveSlots(ctx context.Context, slots chan struct{}) int {
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return 0
+	}
+	n := 1
+	for n < cap(slots) {
+		select {
+		case slots <- struct{}{}:
+			n++
+		default:
+			return n
+		}
+	}
+	return n
 }
 
 // work takes the next message by priority and settles it, until ctx is done.
@@ -227,6 +295,7 @@ func (c *AlertConsumer) work(ctx context.Context) {
 		if !ok {
 			return
 		}
+		queued.takeOver()
 		c.handle(ctx, tier, queued.queue, queued.message)
 	}
 }
@@ -235,26 +304,26 @@ func (c *AlertConsumer) work(ctx context.Context) {
 func (c *AlertConsumer) handle(ctx context.Context, tier domain.AlertTier, queue AlertQueue, message *domain.AlertQueueMessage) {
 	processCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processTimeout)
 	defer cancel()
-	if err := c.renewLockIfDue(processCtx, queue, message); err != nil {
+	if err := c.renewLockIfDue(processCtx, queue, message, c.lockRenewMargin); err != nil {
 		slog.WarnContext(ctx, "alert consumer: lock lost while the message waited for a worker, the queue will redeliver it", "messageId", message.ID, "queue", queue.Name(), "err", err)
 		return
 	}
 	stopRenewing := c.keepLock(processCtx, queue, message)
 	decision := c.process(processCtx, tier, message)
 	stopRenewing()
-	// Renewal stops before settling, so the two never touch the message at once; a last renewal covers a slow settlement.
+	// Renewal stops before settling, so the two never touch the message at once; the last renewal leaves room for a settlement that takes its full timeout.
 	renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
 	defer cancelRenew()
-	if err := c.renewLockIfDue(renewCtx, queue, message); err != nil {
+	if err := c.renewLockIfDue(renewCtx, queue, message, settleLockMargin); err != nil {
 		slog.WarnContext(ctx, "alert consumer: lock lost before settlement, the queue will redeliver the message", "messageId", message.ID, "queue", queue.Name(), "err", err)
 		return
 	}
 	c.settle(processCtx, queue, message, decision)
 }
 
-// renewLockIfDue renews the message lock when it expires within lockRenewMargin.
-func (c *AlertConsumer) renewLockIfDue(ctx context.Context, queue AlertQueue, message *domain.AlertQueueMessage) error {
-	if message.LockedUntil == nil || c.now().Add(c.lockRenewMargin).Before(*message.LockedUntil) {
+// renewLockIfDue renews the message lock when it expires within margin.
+func (c *AlertConsumer) renewLockIfDue(ctx context.Context, queue AlertQueue, message *domain.AlertQueueMessage, margin time.Duration) error {
+	if message.LockedUntil == nil || c.now().Add(margin).Before(*message.LockedUntil) {
 		return nil
 	}
 	return queue.RenewLock(ctx, message)
@@ -323,6 +392,9 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 	}
 
 	rows, err := c.buildRows(source, tier, message, alerts, ids)
+	if errors.Is(err, errUnstorableAlert) {
+		return alertDeadLetterDecision(alertDeadLetterUnstorable, err.Error())
+	}
 	if err != nil {
 		return alertDeadLetterDecision(alertDeadLetterTransformFailed, err.Error())
 	}
@@ -359,6 +431,9 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message 
 		if err != nil {
 			return nil, fmt.Errorf("encode alert %d: %w", i, err)
 		}
+		if hasEscapedNUL(body) {
+			return nil, fmt.Errorf("alert %d: %w", i, errUnstorableAlert)
+		}
 		rows[i] = domain.NewAlert{
 			ID:           ids[i],
 			Source:       source,
@@ -371,6 +446,20 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message 
 		}
 	}
 	return rows, nil
+}
+
+// hasEscapedNUL reports whether encoded JSON holds a \u0000 escape, skipping escaped backslashes so a literal "\\u0000" does not count.
+func hasEscapedNUL(body []byte) bool {
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			continue
+		}
+		if bytes.HasPrefix(body[i+1:], []byte("u0000")) {
+			return true
+		}
+		i++
+	}
+	return false
 }
 
 // receivedOn is when the gateway accepted the request, falling back to when the queue stored the message.
@@ -432,6 +521,7 @@ func (c *AlertConsumer) abandonBuffered(lane *alertLane) {
 	for {
 		select {
 		case queued := <-lane.messages:
+			queued.takeOver()
 			c.abandonAll(queued.queue, []*domain.AlertQueueMessage{queued.message})
 		default:
 			return

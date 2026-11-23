@@ -2021,9 +2021,9 @@ func SQSRegionFromQueueURL(queueURL string) (string, error) {
 	}
 	labels := strings.Split(u.Hostname(), ".")
 	switch {
-	case len(labels) >= 4 && labels[0] == "sqs":
+	case len(labels) >= 4 && labels[0] == "sqs" && labels[1] != "":
 		return labels[1], nil
-	case len(labels) >= 4 && labels[1] == "queue":
+	case len(labels) >= 4 && labels[1] == "queue" && labels[0] != "":
 		return labels[0], nil
 	}
 	return "", fmt.Errorf("%q does not name an SQS region", queueURL)
@@ -2101,5 +2101,28 @@ func (c *Config) validateAlertSQS() error {
 			return fmt.Errorf("%s is in %s, but the priority queue is in %s; every SQS queue must be in one region", name, other, region)
 		}
 	}
+	if dlq := c.AlertSQSDeadLetterQueueURL; dlq != "" && (sameSQSQueue(dlq, c.AlertSQSPriorityQueueURL) || sameSQSQueue(dlq, c.AlertSQSStandardQueueURL)) {
+		return fmt.Errorf("ALERT_SQS_DEAD_LETTER_QUEUE_URL must not name an input queue, or every rejected message would be received again")
+	}
 	return nil
+}
+
+// sameSQSQueue reports whether two valid queue URLs name one queue, whichever SQS hostname form each uses.
+func sameSQSQueue(a, b string) bool {
+	regionA, errA := SQSRegionFromQueueURL(a)
+	regionB, errB := SQSRegionFromQueueURL(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	pathA, pathB := sqsQueuePath(a), sqsQueuePath(b)
+	return strings.EqualFold(regionA, regionB) && pathA != "" && pathA == pathB
+}
+
+// sqsQueuePath is the account and queue name part of a queue URL.
+func sqsQueuePath(queueURL string) string {
+	u, err := url.Parse(queueURL)
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(u.Path, "/")
 }

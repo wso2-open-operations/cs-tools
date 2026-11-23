@@ -58,6 +58,8 @@ const (
 	attributeDeadLetterReason      = "dead_letter_reason"
 	attributeDeadLetterDescription = "dead_letter_description"
 	attributeSourceQueue           = "source_queue"
+	// attributeSourceMessageID is the original SQS message id, which stays the same across redeliveries, so copies of one message can be matched.
+	attributeSourceMessageID = "source_message_id"
 )
 
 // errForeignMessage means a message was settled on a queue that did not receive it.
@@ -170,7 +172,7 @@ func (q *Queue) RenewLock(ctx context.Context, message *domain.AlertQueueMessage
 	return nil
 }
 
-// DeadLetter copies the message with its reason to the dead-letter queue and deletes it; without one, it releases the message to the redrive policy.
+// DeadLetter copies the message with its reason to the dead-letter queue and only then deletes it; without one, or when the copy fails, it releases the message to the redrive policy.
 func (q *Queue) DeadLetter(ctx context.Context, message *domain.AlertQueueMessage, reason, description string) error {
 	m, err := handleOf(message)
 	if err != nil {
@@ -182,6 +184,7 @@ func (q *Queue) DeadLetter(ctx context.Context, message *domain.AlertQueueMessag
 	attributes := map[string]types.MessageAttributeValue{
 		attributeDeadLetterReason: stringAttribute(reason),
 		attributeSourceQueue:      stringAttribute(q.name),
+		attributeSourceMessageID:  stringAttribute(aws.ToString(m.MessageId)),
 	}
 	if description != "" {
 		attributes[attributeDeadLetterDescription] = stringAttribute(description)
@@ -199,7 +202,8 @@ func (q *Queue) DeadLetter(ctx context.Context, message *domain.AlertQueueMessag
 		MessageBody:       m.Body,
 		MessageAttributes: attributes,
 	}); err != nil {
-		return fmt.Errorf("send to dead-letter queue: %w", err)
+		// A copy that never fits, such as a body near the size limit plus the reason attributes, must not loop, so the redrive policy takes the original.
+		return errors.Join(fmt.Errorf("send to dead-letter queue: %w", err), q.Abandon(ctx, message))
 	}
 	return q.Complete(ctx, message)
 }

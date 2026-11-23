@@ -363,6 +363,34 @@ func TestAlertConsumerProcess_DeadLettersATransformThatPanics(t *testing.T) {
 	}
 }
 
+func TestAlertConsumerProcess_DeadLettersANULItCannotStore(t *testing.T) {
+	repo := newFakeAlertRepo()
+	c, _ := singleQueueConsumer(t, repo)
+	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","description":"bad \u0000 byte"}`
+
+	decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "servicenow", body))
+	if decision.settlement != alertDeadLetter || decision.reason != alertDeadLetterUnstorable {
+		t.Fatalf("decision = %+v, want dead-letter with %s instead of retrying an insert that always fails", decision, alertDeadLetterUnstorable)
+	}
+	if repo.insertCalls != 0 {
+		t.Fatalf("insert ran %d times, want none", repo.insertCalls)
+	}
+}
+
+func TestHasEscapedNUL(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"a":"x\u0000y"}`: true,
+		`{"a":"\\u0000"}`:  false,
+		`{"a":"\\\u0000"}`: true,
+		`{"a":"plain"}`:    false,
+		`{"a":"\u00001"}`:  true,
+	} {
+		if got := hasEscapedNUL([]byte(body)); got != want {
+			t.Errorf("hasEscapedNUL(%s) = %v, want %v", body, got, want)
+		}
+	}
+}
+
 type panickingTransforms struct{}
 
 func (panickingTransforms) Lookup(string) (alertsource.Transform, bool) {
@@ -386,6 +414,7 @@ func TestAlertConsumerRun_DrainsEveryQueueOnBothCloudsConcurrently(t *testing.T)
 		8, 4)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -471,14 +500,97 @@ func TestAlertConsumerHandle_RenewsTheLockOfAMessageThatWaitedInTheBuffer(t *tes
 	}
 }
 
+// renewalGatedRepo holds every insert until the queue records a lock renewal, and fails the insert if none comes in time.
+type renewalGatedRepo struct {
+	*fakeAlertRepo
+	queue *fakeAlertQueue
+}
+
+func (r renewalGatedRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for r.queue.renewCount() == 0 {
+		if time.Now().After(deadline) {
+			return 0, errors.New("no lock renewal while the insert ran")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return r.fakeAlertRepo.InsertAlerts(ctx, alerts)
+}
+
 func TestAlertConsumerHandle_KeepsTheLockDuringSlowProcessing(t *testing.T) {
-	c, priority := singleQueueConsumer(t, slowAlertRepo{fakeAlertRepo: newFakeAlertRepo(), delay: 300 * time.Millisecond})
+	priority := newFakeAlertQueue("priority")
+	repo := renewalGatedRepo{fakeAlertRepo: newFakeAlertRepo(), queue: priority}
+	c := newTestConsumer(t, repo, []AlertQueue{priority}, []AlertQueue{newFakeAlertQueue("standard")}, 1, 4)
 	c.lockRenewMargin = 950 * time.Millisecond
 
 	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
-	if priority.renewCount() == 0 || priority.completedCount() != 1 {
-		t.Fatalf("renewals %d, completed %v; want the lock renewed while the insert ran", priority.renewCount(), priority.completed)
+	if priority.completedCount() != 1 {
+		t.Fatalf("completed %v; want the insert to see a renewal while it ran, then the message completed", priority.completed)
 	}
+}
+
+func TestAlertConsumerHandle_RenewsBeforeSettlingWhenTheLockCannotCoverASlowSettlement(t *testing.T) {
+	c, priority := singleQueueConsumer(t, newFakeAlertRepo())
+
+	// 20 seconds is past the processing margin but short of a settlement that takes its full timeout.
+	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 20*time.Second))
+	if priority.renewCount() == 0 || priority.completedCount() != 1 {
+		t.Fatalf("renewals %d, completed %v; want the lock renewed before settling", priority.renewCount(), priority.completed)
+	}
+}
+
+func TestAlertConsumerReceive_RenewsTheLockWhileAMessageWaitsInTheBuffer(t *testing.T) {
+	priority := newFakeAlertQueue("priority", lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
+	c := newTestConsumer(t, newFakeAlertRepo(), []AlertQueue{priority}, nil, 1, 4)
+	c.lockRenewMargin = 950 * time.Millisecond
+	lane := c.lanes[domain.AlertTierHigh]
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.receive(ctx, lane, priority)
+	deadline := time.Now().Add(5 * time.Second)
+	for priority.renewCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the lock of a buffered message was never renewed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	queued := <-lane.messages
+	queued.takeOver()
+}
+
+func TestAlertConsumerReceive_OneQueueCannotFillTheTier(t *testing.T) {
+	var messages []*domain.AlertQueueMessage
+	for i := range 10 {
+		messages = append(messages, alertMessage(fmt.Sprintf("m-%d", i), "servicenow", canonicalAlert))
+	}
+	busy := newFakeAlertQueue("sqs/priority-queue", messages...)
+	idle := newFakeAlertQueue("servicebus/priority-queue")
+	c := newTestConsumer(t, newFakeAlertRepo(), []AlertQueue{busy, idle}, nil, 8, 4)
+	lane := c.lanes[domain.AlertTierHigh]
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.receive(ctx, lane, busy)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(lane.messages) < 4 {
+		if time.Now().After(deadline) {
+			t.Fatalf("buffered %d messages, want the busy queue's share of 4", len(lane.messages))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := len(lane.messages); got != 4 {
+		t.Fatalf("buffered %d messages, want the busy queue held to its share of 4 so the idle queue keeps room", got)
+	}
+	cancel()
+	<-done
+	c.abandonBuffered(lane)
 }
 
 func TestAlertConsumerHandle_SkipsAMessageWhoseLockIsAlreadyLost(t *testing.T) {

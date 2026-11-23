@@ -37,6 +37,9 @@ type fakeClient struct {
 	deleted    []string
 	visibility map[string]int32
 	sent       []*sqs.SendMessageInput
+	sendErr    error
+	// calls is every settlement call in order, so a test can check that the copy comes before the delete.
+	calls []string
 }
 
 func (c *fakeClient) ReceiveMessage(ctx context.Context, in *sqs.ReceiveMessageInput, _ ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
@@ -57,6 +60,7 @@ func (c *fakeClient) ReceiveMessage(ctx context.Context, in *sqs.ReceiveMessageI
 
 func (c *fakeClient) DeleteMessage(_ context.Context, in *sqs.DeleteMessageInput, _ ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
 	c.deleted = append(c.deleted, aws.ToString(in.ReceiptHandle))
+	c.calls = append(c.calls, "delete")
 	return &sqs.DeleteMessageOutput{}, nil
 }
 
@@ -65,10 +69,15 @@ func (c *fakeClient) ChangeMessageVisibility(_ context.Context, in *sqs.ChangeMe
 		c.visibility = map[string]int32{}
 	}
 	c.visibility[aws.ToString(in.ReceiptHandle)] = in.VisibilityTimeout
+	c.calls = append(c.calls, "visibility")
 	return &sqs.ChangeMessageVisibilityOutput{}, nil
 }
 
 func (c *fakeClient) SendMessage(_ context.Context, in *sqs.SendMessageInput, _ ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
+	c.calls = append(c.calls, "send")
+	if c.sendErr != nil {
+		return nil, c.sendErr
+	}
 	c.sent = append(c.sent, in)
 	return &sqs.SendMessageOutput{}, nil
 }
@@ -140,7 +149,7 @@ func TestQueue_Settlement(t *testing.T) {
 	if err := q.Complete(ctx, messages[0]); err != nil || len(c.deleted) != 1 || c.deleted[0] != "receipt-m-1" {
 		t.Fatalf("Complete deleted %v (%v), want receipt-m-1", c.deleted, err)
 	}
-	if err := q.Abandon(ctx, messages[1]); err != nil || c.visibility["receipt-m-2"] != 0 {
+	if err := q.Abandon(ctx, messages[1]); err != nil || !hasVisibility(c, "receipt-m-2", 0) {
 		t.Fatalf("Abandon set visibility %v (%v), want 0", c.visibility, err)
 	}
 	before := *messages[2].LockedUntil
@@ -158,14 +167,14 @@ func TestQueue_DeadLetterMovesTheMessageWithItsReason(t *testing.T) {
 	if err := q.DeadLetter(context.Background(), m, "UnknownSource", "no transform"); err != nil {
 		t.Fatalf("DeadLetter: %v", err)
 	}
-	if len(c.sent) != 1 || len(c.deleted) != 1 {
-		t.Fatalf("sent %d and deleted %d, want the message copied to the dead-letter queue and then deleted", len(c.sent), len(c.deleted))
+	if len(c.calls) != 2 || c.calls[0] != "send" || c.calls[1] != "delete" {
+		t.Fatalf("calls = %v, want the message copied to the dead-letter queue and then deleted", c.calls)
 	}
 	sent := c.sent[0]
 	if aws.ToString(sent.QueueUrl) != "https://sqs.us-east-1.amazonaws.com/123456789012/alerts-dead-letter" || aws.ToString(sent.MessageBody) != `{"alert":true}` {
 		t.Fatalf("sent to %s body %s", aws.ToString(sent.QueueUrl), aws.ToString(sent.MessageBody))
 	}
-	for key, want := range map[string]string{"dead_letter_reason": "UnknownSource", "dead_letter_description": "no transform", "source_queue": "priority-queue", "source": " azure "} {
+	for key, want := range map[string]string{"dead_letter_reason": "UnknownSource", "dead_letter_description": "no transform", "source_queue": "priority-queue", "source_message_id": "m-1", "source": " azure "} {
 		if got := aws.ToString(sent.MessageAttributes[key].StringValue); got != want {
 			t.Errorf("attribute %s = %q, want %q", key, got, want)
 		}
@@ -180,9 +189,28 @@ func TestQueue_DeadLetterWithoutAQueueLeavesItToTheRedrivePolicy(t *testing.T) {
 	if err := q.DeadLetter(context.Background(), m, "UnknownSource", ""); err != nil {
 		t.Fatalf("DeadLetter: %v", err)
 	}
-	if len(c.sent) != 0 || len(c.deleted) != 0 || c.visibility["receipt-m-1"] != 0 {
+	if len(c.sent) != 0 || len(c.deleted) != 0 || !hasVisibility(c, "receipt-m-1", 0) {
 		t.Fatalf("sent %d, deleted %d, visibility %v; want the message released, not moved", len(c.sent), len(c.deleted), c.visibility)
 	}
+}
+
+func TestQueue_DeadLetterKeepsTheOriginalWhenTheCopyFails(t *testing.T) {
+	c := &fakeClient{receives: [][]types.Message{{sqsMessage("m-1")}}, sendErr: errors.New("message too long")}
+	q := newQueue(c, priorityURL, "https://sqs.us-east-1.amazonaws.com/123456789012/alerts-dead-letter")
+	m := receiveOne(t, q)
+
+	if err := q.DeadLetter(context.Background(), m, "UnknownSource", "no transform"); err == nil {
+		t.Fatal("DeadLetter returned no error after the copy failed")
+	}
+	if len(c.deleted) != 0 || !hasVisibility(c, "receipt-m-1", 0) {
+		t.Fatalf("deleted %v, visibility %v; want the original kept and released to the redrive policy", c.deleted, c.visibility)
+	}
+}
+
+// hasVisibility reports whether a visibility change was actually sent for the receipt handle, with that timeout.
+func hasVisibility(c *fakeClient, handle string, want int32) bool {
+	got, ok := c.visibility[handle]
+	return ok && got == want
 }
 
 func TestQueue_RefusesAMessageFromAnotherQueue(t *testing.T) {
