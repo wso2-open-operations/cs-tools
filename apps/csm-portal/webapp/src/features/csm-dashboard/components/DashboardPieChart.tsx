@@ -21,7 +21,6 @@ import { useState, type JSX, type KeyboardEvent, type SyntheticEvent } from "rea
 import type { BeWidgetPaletteColor } from "@api/backend/types";
 import type { PieSliceResult } from "@features/csm-dashboard/api/useWidgetPieData";
 import { useDarkMode } from "@utils/useDarkMode";
-import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
 
 const CHART_SIZE_PX = 180;
 const INNER_RADIUS_PX = 62;
@@ -416,12 +415,9 @@ export default function DashboardPieChart({
                   flexShrink: 0,
                 }}
               />
-              <Box sx={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 0.5 }}>
-                <Typography variant="body2" noWrap>
-                  {slice.label}
-                </Typography>
-                {slice.isStaff && <TechnicalTeamBadge />}
-              </Box>
+              <Typography variant="body2" sx={{ flex: 1 }} noWrap>
+                {slice.label}
+              </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                 {shown(slice.value)} ({pct}%)
               </Typography>
