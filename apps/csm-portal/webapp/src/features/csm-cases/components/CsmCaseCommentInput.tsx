@@ -46,6 +46,10 @@ import {
 import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
+import {
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_IMAGES_MESSAGE,
+} from "@components/rich-text-editor/richTextConstants";
 import { imagePasteRefusalMessage, type ImagePasteRefusal } from "@components/rich-text-editor/inlineImageLimits";
 import {
   attachmentLimitMessage,
@@ -169,6 +173,9 @@ function fileSignature(f: File): string {
 // markup typed in HTML source mode. Headroom covers the JSON envelope and escaping.
 const MAX_COMMENT_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
+
+/** Every `<img>` in the draft counts toward the image limit, whatever its source. */
+const IMG_TAG = /<img\b/gi;
 
 /** Strip tags + collapse whitespace to decide if the editor is effectively empty. */
 function isEmpty(html: string): boolean {
@@ -314,8 +321,18 @@ export default function CsmCaseCommentInput({
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
+  // A refused image is said once and goes away by itself: the draft is unchanged
+  // by the refusal, so the message must not stay up like an error that blocks Send.
+  const pasteNoticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(pasteNoticeTimer.current), []);
   const onPasteError = useCallback((reason: ImagePasteRefusal) => {
-    setError(imagePasteRefusalMessage(reason));
+    const message = imagePasteRefusalMessage(reason);
+    setError(message);
+    clearTimeout(pasteNoticeTimer.current);
+    pasteNoticeTimer.current = setTimeout(
+      () => setError((current) => (current === message ? null : current)),
+      8000,
+    );
   }, []);
 
   // Dropping files directly onto the composer, as an alternative to the
@@ -432,8 +449,16 @@ export default function CsmCaseCommentInput({
   // per mount).
   const [editorMountKey, setEditorMountKey] = useState(0);
 
+  // The editor refuses an image that would pass the limit, but a draft can still
+  // hold too many (HTML source mode), so Send checks the draft itself too.
+  const overImageLimit = (html.match(IMG_TAG)?.length ?? 0) > MAX_COMMENT_IMAGES;
+
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
+    if (overImageLimit) {
+      setError(MAX_COMMENT_IMAGES_MESSAGE);
+      return;
+    }
     // Allow an attachment-only post (no text) — the case still gets the files.
     if (isBlank(html) && attachments.length === 0) {
       setError("Add a comment or an attachment.");
@@ -568,6 +593,7 @@ export default function CsmCaseCommentInput({
     submitting,
     api,
     imageUploadParentId,
+    overImageLimit,
   ]);
 
   // Customer replies are blocked for this case state. The composer is locked to
@@ -811,14 +837,15 @@ export default function CsmCaseCommentInput({
         <Typography
           variant="caption"
           color={
-            error
+            error || overImageLimit
               ? "error"
               : showBottomLockReason
                 ? "warning.main"
                 : "text.secondary"
           }
         >
-          {error ??
+          {(overImageLimit ? MAX_COMMENT_IMAGES_MESSAGE : null) ??
+            error ??
             (uploadingImages
               ? "Uploading images…"
               : showBottomLockReason
@@ -837,6 +864,7 @@ export default function CsmCaseCommentInput({
                 disabled ||
                 submitting ||
                 uploadingImages ||
+                overImageLimit ||
                 (isBlank(html) && attachments.length === 0) ||
                 // Safety net: a public reply with text while replies are locked.
                 // Normally unreachable — the toggle is forced to work-note mode.
