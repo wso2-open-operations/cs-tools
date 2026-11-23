@@ -680,7 +680,8 @@ text, saves the draft as a template and opens the Manage dialog. The list is fet
 - **Inserting.** A picked template goes to the editor as `Editor`'s `insertHtml` (`InsertHtmlPlugin` calls
   `$insertHtmlAsBlocks`, `insertHtmlBlocks.ts`: at the selection, else at the end, through Lexical's DOM import,
   never innerHTML). Mid-paragraph it splits the paragraph and puts the template between the halves, so no text
-  on either side is merged into it. The parent clears the request in
+  on either side is merged into it. With the cursor in a list or a code block it goes after that whole block
+  instead (a paragraph can't sit inside a list, and a code block is not split). The parent clears the request in
   `onHtmlInserted`: the editor is remounted on some toggles, and a request left set would be inserted again. In
   HTML-source mode the template is appended to the source text.
 - **Previews are text only** (`templatePlainText`, an inert `DOMParser` document read as `textContent`, with a

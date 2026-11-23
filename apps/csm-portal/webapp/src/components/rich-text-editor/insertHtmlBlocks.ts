@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { $isCodeNode } from "@lexical/code";
 import { $generateNodesFromDOM } from "@lexical/html";
 import { $findMatchingParent } from "@lexical/utils";
 import {
@@ -52,8 +53,8 @@ function pointStillFits(point: PointType): boolean {
  * cursor is merged into it ($insertNodes alone would glue the text after the
  * cursor onto the inserted last line). The HTML goes through Lexical's DOM
  * import, so only node types the editor knows survive; nothing is innerHTML.
- * Inside a list the template goes after the whole list, since a paragraph
- * can't be a direct child of a list.
+ * Inside a list or a code block the template goes after the whole block: a
+ * paragraph can't be a direct child of a list, and a code block is not split.
  *
  * `lastSelection` is where the cursor was before the editor lost focus: picking
  * from a menu blurs the editor and Lexical then has no selection, so without
@@ -83,9 +84,11 @@ export function $insertHtmlAsBlocks(
   const anchor = selection.anchor.getNode();
   const block = anchor.getTopLevelElement();
   const nearest = $findMatchingParent(anchor, (n) => $isElementNode(n) && !n.isInline());
-  if (block && nearest && nearest !== block) {
+  if (block && ((nearest && nearest !== block) || $isCodeNode(block))) {
     // The cursor is in a nested block (a list item): splitting it would put the
     // template's paragraphs inside the list, so they go after the whole list.
+    // A code block cannot be split either: its own "new paragraph" adds a line
+    // break to the code and returns nothing, so the template goes after it.
     const blocks = asBlocks(nodes);
     let prev: LexicalNode = block;
     blocks.forEach((b) => {

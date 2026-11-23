@@ -15,6 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
+import { $createCodeNode, CodeHighlightNode, CodeNode } from "@lexical/code";
 import { $createListItemNode, $createListNode, $isListNode, ListItemNode, ListNode } from "@lexical/list";
 import {
   $createParagraphNode,
@@ -131,6 +132,39 @@ describe("$insertHtmlAsBlocks inside a list", () => {
       { type: "paragraph", text: "Intro.", kids: [] },
       { type: "list", text: "One\n\nTwoThree", kids: ["listitem", "listitem"] },
       { type: "paragraph", text: "Template.", kids: [] },
+    ]);
+  });
+});
+
+describe("$insertHtmlAsBlocks inside a code block", () => {
+  it("leaves the code untouched and puts the template after the code block", () => {
+    const editor = createEditor({
+      namespace: "test",
+      nodes: [CodeNode, CodeHighlightNode],
+      onError: (e) => { throw e; },
+    });
+    editor.update(
+      () => {
+        const p = $createParagraphNode();
+        p.append($createTextNode("Intro."));
+        const code = $createCodeNode();
+        const t = $createTextNode("let x = 1;");
+        code.append(t);
+        $getRoot().append(p, code);
+        t.select(4, 4);
+      },
+      { discrete: true },
+    );
+    insert(editor, "<p>Template.</p>");
+    const shape = editor.getEditorState().read(() =>
+      $getRoot()
+        .getChildren()
+        .map((n) => ({ type: n.getType(), text: n.getTextContent() })),
+    );
+    expect(shape).toEqual([
+      { type: "paragraph", text: "Intro." },
+      { type: "code", text: "let x = 1;" },
+      { type: "paragraph", text: "Template." },
     ]);
   });
 });
