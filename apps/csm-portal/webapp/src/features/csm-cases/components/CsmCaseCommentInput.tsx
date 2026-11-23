@@ -163,6 +163,13 @@ function fileSignature(f: File): string {
   return `${f.name}-${f.size}-${f.lastModified}`;
 }
 
+// The backend refuses a comment-create body over 10 MiB (`maxCommentBodyBytes`
+// in the portal backend's cases.go). Pasted images are uploaded separately and
+// only referenced from the comment, so this is reached only by very long text or
+// markup typed in HTML source mode. Headroom covers the JSON envelope and escaping.
+const MAX_COMMENT_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
+
 /** Strip tags + collapse whitespace to decide if the editor is effectively empty. */
 function isEmpty(html: string): boolean {
   const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
@@ -448,6 +455,17 @@ export default function CsmCaseCommentInput({
       setError(
         `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
           maxBytes,
+        )}.`,
+      );
+      return;
+    }
+    // Refuse an over-long body before uploading any image, so a comment the
+    // backend would reject with a 413 leaves nothing stored.
+    const bodyBytes = new TextEncoder().encode(html).length;
+    if (bodyBytes > MAX_COMMENT_CONTENT_BYTES) {
+      setError(
+        `Comment is too large (${formatBytes(bodyBytes)}). Maximum is ${formatBytes(
+          MAX_COMMENT_BODY_BYTES,
         )}.`,
       );
       return;
