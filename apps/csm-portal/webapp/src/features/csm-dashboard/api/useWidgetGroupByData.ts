@@ -323,9 +323,8 @@ export function useWidgetGroupByData(
   // that is only the marker reads "Unnamed", never the marker itself.
   const groupLabel = (raw: string): string => {
     if (dayLabels) return formatDayLabel(raw);
-    const cleaned = stripStaffNameMarker(raw);
-    if (cleaned) return cleaned;
-    return hasStaffNameMarker(raw) ? UNNAMED_LABEL : raw;
+    if (!hasStaffNameMarker(raw)) return raw;
+    return stripStaffNameMarker(raw) || UNNAMED_LABEL;
   };
   const slices: PieSliceResult[] = buckets.map((bucket) => ({
     label: groupLabel(bucket.label),
