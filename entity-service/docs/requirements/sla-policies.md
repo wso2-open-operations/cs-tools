@@ -8,7 +8,7 @@ are intended; they are collected in section 9.
 
 **Related:** [sla-clocks.md](sla-clocks.md) (what a clock does once started),
 [sla-status-and-reporting.md](sla-status-and-reporting.md), and the storage-level view in
-[../sla.md](../sla.md).
+[../specs/sla.md](../specs/sla.md).
 
 ---
 

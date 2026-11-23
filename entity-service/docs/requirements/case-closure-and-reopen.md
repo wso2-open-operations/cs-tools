@@ -8,7 +8,7 @@ are collected in section 9.
 
 Related documents: [case-creation-and-detail.md](case-creation-and-detail.md),
 [case-updates-and-states.md](case-updates-and-states.md) (the state tables and every other
-change), [case-escalation.md](case-escalation.md), and [sla.md](../sla.md).
+change), [case-escalation.md](case-escalation.md), and [sla.md](../specs/sla.md).
 
 "Case" here means any of the five ticket kinds listed in
 [case-creation-and-detail.md](case-creation-and-detail.md) section 3, unless a rule says
@@ -39,7 +39,7 @@ closes from Work In Progress or Solution Proposed, and a customer closes from al
 open state.
 
 **CAS-400** Closing shall stamp the closing time and the person who closed it. The
-case's SLA clocks are finished by the close (see [sla.md](../sla.md)).
+case's SLA clocks are finished by the close (see [sla.md](../specs/sla.md)).
 
 **CAS-401** A case shall **not** be closed while any of its child cases is still open. The
 request shall be refused as a conflict, naming the open child's number, and nothing is saved.

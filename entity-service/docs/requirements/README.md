@@ -120,7 +120,7 @@ tests, so a requirement can be traced to both.
 | [Data sources, mirroring and scheduled-task runs](data-sources-and-scheduled-tasks.md) | `INT` | 27 |
 | [Platform and operations](platform-and-operations.md) | `PLT` | 59 |
 
-Related specs that already exist: [sla.md](../sla.md), [team-schedule.md](../team-schedule.md),
-[github-cr-sync-spec.md](../github-cr-sync-spec.md), [usage-metrics.md](../usage-metrics.md),
-[github-integration-deployment.md](../github-integration-deployment.md),
-[change-request-tests.md](../change-request-tests.md).
+Related specs that already exist: [sla.md](../specs/sla.md), [team-schedule.md](../specs/team-schedule.md),
+[github-cr-sync-spec.md](../specs/github-cr-sync-spec.md), [usage-metrics.md](../specs/usage-metrics.md),
+[github-integration-deployment.md](../specs/github-integration-deployment.md),
+[change-request-tests.md](../specs/change-request-tests.md).

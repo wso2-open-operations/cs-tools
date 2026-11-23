@@ -9,7 +9,7 @@ are intended; they are collected in section 14.
 **Related documents:** what happens automatically after an incident changes (report
 task, incident report, follow-up tasks, the workaround problem, the special-operations
 page) is in [incident-reports.md](incident-reports.md). SLA clocks are covered by
-[../sla.md](../sla.md). Change requests are in [change-requests.md](change-requests.md).
+[../specs/sla.md](../specs/sla.md). Change requests are in [change-requests.md](change-requests.md).
 
 ---
 

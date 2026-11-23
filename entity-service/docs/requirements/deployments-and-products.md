@@ -6,7 +6,7 @@ intended; they are collected in section 8.
 
 **Audience:** product owners, CS leads, QA, and engineers new to the service.
 
-**Related documents:** [projects.md](projects.md), [../usage-metrics.md](../usage-metrics.md)
+**Related documents:** [projects.md](projects.md), [../specs/usage-metrics.md](../specs/usage-metrics.md)
 (where usage and metrics data comes from and how a node is tied to a deployed product; this
 document does not repeat it).
 
@@ -179,7 +179,7 @@ turned off by the caller.
 *Check:* a project suspended yesterday is not in the list for a version it runs.
 
 **PRJ-283** Usage metrics and usage counts for one deployed product shall be read from the
-data described in [../usage-metrics.md](../usage-metrics.md). The deployment, a start date and
+data described in [../specs/usage-metrics.md](../specs/usage-metrics.md). The deployment, a start date and
 an end date shall be given, the start date shall be before the end date, and the range shall
 not exceed one year.
 
@@ -203,7 +203,7 @@ mapped. An empty name shall be refused. Only active mappings count.
 
 Instances are the running copies of a product that report back. How they are stored and tied
 to a project, deployment and product is described in
-[../usage-metrics.md](../usage-metrics.md); only the rules around them are listed here.
+[../specs/usage-metrics.md](../specs/usage-metrics.md); only the rules around them are listed here.
 
 **PRJ-300** The service shall list instances and their metrics and usage, by project,
 deployment or deployed product, over a date range. **At most one** of project, deployment and
@@ -296,7 +296,7 @@ shall be all-or-nothing, and duplicate or keyless old rows shall be removed.
 | Air-gapped | `internal/service/deployment_air_gap_service.go`, `internal/repository/deployment_air_gap_repo.go` |
 | Deployed products | `internal/service/deployed_product_service.go`, `internal/repository/deployed_product_repo.go` |
 | Catalogue | `internal/service/product_service.go`, `internal/service/product_version_service.go`, `internal/service/product_repo_mapping.go` |
-| Instances and usage | `internal/service/instance_service.go`, `internal/service/instance_ingestion_service.go`, [../usage-metrics.md](../usage-metrics.md) |
+| Instances and usage | `internal/service/instance_service.go`, `internal/service/instance_ingestion_service.go`, [../specs/usage-metrics.md](../specs/usage-metrics.md) |
 | Vulnerabilities | `internal/service/product_vulnerability_service.go`, `internal/handler/product_vulnerability_handler.go`, `internal/service/cached_product_vulnerability_service.go` |
 | Row-level security | migration `100017` (deployments and deployed products), `0246` (air-gapped), `0222` (deployment numbers) |
 | Routes | `POST /deployments`, `POST /deployments/search`, `PATCH /deployments/{id}`, `PUT /deployments/{id}/air-gapped`, `POST /deployed-products`, `POST /deployed-products/search`, `POST /deployed-products/projects/search`, `PATCH /deployed-products/{id}`, `POST /deployed-products/{id}/metrics/search`, `POST /deployed-products/{id}/metrics/usage-counts/search`, `POST /products/search`, `POST /products/{id}/versions/search`, `GET /products/github-repo`, `POST /instances/...`, `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, `POST /products/vulnerabilities/sync` |

@@ -219,7 +219,7 @@ the same moment are handled one after the other, so a team never ends with two l
 **USR-085** A group's membership shall be readable by internal callers only.
 
 Rotas, leave and rota access for teams are described in
-[../team-schedule.md](../team-schedule.md).
+[../specs/team-schedule.md](../specs/team-schedule.md).
 
 ## 11. Speed-up cache
 

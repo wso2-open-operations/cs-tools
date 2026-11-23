@@ -8,7 +8,7 @@ are intended; they are collected in section 7.
 
 **Related documents:** incidents, problems and tasks themselves are in
 [incidents-and-problems.md](incidents-and-problems.md). The team schedule and its rota
-are in [../team-schedule.md](../team-schedule.md).
+are in [../specs/team-schedule.md](../specs/team-schedule.md).
 
 ---
 

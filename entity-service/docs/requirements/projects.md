@@ -8,7 +8,7 @@ intended; they are collected in section 12.
 
 **Related documents:** [accounts.md](accounts.md) (the customer organisation a project
 belongs to), [deployments-and-products.md](deployments-and-products.md) (what a project
-runs), [../sla.md](../sla.md) (case SLA clocks, which are separate from the project health
+runs), [../specs/sla.md](../specs/sla.md) (case SLA clocks, which are separate from the project health
 indicator in section 9).
 
 **Not covered here:** project contacts and memberships, customer health risk tracking, and

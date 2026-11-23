@@ -18,7 +18,7 @@ Two small operational features that other teams depend on:
 - **Public holidays** keep a local copy of each country's public holidays so the Team Schedule
   can show them against the people who observe them.
 
-The detail of the Team Schedule itself is in [../team-schedule.md](../team-schedule.md). The
+The detail of the Team Schedule itself is in [../specs/team-schedule.md](../specs/team-schedule.md). The
 case alert settings are described there in full ("Case Alerts settings"); this document states
 the requirements.
 
@@ -192,5 +192,5 @@ not part of what the service does today.
 | Public holidays | `internal/service/public_holiday_service.go`, `internal/holidays/`, `internal/service/holiday_availability_service.go` |
 | Holiday routes | `POST /team-schedule/public-holidays/search`, `POST /team-schedule/public-holidays/refresh` |
 | Holiday settings | `HOLIDAY_CALENDAR_*`, `HR_ENTITY_*` (set together or not at all) |
-| Existing spec | [../team-schedule.md](../team-schedule.md) |
+| Existing spec | [../specs/team-schedule.md](../specs/team-schedule.md) |
 | Tests | `case_alert_*_test.go`, `public_holiday_service_test.go` |

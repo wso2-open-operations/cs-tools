@@ -8,7 +8,7 @@ are collected in section 14.
 
 Related documents: [case-creation-and-detail.md](case-creation-and-detail.md),
 [case-closure-and-reopen.md](case-closure-and-reopen.md) (closing, reopening,
-auto-closure), [case-escalation.md](case-escalation.md), and [sla.md](../sla.md).
+auto-closure), [case-escalation.md](case-escalation.md), and [sla.md](../specs/sla.md).
 
 "Case" here means any of the five ticket kinds listed in
 [case-creation-and-detail.md](case-creation-and-detail.md) section 3, unless a rule says
@@ -135,7 +135,7 @@ automated change.
 
 **CAS-224** A genuine state change shall update the case's SLA clocks (pause, resume, complete)
 according to the new state, whether or not email is configured. Asking for the current state
-again re-applies the same effect harmlessly. See [sla.md](../sla.md).
+again re-applies the same effect harmlessly. See [sla.md](../specs/sla.md).
 
 **CAS-225** A genuine state change shall publish a "status changed" event so the notification
 service can email the case's active watchers and the account's default watchers, showing

@@ -9,7 +9,7 @@ are collected in section 13.
 Related documents: [case-updates-and-states.md](case-updates-and-states.md) (changing a
 case), [case-closure-and-reopen.md](case-closure-and-reopen.md) (closing, reopening,
 auto-closure, feedback), [case-escalation.md](case-escalation.md) (escalation), and
-[sla.md](../sla.md) (the SLA clocks a new case starts).
+[sla.md](../specs/sla.md) (the SLA clocks a new case starts).
 
 Searching, filtering and counting cases, comments, attachments, tags and watch lists are
 not covered here.
@@ -213,7 +213,7 @@ creator, except for announcements and blank descriptions.
 
 **CAS-091** For cases, security report analyses and service requests (not engagements or
 announcements) the service shall start the ticket's SLA clocks, according to its severity and
-project. See [sla.md](../sla.md).
+project. See [sla.md](../specs/sla.md).
 
 **CAS-092** The service shall publish a "case created" event so the notification service can
 email the ticket's watchers. The event is not published if the ticket has no project, or if

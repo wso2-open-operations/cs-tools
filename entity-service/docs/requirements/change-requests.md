@@ -7,9 +7,9 @@ are intended; they are collected in section 14.
 **Audience:** product owners, CS leads, QA, and engineers new to the service.
 
 **Related documents:** the test inventory for this area is
-[change-request-tests.md](../change-request-tests.md). The GitHub side is described in
-[github-cr-sync-spec.md](../github-cr-sync-spec.md) and
-[github-integration-deployment.md](../github-integration-deployment.md); section 12
+[change-request-tests.md](../specs/change-request-tests.md). The GitHub side is described in
+[github-cr-sync-spec.md](../specs/github-cr-sync-spec.md) and
+[github-integration-deployment.md](../specs/github-integration-deployment.md); section 12
 below says what the service actually does with GitHub today.
 
 ---
@@ -488,4 +488,4 @@ configurable interval (5 seconds by default).
 | Notices | `internal/service/cr_notice_service.go`, `cr_notice_drainer.go`, `internal/repository/cr_notice_repo.go`, `internal/events/change_request.go` |
 | Routes | `POST /change-requests` (internal only), `POST /change-requests/search`, `…/aggregate`, `…/link-options` (internal only), `GET`/`PATCH /change-requests/{id}`, `GET /change-requests/{id}/approvals`, `POST …/approvals/decision` |
 | Settings | `CR_NOTICES_ENABLED`, `CR_NOTICE_POLL_INTERVAL`, `CR_STRICT_VISIBILITY_FROM` |
-| Tests | `internal/repository/change_request_*_test.go`; scenario map in [change-request-tests.md](../change-request-tests.md) |
+| Tests | `internal/repository/change_request_*_test.go`; scenario map in [change-request-tests.md](../specs/change-request-tests.md) |

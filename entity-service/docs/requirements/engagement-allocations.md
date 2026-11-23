@@ -6,7 +6,7 @@ intended; they are collected in section 6.
 
 **Audience:** product owners, CS leads, QA, and engineers new to the service.
 
-**Related documents:** [../team-schedule.md](../team-schedule.md) (the schedule that also
+**Related documents:** [../specs/team-schedule.md](../specs/team-schedule.md) (the schedule that also
 shows allocated engineers), [accounts.md](accounts.md).
 
 ---
@@ -161,7 +161,7 @@ Monday (UTC).
 ## 5. Related schedule views
 
 The team schedule has its own, separate list of engagement allocations and a way to dismiss
-one; see [../team-schedule.md](../team-schedule.md).
+one; see [../specs/team-schedule.md](../specs/team-schedule.md).
 
 ## 6. Open questions for the product owner
 

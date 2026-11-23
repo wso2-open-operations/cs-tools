@@ -202,7 +202,7 @@ table says which feature uses which.
 | SLA recalculation and the SLA admin view | CSM admin | The same |
 | Skills catalogue (create, change) | CSM admin | A role in the person's token that matches the configured admin role list |
 | Everyone's skills (search) | CSM admin, or a CRE or SRE team lead | The same role list, or being such a lead |
-| Rota access, schedule administration, rota reminder settings, case alert settings | CSM admin, or the stored rota admin / lead roles for their own family or team | The same role list, plus stored roles; see [../team-schedule.md](../team-schedule.md) |
+| Rota access, schedule administration, rota reminder settings, case alert settings | CSM admin, or the stored rota admin / lead roles for their own family or team | The same role list, plus stored roles; see [../specs/team-schedule.md](../specs/team-schedule.md) |
 | Updating another person's profile; assigning a team lead | Any internal caller | Internal-only check; any finer rule is the CSM portal's |
 
 **USR-160** For the first group (banners, who may de-escalate, SLA recalculation) the

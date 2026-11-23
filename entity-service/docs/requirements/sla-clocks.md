@@ -9,7 +9,7 @@ are intended; they are collected in section 14.
 **Related:** [sla-policies.md](sla-policies.md) (which rules decide what a clock does),
 [sla-status-and-reporting.md](sla-status-and-reporting.md) (how clocks are read and
 reported), [sla-admin-actions.md](sla-admin-actions.md) (admin repair actions). For the
-storage-level view of the same engine see [../sla.md](../sla.md).
+storage-level view of the same engine see [../specs/sla.md](../specs/sla.md).
 
 ---
 
