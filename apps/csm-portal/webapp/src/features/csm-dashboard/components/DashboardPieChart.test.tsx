@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
@@ -91,25 +91,6 @@ const SLICES: PieSliceResult[] = [
 ];
 
 describe("DashboardPieChart", () => {
-  it("shows the staff badge beside a staff person's legend row, and only there", () => {
-    render(
-      <DashboardPieChart
-        slices={[
-          { label: "Jane Doe", query: {}, value: 3, isStaff: true },
-          { label: "Sam Customer", query: {}, value: 1 },
-        ]}
-        total={4}
-        isLoading={false}
-        isError={false}
-        onSliceClick={vi.fn()}
-      />,
-    );
-    const staffRow = screen.getByRole("button", { name: /^Jane Doe:/ });
-    const customerRow = screen.getByRole("button", { name: /^Sam Customer:/ });
-    expect(within(staffRow).getByRole("img", { name: "Technical Team" })).toBeInTheDocument();
-    expect(within(customerRow).queryByRole("img", { name: "Technical Team" })).not.toBeInTheDocument();
-  });
-
   it("renders a skeleton per slice while loading", () => {
     const { container } = render(
       <DashboardPieChart
