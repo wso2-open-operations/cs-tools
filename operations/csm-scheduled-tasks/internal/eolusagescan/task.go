@@ -119,7 +119,11 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			slog.Info("EOL product usage report: emails are disabled (ALERTS_ENABLED); not sent")
 			return nil
 		}
-		if len(to) == 0 {
+		// An empty "to" switches the report off, unless the sender redirects
+		// (debug mail mode or a run-now override): configuring only a debug
+		// list is how the report is tried without its real recipients, so it
+		// must still be built and sent there.
+		if len(to) == 0 && !notify.Redirects(email) {
 			slog.Info("EOL product usage report has no recipients; skipping")
 			return nil
 		}

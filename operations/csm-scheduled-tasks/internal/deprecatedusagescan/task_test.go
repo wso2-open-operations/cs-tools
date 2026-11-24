@@ -26,6 +26,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagescan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 )
 
@@ -305,5 +306,28 @@ func TestSendReportUsesTheClaimedPeriodOverTheClock(t *testing.T) {
 	}
 	if reports.gotAsOf != "2026-12-14" {
 		t.Errorf("asOf = %q, want 2026-12-14", reports.gotAsOf)
+	}
+}
+
+// With only a debug list (no "to"), the report is still built and sent to
+// the debug list, marked as a test copy: that is how it is tried without
+// its real recipients.
+func TestSendReportDebugListWithoutRecipientsStillSends(t *testing.T) {
+	reports := &fakeReports{report: sampleReport()}
+	email := &fakeEmail{}
+	debug := []string{"debug@example.invalid"}
+	handler := deprecatedusagescan.SendReport(reports, notify.ForReport(email, debug), nil, nil,
+		deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil {
+		t.Fatalf("SendReport: %v", err)
+	}
+	if reports.calls != 1 || email.calls != 1 {
+		t.Fatalf("fetched %d, sent %d; want 1 and 1", reports.calls, email.calls)
+	}
+	if !reflect.DeepEqual(email.to, debug) {
+		t.Errorf("to = %v, want the debug list %v", email.to, debug)
+	}
+	if !strings.Contains(email.subject, "[Test copy]") {
+		t.Errorf("subject = %q, want a test copy", email.subject)
 	}
 }

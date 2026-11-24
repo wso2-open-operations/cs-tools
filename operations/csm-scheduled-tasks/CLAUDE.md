@@ -1192,8 +1192,8 @@ no EOL date yet shows "Not set". It has the same structure and behaviour as the 
 version rule differs. A deprecated version whose EOL date has passed is in both reports, on purpose.
 
 - **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
-  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
-  sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's date in Asia/Colombo and
+  sends only when it is a Monday from the 1st to the 7th; any other date succeeds without fetching anything. That Monday is the
   run's claimed period (`schedule.PeriodFromContext`; `Options.Anchor` only outside the engine), not the clock: the engine retries a
   failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
   A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
@@ -1215,6 +1215,9 @@ version rule differs. A deprecated version whose EOL date has passed is in both 
   versions" note to the configured to/cc only, so the leadership group knows the report ran.
 - `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages;
   unset keeps plain text, and a non-https value refuses to start.
+- **An empty `to` only switches the report off for a plain sender.** With a debug list (debug mail mode) or a run-now
+  recipient override, `notify.Redirects` is true and both monthly reports still build and send, to the redirect only;
+  configuring a debug list without a `to` is how a report is tried without its real recipients.
 - **Same checks as the EOL report.** A scheduled run sends only when its date is a Monday from the 1st to the 7th, and
   `Audience` adds an account manager or technical owner only when it is a single plain address (`net/mail`) and, when
   `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` is set, in one of those domains; the rest are dropped and counted
@@ -1266,8 +1269,8 @@ account's cells (account, CS ABT, account manager, technical owner) spanning its
 spanning its versions.
 
 - **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
-  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
-  sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's date in Asia/Colombo and
+  sends only when it is a Monday from the 1st to the 7th; any other date succeeds without fetching anything. That Monday is the
   run's claimed period (`schedule.PeriodFromContext`; `Options.Anchor` only outside the engine), not the clock: the engine retries a
   failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
   A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
