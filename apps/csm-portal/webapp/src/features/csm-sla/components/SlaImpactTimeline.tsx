@@ -31,6 +31,7 @@ const SEGMENT_CONTRAST: Record<OwnershipSide, string> = {
   closed: "background.paper",
 };
 const LABELS: Record<OwnershipSide, string> = { wso2: "With Choreo Labs", customer: "With customer", closed: "Closed" };
+const LATEST_LIMIT = 3;
 const when = (ms: number) => formatAbsoluteForUser(new Date(ms).toISOString()) ?? "Unknown time";
 const changeText = (event: SlaTimelineEvent) => event.changes.map((c) => `${c.label}: ${c.from ?? "None"} → ${c.to ?? "Cleared"}`).join(" · ");
 
@@ -81,7 +82,7 @@ function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [],
   const timeline = ownershipTimeline(allEvents, openedAt, currentState, now, closedAt);
   const events = timeline.events;
   const breachedSlas = slas.filter((sla) => sla.hasBreached);
-  const latest = events.slice(-3).reverse();
+  const latest = events.slice(-LATEST_LIMIT).reverse();
   const periods = timeline.periods;
   const selected = selection && periods.find((period) => period.start === selection.start && period.end === selection.end) || periods.at(-1);
   const span = Math.max(1, timeline.end - timeline.start);
@@ -97,7 +98,7 @@ function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [],
       ref={(element) => { if (detailed && element) historyRefs.current.set(event.id, element); }}
       onClick={() => detailed ? setHistory((previous) => previous ? { ...previous, selectedId: previous.selectedId === event.id ? undefined : event.id } : null) : openEvent(event)}
       aria-expanded={detailed ? history?.selectedId === event.id : undefined}
-      sx={{ textTransform: "none", color: "text.primary", justifyContent: "flex-start", textAlign: "left", width: "100%", py: 1.25, borderBottom: 1, borderColor: "divider", bgcolor: detailed && history?.selectedId === event.id ? "action.selected" : undefined }}
+      sx={{ textTransform: "none", borderRadius: 0, color: "text.primary", justifyContent: "flex-start", textAlign: "left", width: "100%", py: 1.25, borderBottom: 1, borderColor: "divider", bgcolor: detailed && history?.selectedId === event.id ? "action.selected" : undefined }}
     >
       <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, minWidth: 0 }}>
         <Typography variant="caption" color="text.secondary">{when(timestampMs(event.at)!)}</Typography>
@@ -172,8 +173,7 @@ function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [],
       {isSlasError && <Typography variant="caption" color="error">SLA statuses could not be loaded. The ownership history is still available.</Typography>}
       {selected && <Box id={selectionId} aria-live="polite" sx={{ p: 1.5, bgcolor: "action.selected", borderLeft: 3, borderColor: "primary.main", borderRadius: 1 }}><Typography variant="caption" color="text.secondary">Selected period</Typography><Typography variant="body2">{LABELS[selected.side]} · {elapsedLabel(selected.end - selected.start)} elapsed</Typography><Typography variant="caption" color="text.secondary">{when(selected.start)} → {when(selected.end)}</Typography></Box>}
       <Box><Typography variant="subtitle2">Latest changes</Typography><Typography variant="caption" color="text.secondary">Latest {latest.length} of {events.length} · newest first</Typography>{latest.map((event) => renderEvent(event))}</Box>
-      {events.length ? <Button size="small" onClick={() => setHistory({ events: [...events].reverse() })} endIcon={<ArrowRight size={14} />} sx={{ alignSelf: "flex-start", textTransform: "none" }}>View all {events.length} events</Button> : <Typography variant="body2" color="text.secondary">No SLA-affecting changes recorded for this case yet.</Typography>}
-      <Typography variant="caption" color="text.secondary">Ownership and SLA clock status are independent. Fix ETA changes may pause an SLA while the case remains with Choreo Labs.</Typography>
+      {events.length > LATEST_LIMIT ? <Button size="small" onClick={() => setHistory({ events: [...events].reverse() })} endIcon={<ArrowRight size={14} />} sx={{ alignSelf: "flex-start", textTransform: "none" }}>View all {events.length} events</Button> : events.length === 0 ? <Typography variant="body2" color="text.secondary">No SLA-affecting changes recorded for this case yet.</Typography> : null}
       <Drawer anchor="right" open={!!history} onClose={() => setHistory(null)} PaperProps={{ "aria-label": "SLA event history", sx: { width: { xs: "100%", sm: 440 }, maxWidth: "100%" } }}>
         <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
           <Box sx={{ p: 2, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: 1, borderColor: "divider" }}><Box><Typography variant="subtitle1">SLA event history</Typography><Typography variant="caption" color="text.secondary">{history?.events.length} events · newest first</Typography></Box><IconButton aria-label="Close SLA history" onClick={() => setHistory(null)}><X size={18} /></IconButton></Box>
@@ -188,7 +188,7 @@ export function SlaImpactTimeline(props: SlaImpactTimelineProps): JSX.Element | 
   if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)) return null;
   return (
     <Card component="section" aria-label="SLA impact timeline" sx={{ p: 2.5, mt: 2, display: "flex", flexDirection: "column", gap: 2, minWidth: 0, maxWidth: "100%" }}>
-      <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1 }}><History size={16} /><Typography variant="subtitle2">SLA impact timeline</Typography><Chip label="Ownership & SLA events" size="small" variant="outlined" /></Box>
+      <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1 }}><History size={16} /><Typography variant="subtitle2">SLA impact timeline</Typography></Box>
       {props.isLoading ? <Skeleton variant="rounded" height={180} /> : props.isError ? <Box><Typography color="error">Could not load the SLA impact timeline for this case.</Typography><Button size="small" onClick={props.onRetry} startIcon={<RefreshCw size={14} />}>Retry</Button></Box> : <TimelineContent {...props} />}
     </Card>
   );
