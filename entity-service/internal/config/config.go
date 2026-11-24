@@ -338,6 +338,23 @@ type Config struct {
 	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
 	// another drainer never changes it.
 	ACPReactivationPollInterval time.Duration
+	// AuditLogEnabled registers POST /audit-log/maintenance, the audit log's
+	// upkeep (CSM_AUDIT_LOG_ENABLED). Defaults to false, and while it is false
+	// routes.go does not register the route at all, so it 404s. Turn it on only
+	// once migration 0295 is applied and the database role may run the audit
+	// functions; the audit_log_maintenance sub-cron in csm-scheduled-tasks has
+	// its own switch and must be turned on after this one.
+	AuditLogEnabled bool
+	// AuditLogMonthsAhead is how many months past the current one get a
+	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
+	// the audit log's own health check reports a problem on every run.
+	AuditLogMonthsAhead int
+	// AuditLogRetentionMonths is how long audit rows are kept
+	// (CSM_AUDIT_LOG_RETENTION_MONTHS, default 18, from 12 to 120). Each weekly
+	// maintenance run deletes the monthly partitions that ended at least this
+	// many months ago; the data is not archived. The floor stops a typo from
+	// deleting recent history.
+	AuditLogRetentionMonths int
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -709,6 +726,12 @@ type Config struct {
 	// setting. Matched exactly, as the portal does. Empty means nobody is (the
 	// portal's own rule for an unset role).
 	AuthAdminRoles []string
+	// AuthProductCatalogManagerRoles is AUTH_PRODUCT_CATALOG_MANAGER_ROLES,
+	// comma-separated: the same variable, with the same value, as
+	// csm-portal-backend's -- the token roles that may edit the product
+	// catalogue. AUTH_ADMIN_ROLES may edit it too.
+	// Matched exactly. Empty means only admins can.
+	AuthProductCatalogManagerRoles []string
 	// CaseAlertsSecretKey is CASE_ALERTS_SECRET_KEY: 32 bytes, base64, the
 	// AES-256-GCM key that seals the Case Alerts chat-room webhook URLs
 	// (migration 0233). One per environment, so a database copied from
@@ -1016,6 +1039,7 @@ func Load() *Config {
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
 		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
 		AuthAdminRoles:                                splitComma(os.Getenv("AUTH_ADMIN_ROLES")),
+		AuthProductCatalogManagerRoles:                splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 		CaseAlertsSecretKey:                           strings.TrimSpace(os.Getenv("CASE_ALERTS_SECRET_KEY")),
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
@@ -1093,6 +1117,9 @@ func Load() *Config {
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
 	cfg.ACPInternalEmailDomains = splitComma(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
+	cfg.AuditLogEnabled = getBoolOrDefault("CSM_AUDIT_LOG_ENABLED", false)
+	cfg.AuditLogMonthsAhead = envIntInRange("CSM_AUDIT_LOG_MONTHS_AHEAD", 3, 2, 24)
+	cfg.AuditLogRetentionMonths = envIntInRange("CSM_AUDIT_LOG_RETENTION_MONTHS", 18, 12, 120)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
@@ -1735,6 +1762,26 @@ func envPositiveInt(key string, def int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// envIntInRange reads an integer that must lie in lo..hi. Unset is def, silently.
+// A value that is not a number, or is outside the range (zero and negative
+// included), falls back to def with a warning that names the value as it was
+// written. It validates the raw text itself: going through envPositiveInt first
+// would turn a bad value into def before the range check, and no warning would
+// ever be logged.
+func envIntInRange(key string, def, lo, hi int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < lo || n > hi {
+		slog.Warn("configuration value invalid or out of range, using the default",
+			"key", key, "value", raw, "min", lo, "max", hi, "default", def)
 		return def
 	}
 	return n

@@ -46,6 +46,7 @@ import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
+import PastedHtmlImagesPlugin from "@components/rich-text-editor/PastedHtmlImagesPlugin";
 import {
   insertImageWithUpload,
   remainingImageBytes,
@@ -599,6 +600,7 @@ const Editor = ({
           <ListPlugin />
           <ImagesPlugin />
           <ClipboardImagePlugin onPasteError={onPasteError} onImageUpload={onImageUpload} />
+          <PastedHtmlImagesPlugin onPasteError={onPasteError} onImageUpload={onImageUpload} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />

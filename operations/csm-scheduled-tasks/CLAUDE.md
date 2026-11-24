@@ -215,6 +215,7 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 | Task | Default schedule | Announces |
 |---|---|---|
 | `rota_weekday_reminder` | `30 3 * * 0-4` (09:00 Colombo, Sun–Thu) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): always tomorrow, so **Monday from Sunday** |
+| `rota_weekday_mark_check` | `30 11 * * 0-3,6` (17:00 Colombo, Sat–Wed) | nothing to the rota: the evening before each `rota_weekday_reminder` run, tells the rota admins when a weekday rotation of the day that run will announce is short (see "Weekday rota check" below) |
 | `rota_weekend_notice` | `30 3 * * 1-4` (09:00 Colombo, Mon–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once (on Monday when it is already marked); until then the rota admins are asked every morning |
 | `rota_weekend_reminder` | `30 3 * * 5` (09:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
@@ -327,6 +328,20 @@ schedules assume `TZ=UTC` like every other here.
   so a test event never stands in for or blocks the real one; and the weekend's send record is
   neither read nor written, so the real reminders are unaffected. Works in every environment,
   production included, and needs no `ROTA_REMINDER_REDIRECT_TO`.
+- **Weekday rota check, and the rota admins on every weekday reminder.** A weekday reminder is never
+  held back. `rota_weekday_mark_check` runs at 17:00 IST the evening before each
+  `rota_weekday_reminder` run and checks the day it will announce (`NextWorkingDay` of tomorrow:
+  Saturday checks Monday, Wednesday Friday). A shift with fewer people than
+  `ROTA_REMINDER_WEEKDAY_REQUIRED` (default `CRE_EVENING=7`; people on leave are not counted, the
+  on-call variant does not count, one person counts once) gets one email to the family's rota admins
+  (`GET /team-schedule/rota-admins/{family}`; the task's alert audience when there are none) with a
+  Day | Rotation | Marked | Needed table naming the reminder's own date; a fully marked day sends
+  nothing. Only codes the weekday reminders announce are checked, and a retry that runs after the
+  09:00 reminder sends nothing (the admins are already copied on it). The weekday switch on the
+  card applies; the minimums are not on the card. Then every weekday reminder, scheduled and Send now,
+  copies (Cc) the rota admins, the email carrying the invitation included, and never makes them guests
+  of the event (`Config.Admins` / `AdminCopy`); the plain `copyTo` copy skips them. A failed admin read
+  is logged and the reminders go without the copy. "Send a test to me" copies nobody.
 - **Only a fully marked weekend is announced.** `ROTA_REMINDER_WEEKEND_REQUIRED` (default
   `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) is how many people each shift needs on each day; the on-call
   variant does not count. Until that holds, `rota_weekend_notice` emails the family's rota admins
@@ -939,6 +954,16 @@ the run-now is safe beside the scheduled run for the reason above: entity-servic
 `AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
 the logs (`run-now: ...`).
 
+## Audit log maintenance
+
+**`audit_log_maintenance`** (default `0 1 * * 1`, Mondays at 01:00 UTC) is the weekly upkeep of entity-service's field-level audit log (its migration `0295`). It is a trigger, not a calculator: `internal/auditlog.Client` calls `POST /audit-log/maintenance` (service credentials only: this component's client id must be in entity-service's `M2M_CLIENT_IDS`), and the work runs in the database. Entity-service creates the coming monthly partitions, checks the log's health and puts back audit triggers that were missing, disabled or different from their registration; its own CLAUDE.md ("Audit log maintenance") has the details. This is the only scheduler of that upkeep: entity-service has none of its own.
+
+A 200 from entity-service means the steps ran, not that all is well, so `auditlog.Maintenance` reads the lists in the response and **returns an error for any of them**: a step that could not run (`stepErrors`), a health problem (rows in the catch-all partition, a missing monthly partition from this month to the months entity-service creates ahead), a trigger that was repaired (the history had a gap while it was off) or one still wrong after the repair. The error names each, the engine mails it, and the next tick retries. The upkeep is safe to repeat, so the retry succeeds once nothing is wrong any more, which is also how a repaired trigger stops alerting.
+
+**Off unless `AUDIT_LOG_MAINTENANCE_ENABLED=true`** (default false): neither the client nor the task is created otherwise. Turn it on only once entity-service has `CSM_AUDIT_LOG_ENABLED=true` (without it the endpoint answers 404), migration `0295` applied and its database role has `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health(int)`, `audit_reconcile(boolean)`, `audit_delete_expired_partitions(int, text)` and `audit_delete_expired_default_rows(int, text)`; before that every run fails and mails. A failed audit write fails the business write, so once the audit log is in use, a stopped upkeep is an outage a few months out: alert on `SELECT count(*) FROM audit_partition_health()` too, which does not depend on this task.
+
+Deleting audit data older than 18 months is part of the same entity-service call (its last step, `CSM_AUDIT_LOG_RETENTION_MONTHS`): the response lists the dropped partitions as `partitionsDeleted` and the expired catch-all rows as `defaultRowsDeleted`, which this task ignores because a deletion is the expected outcome, not a problem. A step that could not run still arrives in `stepErrors` and fails the run like any other (see entity-service's CLAUDE.md).
+
 ## Usage rollups
 
 Two sub-crons that rebuild the usage summary tables: **`usage_rollup_daily`** (default `30 0 * * *`)
@@ -1113,6 +1138,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `ROTA_REMINDER_COPY_TASK_RECIPIENTS` | No (default `false`) | Also copies each task's `SUB_CRON_RECIPIENTS` on every reminder |
 | `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
+| `ROTA_REMINDER_WEEKDAY_REQUIRED` | No (default `CRE_EVENING=7`) | `CODE=N` pairs: how many people each weekday shift needs; `rota_weekday_mark_check` tells the rota admins the evening before when one is short |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the Americas On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
@@ -1125,6 +1151,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

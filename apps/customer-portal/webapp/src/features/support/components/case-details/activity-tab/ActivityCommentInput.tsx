@@ -60,6 +60,7 @@ import {
 import {
   ERROR_UNSUPPORTED_TYPE,
   imageCountExceededMessage,
+  INLINE_IMAGE_MAX_COUNT,
   imageSizeExceededMessage,
 } from "@constants/common";
 import { formatBytes } from "@features/project-details/utils/projectDetails";
@@ -149,6 +150,12 @@ export default function ActivityCommentInput({
         MAX_COMMENT_BODY_BYTES,
       )} — upload large images as attachments instead of embedding them inline.`
     : null;
+
+  // The editor refuses an image that would pass the limit, but pasted HTML can still
+  // bring more (pictures it links to rather than carries), so the draft is counted
+  // on send too.
+  const overImageLimit =
+    (value.match(/<img\b/gi)?.length ?? 0) > INLINE_IMAGE_MAX_COUNT;
 
   if (isCaseClosed) return null;
   // Posting a comment is POST /cases/{id}/comments, which the backend gates
@@ -329,6 +336,10 @@ export default function ActivityCommentInput({
       showError(sizeError as string);
       return;
     }
+    if ((currentValue.match(/<img\b/gi)?.length ?? 0) > INLINE_IMAGE_MAX_COUNT) {
+      showError(imageCountExceededMessage());
+      return;
+    }
 
     // Snapshot attachments before posting
     const attachmentsSnapshot = [...currentAttachments];
@@ -484,7 +495,9 @@ export default function ActivityCommentInput({
                 title={
                   overSizeLimit && hasSubmittableEditorContent(value)
                     ? sizeError
-                    : pendingImages > 0
+                    : overImageLimit
+                      ? imageCountExceededMessage()
+                      : pendingImages > 0
                       ? "Uploading image..."
                       : "Send comment"
                 }
@@ -495,6 +508,7 @@ export default function ActivityCommentInput({
                       (!hasSubmittableEditorContent(value) &&
                         attachments.length === 0) ||
                       (overSizeLimit && hasSubmittableEditorContent(value)) ||
+                      overImageLimit ||
                       pendingImages > 0 ||
                       isDisabled
                     }

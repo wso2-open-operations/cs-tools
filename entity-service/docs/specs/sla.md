@@ -1,7 +1,7 @@
 # SLA clocks — storage, pause/resume, breach
 
 How entity-service stores and drives SLA clocks. Breach *alerting* (Chat/email) is not done here; see
-[csm-notification-service spec, section 3.2.1](../../integrations/csm-notification-service/docs/spec.md).
+[csm-notification-service spec, section 3.2.1](../../../integrations/csm-notification-service/docs/spec.md).
 
 ## Storage
 

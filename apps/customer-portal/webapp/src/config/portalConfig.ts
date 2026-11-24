@@ -42,7 +42,7 @@ export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_COMPANY_NAME?: string;
   /**
    * Billing team's email address, shown on the suspended-project notice.
-   * Defaults to "billing@wso2.com".
+   * Defaults to "billing@choreolabs.com".
    */
   CUSTOMER_PORTAL_BILLING_EMAIL?: string;
   /**

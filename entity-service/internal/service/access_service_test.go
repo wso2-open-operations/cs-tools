@@ -194,6 +194,58 @@ func TestAccessService_ResolveScope(t *testing.T) {
 	}
 }
 
+// The audit log names the person behind a request. For an unrestricted caller
+// that person rides in AuditActor, never in ViewerEmail (which other code reads
+// as "CSM portal caller"); a customer's and a CSM portal user's email is already
+// in ViewerEmail.
+func TestAccessService_ResolveScope_AuditActor(t *testing.T) {
+	const email = "jane@example.com"
+	tests := []struct {
+		name            string
+		id              auth.Identity
+		users           []repository.AccessUser
+		projects        []string
+		wantAuditActor  string
+		wantViewerEmail string
+	}{
+		{name: "staff using the customer portal is named",
+			id:             auth.Identity{Validated: true, ClientID: "customer-portal", UserEmail: email},
+			users:          []repository.AccessUser{userOf("INTERNAL", true)},
+			wantAuditActor: email},
+		{name: "staff with only a user token is named",
+			id:             auth.Identity{Validated: true, UserEmail: email},
+			users:          []repository.AccessUser{userOf("INTERNAL", true)},
+			wantAuditActor: email},
+		{name: "internal service forwarding a user token names that user",
+			id:             auth.Identity{Validated: true, ClientID: "csm-backend", UserEmail: email},
+			wantAuditActor: email},
+		{name: "internal service with no user token names nobody (the log falls back to the database role)",
+			id: auth.Identity{Validated: true, ClientID: "csm-backend"}},
+		{name: "customer keeps their email in ViewerEmail only",
+			id:              auth.Identity{Validated: true, ClientID: "customer-portal", UserEmail: "cust@example.com"},
+			users:           []repository.AccessUser{userOf("EXTERNAL", true)},
+			projects:        []string{"p1"},
+			wantViewerEmail: "cust@example.com"},
+		{name: "csm portal user keeps their email in ViewerEmail only",
+			id:              auth.Identity{Validated: true, ClientID: "csm-portal", UserEmail: "engineer@wso2.com"},
+			wantViewerEmail: "engineer@wso2.com"},
+	}
+	for _, tt := range tests {
+		repo := &fakeAccessRepo{users: tt.users, projects: tt.projects}
+		scope, err := NewAccessService(repo, testClientConfig).ResolveScope(idCtx(tt.id))
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", tt.name, err)
+			continue
+		}
+		if scope.AuditActor != tt.wantAuditActor {
+			t.Errorf("%s: AuditActor = %q, want %q", tt.name, scope.AuditActor, tt.wantAuditActor)
+		}
+		if scope.ViewerEmail != tt.wantViewerEmail {
+			t.Errorf("%s: ViewerEmail = %q, want %q", tt.name, scope.ViewerEmail, tt.wantViewerEmail)
+		}
+	}
+}
+
 // Internal users must not trigger a project lookup at all.
 func TestAccessService_InternalSkipsProjectLookup(t *testing.T) {
 	repo := &fakeAccessRepo{users: []repository.AccessUser{userOf("INTERNAL", true)}}
