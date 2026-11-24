@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -41,7 +42,9 @@ const (
 
 	errMsgGitHubRepoNotMapped = "No GitHub repository is mapped for this product."
 	errMsgGitHubTitleInvalid  = "A title of up to 256 characters is required."
-	errMsgGitHubBodyTooLong   = "The issue description is too long."
+	errMsgGitHubBodyTooLong   = "The issue is too long."
+
+	errMsgGitHubHotfixReasonInvalid = "Choose a hotfix reason from the list."
 
 	regressionLabel          = "regression"
 	originLabel              = "Origin/CS"
@@ -53,9 +56,11 @@ const (
 	migrationLabel           = "Affected/Migration"
 	onboardingLabel          = "Onboarding/affected"
 
-	priorityCriticalLabel = "Priority/Critical(P1)"
-	priorityHighLabel     = "Priority/High(P2)"
-	priorityMediumLabel   = "Priority/Medium(P3)"
+	// The priorities of the Internal Issue Handling Policy, as GitHub labels.
+	priorityImmediateLabel = "Priority/Immediate(P0)"
+	priorityHighLabel      = "Priority/High(P1)"
+	priorityMediumLabel    = "Priority/Medium(P2)"
+	priorityLowLabel       = "Priority/Low(P3)"
 )
 
 const (
@@ -64,6 +69,25 @@ const (
 	// page bound only guards a response that never reports the end.
 	deployedProductLookupMaxPages = 4
 )
+
+// gitHubPrioritiesWithJustification are the priorities that carry a Priority
+// Justification: P0 and P1, which the policy has CS leadership review first.
+var gitHubPrioritiesWithJustification = map[string]bool{
+	priorityImmediateLabel: true,
+	priorityHighLabel:      true,
+}
+
+// gitHubHotfixReasons are the reasons the dialog offers when a hotfix is required.
+//
+// It must match the webapp's src/features/csm-cases/utils/githubIssueOptions.json,
+// which the dialog reads: a choice missing here is a 400 for the engineer.
+// TestGitHubIssueChoiceListsMatchTheWebapp fails when the two differ.
+var gitHubHotfixReasons = []string{
+	"Customer-Requested Hotfix",
+	"Critical Production Bug / Downtime",
+	"Defect Blocking Operations / Development",
+	"Unable to Upgrade to Latest U2",
+}
 
 // deployedProductLookupTimeout bounds the deployed-product lookup so a slow
 // entity service can delay filing a Git issue by at most this long, never block
@@ -104,6 +128,41 @@ type caseGitHubIssueRequest struct {
 	IssueTypeLabel       string `json:"issueTypeLabel"`
 	PriorityLevel        string `json:"priorityLevel"`
 	OnboardingInProgress bool   `json:"onboardingInProgress"`
+	// The four below only add to the issue body; none of them is a label.
+	PriorityJustification string `json:"priorityJustification"`
+	ReproducingSteps      string `json:"reproducingSteps"`
+	HotFixReason          string `json:"hotFixReason"`
+	RelatedInternalIssues string `json:"relatedInternalIssues"`
+}
+
+// priorityJustification is the request's free-text justification when its
+// priority is P0 or P1, "" otherwise: a P2, a P3 or an unknown priority carries
+// none, so one sent with it is not written. The dialog's field is one line, so
+// any line breaks are collapsed and the body keeps it on its own line.
+func (req caseGitHubIssueRequest) priorityJustification() string {
+	if !gitHubPrioritiesWithJustification[githubPriorityLabel(req.PriorityLevel)] {
+		return ""
+	}
+	return strings.Join(strings.Fields(req.PriorityJustification), " ")
+}
+
+// hotFixReason is the request's hotfix reason when a hotfix is required, "" otherwise.
+func (req caseGitHubIssueRequest) hotFixReason() string {
+	if !req.HotFixRequired {
+		return ""
+	}
+	return strings.TrimSpace(req.HotFixReason)
+}
+
+// validateGitHubIssueChoices checks that the hotfix reason, when it will be
+// written, is one of the dialog's own options. It is not required here: the
+// dialog requires it, and refusing a request without one would break a webapp
+// one release behind this backend. The priority justification is free text.
+func validateGitHubIssueChoices(req caseGitHubIssueRequest) string {
+	if r := req.hotFixReason(); r != "" && !slices.Contains(gitHubHotfixReasons, r) {
+		return errMsgGitHubHotfixReasonInvalid
+	}
+	return ""
 }
 
 type caseGitHubIssueResponse struct {
@@ -294,7 +353,9 @@ func idKey(id string) string {
 const issueInfoBlankValue = "undefined"
 
 // buildGitHubIssueBody is the caller's own description, then the optional
-// Hotfix Required line, then the info block as the footer: always the same
+// sections the engineer filled in (Reproducing Steps, Priority Justification,
+// the Hotfix Required line with its Hotfix Reason, Related Internal Issue(s)),
+// then the info block as the footer: always the same
 // seven lines (Product, Update level, WSO2 case id, Case number, Public Git
 // Issue, ABT Team, Opened by), in this order and spelling, as the issues filed
 // before the portal moved to the engineering service carry it. A value that is
@@ -342,25 +403,45 @@ func buildGitHubIssueBody(req caseGitHubIssueRequest, productLabel string, caseC
 		}
 		b.WriteString(value)
 	}
-	section(strings.TrimSpace(req.Description))
-	if req.HotFixRequired {
-		section("Hotfix Required : Yes")
+	// A free-text section keeps its own line breaks: it is read by people, and
+	// only the footer is parsed line by line.
+	labelled := func(label, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			section(label + " :\n" + value)
+		}
 	}
+	section(strings.TrimSpace(req.Description))
+	labelled("Reproducing Steps", req.ReproducingSteps)
+	if j := req.priorityJustification(); j != "" {
+		section("Priority Justification : " + j)
+	}
+	if req.HotFixRequired {
+		// "Hotfix Required : Yes" stays a line of its own, spelled as before.
+		hotfix := "Hotfix Required : Yes"
+		if r := req.hotFixReason(); r != "" {
+			hotfix += "\nHotfix Reason : " + r
+		}
+		section(hotfix)
+	}
+	labelled("Related Internal Issue(s)", req.RelatedInternalIssues)
 	section(info.String())
 	return strings.TrimSpace(b.String())
 }
 
-// githubPriorityLabel maps the dialog's severity onto the GitHub label names
-// the internals dashboards filter on. Bare Priority/Critical (etc.) is
-// rewritten to the (Pn) form; the (Pn) form is left as-is.
+// githubPriorityLabel maps the dialog's priority onto the GitHub label names
+// of the Internal Issue Handling Policy (P0 to P3). Bare Priority/Immediate
+// (etc.) is rewritten to the (Pn) form; anything else is left as written, so a
+// webapp one release behind still files the label it sent.
 func githubPriorityLabel(level string) string {
 	switch strings.TrimSpace(level) {
-	case "Priority/Critical", priorityCriticalLabel:
-		return priorityCriticalLabel
+	case "Priority/Immediate", priorityImmediateLabel:
+		return priorityImmediateLabel
 	case "Priority/High", priorityHighLabel:
 		return priorityHighLabel
 	case "Priority/Medium", priorityMediumLabel:
 		return priorityMediumLabel
+	case "Priority/Low", priorityLowLabel:
+		return priorityLowLabel
 	default:
 		return strings.TrimSpace(level)
 	}
@@ -462,6 +543,11 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 	// before any upstream call.
 	if utf8.RuneCountInString(strings.TrimSpace(req.Description)) > maxGitHubIssueBodyChars {
 		writeError(w, http.StatusBadRequest, errMsgGitHubBodyTooLong)
+		return
+	}
+
+	if msg := validateGitHubIssueChoices(req); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 

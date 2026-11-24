@@ -1,0 +1,8 @@
+{
+  "hotfixReasons": [
+    "Customer-Requested Hotfix",
+    "Critical Production Bug / Downtime",
+    "Defect Blocking Operations / Development",
+    "Unable to Upgrade to Latest U2"
+  ]
+}

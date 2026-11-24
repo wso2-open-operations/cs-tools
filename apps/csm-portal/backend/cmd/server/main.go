@@ -144,7 +144,7 @@ func main() {
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
-	// Optional: with the engineering entity service configured, "Open Git issue"
+	// Optional: with the engineering entity service configured, "Raise internal Git issue"
 	// (POST /cases/{id}/github-issues) files the issue through it rather than
 	// forwarding to the entity service. It authenticates as the same shared
 	// OAuth2 app as every other upstream; only its base URL and scopes are its

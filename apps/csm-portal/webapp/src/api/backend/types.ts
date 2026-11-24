@@ -2426,8 +2426,16 @@ export interface BeCreateCaseGithubIssuePayload {
   hotFixRequired?: boolean;
   /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
   issueTypeLabel?: string;
-  /** Priority label for Discussion: Priority/Critical(P1), Priority/High(P2), or Priority/Medium(P3). */
+  /** Priority label for Discussion: Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). */
   priorityLevel?: string;
+  /** Why the issue is P0 or P1 (free text). Written to the issue body. */
+  priorityJustification?: string;
+  /** Steps to reproduce, written to the issue body. */
+  reproducingSteps?: string;
+  /** Why a hotfix is required (one of the dialog's fixed options). Sent only with hotFixRequired. */
+  hotFixReason?: string;
+  /** Related internal issue links or numbers, written to the issue body. */
+  relatedInternalIssues?: string;
   /** Project onboarding status is In-Progress. Adds Onboarding/affected. */
   onboardingInProgress?: boolean;
 }
