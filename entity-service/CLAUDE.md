@@ -12283,9 +12283,42 @@ product version past its EOL date in Primary Production. Internal callers only; 
 - **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
   met), then account, then project; versions oldest EOL first. Text a row lacks (region, CS ABT, project key) is
   `null`, never `""`; a person's missing name or email is left out (`omitempty`). The timestamp is `generatedOn`.
+- **Only when deployed products are read from Postgres** (`cfg.UsageReadRoute() == UsageReadRoutePostgres`, the default):
+  under `DATA_SOURCE=servicenow` or `USAGE_READ_MODE=legacy` the route is not registered, so the monthly task fails and
+  alerts instead of mailing a report that silently misses customers.
 
 Tests: `eol_product_usage_report_service_test.go` (unit), `eol_product_usage_report_integration_test.go`
 (`ENTITY_TEST_DATABASE_URL`).
+
+## Deprecated product usage report (`GET /reports/deprecated-product-usage`)
+
+`DeprecatedProductUsageReportService` (`internal/service/deprecated_product_usage_report_service.go`) builds the
+monthly report `operations/csm-scheduled-tasks` mails to account managers, technical owners and CS leadership:
+customers running a product version whose support status is Deprecated in Primary Production. Internal callers
+only; reads under the system identity. Same shape and rules as the EOL product usage report; only the version rule
+differs.
+
+- **Rows** (`deprecated_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an
+  active `PRIMARY_PRODUCTION` deployment whose version's `current_support_status` is `DEPRECATED`, whether its EOL
+  date has passed or not, listed once per (project, product version) however many such deployments run it. A
+  deprecated version whose EOL date has passed is also in the EOL product usage report, on purpose: it is both
+  deprecated and past its EOL date. `asOf` (default today in
+  Asia/Colombo) is only the report date shown; the status is the current one.
+- **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
+  active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed.
+  `deployed_product.life_cycle_stage_status` is deliberately not used.
+- **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
+  `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
+- **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
+  met), then account, then project; versions by EOL date (none last). Text a row lacks (region, CS ABT, project key,
+  EOL date) is `null`, never `""`; a person's missing name or email is left out (`omitempty`). The timestamp is
+  `generatedOn`.
+- **Only when deployed products are read from Postgres** (`cfg.UsageReadRoute() == UsageReadRoutePostgres`, the default):
+  under `DATA_SOURCE=servicenow` or `USAGE_READ_MODE=legacy` the route is not registered, so the monthly task fails and
+  alerts instead of mailing a report that silently misses customers.
+
+Tests: `deprecated_product_usage_report_service_test.go` (unit),
+`deprecated_product_usage_report_integration_test.go` (`ENTITY_TEST_DATABASE_URL`).
 
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 

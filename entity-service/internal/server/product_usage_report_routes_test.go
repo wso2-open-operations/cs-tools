@@ -26,8 +26,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
-// The product usage report reads deployed products from Postgres, so it is
-// registered only when deployed products are read from Postgres
+// The two product usage reports read deployed products from Postgres, so they
+// are registered only when deployed products are read from Postgres
 // (cfg.UsageReadRoute). Under dual-write with USAGE_READ_MODE=legacy the
 // routes are absent (404): the monthly task fails loudly instead of mailing
 // a report that misses customers. Anything else means the route exists; an
@@ -58,7 +58,7 @@ func TestProductUsageReportRoutesFollowTheUsageReadRoute(t *testing.T) {
 			}
 			withTestAuth(t, cfg)
 			router, _ := NewRouter(pool, cfg)
-			for _, path := range []string{"/reports/eol-product-usage"} {
+			for _, path := range []string{"/reports/eol-product-usage", "/reports/deprecated-product-usage"} {
 				rec := httptest.NewRecorder()
 				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 				if absent := rec.Code == http.StatusNotFound; absent == tc.present {
