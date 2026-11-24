@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { createTheme, ThemeProvider } from "@wso2/oxygen-ui";
@@ -67,7 +67,7 @@ describe("SlaImpactTimeline", () => {
       <SlaImpactTimeline entries={ENTRIES} openedAt="2026-07-01T09:00:00Z" isLoading={false} isError={false} onRetry={vi.fn()} />
     </ThemeProvider>);
     const timeline = screen.getByRole("group", { name: "Ownership timeline" });
-    const wso2 = within(timeline).getByRole("button", { name: /With WSO2/ });
+    const wso2 = within(timeline).getByRole("button", { name: /With Choreo Labs/ });
     fireEvent.click(wso2);
     expect(wso2).toHaveAttribute("aria-pressed", "true");
     expect(wso2).toHaveStyle({ color: theme.palette.info.contrastText, height: "24px", borderRadius: "999px" });
@@ -95,7 +95,7 @@ describe("SlaImpactTimeline", () => {
 
   it("shows ownership summaries without a closed duration", () => {
     renderTimeline();
-    for (const label of ["With WSO2", "With customer"]) {
+    for (const label of ["With Choreo Labs", "With customer"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByText("Closed")).not.toBeInTheDocument();
@@ -112,8 +112,8 @@ describe("SlaImpactTimeline", () => {
 
   it("shows duration and exact times when an ownership period is clicked", () => {
     renderTimeline({ openedAt: "2026-07-01T09:00:00Z" });
-    fireEvent.click(within(screen.getByRole("group", { name: "Ownership timeline" })).getByRole("button", { name: /With WSO2, 1h elapsed/ }));
-    expect(screen.getByText("With WSO2 · 1h elapsed")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("group", { name: "Ownership timeline" })).getByRole("button", { name: /With Choreo Labs, 1h elapsed/ }));
+    expect(screen.getByText("With Choreo Labs · 1h elapsed")).toBeInTheDocument();
   });
 
   it("limits the main history to the latest three changes", () => {
@@ -121,6 +121,30 @@ describe("SlaImpactTimeline", () => {
     expect(screen.getByText("Latest 3 of 5 · newest first")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View all 5 events" }));
     expect(within(screen.getByRole("dialog")).getAllByText("Workaround provided")).toHaveLength(5);
+  });
+
+  it("opens the full history when a grouped marker is clicked", () => {
+    const close = (i: number) => ({ ...ENTRIES[1], id: `g${i}`, createdAt: `2026-07-02T10:00:0${i}Z` });
+    renderTimeline({ entries: [ENTRIES[0], close(1), close(2), close(3)] });
+    const group = screen.getByRole("group", { name: "SLA events, oldest to newest" });
+    fireEvent.click(within(group).getByRole("button", { name: /Workaround provided.*Workaround provided/ }));
+    const dialog = screen.getByRole("dialog", { name: "SLA event history" });
+    expect(within(dialog).getByText("4 events · newest first")).toBeInTheDocument();
+  });
+
+  it("picks up an event recorded after the timeline mounted", () => {
+    vi.useFakeTimers();
+    try {
+      const mountedAt = new Date("2026-07-05T10:00:00Z");
+      vi.setSystemTime(mountedAt);
+      const later: CaseAuditEntry = { ...ENTRIES[1], id: "later", createdAt: "2026-07-05T10:00:10Z" };
+      renderTimeline({ entries: [later], openedAt: "2026-07-01T09:00:00Z" });
+      expect(screen.getByText(/No SLA-affecting changes/)).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(30_000); });
+      expect(screen.getByText("Latest 1 of 1 · newest first")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows breached SLA statuses without inventing times or placing them on the graph", () => {

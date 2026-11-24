@@ -30,7 +30,7 @@ const SEGMENT_CONTRAST: Record<OwnershipSide, string> = {
   customer: "warning.contrastText",
   closed: "background.paper",
 };
-const LABELS: Record<OwnershipSide, string> = { wso2: "With WSO2", customer: "With customer", closed: "Closed" };
+const LABELS: Record<OwnershipSide, string> = { wso2: "With Choreo Labs", customer: "With customer", closed: "Closed" };
 const when = (ms: number) => formatAbsoluteForUser(new Date(ms).toISOString()) ?? "Unknown time";
 const changeText = (event: SlaTimelineEvent) => event.changes.map((c) => `${c.label}: ${c.from ?? "None"} → ${c.to ?? "Cleared"}`).join(" · ");
 
@@ -49,7 +49,14 @@ interface SlaImpactTimelineProps {
 
 function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [], isSlasLoading, isSlasError }: SlaImpactTimelineProps): JSX.Element {
   const selectionId = useId();
-  const [now] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  // Keep the clock moving so elapsed times and events recorded after mount
+  // appear, and refresh it as soon as the audit or case inputs change.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => setNow(Date.now()), [entries, currentState, closedAt]);
   const plot = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   const [selection, setSelection] = useState<OwnershipPeriod | null>(null);
@@ -83,7 +90,7 @@ function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [],
 
   const openEvent = (event: SlaTimelineEvent) => setHistory({ events: [...events].reverse(), selectedId: event.id });
   const groupLabel = (group: SlaTimelineEvent[]) => group.map((e) => `${e.title}, ${changeText(e)}, ${e.actor}, ${when(timestampMs(e.at)!)}`).join("; ");
-  const openGroup = (group: SlaTimelineEvent[]) => group.length === 1 ? openEvent(group[0]) : setHistory({ events: [...group].reverse() });
+  const openGroup = (group: SlaTimelineEvent[]) => openEvent(group.at(-1)!);
   const renderEvent = (event: SlaTimelineEvent, detailed = false) => (
     <Button
       key={event.id}
@@ -166,7 +173,7 @@ function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [],
       {selected && <Box id={selectionId} aria-live="polite" sx={{ p: 1.5, bgcolor: "action.selected", borderLeft: 3, borderColor: "primary.main", borderRadius: 1 }}><Typography variant="caption" color="text.secondary">Selected period</Typography><Typography variant="body2">{LABELS[selected.side]} · {elapsedLabel(selected.end - selected.start)} elapsed</Typography><Typography variant="caption" color="text.secondary">{when(selected.start)} → {when(selected.end)}</Typography></Box>}
       <Box><Typography variant="subtitle2">Latest changes</Typography><Typography variant="caption" color="text.secondary">Latest {latest.length} of {events.length} · newest first</Typography>{latest.map((event) => renderEvent(event))}</Box>
       {events.length ? <Button size="small" onClick={() => setHistory({ events: [...events].reverse() })} endIcon={<ArrowRight size={14} />} sx={{ alignSelf: "flex-start", textTransform: "none" }}>View all {events.length} events</Button> : <Typography variant="body2" color="text.secondary">No SLA-affecting changes recorded for this case yet.</Typography>}
-      <Typography variant="caption" color="text.secondary">Ownership and SLA clock status are independent. Fix ETA changes may pause an SLA while the case remains with WSO2.</Typography>
+      <Typography variant="caption" color="text.secondary">Ownership and SLA clock status are independent. Fix ETA changes may pause an SLA while the case remains with Choreo Labs.</Typography>
       <Drawer anchor="right" open={!!history} onClose={() => setHistory(null)} PaperProps={{ "aria-label": "SLA event history", sx: { width: { xs: "100%", sm: 440 }, maxWidth: "100%" } }}>
         <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
           <Box sx={{ p: 2, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: 1, borderColor: "divider" }}><Box><Typography variant="subtitle1">SLA event history</Typography><Typography variant="caption" color="text.secondary">{history?.events.length} events · newest first</Typography></Box><IconButton aria-label="Close SLA history" onClick={() => setHistory(null)}><X size={18} /></IconButton></Box>
