@@ -165,6 +165,47 @@ describe("PublicHolidaysEditor", () => {
     expect(box).toHaveValue("2027-02-04, Independence Day");
   });
 
+  it("imports a calendar file's days for the chosen year into the box, after what is there", async () => {
+    list.data = editable();
+    render(<PublicHolidaysEditor />);
+    const y = new Date().getFullYear();
+    const box = screen.getByLabelText("Holidays to add, one per line");
+    fireEvent.change(box, { target: { value: `${y}-12-31, New Year's Eve` } });
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      `DTSTART;VALUE=DATE:${y}0115`,
+      "SUMMARY:Tamil Thai Pongal Day",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      `DTSTART;VALUE=DATE:${y + 1}0115`,
+      "SUMMARY:Next year",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    fireEvent.change(screen.getByLabelText("Holiday file to import"), {
+      target: { files: [new File([ics], "lk.ics", { type: "text/calendar" })] },
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(`1 holiday in ${y} read from the calendar. Check the lines`);
+    expect(box).toHaveValue(`${y}-12-31, New Year's Eve\n${y}-01-15, Tamil Thai Pongal Day`);
+    expect(screen.getByText(/2 holidays ready/)).toBeInTheDocument();
+    expect(addMutate).not.toHaveBeenCalled();
+  });
+
+  it("says so when a file holds nothing to add, or is too large", async () => {
+    list.data = editable();
+    render(<PublicHolidaysEditor />);
+    const input = screen.getByLabelText("Holiday file to import");
+    fireEvent.change(input, { target: { files: [new File(["BEGIN:VCALENDAR\r\nEND:VCALENDAR"], "empty.ics")] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/No holidays found in empty.ics for \d{4}/);
+
+    const big = new File(["x"], "big.txt");
+    Object.defineProperty(big, "size", { value: 2 * 1024 * 1024 });
+    fireEvent.change(input, { target: { files: [big] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("big.txt is larger than 1 MB");
+    expect(screen.getByLabelText("Holidays to add, one per line")).toHaveValue("");
+  });
+
   it("removes one day", () => {
     list.data = editable([{ country: "Sri Lanka", date: "2027-02-04", title: "Independence Day", source: "MANUAL" }]);
     render(<PublicHolidaysEditor />);

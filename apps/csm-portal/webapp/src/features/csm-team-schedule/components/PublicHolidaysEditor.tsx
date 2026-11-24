@@ -16,9 +16,23 @@
  * under the License.
  */
 
-import { useId, useMemo, useState, type JSX } from "react";
+import { useId, useMemo, useRef, useState, type ChangeEvent, type JSX } from "react";
 import { useAddPublicHolidays, usePublicHolidayList, useRemovePublicHoliday } from "../api/usePublicHolidayEditor";
+import { holidayFileToLines, MAX_HOLIDAY_FILE_BYTES } from "../utils/holidayFile";
 import { parseHolidayLines } from "../utils/holidayLines";
+
+/** What the Import file picker offers: a calendar, a table, or plain text lines. */
+const IMPORT_ACCEPT = ".ics,.csv,.tsv,.txt,text/calendar,text/csv,text/tab-separated-values,text/plain";
+
+/** A picked file's text (UTF-8). */
+function readText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsText(file);
+  });
+}
 
 /** The country picker's entry that lets the reader type another country. */
 const OTHER = "__other__";
@@ -47,6 +61,7 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
   const [countryChoice, setCountryChoice] = useState<string | null>(null);
   const [otherCountry, setOtherCountry] = useState("");
   const [text, setText] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Whether the server last said this reader may edit. It does not depend on
@@ -97,12 +112,42 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
     );
   };
 
+  // Reads a picked file into the paste box (after anything already there), to be
+  // checked and added like a paste. Nothing is sent until Add holidays.
+  const importFile = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // the same file can be picked again
+    if (!file) return;
+    setMessage(null);
+    setError(null);
+    if (file.size > MAX_HOLIDAY_FILE_BYTES) {
+      setError(`${file.name} is larger than 1 MB; a year of holidays is a few KB.`);
+      return;
+    }
+    let content: string;
+    try {
+      content = await readText(file);
+    } catch {
+      setError(`${file.name} could not be read.`);
+      return;
+    }
+    const read = holidayFileToLines(file.name, content, year);
+    if (!read.text.trim()) {
+      setError(`No holidays found in ${file.name}${/\.ics$/i.test(file.name) ? ` for ${year}` : ""}.`);
+      return;
+    }
+    setText((current) => (current.trim() ? `${current.replace(/\s+$/, "")}\n${read.text}` : read.text));
+    setMessage(`${read.note} Check the lines, then Add holidays.`);
+  };
+
   return (
     <section className="ra-sec phe" aria-labelledby={headingId}>
       <h3 id={headingId}>Public holidays</h3>
       <p className="cp-help">
         The roster shades each person&apos;s public holidays (their own country&apos;s, else Sri Lanka, or India for
-        the India team). Add a country&apos;s holidays here, one per line as <code>YYYY-MM-DD, Name</code>. CRE members
+        the India team). Add a country&apos;s holidays here, one per line as <code>YYYY-MM-DD, Name</code>, or import
+        a file: a holiday calendar (<code>.ics</code>, the chosen year&apos;s days), a table (<code>.csv</code>, date
+        then name) or a text file of such lines. CRE members
         get a Public holiday tag on each weekday holiday, three weeks ahead; their lead removes it for whoever works.
       </p>
 
@@ -217,6 +262,20 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
           aria-label="Holidays to add, one per line"
         />
       </label>
+      <div className="phe-import">
+        <input
+          ref={fileInput}
+          type="file"
+          accept={IMPORT_ACCEPT}
+          hidden
+          onChange={(e) => void importFile(e)}
+          aria-label="Holiday file to import"
+        />
+        <button type="button" className="btn sm ghost" onClick={() => fileInput.current?.click()}>
+          Import file…
+        </button>
+        <span className="cp-help">.ics calendar, .csv table or .txt lines; nothing is added until Add holidays.</span>
+      </div>
       {parsed.errors.length > 0 ? (
         <ul className="phe-errs" aria-label="Lines to fix">
           {parsed.errors.map((e) => (

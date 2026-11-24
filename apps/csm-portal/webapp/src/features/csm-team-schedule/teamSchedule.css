@@ -3816,4 +3816,5 @@
 .csm-ts .phe .phe-src { color: var(--ink-2); font-size: 12.5px; }
 .csm-ts .phe .phe-paste { display: flex; flex-direction: column; gap: 6px; }
 .csm-ts .phe .phe-paste textarea { width: 100%; font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
+.csm-ts .phe .phe-import { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
 .csm-ts .phe .phe-errs { margin: 6px 0; padding-left: 18px; color: var(--crit); font-size: 12.5px; }
