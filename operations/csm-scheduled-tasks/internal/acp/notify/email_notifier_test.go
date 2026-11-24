@@ -369,8 +369,8 @@ func TestEmailNotifier_Send_InternalNoticeGetsOwnBrandedTemplate(t *testing.T) {
 	}
 	got := sender.calls[0].htmlBody
 
-	if strings.Contains(got, "#fdece2") || strings.Contains(got, "#ff7300") {
-		t.Error("htmlBody uses the customer-facing shell's peach background/orange border — internal must use its own distinct template")
+	if strings.Contains(got, "#e9ecf3") || strings.Contains(got, "#0B1633") {
+		t.Error("htmlBody uses the customer-facing shell's light background/navy border — internal must use its own distinct template")
 	}
 	if !strings.Contains(got, defaultLogoURL) {
 		t.Error("htmlBody missing the logo — internal notices get it in the footer, matching the real reference")
@@ -436,7 +436,7 @@ func TestEmailNotifier_Send_InternalFallbackForUnrecognizedShape(t *testing.T) {
 }
 
 // TestEmailNotifier_Send_CustomerNoticeGetsBrandedTemplate verifies the
-// branded WSO2 shell (logo, orange accent border, footer disclaimer) wraps
+// branded WSO2 shell (logo, navy accent border, footer disclaimer) wraps
 // the customer-facing notice too, per real examples.
 func TestEmailNotifier_Send_CustomerNoticeGetsBrandedTemplate(t *testing.T) {
 	sender := &mockEmailSender{}

@@ -50,11 +50,11 @@ const (
 	statSubCell = `style="background-color:#ffffff; text-align:center; padding:2px 8px 7px; font-size:14px; color:#465868;"`
 )
 
-// pill is one labelled figure: the name above, the value below in WSO2
-// orange. ServiceNow used these for its per-team and per-type rows.
+// pill is one labelled figure: the name above, the value below in
+// navy. ServiceNow used these for its per-team and per-type rows.
 //
 // A pill is a pair of cells in a shared two-row table rather than a table
-// of its own -- that is what keeps every orange bar on one line when a
+// of its own -- that is what keeps every navy bar on one line when a
 // team name wraps, which "Americas CS Team - Integration" always does.
 type pillCell struct{ label, value string }
 
