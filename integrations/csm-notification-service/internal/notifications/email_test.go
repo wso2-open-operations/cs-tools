@@ -18,6 +18,7 @@ package notifications
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -139,6 +140,75 @@ func TestSendEmail_SendsExpectedRequest(t *testing.T) {
 	}
 	if len(capturedBody.Attachments) != 1 || capturedBody.Attachments[0].ContentName != "notes.txt" {
 		t.Errorf("Attachments = %+v, want one attachment named notes.txt", capturedBody.Attachments)
+	}
+}
+
+// TestSendEmailRequest_AttachmentWireShape pins the JSON shape of an
+// attachment's content. email-service is a Ballerina service whose
+// EmailAttachment.attachment is byte[]; its data binding accepts that only
+// as a JSON array of numbers (one per byte) and rejects encoding/json's
+// default base64 string with a 400 ("should be of type 'byte[]'"). The
+// template field is the opposite: the service takes it as base64, so it
+// must stay a string.
+func TestSendEmailRequest_AttachmentWireShape(t *testing.T) {
+	raw, err := json.Marshal(sendEmailRequest{
+		To:       []string{"customer@example.com"},
+		From:     "noreply@example.com",
+		Subject:  "s",
+		Template: []byte("<p>hi</p>"),
+		Attachments: []EmailAttachment{
+			{ContentName: "a.png", ContentType: "image/png", Attachment: []byte{0, 1, 127, 128, 255}, Inline: true, ContentID: "img1"},
+			{ContentName: "empty.txt", ContentType: "text/plain"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got struct {
+		Template    json.RawMessage              `json:"template"`
+		Attachments []map[string]json.RawMessage `json:"attachments"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if want := `"` + base64.StdEncoding.EncodeToString([]byte("<p>hi</p>")) + `"`; string(got.Template) != want {
+		t.Errorf("template = %s, want base64 string %s", got.Template, want)
+	}
+	if len(got.Attachments) != 2 {
+		t.Fatalf("attachments = %d, want 2", len(got.Attachments))
+	}
+	wantFields := map[string]string{
+		"contentName": `"a.png"`,
+		"contentType": `"image/png"`,
+		"attachment":  `[0,1,127,128,255]`,
+		"inline":      `true`,
+		"contentId":   `"img1"`,
+	}
+	for k, want := range wantFields {
+		if v := string(got.Attachments[0][k]); v != want {
+			t.Errorf("attachments[0].%s = %s, want %s", k, v, want)
+		}
+	}
+	if len(got.Attachments[0]) != len(wantFields) {
+		t.Errorf("attachments[0] has fields %v, want exactly %d", got.Attachments[0], len(wantFields))
+	}
+	// No content still has to be a byte[] for the service, not null.
+	if v := string(got.Attachments[1]["attachment"]); v != `[]` {
+		t.Errorf("attachments[1].attachment = %s, want []", v)
+	}
+	if _, ok := got.Attachments[1]["inline"]; ok {
+		t.Errorf("attachments[1] has inline, want it omitted when false")
+	}
+
+	// A Go client decoding the request back (as the tests above do) still
+	// gets the original bytes.
+	var back sendEmailRequest
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal into sendEmailRequest: %v", err)
+	}
+	if string(back.Attachments[0].Attachment) != string([]byte{0, 1, 127, 128, 255}) {
+		t.Errorf("round-tripped attachment = %v", back.Attachments[0].Attachment)
 	}
 }
 
