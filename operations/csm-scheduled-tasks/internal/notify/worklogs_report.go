@@ -114,7 +114,7 @@ func caseLink(caseLinkBase string, iss worklogreport.IssueRef) string {
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(iss.ID)
 	return `<a href="` + escapeHTML(href) +
-		`" style="color:#0B1633; text-decoration:underline;">` + key + `</a>`
+		`" style="color:#0B1633; text-decoration:none;">` + key + `</a>`
 }
 
 func WorklogsReportSubject(r worklogreport.Report) string {
