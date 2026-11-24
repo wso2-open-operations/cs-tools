@@ -50,6 +50,9 @@ func TestSetLogoURL_ReplacesEveryBakedLogo(t *testing.T) {
 	if !strings.Contains(eolProductUsageReportTemplate, "https://example.test/logo.png") || strings.Contains(eolProductUsageReportTemplate, defaultLogoURL) {
 		t.Errorf("logo not replaced in eolProductUsageReportTemplate")
 	}
+	if !strings.Contains(deprecatedProductUsageReportTemplate, "https://example.test/logo.png") || strings.Contains(deprecatedProductUsageReportTemplate, defaultLogoURL) {
+		t.Errorf("logo not replaced in deprecatedProductUsageReportTemplate")
+	}
 }
 
 // Every template baked with bakeLogo must be listed in logoTemplates, or the
@@ -110,6 +113,9 @@ func TestSetCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	if !strings.Contains(eolProductUsageReportTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All Rights Reserved.") {
 		t.Errorf("copyright line not replaced in eolProductUsageReportTemplate")
 	}
+	if !strings.Contains(deprecatedProductUsageReportTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All Rights Reserved.") {
+		t.Errorf("copyright line not replaced in deprecatedProductUsageReportTemplate")
+	}
 	if !strings.Contains(productRegressionReportTemplate, "Acme Case Id") {
 		t.Errorf("\"Case Id\" column header not replaced in productRegressionReportTemplate")
 	}
@@ -162,5 +168,11 @@ func TestDefaultBranding_IsChoreoLabs(t *testing.T) {
 	}
 	if !strings.Contains(eolProductUsageReportTemplate, defaultLogoURL) {
 		t.Errorf("default logo missing from eolProductUsageReportTemplate")
+	}
+	if !strings.Contains(deprecatedProductUsageReportTemplate, "&copy; <!-- [YEAR] --> Choreo Labs LLC. All Rights Reserved.") {
+		t.Errorf("default copyright line missing from deprecatedProductUsageReportTemplate")
+	}
+	if !strings.Contains(deprecatedProductUsageReportTemplate, defaultLogoURL) {
+		t.Errorf("default logo missing from deprecatedProductUsageReportTemplate")
 	}
 }

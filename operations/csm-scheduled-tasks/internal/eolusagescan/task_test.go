@@ -26,6 +26,8 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 )
 
 type fakeReports struct {
@@ -285,5 +287,46 @@ func TestAudienceAndCc(t *testing.T) {
 	}
 	if cc := eolusagescan.Cc([]string{"a@x.com"}, []string{"A@x.com", "b@x.com", "b@x.com", " "}); !reflect.DeepEqual(cc, []string{"b@x.com"}) {
 		t.Errorf("Cc = %v, want [b@x.com]", cc)
+	}
+}
+
+func TestSendReportUsesTheClaimedPeriodOverTheClock(t *testing.T) {
+	// The engine claimed the first Monday's period (7 Dec), but the handler
+	// runs after the next Monday's firing on the clock (14 Dec 04:31): the
+	// claimed period decides, so it sends; the report is as of that Monday.
+	reports := &fakeReports{report: sampleReport()}
+	email := &fakeEmail{}
+	late := func() time.Time { return time.Date(2026, 12, 14, 4, 31, 0, 0, time.UTC) }
+	handler := eolusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: late, Anchor: late})
+	ctx := schedule.WithPeriod(context.Background(), time.Date(2026, 12, 7, 4, 30, 0, 0, time.UTC))
+	if err := handler(ctx); err != nil || email.calls != 1 {
+		t.Fatalf("err=%v sent=%d, want the claimed first-Monday period to send", err, email.calls)
+	}
+	if reports.gotAsOf != "2026-12-07" {
+		t.Errorf("asOf = %q, want 2026-12-07", reports.gotAsOf)
+	}
+}
+
+// With only a debug list (no "to"), the report is still built and sent to
+// the debug list, marked as a test copy: that is how it is tried without
+// its real recipients.
+func TestSendReportDebugListWithoutRecipientsStillSends(t *testing.T) {
+	reports := &fakeReports{report: sampleReport()}
+	email := &fakeEmail{}
+	debug := []string{"debug@example.invalid"}
+	handler := eolusagescan.SendReport(reports, notify.ForReport(email, debug), nil, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil {
+		t.Fatalf("SendReport: %v", err)
+	}
+	if reports.calls != 1 || email.calls != 1 {
+		t.Fatalf("fetched %d, sent %d; want 1 and 1", reports.calls, email.calls)
+	}
+	if !reflect.DeepEqual(email.to, debug) {
+		t.Errorf("to = %v, want the debug list %v", email.to, debug)
+	}
+	if !strings.Contains(email.subject, "[Test copy]") {
+		t.Errorf("subject = %q, want a test copy", email.subject)
 	}
 }

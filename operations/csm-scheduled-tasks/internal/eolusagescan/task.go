@@ -34,6 +34,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 )
 
 // TaskName is the registry (and SUB_CRON_SCHEDULES / SUB_CRON_RECIPIENTS)
@@ -118,13 +119,20 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			slog.Info("EOL product usage report: emails are disabled (ALERTS_ENABLED); not sent")
 			return nil
 		}
-		if len(to) == 0 {
+		// An empty "to" switches the report off, unless the sender redirects
+		// (debug mail mode or a run-now override): configuring only a debug
+		// list is how the report is tried without its real recipients, so it
+		// must still be built and sent there.
+		if len(to) == 0 && !notify.Redirects(email) {
 			slog.Info("EOL product usage report has no recipients; skipping")
 			return nil
 		}
 
 		clock := opts.Now
-		if opts.Anchor != nil {
+		if p, ok := schedule.PeriodFromContext(ctx); ok {
+			// The period the engine claimed for this run.
+			clock = func() time.Time { return p }
+		} else if opts.Anchor != nil {
 			clock = opts.Anchor
 		}
 		asOf := runDate(clock)

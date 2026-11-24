@@ -48,6 +48,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagereport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
@@ -223,6 +225,21 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service time-card report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The deprecated product usage report's own client: the same deployment
+	// and credentials, a distinct endpoint (GET
+	// /reports/deprecated-product-usage).
+	deprecatedUsageReportClient, err := deprecatedusagereport.NewClient(deprecatedusagereport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service deprecated-product-usage-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -769,8 +786,10 @@ func main() {
 	// address (see eolusagescan.Options.AllowedRecipientDomains).
 	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled,
 		AllowedRecipientDomains: splitComma(os.Getenv("EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS"))}
-	// A scheduled run (and its retries) takes its date from its period; a
-	// run-now below keeps the clock.
+	// A scheduled run (and its retries) takes its date from the period the
+	// engine claimed (schedule.PeriodFromContext); Anchor is the fallback for
+	// a run outside the engine, such as a tryout. A run-now below keeps the
+	// clock.
 	eolUsageScheduled := eolUsageOptions
 	eolUsageScheduled.Anchor = periodStart(eolUsageSchedule)
 	eolUsageTask := registry.Task{
@@ -860,6 +879,66 @@ func main() {
 
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
+
+	// The monthly deprecated product usage report: the customers running a
+	// product version whose support status is Deprecated in an active
+	// Primary Production deployment, mailed on the first Monday of the month
+	// at 10:00 IST (04:30 UTC; the schedule fires every Monday and the handler
+	// sends only when its run's Monday is the 1st to the 7th). To is its
+	// SUB_CRON_RECIPIENTS "to" (the CS leadership group) plus every listed
+	// account's manager and technical owner; with no "to" the task skips and
+	// succeeds. A month with no deprecated usage still sends a short note to
+	// the configured to/cc.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the regression
+	// reports: failures go to ALERT_RECIPIENTS alone, never to the account
+	// managers on every retry. That also hides its audience from the
+	// EMAIL_BASE_URL check further below, so it is checked here.
+	//
+	// DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL optionally links account and
+	// project names to their CSM portal pages (<base>/customers/accounts/<id>);
+	// a non-https value refuses to start, as every URL here does.
+	deprecatedUsagePortalBase := strings.TrimRight(os.Getenv("DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL"), "/")
+	if deprecatedUsagePortalBase != "" {
+		if err := httpsec.RequireSecureURL(deprecatedUsagePortalBase); err != nil {
+			slog.Error("invalid DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	deprecatedUsageTo, deprecatedUsageCc := recipientsFor(recipientOverrides, deprecatedusagescan.TaskName)
+	if alertsEnabled && emailBaseURL == "" && len(deprecatedUsageTo) > 0 {
+		slog.Error("the deprecated product usage report has recipients but EMAIL_BASE_URL is not set; refusing to start since the report could never be sent",
+			"task", deprecatedusagescan.TaskName)
+		os.Exit(1)
+	}
+	deprecatedUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, deprecatedusagescan.TaskName))
+	deprecatedUsageSchedule := scheduleFor(scheduleOverrides, deprecatedusagescan.TaskName, deprecatedusagescan.DefaultSchedule)
+	// DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS (comma-separated,
+	// e.g. "wso2.com") limits the account managers and technical owners
+	// added to the report's To list to those email domains; unset adds every
+	// valid address (see deprecatedusagescan.Options.AllowedRecipientDomains).
+	deprecatedUsageOptions := deprecatedusagescan.Options{PortalBaseURL: deprecatedUsagePortalBase, EmailsEnabled: alertsEnabled,
+		AllowedRecipientDomains: splitComma(os.Getenv("DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS"))}
+	// A scheduled run (and its retries) decides "first Monday" from the
+	// period the engine claimed (schedule.PeriodFromContext; Anchor is the
+	// fallback outside the engine, such as a tryout) and is dated the day it
+	// runs; a run-now below sends on any day.
+	deprecatedUsageScheduled := deprecatedUsageOptions
+	deprecatedUsageScheduled.Anchor = periodStart(deprecatedUsageSchedule)
+	deprecatedUsageTask := registry.Task{
+		Name:     deprecatedusagescan.TaskName,
+		Schedule: deprecatedUsageSchedule,
+		Handler:  deprecatedusagescan.SendReport(deprecatedUsageReportClient, deprecatedUsageEmail, deprecatedUsageTo, deprecatedUsageCc, deprecatedUsageScheduled),
+		// --recipients/--cc of a manual run-now only; see reportRunNow. A
+		// run-now sends whatever the date: it is asked for on purpose.
+		RunNowFlags: reportRunNowFlags,
+		RunNowNarrow: reportRunNow(deprecatedUsageEmail, emailClient,
+			func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				opts := deprecatedUsageOptions
+				opts.AnyDay = true
+				return deprecatedusagescan.SendReport(deprecatedUsageReportClient, email, orRecipients(deprecatedUsageTo, rec), deprecatedUsageCc, opts)
+			}),
+	}
 
 	const autoclosureTaskName = "case_autoclosure"
 	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
@@ -1128,6 +1207,7 @@ func main() {
 					return timecardreport.SendReports(timeCardsClient, email, periodStart(timeCardSchedule), cfg, alertsEnabled)
 				}),
 		},
+		deprecatedUsageTask,
 		// The two outage emails (internal-stakeholder notification and SRE
 		// outage communication) used to be sub-crons here. They moved to
 		// entity-service's outage notice drainer and csm-notification-service,
