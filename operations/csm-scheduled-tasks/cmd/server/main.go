@@ -913,7 +913,12 @@ func main() {
 	}
 	deprecatedUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, deprecatedusagescan.TaskName))
 	deprecatedUsageSchedule := scheduleFor(scheduleOverrides, deprecatedusagescan.TaskName, deprecatedusagescan.DefaultSchedule)
-	deprecatedUsageOptions := deprecatedusagescan.Options{PortalBaseURL: deprecatedUsagePortalBase, EmailsEnabled: alertsEnabled}
+	// DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS (comma-separated,
+	// e.g. "wso2.com") limits the account managers and technical owners
+	// added to the report's To list to those email domains; unset adds every
+	// valid address (see deprecatedusagescan.Options.AllowedRecipientDomains).
+	deprecatedUsageOptions := deprecatedusagescan.Options{PortalBaseURL: deprecatedUsagePortalBase, EmailsEnabled: alertsEnabled,
+		AllowedRecipientDomains: splitComma(os.Getenv("DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS"))}
 	// A scheduled run (and its retries) decides "first Monday" from the
 	// period the engine claimed (schedule.PeriodFromContext; Anchor is the
 	// fallback outside the engine, such as a tryout) and is dated the day it

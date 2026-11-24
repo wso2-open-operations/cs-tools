@@ -1157,6 +1157,7 @@ a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
+| `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the deprecated product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
@@ -1214,6 +1215,10 @@ version rule differs. A deprecated version whose EOL date has passed is in both 
   versions" note to the configured to/cc only, so the leadership group knows the report ran.
 - `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages;
   unset keeps plain text, and a non-https value refuses to start.
+- **Same checks as the EOL report.** A scheduled run sends only when its date is a Monday from the 1st to the 7th, and
+  `Audience` adds an account manager or technical owner only when it is a single plain address (`net/mail`) and, when
+  `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` is set, in one of those domains; the rest are dropped and counted
+  in a warning. Keep the two tasks' rules the same when changing either.
 
 ## Monthly product regression reports
 

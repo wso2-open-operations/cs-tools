@@ -34273,7 +34273,7 @@ components:
             $ref: '#/components/schemas/DeprecatedProductUsageAccount'
     DeprecatedProductUsageAccount:
       type: object
-      required: [accountId, accountName, csAbt, region, projects]
+      required: [accountId, accountName, csAbt, region, accountManager, technicalOwner, projects]
       properties:
         accountId: {type: string, format: uuid}
         accountName: {type: string}
@@ -34313,7 +34313,7 @@ components:
             $ref: '#/components/schemas/DeprecatedProductUsageVersion'
     DeprecatedProductUsageVersion:
       type: object
-      required: [productVersionId, productName, version]
+      required: [productVersionId, productName, version, supportStatus, eolDate]
       properties:
         productVersionId: {type: string, format: uuid}
         productName: {type: string}

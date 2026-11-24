@@ -45,7 +45,10 @@ func NewDeprecatedProductUsageReportRepository(db *Scoped) DeprecatedProductUsag
 	return &deprecatedProductUsageReportRepository{db: db}
 }
 
-// listDeprecatedUsageSQL is the report. Notes:
+// listDeprecatedUsageSQL is the report. It is listEolUsageSQL
+// (eol_product_usage_report_repo.go) with only the version predicate changed;
+// change the customer, deployment and grouping rules in both together (see
+// CLAUDE.md, "Change the two report queries together"). Notes:
 //
 //   - A deployed product, deployment or project with no active flag (NULL)
 //     counts as active, as the deployment pages treat it.

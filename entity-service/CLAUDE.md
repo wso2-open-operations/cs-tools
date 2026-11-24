@@ -12320,6 +12320,12 @@ differs.
 Tests: `deprecated_product_usage_report_service_test.go` (unit),
 `deprecated_product_usage_report_integration_test.go` (`ENTITY_TEST_DATABASE_URL`).
 
+**Change the two report queries together.** `listDeprecatedUsageSQL` is the EOL report's query
+(`eol_product_usage_report_repo.go`) with only the version predicate changed (`current_support_status = 'DEPRECATED'`
+instead of the EOL date). The rules for customers who have left (deleted account, inactive or closed project, NULL read
+as active), the Primary Production filter, the one-row-per-project-and-version rule and the grouping are the same in
+both. A change to any of them belongs in both repositories (and their integration tests) in the same change.
+
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 
 A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view

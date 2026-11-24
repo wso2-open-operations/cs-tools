@@ -1,3 +1,19 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package deprecatedusagescan_test
 
 import (
@@ -121,13 +137,30 @@ func TestSendReportSkipsMondaysAfterTheFirstWeek(t *testing.T) {
 			t.Errorf("day %d: fetched %d, sent %d; want nothing", day, reports.calls, email.calls)
 		}
 	}
-	for _, day := range []int{1, 7} {
+	// 7 December 2026 is the month's first Monday: it sends.
+	reports := &fakeReports{report: sampleReport()}
+	email := &fakeEmail{}
+	handler := deprecatedusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
+		deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.calls != 1 {
+		t.Errorf("7 Dec: err=%v sent=%d, want one mail", err, email.calls)
+	}
+}
+
+// A schedule overridden to fire on other days (SUB_CRON_SCHEDULES) still
+// sends only on the first Monday: the 1st to the 6th of December 2026 are
+// Tuesday to Sunday.
+func TestSendReportSendsOnlyOnAMonday(t *testing.T) {
+	for day := 1; day <= 6; day++ {
 		reports := &fakeReports{report: sampleReport()}
 		email := &fakeEmail{}
 		handler := deprecatedusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
-			deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, day)})
-		if err := handler(context.Background()); err != nil || email.calls != 1 {
-			t.Errorf("day %d: err=%v sent=%d, want one mail", day, err, email.calls)
+			deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, day), Anchor: at(2026, 12, day)})
+		if err := handler(context.Background()); err != nil {
+			t.Fatalf("day %d: %v", day, err)
+		}
+		if reports.calls != 0 || email.calls != 0 {
+			t.Errorf("day %d: fetched %d, sent %d; want nothing", day, reports.calls, email.calls)
 		}
 	}
 }
@@ -212,11 +245,45 @@ func TestSendReportFailures(t *testing.T) {
 	}
 }
 
+// Account contacts must be one plain address and, when domains are set, in
+// one of them; the configured to is taken as given.
+func TestAudienceDropsMalformedAndOutsideDomainContacts(t *testing.T) {
+	r := deprecatedusagereport.Report{Regions: []deprecatedusagereport.Region{{Accounts: []deprecatedusagereport.Account{
+		{AccountManager: &deprecatedusagereport.Person{Email: "am@example.com"}, TechnicalOwner: &deprecatedusagereport.Person{Email: "owner@other.org"}},
+		{AccountManager: &deprecatedusagereport.Person{Email: "not-an-address"}, TechnicalOwner: &deprecatedusagereport.Person{Email: "Someone <x@example.com>"}},
+		{AccountManager: &deprecatedusagereport.Person{Email: "a@example.com, b@example.com"}, TechnicalOwner: &deprecatedusagereport.Person{Email: "TO@EXAMPLE.COM"}},
+	}}}}
+
+	got, dropped := deprecatedusagescan.Audience(r, []string{"lead@leadership.example.net"}, []string{"example.com"})
+	want := []string{"lead@leadership.example.net", "am@example.com", "TO@EXAMPLE.COM"}
+	if !reflect.DeepEqual(got, want) || dropped != 4 {
+		t.Errorf("with domains: Audience = %v (dropped %d), want %v (dropped 4)", got, dropped, want)
+	}
+
+	got, dropped = deprecatedusagescan.Audience(r, nil, nil)
+	want = []string{"am@example.com", "owner@other.org", "TO@EXAMPLE.COM"}
+	if !reflect.DeepEqual(got, want) || dropped != 3 {
+		t.Errorf("no domains: Audience = %v (dropped %d), want %v (dropped 3)", got, dropped, want)
+	}
+}
+
+func TestSendReportMailsOnlyAllowedDomains(t *testing.T) {
+	email := &fakeEmail{}
+	handler := deprecatedusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 11, 2), AllowedRecipientDomains: []string{"wso2.example"}})
+	if err := handler(context.Background()); err != nil || email.calls != 1 {
+		t.Fatalf("err=%v sent=%d", err, email.calls)
+	}
+	if !reflect.DeepEqual(email.to, []string{"lead@example.com"}) {
+		t.Errorf("to = %v, want only the configured leadership address", email.to)
+	}
+}
+
 func TestAudienceAndCc(t *testing.T) {
-	got := deprecatedusagescan.Audience(sampleReport(), []string{" lead@example.com ", "", "AM.ONE@example.com"})
+	got, dropped := deprecatedusagescan.Audience(sampleReport(), []string{" lead@example.com ", "", "AM.ONE@example.com"}, nil)
 	want := []string{"lead@example.com", "AM.ONE@example.com", "TO.One@example.com"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Audience = %v, want %v", got, want)
+	if !reflect.DeepEqual(got, want) || dropped != 0 {
+		t.Errorf("Audience = %v (dropped %d), want %v", got, dropped, want)
 	}
 	if cc := deprecatedusagescan.Cc([]string{"a@example.net"}, []string{"A@example.net", "b@example.net", "b@example.net", " "}); !reflect.DeepEqual(cc, []string{"b@example.net"}) {
 		t.Errorf("Cc = %v, want [b@example.net]", cc)
