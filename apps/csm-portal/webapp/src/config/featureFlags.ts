@@ -92,8 +92,23 @@ function readRawOverrides(): unknown {
 }
 
 /**
+ * Nav ids that were renamed, mapped to their current id, so a deployment's
+ * existing `CSM_PORTAL_FEATURE_OVERRIDES` keys keep working (each one is
+ * warned about, to be renamed). The product catalogue was a top-level
+ * "Products" section until 2026-11, when it moved to Settings ▸ Product
+ * catalogue: a deployment that hid `products` (an entity service with no
+ * catalogue yet) must keep it hidden.
+ */
+export const LEGACY_NAV_ID_ALIASES: Readonly<Record<string, string>> = {
+  products: "admin.product-catalog",
+  "products.catalogue": "admin.product-catalog.products",
+  "products.release-lines": "admin.product-catalog.release-lines",
+};
+
+/**
  * Validates the raw map, dropping entries that name an unknown page or an
- * unknown state. Both are almost always typos, and a silently ignored typo in a
+ * unknown state. A renamed id ({@link LEGACY_NAV_ID_ALIASES}) applies to its
+ * current id, unless the map also sets the current id, which then wins. Both are almost always typos, and a silently ignored typo in a
  * flag that is meant to hide something is the failure mode worth shouting
  * about, so each one is warned about at startup.
  */
@@ -107,7 +122,17 @@ function parseOverrides(): Record<string, FeatureState> {
   ]);
   const parsed: Record<string, FeatureState> = {};
 
-  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+  const entries = Object.entries(raw as Record<string, unknown>);
+  for (const [rawId, value] of entries) {
+    const alias = LEGACY_NAV_ID_ALIASES[rawId];
+    let id = rawId;
+    if (alias !== undefined && !knownIds.has(rawId)) {
+      console.warn(
+        `[featureFlags] CSM_PORTAL_FEATURE_OVERRIDES key "${rawId}" was renamed to "${alias}"; please rename it.`,
+      );
+      if (Object.prototype.hasOwnProperty.call(raw, alias)) continue;
+      id = alias;
+    }
     if (!knownIds.has(id)) {
       console.warn(
         `[featureFlags] CSM_PORTAL_FEATURE_OVERRIDES names an unknown page "${id}"; ignoring it.`,

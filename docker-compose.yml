@@ -321,7 +321,10 @@ services:
       # ranks behind it to decide who each rung reaches, machine to machine, with no user to carry a
       # token. Both of those reads are internal-staff-only, so without it every rung resolves to
       # nobody and the ladder silently reaches no one.
-      M2M_CLIENT_IDS: csm-integration-service-dev-client,csm-notification-service-dev-client
+      M2M_CLIENT_IDS: csm-integration-service-dev-client,csm-notification-service-dev-client,legacy-product-api-dev-client
+      # Token roles that may edit the product catalogue. The
+      # same value as csm-portal-backend's; sign in to mock-oidc with this group.
+      AUTH_PRODUCT_CATALOG_MANAGER_ROLES: cs_product_catalog_manager
       # CSM_PORTAL_BACKEND_CLIENT_ID / CSM_PORTAL_USER_DOMAIN are deliberately NOT set. They make the
       # CSM BFF unrestricted for any user whose email is in that domain (and refuse everyone else),
       # but this stack's staff and customer personas share example.com, so the domain cannot tell them
@@ -367,6 +370,7 @@ services:
       AUTH_ADMIN_ROLES: cs_admin
       AUTH_TIMECARD_APPROVER_ROLES: cs_timecard_approver
       AUTH_DASHBOARD_DESIGNER_ROLES: cs_dashboard_designer
+      AUTH_PRODUCT_CATALOG_MANAGER_ROLES: cs_product_catalog_manager
       # Marker role, not a capability tier like the ones above -- picks the
       # Sales/Solutions-Architecture (SPL) nav over CS Portal's own (see
       # usePortalView.ts and internal/handler/access.go's AccessConfig.SalesSolutions).
@@ -529,6 +533,25 @@ services:
       PORT: "8080"
     ports:
       - "127.0.0.1:8084:8080"
+
+  # The retired wso2-product-service's read contract, served from the CSM
+  # product catalogue (integrations/legacy-product-api). Local URLs are the
+  # legacy paths at the root, e.g. http://127.0.0.1:8088/products/support-matrix.
+  legacy-product-api:
+    build:
+      context: ./integrations/legacy-product-api
+      dockerfile: ../../docker/local/legacy-product-api.Dockerfile
+    depends_on:
+      - entity-service
+      - mock-oidc
+    environment:
+      ENTITY_BASE_URL: http://entity-service:8080
+      ENTITY_TOKEN_URL: http://mock-oidc:9100/oauth2/token
+      ENTITY_CLIENT_ID: legacy-product-api-dev-client
+      ENTITY_CLIENT_SECRET: dev-secret
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:8088:8080"
 
   csm-ai-integration-service:
     build:
