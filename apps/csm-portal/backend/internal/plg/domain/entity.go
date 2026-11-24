@@ -1249,6 +1249,8 @@ type DashboardAnalytics struct {
 	RegistrationsByLifecycleStage []CountByLabel   `json:"registrationsByLifecycleStage"`
 	SubscriptionMix               []CountByLabel   `json:"subscriptionMix"`
 	RegistrationsOverTime         TimeSeries       `json:"registrationsOverTime"`
+	// RegistrationsByEntryProduct counts each organisation once, under its earliest registration's product.
+	RegistrationsByEntryProduct []CountByLabel `json:"registrationsByEntryProduct"`
 	// UTMSources counts registrations by the utm_source of the landing URL.
 	UTMSources []CountByLabel `json:"utmSources"`
 	// EmailClassification counts registrations by the owner's email classification.

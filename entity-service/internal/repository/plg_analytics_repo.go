@@ -117,6 +117,19 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		return nil, err
 	}
 
+	// An organisation's entry product is its earliest registration's, whatever
+	// the period; it counts when that registration falls in the period.
+	if out.RegistrationsByEntryProduct, err = r.countBy(ctx, `
+		SELECT pr.name, COUNT(*)::INT
+		FROM  (SELECT DISTINCT ON (op.organization_id) op.product_id, op.registered_on
+		       FROM   plg_org_platform op
+		       ORDER  BY op.organization_id, op.registered_on, op.id) first
+		JOIN   plg_product pr ON pr.id = first.product_id
+		WHERE  first.registered_on BETWEEN $1 AND $2
+		GROUP  BY pr.name ORDER BY 2 DESC, 1`, from, to); err != nil {
+		return nil, err
+	}
+
 	if out.UTMSources, err = r.countBy(ctx, `
 		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'), COUNT(*)::INT
 		FROM   plg_org_platform op

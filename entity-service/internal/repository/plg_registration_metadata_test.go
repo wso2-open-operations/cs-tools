@@ -33,6 +33,12 @@ func TestRegistrationMetadataIsStoredKeptAndReported(t *testing.T) {
 	const owner = "019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"
 	const company = "meta-company-1"
 
+	from, to := time.Now().AddDate(-1, 0, 0), time.Now().AddDate(1, 0, 0)
+	before, err := NewAnalyticsRepository(pool).Dashboard(ctx, domain.AnalyticsRange{From: &from, To: &to})
+	if err != nil {
+		t.Fatalf("dashboard before: %v", err)
+	}
+
 	first, err := ingest.Register(ctx, domain.Registration{
 		CompanyID: company, UserID: owner, InitiatingProduct: "identity-platform",
 		Metadata: &domain.RegistrationMetadata{
@@ -110,7 +116,6 @@ func TestRegistrationMetadataIsStoredKeptAndReported(t *testing.T) {
 		domain.TaskCodeEligibilityOutcome: "ELIGIBLE", domain.TaskCodeEmailClassification: "CORPORATE",
 	})
 
-	from, to := time.Now().AddDate(-1, 0, 0), time.Now().AddDate(1, 0, 0)
 	got, err := NewAnalyticsRepository(pool).Dashboard(ctx, domain.AnalyticsRange{From: &from, To: &to})
 	if err != nil {
 		t.Fatalf("dashboard: %v", err)
@@ -122,6 +127,15 @@ func TestRegistrationMetadataIsStoredKeptAndReported(t *testing.T) {
 			}
 		}
 		return 0
+	}
+	// An organisation counts once, under its first product: company 1 entered on
+	// IAM (its API and Integration registrations came later), company 2 on API.
+	delta := func(label string) int {
+		return count(got.RegistrationsByEntryProduct, label) - count(before.RegistrationsByEntryProduct, label)
+	}
+	if delta("Identity & Access Management") != 1 || delta("API Platform") != 1 || delta("Integration Platform") != 0 {
+		t.Errorf("entry products moved by IAM %d, API %d, Integration %d; want 1, 1, 0",
+			delta("Identity & Access Management"), delta("API Platform"), delta("Integration Platform"))
 	}
 	if count(got.UTMSources, "google") != 1 || count(got.UTMSources, "NOT_RECORDED") < 1 {
 		t.Errorf("utm sources = %+v", got.UTMSources)

@@ -34286,6 +34286,16 @@ components:
                 type: string
               count:
                 type: integer
+        registrationsByEntryProduct:
+          type: array
+          description: Organisations by the product of their earliest registration, each counted once.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
         registrationsByLifecycleStage:
           type: array
           items:

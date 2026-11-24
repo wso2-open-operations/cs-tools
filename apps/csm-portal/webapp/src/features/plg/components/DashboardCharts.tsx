@@ -56,7 +56,7 @@ export function DashboardCharts({ data }: { data?: DashboardAnalytics }): JSX.El
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 7 }}>
           <SectionCard fill title="Registrations by Entry Product">
-            {data ? <CountBarChart data={data.registrationsByProduct} /> : <LoadingBlock />}
+            {data ? <CountBarChart data={data.registrationsByEntryProduct} /> : <LoadingBlock />}
           </SectionCard>
         </Grid>
         <Grid size={{ xs: 12, md: 5 }}>

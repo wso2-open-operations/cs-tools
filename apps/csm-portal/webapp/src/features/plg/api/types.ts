@@ -693,6 +693,8 @@ export interface DashboardSummary {
 export interface DashboardAnalytics {
   summary: DashboardSummary;
   registrationsByProduct: CountByLabel[];
+  /** Each organisation once, under its earliest registration's product. */
+  registrationsByEntryProduct: CountByLabel[];
   registrationsByLifecycleStage: CountByLabel[];
   subscriptionMix: CountByLabel[];
   registrationsOverTime: TimeSeries;

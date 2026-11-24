@@ -41,7 +41,8 @@ const data: DashboardAnalytics = {
     trialsEndingSoon: 0,
     unresolvedIngestFailures: 0,
   },
-  registrationsByProduct: [{ label: "API Platform", count: 2 }],
+  registrationsByProduct: [{ label: "WSO2 Cloud", count: 9 }],
+  registrationsByEntryProduct: [{ label: "API Platform", count: 2 }],
   registrationsByLifecycleStage: [],
   subscriptionMix: [],
   registrationsOverTime: { buckets: [], series: [] },
@@ -80,6 +81,7 @@ describe("DashboardCharts", () => {
     expect(screen.queryByText(/UNKNOWN/)).not.toBeInTheDocument();
     // The entry product is a bar chart too, not a ring.
     expect(screen.getByText("bars:API Platform")).toBeInTheDocument();
+    expect(screen.queryByText(/WSO2 Cloud/)).not.toBeInTheDocument();
     expect(screen.getByText("stack:google")).toBeInTheDocument();
   });
 });
