@@ -1094,7 +1094,7 @@ equivalent of that service's `EMAIL_LOGO_WHITE_URL`. Unset keeps every built-in 
 the existing logo URLs) exactly as it was before this config existed.
 
 - **`EMAIL_LOGO_LIGHT_URL`** overrides `internal/notify.SetLogoURL` — all eight of that package's
-  templates share one orange header, so they all need the same light-colored logo.
+  templates share one dark navy header, so they all need the same light-colored logo.
   **`EMAIL_LOGO_DARK_URL`** overrides `internal/acp/notify.SetLogoURL` — all five of that package's
   templates share one light background, so they need a dark-colored logo instead. The two are
   deliberately separate env vars, not one shared value, since the two packages' templates need

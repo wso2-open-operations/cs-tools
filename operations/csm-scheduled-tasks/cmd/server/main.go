@@ -94,7 +94,7 @@ func main() {
 	// built-in default. The two logo vars are deliberately separate, not
 	// shared, because each package's templates share one fixed header color
 	// that needs the opposite logo color to stay visible: internal/notify's
-	// eight templates all share an orange header (needs a light-colored
+	// eight templates all share a dark navy header (needs a light-colored
 	// logo), internal/acp/notify's five all share a light background (needs
 	// a dark-colored logo).
 	notify.SetLogoURL(os.Getenv("EMAIL_LOGO_LIGHT_URL"))

@@ -38,7 +38,7 @@ var openCasesReportTemplateRaw string
 var unresolvedProductsReportTemplateRaw string
 
 // wso2LogoURL is the white WSO2 logo variant — the alert template's header
-// sits on an orange background, unlike
+// sits on a dark navy background, unlike
 // integrations/csm-notification-service's own equivalent constant of the
 // same name (a white background there, black logo). Same reasoning
 // otherwise: Gmail (and most major webmail clients) strip data: URI images
