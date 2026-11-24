@@ -393,27 +393,27 @@ func buildGitHubIssueBody(req caseGitHubIssueRequest, productLabel string, caseC
 	line("ABT Team", caseCtx.Team)
 	line("Opened by", caseCtx.OpenedBy)
 
-	var b strings.Builder
-	section := func(value string) {
-		if value == "" {
-			return
-		}
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(value)
-	}
+	sections := append([]string{strings.TrimSpace(req.Description)}, gitHubIssueSections(req)...)
+	sections = append(sections, info.String())
+	return joinGitHubIssueSections(sections)
+}
+
+// gitHubIssueSections are the optional sections the engineer filled in, in body
+// order: Reproducing Steps, Priority Justification, the Hotfix Required line
+// with its Hotfix Reason, Related Internal Issue(s). A section left empty is
+// not in the list.
+func gitHubIssueSections(req caseGitHubIssueRequest) []string {
+	var sections []string
 	// A free-text section keeps its own line breaks: it is read by people, and
 	// only the footer is parsed line by line.
 	labelled := func(label, value string) {
 		if value = strings.TrimSpace(value); value != "" {
-			section(label + " :\n" + value)
+			sections = append(sections, label+" :\n"+value)
 		}
 	}
-	section(strings.TrimSpace(req.Description))
 	labelled("Reproducing Steps", req.ReproducingSteps)
 	if j := req.priorityJustification(); j != "" {
-		section("Priority Justification : " + j)
+		sections = append(sections, "Priority Justification : "+j)
 	}
 	if req.HotFixRequired {
 		// "Hotfix Required : Yes" stays a line of its own, spelled as before.
@@ -421,11 +421,69 @@ func buildGitHubIssueBody(req caseGitHubIssueRequest, productLabel string, caseC
 		if r := req.hotFixReason(); r != "" {
 			hotfix += "\nHotfix Reason : " + r
 		}
-		section(hotfix)
+		sections = append(sections, hotfix)
 	}
 	labelled("Related Internal Issue(s)", req.RelatedInternalIssues)
-	section(info.String())
-	return strings.TrimSpace(b.String())
+	return sections
+}
+
+// joinGitHubIssueSections joins the non-empty sections with a blank line.
+func joinGitHubIssueSections(sections []string) string {
+	return strings.TrimSpace(strings.Join(slices.DeleteFunc(sections, func(s string) bool { return s == "" }), "\n\n"))
+}
+
+// gitHubIssueBodyOnlyFields are the request fields only this backend knows. The
+// entity service's POST /cases/{id}/github-issues decodes with unknown fields
+// refused, and matches a key whatever its case, so these are removed from the
+// forwarded request in any spelling.
+var gitHubIssueBodyOnlyFields = []string{"reproducingSteps", "priorityJustification", "hotFixReason", "relatedInternalIssues"}
+
+// entityGitHubIssueRequest prepares the request for the entity service, the
+// path used when no engineering client is configured. The fields the entity
+// service does not know are written into the description as the same sections
+// the engineering path writes, and removed from the request, so a P0/P1 or
+// hotfix filing keeps its details instead of being refused. A request without
+// any of them is forwarded byte for byte. The second result is a message for a
+// 400 when the request cannot be used.
+func entityGitHubIssueRequest(body []byte) ([]byte, string) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, ErrMsgBadRequest
+	}
+	stripped := false
+	for key := range fields {
+		if slices.ContainsFunc(gitHubIssueBodyOnlyFields, func(f string) bool { return strings.EqualFold(f, key) }) {
+			delete(fields, key)
+			stripped = true
+		}
+	}
+	if !stripped {
+		return body, ""
+	}
+	var req caseGitHubIssueRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, ErrMsgBadRequest
+	}
+	if msg := validateGitHubIssueChoices(req); msg != "" {
+		return nil, msg
+	}
+	if sections := gitHubIssueSections(req); len(sections) > 0 {
+		description, err := json.Marshal(joinGitHubIssueSections(append([]string{strings.TrimSpace(req.Description)}, sections...)))
+		if err != nil {
+			return nil, ErrMsgBadRequest
+		}
+		for key := range fields {
+			if strings.EqualFold(key, "description") {
+				delete(fields, key)
+			}
+		}
+		fields["description"] = description
+	}
+	forward, err := json.Marshal(fields)
+	if err != nil {
+		return nil, ErrMsgBadRequest
+	}
+	return forward, ""
 }
 
 // githubPriorityLabel maps the dialog's priority onto the GitHub label names

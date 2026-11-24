@@ -783,6 +783,64 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 			t.Error("the entity service was not called")
 		}
 	})
+
+	t.Run("without an engineering client a request with none of the new fields is forwarded byte for byte", func(t *testing.T) {
+		var forwarded []byte
+		entityClient := &mockEntityCaseClient{createCaseGithubIssueFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+			forwarded = body
+			return []byte(`{"issue":{}}`), nil
+		}}
+		sent := "{" + base + `,"priorityLevel":"Priority/Low(P3)","hotFixRequired":true}`
+		w := post(t, NewCaseHandler(entityClient), sent)
+		assertStatus(t, w, http.StatusCreated)
+		if string(forwarded) != sent {
+			t.Errorf("forwarded %s, want %s", forwarded, sent)
+		}
+	})
+
+	t.Run("without an engineering client the new fields are written into the description, not forwarded", func(t *testing.T) {
+		var forwarded map[string]any
+		entityClient := &mockEntityCaseClient{createCaseGithubIssueFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+			if err := json.Unmarshal(body, &forwarded); err != nil {
+				t.Fatalf("forwarded body is not JSON: %v", err)
+			}
+			return []byte(`{"issue":{}}`), nil
+		}}
+		// The entity service matches keys whatever their case, so another spelling is removed too.
+		w := post(t, NewCaseHandler(entityClient), "{"+base+`,"priorityLevel":"Priority/High(P1)","PriorityJustification":"  Go-live\nis blocked ",`+
+			`"reproducingSteps":"1. Log in","hotFixRequired":true,"hotFixReason":"Customer-Requested Hotfix","relatedInternalIssues":"example/internal#12"}`)
+		assertStatus(t, w, http.StatusCreated)
+
+		for key := range forwarded {
+			for _, f := range gitHubIssueBodyOnlyFields {
+				if strings.EqualFold(key, f) {
+					t.Errorf("forwarded %q, which the entity service refuses", key)
+				}
+			}
+		}
+		wantDescription := "It fails.\n\nReproducing Steps :\n1. Log in\n\nPriority Justification : Go-live is blocked" +
+			"\n\nHotfix Required : Yes\nHotfix Reason : Customer-Requested Hotfix\n\nRelated Internal Issue(s) :\nexample/internal#12"
+		if got := forwarded["description"]; got != wantDescription {
+			t.Errorf("description = %q, want %q", got, wantDescription)
+		}
+		if forwarded["priorityLevel"] != "Priority/High(P1)" || forwarded["hotFixRequired"] != true || forwarded["title"] != "Crash on startup" {
+			t.Errorf("the entity service's own fields were not kept: %v", forwarded)
+		}
+	})
+
+	t.Run("without an engineering client an unknown hotfix reason is refused before the entity service", func(t *testing.T) {
+		entityCalled := false
+		entityClient := &mockEntityCaseClient{createCaseGithubIssueFn: func(context.Context, string, []byte) ([]byte, error) {
+			entityCalled = true
+			return nil, nil
+		}}
+		w := post(t, NewCaseHandler(entityClient), "{"+base+`,"hotFixRequired":true,"hotFixReason":"Because"}`)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, errMsgGitHubHotfixReasonInvalid)
+		if entityCalled {
+			t.Error("the entity service was called for a refused request")
+		}
+	})
 }
 
 // With no product label on the case itself, the Product line falls back to the repository

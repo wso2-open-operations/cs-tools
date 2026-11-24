@@ -125,25 +125,33 @@ describe("CreateGithubIssueDialog — fields", () => {
     renderDialog();
     pick(/^priority$/i, /P1 – High Priority/);
     fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
-    const labels = [
-      "Subject",
-      "Description",
-      "Reproducing Steps",
-      "Priority",
-      "Priority Justification",
-      "Approved by CS Leadership",
-      "Update Level",
-      "Public Git Issue or Security Internal JIRA",
-      "Related Internal Issue(s)",
-      "Hotfix Required",
-      "Hotfix Reason",
-      "Regression",
-      "Migration",
+    // Each control by its role and exact name, so two labels that share a
+    // word (Priority, Priority Justification) can never stand in for each other.
+    const controls: [string, HTMLElement][] = [
+      ["Subject", screen.getByRole("textbox", { name: /^subject/i })],
+      ["Description", screen.getByRole("textbox", { name: /^description/i })],
+      ["Reproducing Steps", screen.getByRole("textbox", { name: /^reproducing steps/i })],
+      ["Priority", screen.getByRole("combobox", { name: /^priority$/i })],
+      ["Priority Justification", screen.getByRole("textbox", { name: /^priority justification/i })],
+      ["Approved by CS Leadership", screen.getByRole("checkbox", { name: /^approved by cs leadership/i })],
+      ["Update Level", screen.getByRole("textbox", { name: /^update level/i })],
+      [
+        "Public Git Issue",
+        screen.getByRole("textbox", { name: /^public git issue or security internal jira/i }),
+      ],
+      ["Related Internal Issue(s)", screen.getByRole("textbox", { name: /^related internal issue\(s\)/i })],
+      ["Hotfix Required", screen.getByRole("switch", { name: /^hotfix required/i })],
+      ["Hotfix Reason", screen.getByRole("combobox", { name: /^hotfix reason/i })],
+      ["Regression", screen.getByRole("switch", { name: /^regression/i })],
+      ["Migration", screen.getByRole("switch", { name: /^migration/i })],
     ];
-    const text = document.body.textContent ?? "";
-    const positions = labels.map((l) => text.indexOf(l));
-    positions.forEach((p, i) => expect(p, labels[i]).toBeGreaterThanOrEqual(0));
-    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    controls.slice(1).forEach(([name, control], i) => {
+      const [previousName, previous] = controls[i];
+      expect(
+        previous.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `${name} comes after ${previousName}`,
+      ).toBeTruthy();
+    });
   });
 
   it("leaves Reproducing Steps, Update Level and Related Internal Issue(s) optional", () => {
@@ -156,12 +164,30 @@ describe("CreateGithubIssueDialog — fields", () => {
 });
 
 describe("CreateGithubIssueDialog — required fields gate submission", () => {
-  it("disables Raise issue until Subject, Description and Priority are filled", () => {
+  const fillSubject = () =>
+    fireEvent.change(screen.getByLabelText(/subject/i), { target: { value: "Token issuance is slow" } });
+  const fillDescription = () =>
+    fireEvent.change(screen.getByLabelText(/^description/i), {
+      target: { value: "Latency spiked after the last deploy." },
+    });
+  const pickP3 = () => pick(/^priority$/i, /P3 – Low Priority/);
+
+  it.each([
+    ["Subject", [fillDescription, pickP3]],
+    ["Description", [fillSubject, pickP3]],
+    ["Priority", [fillSubject, fillDescription]],
+  ])("disables Raise issue while only %s is empty", (_, fills) => {
+    renderDialog();
+    fills.forEach((fill) => fill());
+    expect(createButton()).toBeDisabled();
+  });
+
+  it("enables Raise issue once Subject, Description and Priority are filled", () => {
     renderDialog();
     expect(createButton()).toBeDisabled();
-    fillSubjectAndDescription();
-    expect(createButton()).toBeDisabled();
-    pick(/^priority$/i, /P3 – Low Priority/);
+    fillSubject();
+    fillDescription();
+    pickP3();
     expect(createButton()).toBeEnabled();
   });
 });
