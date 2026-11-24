@@ -147,6 +147,12 @@ describe("SlaImpactTimeline", () => {
     }
   });
 
+  it("hides the view-all button when every event is already shown", () => {
+    renderTimeline({ entries: ENTRIES });
+    expect(screen.getByText("Latest 2 of 2 · newest first")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /View all/ })).not.toBeInTheDocument();
+  });
+
   it("shows breached SLA statuses without inventing times or placing them on the graph", () => {
     renderTimeline({ slas: [
       { id: "response", definition: "Response SLA", hasBreached: true },
