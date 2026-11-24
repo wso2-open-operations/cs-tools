@@ -17,6 +17,9 @@
 package notify
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -35,14 +38,42 @@ func TestSetLogoURL_ReplacesEveryBakedLogo(t *testing.T) {
 
 	SetLogoURL("https://example.test/logo.png")
 
-	if !strings.Contains(alertTemplate, "https://example.test/logo.png") || strings.Contains(alertTemplate, wso2LogoURL) {
+	if !strings.Contains(alertTemplate, "https://example.test/logo.png") || strings.Contains(alertTemplate, defaultLogoURL) {
 		t.Errorf("logo not replaced in alertTemplate")
 	}
-	if !strings.Contains(worklogsReportTemplate, "https://example.test/logo.png") || strings.Contains(worklogsReportTemplate, wso2LogoURL) {
+	if !strings.Contains(worklogsReportTemplate, "https://example.test/logo.png") || strings.Contains(worklogsReportTemplate, defaultLogoURL) {
 		t.Errorf("logo not replaced in worklogsReportTemplate")
 	}
-	if !strings.Contains(slaBreachReportTemplate, "https://example.test/logo.png") || strings.Contains(slaBreachReportTemplate, wso2LogoURL) {
+	if !strings.Contains(slaBreachReportTemplate, "https://example.test/logo.png") || strings.Contains(slaBreachReportTemplate, defaultLogoURL) {
 		t.Errorf("logo not replaced in slaBreachReportTemplate")
+	}
+	if !strings.Contains(eolProductUsageReportTemplate, "https://example.test/logo.png") || strings.Contains(eolProductUsageReportTemplate, defaultLogoURL) {
+		t.Errorf("logo not replaced in eolProductUsageReportTemplate")
+	}
+}
+
+// Every template baked with bakeLogo must be listed in logoTemplates, or the
+// logo and company-name overrides skip it (the SLA breach and EOL usage reports
+// were each left out once and kept the default branding after an override).
+func TestLogoTemplates_ListsEveryBakedTemplate(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	baked := regexp.MustCompile(`(?m)^var \w+ = bakeLogo\(`)
+	count := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count += len(baked.FindAll(b, -1))
+	}
+	if got := len(logoTemplates()); got != count {
+		t.Errorf("logoTemplates lists %d templates but %d are baked with bakeLogo", got, count)
 	}
 }
 
@@ -76,6 +107,9 @@ func TestSetCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	if !strings.Contains(alertTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All Rights Reserved.") {
 		t.Errorf("copyright line not replaced in alertTemplate")
 	}
+	if !strings.Contains(eolProductUsageReportTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All Rights Reserved.") {
+		t.Errorf("copyright line not replaced in eolProductUsageReportTemplate")
+	}
 	if !strings.Contains(productRegressionReportTemplate, "Acme Case Id") {
 		t.Errorf("\"Case Id\" column header not replaced in productRegressionReportTemplate")
 	}
@@ -96,7 +130,7 @@ func TestSetCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	// comment also contains the literal text "WSO2 LLC" -- unrelated to the
 	// footer copyright line and never touched by SetCompanyName. Assert the
 	// specific footer phrase, not a blanket absence of "WSO2 LLC" anywhere.
-	if strings.Contains(alertTemplate, "&copy; <!-- [YEAR] --> WSO2 LLC.") {
+	if strings.Contains(alertTemplate, "&copy; <!-- [YEAR] --> "+defaultCompanyName+" LLC.") {
 		t.Errorf("stale default copyright phrase still present in alertTemplate")
 	}
 
@@ -116,5 +150,17 @@ func TestSetCompanyName_EmptyKeepsDefault(t *testing.T) {
 	}
 	if CompanyName() != defaultCompanyName {
 		t.Errorf("CompanyName() = %q, want default %q", CompanyName(), defaultCompanyName)
+	}
+}
+
+func TestDefaultBranding_IsChoreoLabs(t *testing.T) {
+	if CompanyName() != "Choreo Labs" {
+		t.Errorf("default CompanyName() = %q, want %q", CompanyName(), "Choreo Labs")
+	}
+	if !strings.Contains(eolProductUsageReportTemplate, "&copy; <!-- [YEAR] --> Choreo Labs LLC. All Rights Reserved.") {
+		t.Errorf("default copyright line missing from eolProductUsageReportTemplate")
+	}
+	if !strings.Contains(eolProductUsageReportTemplate, defaultLogoURL) {
+		t.Errorf("default logo missing from eolProductUsageReportTemplate")
 	}
 }

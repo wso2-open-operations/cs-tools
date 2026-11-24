@@ -64,7 +64,7 @@ func TestRenderLongOpenCasesReport(t *testing.T) {
 	if ongoing < 0 || onboarding < 0 || ongoing > onboarding {
 		t.Errorf("headings missing or out of order: ongoing=%d onboarding=%d", ongoing, onboarding)
 	}
-	cols := []string{">Case<", ">WSO2 Case ID<", ">Integration CS Team<", ">Assignee<", ">State<", ">Severity<", ">Last updated<", ">Created<"}
+	cols := []string{">Case<", ">Choreo Labs Case ID<", ">Integration CS Team<", ">Assignee<", ">State<", ">Severity<", ">Last updated<", ">Created<"}
 	pos := 0
 	for _, c := range cols {
 		i := strings.Index(body[pos:], c)

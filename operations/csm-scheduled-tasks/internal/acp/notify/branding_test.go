@@ -26,7 +26,7 @@ import (
 
 func TestSetLogoURL_And_SetCompanyName_OverrideCustomerNotice(t *testing.T) {
 	t.Cleanup(func() {
-		logoURL = wso2LogoURL
+		logoURL = defaultLogoURL
 		companyName = defaultCompanyName
 	})
 
@@ -58,14 +58,14 @@ func TestSetLogoURL_And_SetCompanyName_OverrideCustomerNotice(t *testing.T) {
 	if !strings.Contains(got, "This automated message was sent by Acme's support system.") {
 		t.Error("htmlBody missing the configured company name in the footer disclaimer")
 	}
-	if strings.Contains(got, wso2LogoURL) {
+	if strings.Contains(got, defaultLogoURL) {
 		t.Error("htmlBody still carries the default logo URL after SetLogoURL")
 	}
 }
 
 func TestSetLogoURL_And_SetCompanyName_OverrideInternalNotice(t *testing.T) {
 	t.Cleanup(func() {
-		logoURL = wso2LogoURL
+		logoURL = defaultLogoURL
 		companyName = defaultCompanyName
 	})
 

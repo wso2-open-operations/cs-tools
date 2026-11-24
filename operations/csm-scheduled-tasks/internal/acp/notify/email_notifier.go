@@ -25,26 +25,24 @@ import (
 	"strings"
 )
 
-// wso2LogoURL points at WSO2's own public CDN copy of the logo (circular
-// pulse icon + wordmark) used in real received notice examples — confirmed
-// pixel-identical to the file the product owner provided directly. A hosted URL, not
-// an embedded data: URI, deliberately: most email clients (confirmed
-// against a real Gmail inbox — the data: URI approach rendered as a broken
-// image icon there) refuse to render inline base64 images in received
-// mail, so the logo has to be fetched from a real reachable address like
-// any other web image.
-const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
+// defaultLogoURL is the dark (navy) logo on the company's own public site,
+// used on the light notice background. A hosted URL, not an embedded data:
+// URI, deliberately: most email clients (confirmed against a real Gmail
+// inbox — the data: URI approach rendered as a broken image icon there)
+// refuse to render inline base64 images in received mail, so the logo has
+// to be fetched from a real reachable address like any other web image.
+const defaultLogoURL = "https://choreolabs.com/themes/wso2theme/images/choreo/brand/choreo-labs-logo-navy-400px.png"
 
 // logoURL is the logo every notice's Sprintf call reads -- defaults to
-// wso2LogoURL, overridable by SetLogoURL. Unlike internal/notify's own
+// defaultLogoURL, overridable by SetLogoURL. Unlike internal/notify's own
 // bakeLogo/SetLogoURL (which rewrite an already-rendered template string),
 // these five templates are only ever filled in at send time via
 // fmt.Sprintf, so a plain package variable read at that moment is enough;
 // there's no baked state to search-and-replace.
-var logoURL = wso2LogoURL
+var logoURL = defaultLogoURL
 
 // SetLogoURL overrides the logo URL every notice in this package sends.
-// An empty value keeps wso2LogoURL (the built-in default). Call once at
+// An empty value keeps defaultLogoURL (the built-in default). Call once at
 // startup, before any notice is sent.
 func SetLogoURL(url string) {
 	url = strings.TrimSpace(url)
@@ -55,7 +53,7 @@ func SetLogoURL(url string) {
 }
 
 // defaultCompanyName is the name every notice carries by default.
-const defaultCompanyName = "WSO2"
+const defaultCompanyName = "Choreo Labs"
 
 // companyName is the name every notice's Sprintf call reads (the logo alt
 // text and the "sent by ...'s support system" footer disclaimer) --

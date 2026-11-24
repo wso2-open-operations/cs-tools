@@ -1047,7 +1047,7 @@ func TestInternalNoticeBody(t *testing.T) {
 			"Account Owner: Lee Example",
 			"Start Date: 2024-11-10",
 			"End Date: 2026-11-09",
-			"Best Regards,\nWSO2 Team",
+			"Best Regards,\nChoreo Labs Team",
 		}
 		for _, want := range wantContains {
 			if !strings.Contains(got, want) {
