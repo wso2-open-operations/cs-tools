@@ -38,13 +38,13 @@ const BRAND_LOGO_HEIGHT = {
 const MAIN_ID = "main-content";
 
 const FOOTER_LINKS = [
-  { href: "https://wso2.com/legal/", label: "WSO2 Legal" },
+  { href: "https://choreolabs.com/legal/", label: "Choreo Labs Legal" },
   {
-    href: "https://wso2.com/privacy-policy/do-not-sell-my-personal-information/",
+    href: "https://choreolabs.com/california-privacy/#opt-out",
     label: "Do Not Sell My Personal Information",
   },
-  { href: "https://wso2.com/modern-slavery-statement/", label: "Modern Slavery Statement" },
-  { href: "https://wso2.com/contact/", label: "Report a Problem With This Page" },
+  { href: "https://choreolabs.com/modern-slavery-statement/", label: "Modern Slavery Statement" },
+  { href: "https://choreolabs.com/contact/", label: "Report a Problem With This Page" },
 ] as const;
 
 /**
@@ -164,7 +164,7 @@ export default function KBLayout(): JSX.Element {
             sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: 1, columnGap: { xs: 2.5, md: 4 } }}
           >
             <Typography variant="body2" color="text.secondary">
-              ©{new Date().getFullYear()} WSO2 LLC
+              ©{new Date().getFullYear()} Choreo Labs LLC
             </Typography>
             <Box
               component="ul"

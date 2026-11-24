@@ -46,6 +46,10 @@ import {
 import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
+import {
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_IMAGES_MESSAGE,
+} from "@components/rich-text-editor/richTextConstants";
 import { imagePasteRefusalMessage, type ImagePasteRefusal } from "@components/rich-text-editor/inlineImageLimits";
 import {
   attachmentLimitMessage,
@@ -163,17 +167,15 @@ function fileSignature(f: File): string {
   return `${f.name}-${f.size}-${f.lastModified}`;
 }
 
-// Deliberately stricter than the BE's own request-body cap for
-// POST /cases/{id}/comments (handler `maxCommentBodyBytes = 10 << 20`, i.e.
-// 10 MiB). Comments carry inline images as base64 data URIs, so the body can
-// get large fast; this FE-only ceiling nudges users toward attachments well
-// before they'd hit the BE's much larger 413 threshold, and matches the same
-// 1 MiB guard applied to the customer-portal webapp for consistency across
-// both portals.
-const MAX_COMMENT_BODY_BYTES = 1 * 1024 * 1024;
-// Reserve headroom for the JSON envelope ({ type, content }) + string escaping
-// so the FE blocks before the BE rejects with 413.
+// The backend refuses a comment-create body over 10 MiB (`maxCommentBodyBytes`
+// in the portal backend's cases.go). Pasted images are uploaded separately and
+// only referenced from the comment, so this is reached only by very long text or
+// markup typed in HTML source mode. Headroom covers the JSON envelope and escaping.
+const MAX_COMMENT_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
+
+/** Every `<img>` in the draft counts toward the image limit, whatever its source. */
+const IMG_TAG = /<img\b/gi;
 
 /** Strip tags + collapse whitespace to decide if the editor is effectively empty. */
 function isEmpty(html: string): boolean {
@@ -319,8 +321,18 @@ export default function CsmCaseCommentInput({
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
+  // A refused image is said once and goes away by itself: the draft is unchanged
+  // by the refusal, so the message must not stay up like an error that blocks Send.
+  const pasteNoticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(pasteNoticeTimer.current), []);
   const onPasteError = useCallback((reason: ImagePasteRefusal) => {
-    setError(imagePasteRefusalMessage(reason));
+    const message = imagePasteRefusalMessage(reason);
+    setError(message);
+    clearTimeout(pasteNoticeTimer.current);
+    pasteNoticeTimer.current = setTimeout(
+      () => setError((current) => (current === message ? null : current)),
+      8000,
+    );
   }, []);
 
   // Dropping files directly onto the composer, as an alternative to the
@@ -437,21 +449,16 @@ export default function CsmCaseCommentInput({
   // per mount).
   const [editorMountKey, setEditorMountKey] = useState(0);
 
-  // UTF-8 byte size of the comment body. The BE caps the whole request body, so
-  // mirror it here to fail fast with a clear message instead of a 413.
-  const bodyBytes = useMemo(
-    () => new TextEncoder().encode(html).length,
-    [html],
-  );
-  const overSizeLimit = bodyBytes > MAX_COMMENT_CONTENT_BYTES;
-  const sizeError = overSizeLimit
-    ? `Comment is too large (${formatBytes(bodyBytes)}). Maximum is ${formatBytes(
-        MAX_COMMENT_BODY_BYTES,
-      )} — upload large images as attachments instead of embedding them inline.`
-    : null;
+  // The editor refuses an image that would pass the limit, but a draft can still
+  // hold too many (HTML source mode), so Send checks the draft itself too.
+  const overImageLimit = (html.match(IMG_TAG)?.length ?? 0) > MAX_COMMENT_IMAGES;
 
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
+    if (overImageLimit) {
+      setError(MAX_COMMENT_IMAGES_MESSAGE);
+      return;
+    }
     // Allow an attachment-only post (no text) — the case still gets the files.
     if (isBlank(html) && attachments.length === 0) {
       setError("Add a comment or an attachment.");
@@ -464,10 +471,6 @@ export default function CsmCaseCommentInput({
       setError(publicCommentDisabledReason);
       return;
     }
-    if (overSizeLimit) {
-      setError(sizeError);
-      return;
-    }
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
     // the comment and then failing on the upload (which would double-post on retry).
@@ -477,6 +480,17 @@ export default function CsmCaseCommentInput({
       setError(
         `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
           maxBytes,
+        )}.`,
+      );
+      return;
+    }
+    // Refuse an over-long body before uploading any image, so a comment the
+    // backend would reject with a 413 leaves nothing stored.
+    const bodyBytes = new TextEncoder().encode(html).length;
+    if (bodyBytes > MAX_COMMENT_CONTENT_BYTES) {
+      setError(
+        `Comment is too large (${formatBytes(bodyBytes)}). Maximum is ${formatBytes(
+          MAX_COMMENT_BODY_BYTES,
         )}.`,
       );
       return;
@@ -576,11 +590,10 @@ export default function CsmCaseCommentInput({
     internal,
     publicCommentDisabledReason,
     onSubmit,
-    overSizeLimit,
-    sizeError,
     submitting,
     api,
     imageUploadParentId,
+    overImageLimit,
   ]);
 
   // Customer replies are blocked for this case state. The composer is locked to
@@ -824,14 +837,14 @@ export default function CsmCaseCommentInput({
         <Typography
           variant="caption"
           color={
-            sizeError || error
+            error || overImageLimit
               ? "error"
               : showBottomLockReason
                 ? "warning.main"
                 : "text.secondary"
           }
         >
-          {sizeError ??
+          {(overImageLimit ? MAX_COMMENT_IMAGES_MESSAGE : null) ??
             error ??
             (uploadingImages
               ? "Uploading images…"
@@ -841,13 +854,6 @@ export default function CsmCaseCommentInput({
                 ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
                 : "Ctrl/Cmd + Enter to send.")}
         </Typography>
-        <Tooltip
-          title={
-            overSizeLimit
-              ? "Comment is too large — upload large images as attachments instead of embedding them inline."
-              : ""
-          }
-        >
           <span>
             <Button
               variant="contained"
@@ -858,8 +864,8 @@ export default function CsmCaseCommentInput({
                 disabled ||
                 submitting ||
                 uploadingImages ||
+                overImageLimit ||
                 (isBlank(html) && attachments.length === 0) ||
-                overSizeLimit ||
                 // Safety net: a public reply with text while replies are locked.
                 // Normally unreachable — the toggle is forced to work-note mode.
                 (!internal && publicReplyLocked && !isEmpty(html))
@@ -875,7 +881,6 @@ export default function CsmCaseCommentInput({
                   : "Send to customer"}
             </Button>
           </span>
-        </Tooltip>
       </Box>
     </Box>
   );

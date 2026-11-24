@@ -73,9 +73,10 @@ validation boundary. Types and their reaction, from `dispatch.Dispatcher.Handle`
 | `case.acknowledged` | Chat alert only. |
 | `case.workaround_provided` | Completes the workaround SLA clock (no message). |
 | `case.escalated` | One email to the escalation's notification list. |
-| `incident.created` | Voice call to the payload's `callTo`, or `INCIDENT_DEFAULT_CALL_TO`; incident Chat card where `INCIDENT_CHAT_SPACES` has an entry. |
+| `incident.created` | Voice call to the payload's `callTo`, or `INCIDENT_DEFAULT_CALL_TO`; incident Chat card where `INCIDENT_CHAT_SPACES` has an entry; registers the incident's SLA clocks with the SLA engine. |
 | `incident.assigned` | "Incident Acknowledged." reply in the incident's Chat thread. |
-| `incident.acknowledged`, `incident.priority_elevated`, `incident.comment_added` | Ignored here; owned by the call-escalation ladder. |
+| `incident.priority_elevated` | Owned by the call-escalation ladder; here it only registers any SLA clock the raised priority started. |
+| `incident.acknowledged`, `incident.comment_added` | Ignored here; owned by the call-escalation ladder. |
 | `incident.special_ops_alert` | Pages the subject-matter expert through the SRE ladder engine, if enabled. |
 | `change_request.approval_requested`, `change_request.plan_date_notice` | One email; the payload's audience (internal or customer) picks the portal link. |
 | `outage.notification_due`, `outage.communication_due` | Outage email. |
@@ -412,6 +413,7 @@ the steps until the code or documentation is reconciled.
 | `REDIS_PASSWORD` | none | Password for `REDIS_ADDR`; ignored with `REDIS_URL`. | |
 | `SLA_TICK_INTERVAL` | `5m` | How often the wake-index is scanned. | `1m` |
 | `SLA_EMAIL_SENDING_ENABLED` | `true` | Killswitch for all SLA messages (breach Chat card). Events still publish and tiers still advance. | `false` |
+| `INCIDENT_SLA_ALERTS_ENABLED` | `false` | Turns on incident SLA clock tracking and its 50/75/100% alerts to the holding team's Chat space and group email. Only `true` (as `envBool` reads it: trimmed, any case) enables it; set the SRE and SME teams' `chat_webhook_url`/`group_email` rows first. Case SLA alerts are unaffected either way. | `true` |
 
 ### Call-escalation ladder
 

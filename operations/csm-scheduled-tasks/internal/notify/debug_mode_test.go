@@ -116,3 +116,28 @@ func TestForRunNowRedirectsWithCcAndRunNowNotice(t *testing.T) {
 		t.Errorf("notice wrong:\n%s", inner.body)
 	}
 }
+
+// TestRedirectsIdentifiesADivertingSender: a report task asks this before
+// treating an empty audience as "switched off", so getting it wrong either
+// silences debug mode or sends a real report with no recipients.
+func TestRedirectsIdentifiesADivertingSender(t *testing.T) {
+	inner := &fakeSender{}
+
+	if Redirects(inner) {
+		t.Fatal("a plain sender does not redirect")
+	}
+	if !Redirects(ForReport(inner, []string{"debug@example.invalid"})) {
+		t.Fatal("debug mail mode redirects")
+	}
+	if !Redirects(ForRunNow(inner, []string{"me@example.invalid"}, nil)) {
+		t.Fatal("a run-now recipient override redirects")
+	}
+	// ForReport with no debug list returns inner unchanged, so it must
+	// report false -- otherwise every task would look diverted.
+	if Redirects(ForReport(inner, nil)) {
+		t.Fatal("ForReport with no debug recipients returns the sender unchanged")
+	}
+	if Redirects(ForReport(inner, []string{"  ", ""})) {
+		t.Fatal("a debug list of blanks is no debug list")
+	}
+}

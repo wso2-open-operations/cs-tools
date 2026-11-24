@@ -29,10 +29,10 @@ describe("ProjectSuspendedNoticePage", () => {
     expect(screen.getByText(/This project was suspended/i)).toBeInTheDocument();
   });
 
-  it("names WSO2 and its billing address when nothing is configured", () => {
+  it("names WSO2 and the default billing address when nothing is configured", () => {
     render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
     expect(screen.getByText(/contact your WSO2 Account\s+Manager/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "billing@wso2.com" })).toHaveAttribute("href", "mailto:billing@wso2.com");
+    expect(screen.getByRole("link", { name: "billing@choreolabs.com" })).toHaveAttribute("href", "mailto:billing@choreolabs.com");
   });
 
   it("names the configured company and billing address", () => {

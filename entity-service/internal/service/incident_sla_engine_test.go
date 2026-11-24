@@ -431,3 +431,105 @@ func TestSNIncidentService_UpdateIncident_ServiceIDOnlyChangeRevisesSLAClocks(t 
 		t.Fatalf("reviseIncidentCalls = %v, want exactly one for incident %q: a ServiceID-only change must revise SLA clocks", slaEngine.reviseIncidentCalls, testIncidentUUID)
 	}
 }
+
+// decodedCloudIncident*Condition is the "Cloud Incident - High Priority" row
+// as migration 0293 rewrites it: the raw row's priority/state/category codes
+// as this engine's own labels, no terminator, and no business_service
+// clause -- the policy is no longer gated on a service.
+const (
+	decodedCloudIncidentStartCondition  = "priorityINCRITICAL,HIGH^category=SERVICE_INTERRUPTION"
+	decodedCloudIncidentStopCondition   = "stateINON_HOLD,RESOLVED,CLOSED"
+	decodedCloudIncidentCancelCondition = "state=CANCELED^NQcategory!=SERVICE_INTERRUPTION^NQpriorityNOT INCRITICAL,HIGH"
+)
+
+// decodedCloudIncidentPolicyCandidates is cloudIncidentPolicyCandidates with
+// the decoded row. Source stays SERVICENOW, so the read-time translator still
+// runs over it: the test proves decoded text passes through it unchanged.
+func decodedCloudIncidentPolicyCandidates() map[string][]repository.SLAPolicyRef {
+	return map[string][]repository.SLAPolicyRef{
+		"RESOLUTION": {
+			{
+				ID:              "cloud-incident-high-priority",
+				Name:            "Cloud Incident - High Priority",
+				Target:          "RESOLUTION",
+				Source:          "SERVICENOW",
+				StartCondition:  decodedCloudIncidentStartCondition,
+				StopCondition:   decodedCloudIncidentStopCondition,
+				CancelCondition: decodedCloudIncidentCancelCondition,
+				WhenToCancel:    "CANCEL_CONDITIONS_ARE_MET",
+				WhenToResume:    "RESUME_CONDITIONS_ARE_MET",
+			},
+		},
+	}
+}
+
+// The decoded policy starts on priority and category alone: a service the
+// raw row never named, and an incident with no service at all, both match.
+func TestSLAEngineService_RegisterIncidentClocks_DecodedPolicyMatchesAnyService(t *testing.T) {
+	for name, serviceID := range map[string]string{
+		"other service": "11111111-2222-3333-4444-555555555555",
+		"no service":    "",
+		"choreo":        choreoServiceID,
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeFullSLAEngineRepo()
+			repo.candidatesByTarget = decodedCloudIncidentPolicyCandidates()
+			repo.factsByIncident["incident-1"] = repository.IncidentFacts{
+				State:     "NEW",
+				Category:  "SERVICE_INTERRUPTION",
+				ServiceID: serviceID,
+			}
+			svc := NewSLAEngineService(repo)
+
+			priority := domain.IncidentPriorityHigh
+			svc.RegisterIncidentClocks(context.Background(), "incident-1", &priority)
+
+			want := []string{"incident-1|cloud-incident-high-priority"}
+			if len(repo.registered) != len(want) || repo.registered[0] != want[0] {
+				t.Fatalf("registered = %v, want %v", repo.registered, want)
+			}
+		})
+	}
+}
+
+func TestSLAEngineService_RegisterIncidentClocks_DecodedPolicyStillGatesOnPriorityAndCategory(t *testing.T) {
+	for name, tc := range map[string]struct {
+		priority domain.IncidentPriority
+		category string
+	}{
+		"moderate priority": {domain.IncidentPriorityModerate, "SERVICE_INTERRUPTION"},
+		"other category":    {domain.IncidentPriorityCritical, "SOFTWARE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeFullSLAEngineRepo()
+			repo.candidatesByTarget = decodedCloudIncidentPolicyCandidates()
+			repo.factsByIncident["incident-1"] = repository.IncidentFacts{
+				State:     "NEW",
+				Category:  tc.category,
+				ServiceID: choreoServiceID,
+			}
+			svc := NewSLAEngineService(repo)
+
+			priority := tc.priority
+			svc.RegisterIncidentClocks(context.Background(), "incident-1", &priority)
+
+			if len(repo.registered) != 0 {
+				t.Fatalf("registered = %v, want none", repo.registered)
+			}
+		})
+	}
+}
+
+// Without a business_service clause the decoded row is still an incident
+// policy, by its category clause -- and never a case policy.
+func TestIsIncidentPolicy_DecodedRowWithoutBusinessServiceStillMatches(t *testing.T) {
+	if !isIncidentPolicy(decodedCloudIncidentStartCondition, decodedCloudIncidentStopCondition, decodedCloudIncidentCancelCondition) {
+		t.Errorf("isIncidentPolicy(decoded row) = false, want true: the category clause marks it")
+	}
+	if isCasePolicy(decodedCloudIncidentStartCondition, decodedCloudIncidentStopCondition, decodedCloudIncidentCancelCondition) {
+		t.Errorf("isCasePolicy(decoded row) = true, want false")
+	}
+	if isIncidentPolicy("priorityINCRITICAL,HIGH", "stateINON_HOLD") {
+		t.Errorf("isIncidentPolicy(priority/state only) = true, want false: generic fields alone never classify a policy")
+	}
+}

@@ -96,6 +96,10 @@ type GoogleChatClient struct {
 	// HasAudienceSpace/sendCardToAudience.
 	mu                 sync.RWMutex
 	teamAudienceSpaces map[string]string
+	// incidentSLASpaces is the SRE teams' incident SLA spaces,
+	// IncidentSLAAudience(team key) -> team.chat_webhook_url
+	// (SetIncidentSLATeamSpaces). Guarded by mu.
+	incidentSLASpaces map[string]string
 	// routedIncidentSpaces are incident audiences (IncidentAudience, and
 	// IncidentFallbackAudience) taken from the Alert Settings mapping: an
 	// assignment group -> its SRE team's saved room. Set once the paging
@@ -145,6 +149,22 @@ func (c *GoogleChatClient) SetTeamAudienceSpaces(spaces map[string]string) {
 	c.mu.Unlock()
 }
 
+// SetIncidentSLATeamSpaces replaces the SRE teams' incident SLA spaces: team
+// key -> team.chat_webhook_url, the same column a CRE team's case alerts use,
+// kept under IncidentSLAAudience(key). Refreshed with the team spaces; nil or
+// empty clears them.
+func (c *GoogleChatClient) SetIncidentSLATeamSpaces(byKey map[string]string) {
+	spaces := make(map[string]string, len(byKey))
+	for key, url := range byKey {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(url) != "" {
+			spaces[IncidentSLAAudience(key)] = url
+		}
+	}
+	c.mu.Lock()
+	c.incidentSLASpaces = spaces
+	c.mu.Unlock()
+}
+
 // webhookURLFor resolves audience to its configured Chat webhook URL, if
 // any. A routed incident audience (the Alert Settings mapping) wins first;
 // then staticAudienceSpaces (the standing, config-driven audiences) is
@@ -155,6 +175,14 @@ func (c *GoogleChatClient) SetTeamAudienceSpaces(spaces map[string]string) {
 // listed in both.
 func (c *GoogleChatClient) webhookURLFor(audience string) (string, bool) {
 	audience = strings.TrimSpace(audience)
+	if strings.HasPrefix(audience, IncidentSLAAudiencePrefix) {
+		// Only an SRE team's own team.chat_webhook_url: never a static or a
+		// CRE team space.
+		c.mu.RLock()
+		url := c.incidentSLASpaces[audience]
+		c.mu.RUnlock()
+		return url, url != ""
+	}
 	if strings.HasPrefix(audience, IncidentAudiencePrefix) {
 		c.mu.RLock()
 		url := c.routedIncidentSpaces[audience]

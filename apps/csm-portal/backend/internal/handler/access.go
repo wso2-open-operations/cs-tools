@@ -318,6 +318,16 @@ const (
 	// time card approver) while who may see totals per user is still to be
 	// decided; a separate permission so that decision changes one line here.
 	PermViewTimeCardTotals
+	// PermManageProductCatalog is editing the product catalogue (products,
+	// versions and release lines published to the public Support Matrix and
+	// Release Matrix): the create, edit (PATCH) and retire routes of the
+	// products API (/products, /product-versions, /release-lines), applied at
+	// once. Held ONLY by the
+	// product_catalog_manager role and admin -- NOT the CS engineer. Reading
+	// the catalogue stays PermView. It grants no read access: a holder needs a
+	// viewing role separately to see the catalogue at all. entity-service
+	// re-checks the same role on every change.
+	PermManageProductCatalog
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -375,6 +385,12 @@ type AccessConfig struct {
 	// and no other write. Like comment_updater, an unset variable is not a
 	// lockout: admin already holds PermManageOnboarding regardless.
 	OnboardingLead []string
+	// ProductCatalogManager grants PermManageProductCatalog (see that
+	// permission's own doc comment) -- editing the product catalogue -- and
+	// nothing else: no read access and no other write. Like
+	// onboarding_lead, an unset variable is not a lockout: admin already holds
+	// PermManageProductCatalog regardless.
+	ProductCatalogManager []string
 	// SecurityTeam grants PermView, PermViewOperations,
 	// PermViewSecurityCenter and PermViewSecurityReportCases -- the
 	// dedicated role for security-team staff who need to see the Operations
@@ -472,7 +488,8 @@ type portalRole struct {
 // AccessConfig.SecurityTeam's own doc comment. onboarding_lead implies only
 // PermManageOnboarding and the PermUpdateProject route floor -- no View, no
 // PermWrite -- and admin alone also holds PermManageOnboarding; cs_engineer
-// deliberately does not.
+// deliberately does not. product_catalog_manager is the same shape: it implies
+// only PermManageProductCatalog, which admin alone also holds.
 func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 	build := func(lists ...[]string) map[string]struct{} {
 		set := make(map[string]struct{})
@@ -498,6 +515,7 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			{key: "announcement_creator", names: build(cfg.AnnouncementCreator)},
 			{key: "comment_updater", names: build(cfg.CommentUpdater)},
 			{key: "onboarding_lead", names: build(cfg.OnboardingLead)},
+			{key: "product_catalog_manager", names: build(cfg.ProductCatalogManager)},
 			{key: "security_team", names: build(cfg.SecurityTeam)},
 		},
 		allowed: map[Permission]map[string]struct{}{
@@ -568,6 +586,10 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// that narrow what each holder may actually set.
 			PermUpdateProject:      build(cfg.CsEngineer, cfg.Admin, cfg.OnboardingLead),
 			PermViewTimeCardTotals: build(cfg.CsEngineer, cfg.Admin),
+			// product_catalog_manager and admin only -- cs_engineer
+			// deliberately does NOT hold it. See PermManageProductCatalog's
+			// own doc comment.
+			PermManageProductCatalog: build(cfg.ProductCatalogManager, cfg.Admin),
 		},
 	}
 }

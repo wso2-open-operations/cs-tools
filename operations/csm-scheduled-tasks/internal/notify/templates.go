@@ -65,7 +65,7 @@ func logoTemplates() []*string {
 	return []*string{
 		&alertTemplate, &openCasesReportTemplate, &unresolvedProductsReportTemplate,
 		&staleCasesReportTemplate, &migrationCaseReportTemplate, &productRegressionReportTemplate,
-		&queryHoursTemplate, &worklogsReportTemplate,
+		&queryHoursTemplate, &worklogsReportTemplate, &slaBreachReportTemplate,
 	}
 }
 

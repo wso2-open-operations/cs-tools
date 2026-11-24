@@ -9,7 +9,9 @@ each `integrations/*`, …) — this file is only for things that hold everywher
 Each component's `docs/` folder holds specs (`entity-service/docs/`,
 `integrations/csm-notification-service/docs/`, …) that explain behavior and the
 reasons behind it, which the code alone does not. Read the ones relevant to the
-area you are touching before editing it, not just the code.
+area you are touching before editing it, not just the code. In `entity-service/docs/`,
+`specs/` holds the design and porting specs and `requirements/` holds the
+plain-language requirements per feature area (start at its `README.md`).
 
 The code is the source of truth. If a spec and the code disagree, the spec is
 stale: fix the spec to match the code in the same change, never the reverse, and

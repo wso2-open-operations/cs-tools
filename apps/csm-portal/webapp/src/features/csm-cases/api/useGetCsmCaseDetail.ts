@@ -127,6 +127,7 @@ export function detailFromBeCase(
     slaClockType: "ack",
     minutesToBreach: 0,
     createdAt: c.createdOn ?? "",
+    closedAt: c.closedOn ?? undefined,
     updatedAt: c.updatedOn ?? c.createdOn ?? "",
     description: c.description ?? "",
     issueType: c.issueType,

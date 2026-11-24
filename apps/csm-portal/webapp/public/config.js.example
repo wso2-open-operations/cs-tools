@@ -97,7 +97,8 @@ window.config = {
   // {.reports, .vulnerabilities}, updates, time-cards, announcements,
   // customers{.accounts, .projects, .customer-health}, customer-health,
   // usage-metrics, user-scan, admin{.user-management{.users, .roles,
-  // .groups, .teams, .permissions}, .dashboards}. Unknown ids are ignored
+  // .groups, .teams, .permissions}, .dashboards, .banners, .sla-engine,
+  // .product-catalog{.products, .release-lines}}. Unknown ids are ignored
   // with a console warning.
   //
   // "customers.customer-health" is not a Customers tab but a second sidebar

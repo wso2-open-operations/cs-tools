@@ -2299,6 +2299,19 @@ type Product struct {
 	Class     ProductClass `json:"class"`
 	CreatedOn time.Time    `json:"createdOn"`
 	UpdatedOn time.Time    `json:"updatedOn"`
+
+	// Product catalogue fields (migration 0270 onward). unit, businessUnit
+	// and manufacturer are the lowercase enum values.
+	Code         *string `json:"code"`
+	Unit         *string `json:"unit"`
+	BusinessUnit *string `json:"businessUnit"`
+	Manufacturer *string `json:"manufacturer"`
+	Description  *string `json:"description"`
+	// VersionCount is the live (not retired) versions, RetiredVersionCount the
+	// retired ones, ActiveVersionCount the live ones not discontinued.
+	VersionCount        int `json:"versionCount"`
+	RetiredVersionCount int `json:"retiredVersionCount"`
+	ActiveVersionCount  int `json:"activeVersionCount"`
 }
 
 // SearchProductsRequest is the input for a product search operation.
@@ -2388,6 +2401,26 @@ type ProductVersion struct {
 	DeploymentProfile *string   `json:"deploymentProfile"`
 	CreatedOn         time.Time `json:"createdOn"`
 	UpdatedOn         time.Time `json:"updatedOn"`
+
+	// Product catalogue fields (migrations 0270-0272). The public feeds group
+	// the live rows sharing PublicID into one listing.
+	ProductName                string         `json:"productName"`
+	ProductCode                *string        `json:"productCode"`
+	SerialNumber               *string        `json:"serialNumber"`
+	SupportEOLAnnouncementDate *time.Time     `json:"supportEolAnnouncementDate"`
+	PublicID                   *int64         `json:"publicId"`
+	PublicName                 *string        `json:"publicName"`
+	PublicAbbreviation         *string        `json:"publicAbbreviation"`
+	Description                *string        `json:"description"`
+	IsPublic                   bool           `json:"isPublic"`
+	ShowInSupportMatrix        bool           `json:"showInSupportMatrix"`
+	Tags                       []string       `json:"tags"`
+	ReleaseLinks               *string        `json:"releaseLinks"`
+	LegacyStatus               bool           `json:"legacyStatus"`
+	ReleaseLineID              *string        `json:"releaseLineId"`
+	ReleaseLineName            *string        `json:"releaseLineName"`
+	Carbon                     *CatalogCarbon `json:"carbon"`
+	RetiredOn                  *time.Time     `json:"retiredOn"`
 }
 
 // SearchProductVersionsRequest is the input for a product version search operation.
@@ -2402,6 +2435,17 @@ type SearchProductVersionsRequest struct {
 	// Omitted (or empty) applies no profile filter and returns every profile.
 	// Postgres data source only.
 	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
+	// ExcludeRetired leaves out retired rows. Omitted (false) returns every
+	// row, retired ones included, as before the catalogue existed.
+	ExcludeRetired bool `json:"excludeRetired,omitempty"`
+	// Feed (support-matrix or release-matrix) restricts to the live rows with
+	// a public listing on that feed. Feed and PublicID apply to both version
+	// searches (POST /product-versions/search and
+	// POST /products/{id}/versions/search); the CSM Portal and
+	// legacy-product-api use them on the first.
+	Feed string `json:"feed,omitempty"`
+	// PublicID restricts to the rows of one public listing.
+	PublicID *int64 `json:"publicId,omitempty"`
 }
 
 // SearchProductVersionsResponse is the paginated result of a product version search.
@@ -6275,6 +6319,10 @@ type SearchTeamsResponse struct {
 type TeamChatWebhook struct {
 	Name           string `json:"name"`
 	ChatWebhookURL string `json:"chatWebhookUrl"`
+	// Key is the team's key (team.key): csm-notification-service keys an
+	// incident's SRE team SLA space by it, the key the SRE ladder resolves an
+	// assignment group to. Additive; case routing still reads Name.
+	Key string `json:"key,omitempty"`
 }
 
 // ListTeamChatWebhooksResponse is the response for GET /teams/chat-webhooks
@@ -9268,6 +9316,17 @@ type SLAClockState struct {
 	// other, so it sends to TeamEmail and OnboardingTeamEmail together
 	// rather than this service picking one.
 	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
+	// AssignmentGroupName is an incident's assignment group as it is now
+	// (empty for every other work item type): csm-notification-service routes
+	// an incident's SLA alert by it, so a reassigned incident alerts its new
+	// group, whose group_email/manager TeamEmail/TeamLeadName already carry.
+	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
+	// AssignmentGroupTeamKey is the key of the team whose id the incident's
+	// current assignment group has (empty when none, and for every other
+	// type): a specialist handoff escalates an incident to its SME team's
+	// group, which shares that team's id (EnsureTeamGroups), so an incident
+	// escalated to an SME team names that team here.
+	AssignmentGroupTeamKey string `json:"assignmentGroupTeamKey,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

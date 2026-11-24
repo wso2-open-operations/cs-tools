@@ -387,6 +387,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var mttrReportHandler *handler.MTTRReportHandler
 	var runbookHandler *handler.RunbookHandler
 	var portalBannerHandler *handler.PortalBannerHandler
+	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
 	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
@@ -1764,6 +1765,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		portalBannerHandler = handler.NewPortalBannerHandler(
 			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
 		)
+		// Product catalogue routes of the products API: editable by
+		// AUTH_PRODUCT_CATALOG_MANAGER_ROLES and by CSM admins. Postgres data
+		// source only: in ServiceNow mode the product searches read ServiceNow.
+		if cfg.DataSource != config.DataSourceServiceNow {
+			productCatalogHandler = handler.NewProductCatalogHandler(
+				service.NewProductCatalogService(repository.NewProductCatalogRepository(db),
+					repository.NewProductRepository(db), repository.NewProductVersionRepository(db), accessSvc,
+					append(append([]string{}, cfg.AuthProductCatalogManagerRoles...), cfg.AuthAdminRoles...)),
+			)
+		}
 		// Monthly product regression reports: one business unit's regression
 		// cases whose fix ETA was shared last month, for the scheduled task
 		// that mails one report per unit.
@@ -2313,6 +2324,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /runbooks/import", internalOnly(accessSvc, runbookHandler.ImportRunbooks))
 		mux.HandleFunc("PUT /runbooks/{id}", internalOnly(accessSvc, runbookHandler.UpdateRunbook))
 		mux.HandleFunc("DELETE /runbooks/{id}", internalOnly(accessSvc, runbookHandler.DeleteRunbook))
+	}
+	if productCatalogHandler != nil {
+		// The rest of the products API: the catalogue.
+		mux.HandleFunc("GET /products/{id}", productCatalogHandler.GetProduct)
+		mux.HandleFunc("POST /products", productCatalogHandler.CreateProduct)
+		mux.HandleFunc("PATCH /products/{id}", productCatalogHandler.UpdateProduct)
+		mux.HandleFunc("POST /products/{id}/versions", productCatalogHandler.CreateProductVersions)
+		mux.HandleFunc("POST /product-versions/search", productCatalogHandler.SearchAllProductVersions)
+		mux.HandleFunc("GET /product-versions/{id}", productCatalogHandler.GetProductVersion)
+		mux.HandleFunc("PATCH /product-versions/{id}", productCatalogHandler.UpdateProductVersion)
+		mux.HandleFunc("POST /product-versions/{id}/retire", productCatalogHandler.RetireProductVersion)
+		mux.HandleFunc("GET /release-lines", productCatalogHandler.ListReleaseLines)
+		mux.HandleFunc("POST /release-lines", productCatalogHandler.CreateReleaseLine)
+		mux.HandleFunc("PATCH /release-lines/{id}", productCatalogHandler.UpdateReleaseLine)
+		mux.HandleFunc("POST /release-lines/{id}/retire", productCatalogHandler.RetireReleaseLine)
+		mux.HandleFunc("GET /carbon-platform-history", productCatalogHandler.ListCarbonPlatformHistory)
+		mux.HandleFunc("GET /carbon-kernel-releases", productCatalogHandler.ListCarbonKernelReleases)
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that
@@ -2937,6 +2965,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Last: the retry worker above can still be invalidating users
 		// until it has stopped.
 		closeRedis()
+	}
+
+	// The audit log's upkeep (migration 0295), called by csm-scheduled-tasks, weekly by default.
+	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
+	// EXECUTE on the audit_* functions for the application's database role.
+	if db != nil && cfg.AuditLogEnabled {
+		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
+			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead, cfg.AuditLogRetentionMonths))
+		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))
 	}
 
 	// PLG Customer Success Portal. Every repository, service, handler and route

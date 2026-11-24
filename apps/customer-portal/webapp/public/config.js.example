@@ -70,7 +70,7 @@ window.config = {
   //   "<name> Products", "Add <name> Product" (project deployments),
   //   "<name> Resolution" (vulnerability details) and "your <name> Account
   //   Manager" (suspended-project notice).
-  // CUSTOMER_PORTAL_BILLING_EMAIL  (default: "billing@wso2.com")
+  // CUSTOMER_PORTAL_BILLING_EMAIL  (default: "billing@choreolabs.com")
   //   Billing team's email address on the suspended-project notice, as both the
   //   shown address and its mailto: link. A value that is not one plain address
   //   is ignored and the default is used.

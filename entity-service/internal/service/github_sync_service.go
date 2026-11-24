@@ -160,7 +160,7 @@ var githubLikelihoodByLabel = map[string]string{
 // emergency). This schema has neither: it has change_request_type, whose
 // values are INFRA and GENERAL. Scope maps onto it cleanly; the normal /
 // standard / emergency distinction has nowhere to go and is dropped, which is
-// recorded as an open question in docs/github-cr-sync-spec.md rather than
+// recorded as an open question in docs/specs/github-cr-sync-spec.md rather than
 // silently discarded.
 var githubTypeByScope = map[string]string{
 	labelScopeApp:   "GENERAL",

@@ -79,7 +79,7 @@ Conventions:
 
 - Routes are declared in `src/App.tsx`. Pages are imported eagerly (no per-route code splitting), so navigating never triggers a runtime chunk fetch.
 - Authenticated routes sit under `<AuthGuard>` (`src/layouts/AuthGuard.tsx`) and a `FeatureRouteGuard`; the unauthenticated error routes (`/401`, `/403`, `/404`) sit outside.
-- The sidebar, tab strips, quick-nav and Help topics are all driven by one navigation tree in `src/config/csmNavItems.ts`. Each node has a stable dotted id (`operations`, `operations.incidents`). These ids are a public contract: deployments use them as keys in `CSM_PORTAL_FEATURE_OVERRIDES` (see [Configuration](#configuration)), so renaming one is a breaking configuration change.
+- The sidebar, tab strips, quick-nav and Help topics are all driven by one navigation tree in `src/config/csmNavItems.ts`. Each node has a stable dotted id (`operations`, `operations.incidents`). These ids are a public contract: deployments use them as keys in `CSM_PORTAL_FEATURE_OVERRIDES` (see [Configuration](#configuration)), so renaming one is a breaking configuration change. When an id is renamed anyway, map the old id to the new one in `LEGACY_NAV_ID_ALIASES` (`src/config/featureFlags.ts`): the old key keeps applying, with a console warning asking to rename it (e.g. the product catalogue's old `products` ids, now `admin.product-catalog`).
 - `src/config/featureFlags.ts` resolves a node to `enabled`, `wip` (visible but greyed out, routes render a "coming soon" page) or `hidden` (no nav entry, routes redirect to the dashboard).
 
 ### API client layer

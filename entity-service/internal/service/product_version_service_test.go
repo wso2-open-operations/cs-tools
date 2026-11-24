@@ -33,6 +33,10 @@ func (r *stubProductVersionRepo) SearchProductVersions(_ context.Context, req do
 	return nil, 0, nil
 }
 
+func (r *stubProductVersionRepo) GetProductVersions(context.Context, []string) ([]domain.ProductVersion, error) {
+	return nil, nil
+}
+
 func TestProductVersionService_SearchProductVersions_DeploymentProfile(t *testing.T) {
 	custom, none := "Split", ""
 	for name, tc := range map[string]struct {

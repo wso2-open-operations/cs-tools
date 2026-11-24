@@ -45,6 +45,17 @@ describe("useGetWorkItemSlas", () => {
     postMock.mockReset();
   });
 
+  it("loads historical SLA pages so earlier breach instances remain available", async () => {
+    const row = { id: "sla", slaDefinition: { name: "Response" }, stage: "completed", businessElapsedPercentage: 120 };
+    postMock.mockResolvedValueOnce({ slas: Array.from({ length: 50 }, (_, i) => ({ ...row, id: `sla-${i}` })), total: 51 });
+    postMock.mockResolvedValueOnce({ slas: [{ ...row, id: "last" }], total: 51 });
+    const { result } = setup(WORK_ITEM_ID);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.slas).toHaveLength(51);
+    expect(result.current.data?.slas.at(-1)?.id).toBe("last");
+    expect(postMock).toHaveBeenLastCalledWith("/slas/search", { filters: { taskIds: [WORK_ITEM_ID] }, pagination: { limit: 50, offset: 50 } });
+  });
+
   it("searches by the work item id, maps rows, and caches under the work-item key", async () => {
     postMock.mockResolvedValue({
       slas: [

@@ -21,7 +21,7 @@ import type { SectionTabsState } from "@hooks/useSectionTabs";
 import {
   enabledPathTabKeys,
   firstEnabledPathTab,
-  firstEnabledTabHref,
+  useFirstEnabledTabHref,
 } from "@hooks/useSectionTabs";
 
 interface SectionTabsProps extends SectionTabsState {
@@ -156,7 +156,8 @@ export default function SectionTabs({
 
 /**
  * Index-route element for a tabbed section: sends the user to its first usable
- * tab rather than to a hardcoded one that this deployment may have restricted.
+ * tab rather than to a hardcoded one that this deployment, or the user's own
+ * roles, may have restricted.
  * Falls back to the dashboard when every tab is hidden.
  */
 export function SectionIndexRedirect({
@@ -164,7 +165,8 @@ export function SectionIndexRedirect({
 }: {
   sectionId: string;
 }): JSX.Element {
-  return <Navigate to={firstEnabledTabHref(sectionId) ?? "/dashboard"} replace />;
+  const target = useFirstEnabledTabHref(sectionId);
+  return <Navigate to={target ?? "/dashboard"} replace />;
 }
 
 /**

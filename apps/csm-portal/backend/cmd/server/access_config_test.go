@@ -27,6 +27,7 @@ func TestLoadAccessConfig(t *testing.T) {
 		"AUTH_ATTACHMENT_DOWNLOADER_ROLES", "AUTH_USAGE_METRICS_VIEWER_ROLES",
 		"AUTH_SUPPORT_ENGINEER_ROLES", "AUTH_ADMIN_ROLES", "AUTH_TIMECARD_APPROVER_ROLES",
 		"AUTH_DASHBOARD_DESIGNER_ROLES", "AUTH_ANNOUNCEMENT_CREATOR_ROLES", "AUTH_SECURITY_TEAM_ROLES", "AUTH_ONBOARDING_LEAD_ROLES",
+		"AUTH_PRODUCT_CATALOG_MANAGER_ROLES",
 	}
 	resetEnv := func(t *testing.T) {
 		for _, name := range envs {
@@ -86,6 +87,19 @@ func TestLoadAccessConfig(t *testing.T) {
 	// Creating an announcement needs this role on top of write access, so an
 	// unset variable means only admin can create one -- see
 	// handler.AccessConfig.AnnouncementCreator.
+	t.Run("the product catalog manager role reads its own variable and is optional", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES", " test-catalog-managers , test-leads ")
+		got := loadAccessConfig()
+		if want := []string{"test-catalog-managers", "test-leads"}; !slices.Equal(got.ProductCatalogManager, want) {
+			t.Errorf("ProductCatalogManager = %v, want %v", got.ProductCatalogManager, want)
+		}
+		t.Setenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES", "")
+		if got := loadAccessConfig().ProductCatalogManager; len(got) != 0 {
+			t.Errorf("ProductCatalogManager = %v, want empty when unset", got)
+		}
+	})
+
 	t.Run("the onboarding lead role reads its own variable and is optional", func(t *testing.T) {
 		resetEnv(t)
 		t.Setenv("AUTH_ONBOARDING_LEAD_ROLES", " test-onboarders , test-leads ")
