@@ -25,26 +25,24 @@ import (
 	"strings"
 )
 
-// wso2LogoURL points at WSO2's own public CDN copy of the logo (circular
-// pulse icon + wordmark) used in real received notice examples — confirmed
-// pixel-identical to the file the product owner provided directly. A hosted URL, not
-// an embedded data: URI, deliberately: most email clients (confirmed
-// against a real Gmail inbox — the data: URI approach rendered as a broken
-// image icon there) refuse to render inline base64 images in received
-// mail, so the logo has to be fetched from a real reachable address like
-// any other web image.
-const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
+// defaultLogoURL is the dark (navy) logo on the company's own public site,
+// used on the light notice background. A hosted URL, not an embedded data:
+// URI, deliberately: most email clients (confirmed against a real Gmail
+// inbox — the data: URI approach rendered as a broken image icon there)
+// refuse to render inline base64 images in received mail, so the logo has
+// to be fetched from a real reachable address like any other web image.
+const defaultLogoURL = "https://choreolabs.com/themes/wso2theme/images/choreo/brand/choreo-labs-logo-navy-400px.png"
 
 // logoURL is the logo every notice's Sprintf call reads -- defaults to
-// wso2LogoURL, overridable by SetLogoURL. Unlike internal/notify's own
+// defaultLogoURL, overridable by SetLogoURL. Unlike internal/notify's own
 // bakeLogo/SetLogoURL (which rewrite an already-rendered template string),
 // these five templates are only ever filled in at send time via
 // fmt.Sprintf, so a plain package variable read at that moment is enough;
 // there's no baked state to search-and-replace.
-var logoURL = wso2LogoURL
+var logoURL = defaultLogoURL
 
 // SetLogoURL overrides the logo URL every notice in this package sends.
-// An empty value keeps wso2LogoURL (the built-in default). Call once at
+// An empty value keeps defaultLogoURL (the built-in default). Call once at
 // startup, before any notice is sent.
 func SetLogoURL(url string) {
 	url = strings.TrimSpace(url)
@@ -55,7 +53,7 @@ func SetLogoURL(url string) {
 }
 
 // defaultCompanyName is the name every notice carries by default.
-const defaultCompanyName = "WSO2"
+const defaultCompanyName = "Choreo Labs"
 
 // companyName is the name every notice's Sprintf call reads (the logo alt
 // text and the "sent by ...'s support system" footer disclaimer) --
@@ -81,20 +79,20 @@ func SetCompanyName(name string) {
 }
 
 // emailHTMLTemplate is the branded shell the customer-facing notice is
-// wrapped in — peach page background, logo header, orange accent border
+// wrapped in — light page background, logo header, navy accent border
 // around the message body, and the standard disclaimer footer — matching
 // real customer-facing examples. The internal notice uses a different,
 // distinct template (internalEmailHTMLTemplate) — see Send. Four
 // placeholders: the logo URL, the company name (logo alt text), the notice
 // body already converted to simple HTML by plainTextToHTML, and the
 // company name again (footer disclaimer).
-const emailHTMLTemplate = `<div style="background-color:#fdece2;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
+const emailHTMLTemplate = `<div style="background-color:#e9ecf3;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:4px;overflow:hidden;">
     <div style="padding:24px 32px 16px 32px;">
       <img src="%s" alt="%s" height="28" style="display:block;">
     </div>
     <div style="padding:8px 32px 24px 32px;">
-      <div style="border-left:4px solid #ff7300;padding:4px 0 4px 16px;color:#333333;font-size:14px;line-height:1.6;">
+      <div style="border-left:4px solid #0B1633;padding:4px 0 4px 16px;color:#333333;font-size:14px;line-height:1.6;">
         %s
       </div>
     </div>
@@ -105,7 +103,7 @@ const emailHTMLTemplate = `<div style="background-color:#fdece2;padding:32px 16p
 </div>`
 
 // internalEmailHTMLTemplate is the internal notice's own distinct branded
-// shell — no peach background, no logo header, a simple light-bordered
+// shell — no light navy-tint background, no logo header, a simple light-bordered
 // white card instead, framed by a light ash-gray page background (the
 // same #f2f2f2 tone as the detail box below, matching the real reference).
 // Confirmed against a real received internal notice example (an internal
@@ -311,8 +309,8 @@ func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	// Every notice — internal and customer-facing alike — gets a branded
 	// WSO2 shell, confirmed against real received examples of both — but
 	// the two shells are genuinely different (not just a color swap): the
-	// customer-facing one is renderEmailHTML (peach background, logo,
-	// orange border); the internal one is its own distinct
+	// customer-facing one is renderEmailHTML (light navy-tint background, logo,
+	// navy border); the internal one is its own distinct
 	// renderInternalEmailHTML (light-bordered white card, blue
 	// greeting/intro, a separate detail box for the project/account
 	// fields). An earlier version of this code kept the internal notice
@@ -381,7 +379,7 @@ func (n *EmailNotifier) filterRecipients(emails []string) []string {
 }
 
 // renderEmailHTML wraps a notice's plain-text Body in the customer-facing
-// branded WSO2 email shell (emailHTMLTemplate) — logo, orange accent
+// branded WSO2 email shell (emailHTMLTemplate) — logo, navy accent
 // border, footer disclaimer — matching real customer-facing notice
 // examples. Used by Send only when notice.Recipients.Customers is non-empty.
 func renderEmailHTML(body string) string {

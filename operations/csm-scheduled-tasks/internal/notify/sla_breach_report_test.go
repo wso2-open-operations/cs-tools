@@ -56,7 +56,7 @@ func slaBreachFixture() slabreachreport.Report {
 func TestRenderSLABreachReportCarriesTheReportsOwnColumns(t *testing.T) {
 	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
 	for _, want := range []string{
-		"WSO2 Case Id", "WSO2 Product", "Case Type", "Priority", "Target", "Business Elapsed %",
+		"Choreo Labs Case Id", "Choreo Labs Product", "Case Type", "Priority", "Target", "Business Elapsed %",
 		"WSO2-1001", "WSO2 API Manager", "QUESTION", "S1", "RESPONSE", "3315%",
 	} {
 		if !strings.Contains(body, want) {

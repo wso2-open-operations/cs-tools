@@ -335,7 +335,7 @@ func internalReminderBody() string {
 		"Start Date: 2025-01-01",
 		"End Date: 2026-01-01",
 		"Since projects needs contract renewal, kindly take the remedial actions.",
-		"Best Regards,\nWSO2 Team",
+		"Best Regards,\nChoreo Labs Team",
 	}, "\n\n")
 }
 
@@ -369,11 +369,11 @@ func TestEmailNotifier_Send_InternalNoticeGetsOwnBrandedTemplate(t *testing.T) {
 	}
 	got := sender.calls[0].htmlBody
 
-	if strings.Contains(got, "#fdece2") || strings.Contains(got, "#ff7300") {
-		t.Error("htmlBody uses the customer-facing shell's peach background/orange border — internal must use its own distinct template")
+	if strings.Contains(got, "#e9ecf3") || strings.Contains(got, "#0B1633") {
+		t.Error("htmlBody uses the customer-facing shell's light background/navy border — internal must use its own distinct template")
 	}
-	if !strings.Contains(got, wso2LogoURL) {
-		t.Error("htmlBody missing the WSO2 logo — internal notices get it in the footer, matching the real reference")
+	if !strings.Contains(got, defaultLogoURL) {
+		t.Error("htmlBody missing the logo — internal notices get it in the footer, matching the real reference")
 	}
 	if !strings.Contains(got, "Dear Jordan Perera") {
 		t.Error("htmlBody missing the greeting")
@@ -384,10 +384,10 @@ func TestEmailNotifier_Send_InternalNoticeGetsOwnBrandedTemplate(t *testing.T) {
 	if !strings.Contains(got, "Project Key: <strong>ACMESUB</strong>") {
 		t.Error("htmlBody missing the structured Project Key field row")
 	}
-	if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "WSO2 Team") {
+	if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "Choreo Labs Team") {
 		t.Error("htmlBody missing the sign-off")
 	}
-	if !strings.Contains(got, "This automated message was sent by WSO2's support system. Please do not reply to this email.") {
+	if !strings.Contains(got, "This automated message was sent by Choreo Labs's support system. Please do not reply to this email.") {
 		t.Error("htmlBody missing the standard footer disclaimer")
 	}
 	if !strings.Contains(got, "<table") {
@@ -430,13 +430,13 @@ func TestEmailNotifier_Send_InternalFallbackForUnrecognizedShape(t *testing.T) {
 	if !strings.Contains(got, "Urgent reminder regarding the project Acme - Subscription.") {
 		t.Errorf("htmlBody = %q, missing body content in the fallback rendering", got)
 	}
-	if !strings.Contains(got, wso2LogoURL) {
-		t.Error("htmlBody missing the WSO2 logo in the fallback rendering too")
+	if !strings.Contains(got, defaultLogoURL) {
+		t.Error("htmlBody missing the logo in the fallback rendering too")
 	}
 }
 
 // TestEmailNotifier_Send_CustomerNoticeGetsBrandedTemplate verifies the
-// branded WSO2 shell (logo, orange accent border, footer disclaimer) wraps
+// branded WSO2 shell (logo, navy accent border, footer disclaimer) wraps
 // the customer-facing notice too, per real examples.
 func TestEmailNotifier_Send_CustomerNoticeGetsBrandedTemplate(t *testing.T) {
 	sender := &mockEmailSender{}
@@ -458,10 +458,10 @@ func TestEmailNotifier_Send_CustomerNoticeGetsBrandedTemplate(t *testing.T) {
 	}
 	got := sender.calls[0].htmlBody
 
-	if !strings.Contains(got, "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png") {
-		t.Error("htmlBody missing the WSO2 logo <img> reference")
+	if !strings.Contains(got, defaultLogoURL) {
+		t.Error("htmlBody missing the logo <img> reference")
 	}
-	if !strings.Contains(got, "This automated message was sent by WSO2's support system. Please do not reply to this email.") {
+	if !strings.Contains(got, "This automated message was sent by Choreo Labs's support system. Please do not reply to this email.") {
 		t.Error("htmlBody missing the standard footer disclaimer")
 	}
 	if !strings.Contains(got, "body text") {

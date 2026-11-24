@@ -132,7 +132,7 @@ below for why that's not a generic engine feature. It mails entity-service's lon
 and OAuth client credentials as the other entity-service clients, no extra env vars) and
 `notify.RenderLongOpenCasesReport` renders the result as two tables, in this order: "Ongoing cases"
 (the report's `cases`, projects that are not being onboarded) and "Ongoing cases on onboarding
-projects" (`onboardingCases`). Columns: Case, WSO2 Case ID, Integration CS Team, Assignee, State,
+projects" (`onboardingCases`). Columns: Case, Choreo Labs Case ID, Integration CS Team, Assignee, State,
 Severity (S0-S4), Last updated, Created. Which cases count as ongoing, the split between the tables, the
 oldest-first order and the per-table row cap all live in entity-service; this task only fetches,
 renders and sends. The 30-day window is a fixed constant (`staleCaseOlderThanDays` in
@@ -1090,22 +1090,22 @@ Every email this component sends — `internal/notify`'s eight report/alert temp
 name, mirroring `integrations/csm-notification-service`'s own equivalent config.
 `EMAIL_LOGO_DARK_URL`/`EMAIL_TEMPLATE_COMPANY_NAME` are the same env var names that service uses,
 reusable verbatim across a deployment; `EMAIL_LOGO_LIGHT_URL` is this component's own name for its
-equivalent of that service's `EMAIL_LOGO_WHITE_URL`. Unset keeps every built-in default (`WSO2`,
-the existing logo URLs) exactly as it was before this config existed.
+equivalent of that service's `EMAIL_LOGO_WHITE_URL`. Unset keeps every built-in default: the company name `Choreo Labs`,
+a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
 
 - **`EMAIL_LOGO_LIGHT_URL`** overrides `internal/notify.SetLogoURL` — all eight of that package's
-  templates share one orange header, so they all need the same light-colored logo.
+  templates share one dark navy header, so they all need the same light-colored logo.
   **`EMAIL_LOGO_DARK_URL`** overrides `internal/acp/notify.SetLogoURL` — all five of that package's
   templates share one light background, so they need a dark-colored logo instead. The two are
   deliberately separate env vars, not one shared value, since the two packages' templates need
   opposite logo colors.
 - **`EMAIL_TEMPLATE_COMPANY_NAME`** overrides both packages' `SetCompanyName` with the same value —
   it is the same real-world company name regardless of which package sends the email. Replaces the
-  literal word "WSO2" in: the copyright line and the "WSO2 Case Id"/"WSO2 Case ID"/"WSO2 ID"/"WSO2
-  Product" report column headers (`internal/notify`); the footer disclaimer ("sent by WSO2's
+  default name "Choreo Labs" in: the copyright line and the "Choreo Labs Case Id"/"Choreo Labs Case
+  ID"/"Choreo Labs ID"/"Choreo Labs Product" report column headers (`internal/notify`); the footer disclaimer ("sent by Choreo Labs's
   support system") and logo alt text, across all five ACP templates (`internal/acp/notify`); and
-  the plain-text ACP suspension/invoice notice bodies' own "WSO2 Team" signoffs and "WSO2
-  subscription"/"WSO2 Account Manager"/"WSO2 services" body copy (`internal/acp/sweep`'s
+  the plain-text ACP suspension/invoice notice bodies' own "Choreo Labs Team" signoffs and "Choreo Labs
+  subscription"/"Choreo Labs Account Manager"/"Choreo Labs services" body copy (`internal/acp/sweep`'s
   `sweep.go`/`invoice.go`, which call `notify.CompanyName()` — note this is `internal/acp/notify`'s
   `CompanyName`, not `internal/notify`'s own same-named function; the two packages are independent
   and only share the config value, never package state).
@@ -1115,6 +1115,8 @@ the existing logo URLs) exactly as it was before this config existed.
   `time_card_report.html` (the one genuinely customer-facing email in this component) and the rota
   reminder emails carry no logo or company name at all, by design — see "Monthly time card report"
   and "Rota reminders" above.
+- A template baked with `bakeLogo` must also be listed in `logoTemplates()` (internal/notify), or neither
+  override reaches it; `TestLogoTemplates_ListsEveryBakedTemplate` fails when one is missing.
 - Wired once, unconditionally, in `cmd/server/main.go`, right after `loadDotEnv`/the logger setup —
   before anything else in `main` constructs an email client or renders a template.
 

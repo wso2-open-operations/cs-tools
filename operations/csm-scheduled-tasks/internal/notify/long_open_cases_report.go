@@ -112,7 +112,7 @@ func longOpenCaseLink(caseLinkBase string, row longopenreport.Row, text string) 
 		return escapeHTML(text)
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(row.ID)
-	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#0B1633;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
 
 // severityLabel is the S0-S4 label the support team reads, for the API's

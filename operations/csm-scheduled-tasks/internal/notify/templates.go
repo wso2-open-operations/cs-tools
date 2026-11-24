@@ -37,21 +37,20 @@ var openCasesReportTemplateRaw string
 //go:embed templates/unresolved_products_report.html
 var unresolvedProductsReportTemplateRaw string
 
-// wso2LogoURL is the white WSO2 logo variant — the alert template's header
-// sits on an orange background, unlike
-// integrations/csm-notification-service's own equivalent constant of the
-// same name (a white background there, black logo). Same reasoning
-// otherwise: Gmail (and most major webmail clients) strip data: URI images
-// from received HTML mail as a security measure, so an inline base64 logo
-// shows as broken regardless of encoding — this CDN URL is WSO2's own
-// public asset host, not third-party hosting, and is the only option
-// confirmed to actually render.
-const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
+// defaultLogoURL is the light logo variant — the report and alert
+// templates' header sits on a dark navy background, unlike
+// integrations/csm-notification-service's own equivalent constant (a white
+// background there, dark logo). Same reasoning otherwise: Gmail (and most
+// major webmail clients) strip data: URI images from received HTML mail as
+// a security measure, so an inline base64 logo shows as broken regardless
+// of encoding — this is a public URL on the company's own site, not
+// third-party hosting.
+const defaultLogoURL = "https://choreolabs.com/themes/wso2theme/images/choreo/brand/choreo-labs-logo-light-400px.png"
 
-// bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder
+// bakeLogo substitutes defaultLogoURL into raw's <!-- [LOGO_SRC] --> placeholder
 // once at package init, since the logo never varies between emails.
 func bakeLogo(raw string) string {
-	return strings.Replace(raw, "<!-- [LOGO_SRC] -->", wso2LogoURL, 1)
+	return strings.Replace(raw, "<!-- [LOGO_SRC] -->", defaultLogoURL, 1)
 }
 
 var alertTemplate = bakeLogo(alertTemplateRaw)
@@ -66,10 +65,11 @@ func logoTemplates() []*string {
 		&alertTemplate, &openCasesReportTemplate, &unresolvedProductsReportTemplate,
 		&staleCasesReportTemplate, &migrationCaseReportTemplate, &productRegressionReportTemplate,
 		&queryHoursTemplate, &worklogsReportTemplate, &slaBreachReportTemplate,
+		&eolProductUsageReportTemplate,
 	}
 }
 
-// SetLogoURL replaces wso2LogoURL in every already-baked template with url.
+// SetLogoURL replaces defaultLogoURL in every already-baked template with url.
 // An empty value keeps the built-in. Mirrors
 // integrations/csm-notification-service's own notifications.SetLogoURLs --
 // call once at startup, before any email is rendered.
@@ -80,12 +80,12 @@ func SetLogoURL(url string) {
 	}
 	escaped := html.EscapeString(url)
 	for _, t := range logoTemplates() {
-		*t = strings.ReplaceAll(*t, wso2LogoURL, escaped)
+		*t = strings.ReplaceAll(*t, defaultLogoURL, escaped)
 	}
 }
 
 // defaultCompanyName is the name baked into every template by default.
-const defaultCompanyName = "WSO2"
+const defaultCompanyName = "Choreo Labs"
 
 // companyName is the name every rendered email currently carries, returned
 // by CompanyName (e.g. for the product regression report's own Go-formatted
@@ -635,7 +635,7 @@ func openCaseNumberCell(caseLinkBase string, c entitycases.Case) string {
 		return text
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + path + "/" + url.PathEscape(c.ID)
-	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), text)
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#0B1633;">%s</a>`, escapeHTML(href), text)
 }
 
 // caseTitle returns a short display title for a case row: its subject, or
