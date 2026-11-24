@@ -109,6 +109,18 @@ func (s *cachedUserService) UpdateUser(ctx context.Context, userID string, req d
 	return resp, nil
 }
 
+// MakeUserInternal implements UserService, same by-id-only invalidation
+// reasoning as UpdateUser above -- it changes user_type/roles, not the
+// caller's own profile.
+func (s *cachedUserService) MakeUserInternal(ctx context.Context, userID string) (domain.MakeUserInternalResponse, error) {
+	resp, err := s.UserService.MakeUserInternal(ctx, userID)
+	if err != nil {
+		return resp, err
+	}
+	s.cache.InvalidateUser(ctx, userID, "")
+	return resp, nil
+}
+
 // CreateUser implements UserService.
 func (s *cachedUserService) CreateUser(ctx context.Context, req domain.CreateUserRequest) (domain.User, error) {
 	u, err := s.UserService.CreateUser(ctx, req)

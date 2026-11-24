@@ -73,6 +73,15 @@ type UserService interface {
 	// field present, or an over-long phone; a NotFoundError when no user has
 	// that id.
 	UpdateUser(ctx context.Context, userID string, req domain.UpdateUserRequest) (domain.PatchUserMeResponse, error)
+	// MakeUserInternal flips the given user from EXTERNAL to INTERNAL: grants
+	// the "internal" role and revokes the external-side role set
+	// (external/customer/partner/customer_admin/partner_admin), the only way
+	// to actually change user_type (trigger-derived, migration 0011).
+	// Restricted to a @wso2.com target and to apps/csm-portal/backend as the
+	// caller (requireCSMPortalBackendCaller) -- a ForbiddenError otherwise.
+	// A ValidationError is returned for a malformed id or a non-@wso2.com
+	// target; a NotFoundError when no user has that id.
+	MakeUserInternal(ctx context.Context, userID string) (domain.MakeUserInternalResponse, error)
 }
 
 // UserCacheInvalidator clears a user's cached GET /users/{id} and

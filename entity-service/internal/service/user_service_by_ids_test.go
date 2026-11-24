@@ -56,7 +56,7 @@ func TestUserService_GetUsersByIDs_SkipsNonUUIDIDs(t *testing.T) {
 	repo := &recordingUsersByIDsRepo{
 		users: []domain.User{{ID: usersByIDsFirstID}, {ID: usersByIDsSecondID}},
 	}
-	svc := NewUserService(repo, nil)
+	svc := NewUserService(repo, nil, "")
 
 	resp, err := svc.GetUsersByIDs(context.Background(), []string{
 		usersByIDsFirstID,
@@ -93,7 +93,7 @@ func TestUserService_GetUsersByIDs_NoValidIDsSkipsRepository(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &recordingUsersByIDsRepo{}
-			svc := NewUserService(repo, nil)
+			svc := NewUserService(repo, nil, "")
 
 			resp, err := svc.GetUsersByIDs(context.Background(), ids)
 			if err != nil {
@@ -114,7 +114,7 @@ func TestUserService_GetUsersByIDs_NoValidIDsSkipsRepository(t *testing.T) {
 func TestUserService_GetUsersByIDs_PropagatesRepoError(t *testing.T) {
 	wantErr := errors.New("connection reset")
 	repo := &recordingUsersByIDsRepo{err: wantErr}
-	svc := NewUserService(repo, nil)
+	svc := NewUserService(repo, nil, "")
 
 	_, err := svc.GetUsersByIDs(context.Background(), []string{usersByIDsFirstID})
 	if !errors.Is(err, wantErr) {

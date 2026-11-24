@@ -266,6 +266,13 @@ func (c *CustomerEntityClient) UpdateUser(ctx context.Context, id string, body [
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/users/%s", url.PathEscape(id)), body)
 }
 
+// InternalizeUser calls POST /users/{id}/internalize on the entity service,
+// flipping the user from EXTERNAL to INTERNAL. No request body. Response is
+// returned as raw JSON ({"id": "...", "userType": "internal"}).
+func (c *CustomerEntityClient) InternalizeUser(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/users/%s/internalize", url.PathEscape(id)), nil)
+}
+
 // GetAccount calls GET /accounts/{id} on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) GetAccount(ctx context.Context, id string) ([]byte, error) {

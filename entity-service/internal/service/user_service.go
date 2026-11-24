@@ -242,18 +242,24 @@ func validateSearchQuery(q string) error {
 
 type userService struct {
 	repo repository.UserRepository
-	// access gates UpdateUser to internal callers only -- see that method's
-	// own doc comment for why this write needs stricter gating than PatchMe
-	// (a user editing their own profile). nil is safe for every other
-	// method, which never reads it -- only tests that don't exercise
-	// UpdateUser pass nil.
+	// access gates UpdateUser/MakeUserInternal to internal callers only --
+	// see UpdateUser's own doc comment for why this write needs stricter
+	// gating than PatchMe (a user editing their own profile). nil is safe
+	// for every other method, which never reads it -- only tests that don't
+	// exercise UpdateUser/MakeUserInternal pass nil.
 	access AccessService
+	// csmPortalBackendClientID gates MakeUserInternal to apps/csm-portal/backend
+	// specifically, not just any internal service -- see
+	// requireCSMPortalBackendCaller's own doc comment. Empty disables the
+	// route entirely (every call fails the client-id check), same posture
+	// as the other three services that share this exact pattern.
+	csmPortalBackendClientID string
 }
 
 // NewUserService constructs a UserService backed by the given repository and
 // access service.
-func NewUserService(repo repository.UserRepository, access AccessService) UserService {
-	return &userService{repo: repo, access: access}
+func NewUserService(repo repository.UserRepository, access AccessService, csmPortalBackendClientID string) UserService {
+	return &userService{repo: repo, access: access, csmPortalBackendClientID: csmPortalBackendClientID}
 }
 
 // GetUser implements UserService.
@@ -546,6 +552,66 @@ func (s *userService) UpdateUser(ctx context.Context, userID string, req domain.
 			Phone:     updated.Phone,
 		},
 	}, nil
+}
+
+// requireCSMPortalBackendCaller gates MakeUserInternal on the caller being
+// apps/csm-portal/backend itself, mirroring
+// caseEscalationAccessService.requireCSMPortalBackendCaller/
+// portalBannerService.requireCSMPortalBackendCaller/
+// slaStatusService.requireCSMPortalBackendCaller exactly (see any of those
+// for the full reasoning): whether the signed-in person is a CSM admin is
+// decided once, by csm-portal-backend's own PermAdmin gate on this route,
+// not a second time here against an independently-configured role list that
+// can silently disagree with it. Returns the signed-in person's email for
+// the audit trail (user_role.created_by/updated_by).
+func (s *userService) requireCSMPortalBackendCaller(ctx context.Context) (string, error) {
+	if err := RequireInternalCaller(ctx, s.access, "making a user internal is only available to internal services"); err != nil {
+		return "", err
+	}
+	id := auth.IdentityFromContext(ctx)
+	if id.UserEmail == "" {
+		return "", &apierror.ForbiddenError{Msg: "making a user internal needs a user token, not a service credential"}
+	}
+	if s.csmPortalBackendClientID == "" || id.ClientID != s.csmPortalBackendClientID {
+		return "", &apierror.ForbiddenError{Msg: "a user can only be made internal through the CSM Portal"}
+	}
+	return id.UserEmail, nil
+}
+
+// MakeUserInternal implements UserService. Flips userID from EXTERNAL to
+// INTERNAL: grants the "internal" role and revokes the external-side role
+// set (external/customer/partner/customer_admin/partner_admin) -- the only
+// way to actually change user_type, which migration 0011's trigger derives
+// from user_role membership; writing the column directly would be silently
+// overwritten by the next role change (confirmed live against a real
+// deployment).
+//
+// Restricted to a @wso2.com target the same way CreateUser restricts an
+// internal-type user at creation (see that method's own wso2EmailDomain
+// check, just above) -- an external/customer address must never become
+// internal regardless of who asks.
+func (s *userService) MakeUserInternal(ctx context.Context, userID string) (domain.MakeUserInternalResponse, error) {
+	actor, err := s.requireCSMPortalBackendCaller(ctx)
+	if err != nil {
+		return domain.MakeUserInternalResponse{}, err
+	}
+	if err := validateUUIDs("id", []string{userID}); err != nil {
+		return domain.MakeUserInternalResponse{}, err
+	}
+
+	target, err := s.repo.GetUserDetail(ctx, userID)
+	if err != nil {
+		return domain.MakeUserInternalResponse{}, err
+	}
+	if !strings.HasSuffix(strings.ToLower(target.Email), wso2EmailDomain) {
+		return domain.MakeUserInternalResponse{}, &apierror.ValidationError{Msg: "only a " + wso2EmailDomain + " user can be made internal"}
+	}
+
+	userType, err := s.repo.MakeUserInternal(ctx, userID, actor)
+	if err != nil {
+		return domain.MakeUserInternalResponse{}, err
+	}
+	return domain.MakeUserInternalResponse{ID: userID, UserType: userType}, nil
 }
 
 // CreateUser implements UserService.

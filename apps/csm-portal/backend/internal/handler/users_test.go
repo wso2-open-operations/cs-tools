@@ -1517,6 +1517,103 @@ func TestGrantUserRoles(t *testing.T) {
 	})
 }
 
+// ----- InternalizeUser -----
+
+func TestInternalizeUser(t *testing.T) {
+	targetID := "11111111-1111-1111-1111-111111111111"
+
+	newHandler := func(entityClient *mockEntityUserClient) *UsersHandler {
+		return NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), nil)
+	}
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := newHandler(&mockEntityUserClient{})
+		r := httptest.NewRequest(http.MethodPost, "/users/"+targetID+"/internalize", nil)
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.InternalizeUser(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+	})
+
+	t.Run("rejects a malformed id", func(t *testing.T) {
+		h := newHandler(&mockEntityUserClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/users/not-a-uuid/internalize", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.InternalizeUser(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+	})
+
+	t.Run("rejects a target whose email isn't a wso2.com address, before calling entity-service's internalize route", func(t *testing.T) {
+		called := false
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"id":"` + targetID + `","email":"jane@example.com"}`), nil
+			},
+			internalizeUserFn: func(context.Context, string) ([]byte, error) {
+				called = true
+				return nil, nil
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/users/"+targetID+"/internalize", nil))
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.InternalizeUser(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		if called {
+			t.Fatal("entity-service's internalize route must not be called for a non-wso2.com target")
+		}
+	})
+
+	t.Run("makes a wso2.com target internal and passes the entity-service response through", func(t *testing.T) {
+		var gotID string
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(_ context.Context, id string) ([]byte, error) {
+				if id != targetID {
+					t.Fatalf("GetUser called with id = %q, want %q", id, targetID)
+				}
+				return []byte(`{"id":"` + targetID + `","email":"jane@wso2.com"}`), nil
+			},
+			internalizeUserFn: func(_ context.Context, id string) ([]byte, error) {
+				gotID = id
+				return []byte(`{"id":"` + id + `","userType":"internal"}`), nil
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/users/"+targetID+"/internalize", nil))
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.InternalizeUser(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if gotID != targetID {
+			t.Fatalf("entity InternalizeUser called with id = %q, want %q", gotID, targetID)
+		}
+		if body := w.Body.String(); !strings.Contains(body, `"userType":"internal"`) {
+			t.Fatalf("response body = %s, want it to pass the entity-service response through", body)
+		}
+	})
+
+	t.Run("reports an upstream failure from entity-service's internalize route", func(t *testing.T) {
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"id":"` + targetID + `","email":"jane@wso2.com"}`), nil
+			},
+			internalizeUserFn: func(context.Context, string) ([]byte, error) {
+				return nil, &apierror.Error{StatusCode: http.StatusNotFound, Body: `{"message":"no user found with id: ` + targetID + `"}`}
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/users/"+targetID+"/internalize", nil))
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.InternalizeUser(w, r)
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
 // ----- GetTimeCardApprovers -----
 
 func TestGetTimeCardApprovers(t *testing.T) {

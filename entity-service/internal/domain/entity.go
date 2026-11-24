@@ -331,6 +331,14 @@ type UserDetail struct {
 	ProjectAccess []UserContactAccess `json:"projectAccess,omitempty"`
 }
 
+// MakeUserInternalResponse is the result of flipping a user from EXTERNAL to
+// INTERNAL (UserService.MakeUserInternal) -- the resulting user_type,
+// trigger-derived (migration 0011), not merely echoed back.
+type MakeUserInternalResponse struct {
+	ID       string   `json:"id"`
+	UserType UserType `json:"userType"`
+}
+
 // UserContactAccess is one project_contact row for a customer, reported as stored
 // rather than as filtered, so a caller can see why a contact does or does not
 // reach a project's cases.

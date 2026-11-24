@@ -1717,6 +1717,13 @@ export interface BeGrantUserRolesResponse {
   failed?: string[];
 }
 
+/** `POST /users/{id}/internalize` response — the user's resulting id and
+ * user type (always "internal" on success). */
+export interface BeMakeUserInternalResponse {
+  id: string;
+  userType: string;
+}
+
 export interface BeUserSearchFilters {
   /** Case-insensitive match against username and email. */
   searchQuery?: string;

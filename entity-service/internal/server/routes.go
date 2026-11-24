@@ -83,7 +83,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	})
 
 	userRepo := repository.NewUserRepository(db)
-	userSvc := service.NewUserService(userRepo, accessSvc)
+	userSvc := service.NewUserService(userRepo, accessSvc, cfg.CSMPortalBackendClientID)
 
 	// The case-volume-trend cache behind POST /cases/volume-trend is a
 	// plain per-pod in-memory map -- deliberately not Redis-backed, even
@@ -2556,6 +2556,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
 		mux.HandleFunc("POST /users", userHandler.CreateUser)
 		mux.HandleFunc("PATCH /users/{id}", userHandler.UpdateUser)
+		mux.HandleFunc("POST /users/{id}/internalize", userHandler.MakeUserInternal)
 	}
 	if snAccountHandler != nil {
 		mux.HandleFunc("GET /accounts/{id}", internalOnly(accessSvc, snAccountHandler.GetAccount))

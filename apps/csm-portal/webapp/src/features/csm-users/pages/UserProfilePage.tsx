@@ -20,6 +20,7 @@ import {
   Button,
   Card,
   Chip,
+  IconButton,
   Skeleton,
   Table,
   TableBody,
@@ -29,10 +30,11 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Pencil } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { stripStaffNameMarker } from "@utils/staffNameMarker";
@@ -45,6 +47,7 @@ import {
 } from "@features/csm-projects/utils/projectContactRoles";
 import { grantableRoleLabel } from "@features/csm-users/utils/grantableRoleLabels";
 import GrantUserRoleDialog from "@features/csm-users/components/GrantUserRoleDialog";
+import MakeUserInternalDialog from "@features/csm-users/components/MakeUserInternalDialog";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import {
   INTERNAL_USER_ROLES,
@@ -339,6 +342,8 @@ function PlainChipCluster({
  */
 function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element {
   const [grantDialogOpen, setGrantDialogOpen] = useState(false);
+  const [makeInternalDialogOpen, setMakeInternalDialogOpen] = useState(false);
+  const access = usePortalAccess();
   const { data: rolesData } = useSearchRoles({ pagination: { limit: BE_MAX_PAGE_LIMIT } });
   const roleNameById = useMemo(
     () => new Map((rolesData?.roles ?? []).map((r) => [r.id, r.name])),
@@ -375,10 +380,30 @@ function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element 
       <Typography variant="subtitle2">Permissions & assignments</Typography>
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
         <Box sx={{ flex: "1 1 260px", minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {showCsmPlatformRoles ? "Customer Portal roles" : "Platform roles"} ({roleRows.length})
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {showCsmPlatformRoles ? "Customer Portal roles" : "Platform roles"} ({roleRows.length})
+            </Typography>
+            {showCsmPlatformRoles && !internal && access.canMakeUserInternal && (
+              <IconButton
+                size="small"
+                aria-label="Make user internal"
+                className="csm-print-hide"
+                onClick={() => setMakeInternalDialogOpen(true)}
+              >
+                <Pencil size={14} />
+              </IconButton>
+            )}
+          </Box>
           <ChipCluster rows={roleRows} emptyMessage="No roles assigned." />
+          {showCsmPlatformRoles && (
+            <MakeUserInternalDialog
+              open={makeInternalDialogOpen}
+              onClose={() => setMakeInternalDialogOpen(false)}
+              userId={user.id}
+              userEmail={user.email}
+            />
+          )}
         </Box>
         {showCsmPlatformRoles && (
           <Box sx={{ flex: "1 1 260px", minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
@@ -386,9 +411,14 @@ function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element 
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                 CSM Platform roles{csmPlatformRolesAvailable ? ` (${csmPlatformRoleLabels.length})` : ""}
               </Typography>
-              <Button size="small" onClick={() => setGrantDialogOpen(true)}>
-                Grant role
-              </Button>
+              <IconButton
+                size="small"
+                aria-label="Grant role"
+                className="csm-print-hide"
+                onClick={() => setGrantDialogOpen(true)}
+              >
+                <Pencil size={14} />
+              </IconButton>
             </Box>
             <PlainChipCluster
               labels={csmPlatformRoleLabels}

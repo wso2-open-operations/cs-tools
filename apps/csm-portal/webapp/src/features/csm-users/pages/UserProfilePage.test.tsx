@@ -32,6 +32,7 @@ const useGetUserByIdMock = vi.fn();
 // which goes through this same client.
 const backendPostMock = vi.fn();
 const backendGetMock = vi.fn();
+const backendPostEmptyMock = vi.fn();
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
@@ -40,10 +41,20 @@ vi.mock("@api/backend/client", () => ({
       this.status = status;
     }
   },
-  useBackendApi: () => ({ post: backendPostMock, get: backendGetMock }),
+  useBackendApi: () => ({ post: backendPostMock, get: backendGetMock, postEmpty: backendPostEmptyMock }),
 }));
 vi.mock("@features/csm-users/api/useGetUserById", () => ({
   useGetUserById: () => useGetUserByIdMock(),
+}));
+
+// PermissionsCard reads usePortalAccess for the "Make internal" icon's
+// admin-only gate -- mocked directly (not via the real hook's own
+// CurrentUserContext/config chain) the same way CsmProjectDetailPage.test.tsx
+// mocks it for its own admin-only icons. Defaults to true so the existing
+// tests above, written before this gate existed, keep seeing the icon.
+let mockCanMakeUserInternal = true;
+vi.mock("@context/current-user/usePortalAccess", () => ({
+  usePortalAccess: () => ({ canMakeUserInternal: mockCanMakeUserInternal }),
 }));
 
 // Imported after the mocks above so the module picks them up.
@@ -159,6 +170,9 @@ describe("UserProfilePage", () => {
     backendPostMock.mockResolvedValue(ROLES_RESPONSE);
     backendGetMock.mockReset();
     backendGetMock.mockResolvedValue({ roles: [{ key: "cs_engineer" }, { key: "escalator" }] });
+    backendPostEmptyMock.mockReset();
+    backendPostEmptyMock.mockResolvedValue({ id: "user-2", userType: "internal" });
+    mockCanMakeUserInternal = true;
   });
 
   it("renders a loading skeleton while the query is pending", () => {
@@ -272,6 +286,44 @@ describe("UserProfilePage", () => {
     renderPage();
     expect(await screen.findByText(/Customer Portal roles \(2\)/i)).toBeInTheDocument();
     expect(screen.getByText(/CSM Platform roles \(1\)/i)).toBeInTheDocument();
+  });
+
+  it("shows a 'Make user internal' icon for a wso2.com external user when the admin gate allows it", async () => {
+    mockQueryResult({ data: { ...BLOCKED_EXTERNAL_USER, email: "tester@wso2.com" } });
+    renderPage();
+    expect(await screen.findByRole("button", { name: /make user internal/i })).toBeInTheDocument();
+  });
+
+  it("hides the 'Make user internal' icon once the user is already internal", () => {
+    mockQueryResult({ data: { ...INTERNAL_USER, email: "jane.doe@wso2.com" } });
+    renderPage();
+    expect(screen.queryByRole("button", { name: /make user internal/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the 'Make user internal' icon for a non-wso2.com user", () => {
+    mockQueryResult({ data: BLOCKED_EXTERNAL_USER });
+    renderPage();
+    expect(screen.queryByRole("button", { name: /make user internal/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the 'Make user internal' icon when the caller lacks canMakeUserInternal (not an admin)", () => {
+    mockCanMakeUserInternal = false;
+    mockQueryResult({ data: { ...BLOCKED_EXTERNAL_USER, email: "tester@wso2.com" } });
+    renderPage();
+    expect(screen.queryByRole("button", { name: /make user internal/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the Make Internal dialog and confirms, flipping the user", async () => {
+    mockQueryResult({ data: { ...BLOCKED_EXTERNAL_USER, email: "tester@wso2.com" } });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /make user internal/i }));
+    expect(await screen.findByText(/This grants/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Make internal" }));
+
+    expect(await screen.findByText(/is now internal/i)).toBeInTheDocument();
+    expect(backendPostEmptyMock).toHaveBeenCalledWith("/users/user-2/internalize");
   });
 
   it("shows an internal user's mobile number under a 'Mobile number' label", () => {

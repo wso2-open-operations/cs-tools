@@ -84,6 +84,7 @@ type entityUserClient interface {
 	DeleteSavedFilterView(ctx context.Context, listKey, name string) ([]byte, error)
 	ReorderSavedFilterView(ctx context.Context, body []byte) ([]byte, error)
 	UpdateUser(ctx context.Context, id string, body []byte) ([]byte, error)
+	InternalizeUser(ctx context.Context, id string) ([]byte, error)
 }
 
 // UsersHandler handles HTTP requests for user-related operations.
@@ -989,6 +990,58 @@ func (h *UsersHandler) GrantUserRoles(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSONValue(w, http.StatusMultiStatus, resp)
 	}
+}
+
+// InternalizeUser handles POST /users/{id}/internalize -- admin-only
+// (PermAdmin, same gate as CreateUser/GrantUserRoles/GET /roles/grantable).
+// Whether the caller is a CSM admin is decided once, by this route's own
+// PermAdmin gate: entity-service does not re-check it, it only re-checks
+// that the call came from this backend specifically (its own
+// CSM_PORTAL_BACKEND_CLIENT_ID), the same posture as
+// POST /case-escalation-access/deescalators/{userId}.
+//
+// Pre-checks the target is a @wso2.com account before calling entity-service
+// at all, same precedent as GrantUserRoles' own isWso2Email guard just
+// above -- entity-service enforces the identical restriction itself
+// (the real boundary; this is a fast, friendly failure), so the two must
+// never disagree.
+func (h *UsersHandler) InternalizeUser(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	target, err := h.entity.GetUser(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "InternalizeUser: entity GetUser failed", "userID", user.UserID, "targetID", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to look up the user.")
+		return
+	}
+	var targetUser entityUserMeResponse
+	if err := json.Unmarshal(target, &targetUser); err != nil || targetUser.Email == "" {
+		slog.ErrorContext(r.Context(), "InternalizeUser: parse target user failed", "userID", user.UserID, "targetID", id, "err", err)
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+	if !isWso2Email(targetUser.Email) {
+		writeError(w, http.StatusBadRequest, "a user can only be made internal for a "+wso2EmailDomain+" account")
+		return
+	}
+
+	result, err := h.entity.InternalizeUser(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "InternalizeUser: entity InternalizeUser failed", "userID", user.UserID, "targetID", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to make the user internal.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // timeCardApproversResponse is the GET /users/time-card-approvers response shape.

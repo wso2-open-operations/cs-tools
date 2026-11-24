@@ -474,6 +474,7 @@ type mockEntityUserClient struct {
 	reorderSavedFilterViewFn func(ctx context.Context, body []byte) ([]byte, error)
 	createUserFn             func(ctx context.Context, body []byte) ([]byte, error)
 	updateUserFn             func(ctx context.Context, id string, body []byte) ([]byte, error)
+	internalizeUserFn        func(ctx context.Context, id string) ([]byte, error)
 }
 
 func (m *mockEntityUserClient) UpdateUser(ctx context.Context, id string, body []byte) ([]byte, error) {
@@ -481,6 +482,13 @@ func (m *mockEntityUserClient) UpdateUser(ctx context.Context, id string, body [
 		return m.updateUserFn(ctx, id, body)
 	}
 	return []byte(`{"message":"User updated successfully","user":{"id":"` + id + `"}}`), nil
+}
+
+func (m *mockEntityUserClient) InternalizeUser(ctx context.Context, id string) ([]byte, error) {
+	if m.internalizeUserFn != nil {
+		return m.internalizeUserFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `","userType":"internal"}`), nil
 }
 
 func (m *mockEntityUserClient) CreateUser(ctx context.Context, body []byte) ([]byte, error) {

@@ -26,6 +26,7 @@ const NONE = {
   canWrite: false,
   canAddWorkNotes: false,
   canCreateUser: false,
+  canMakeUserInternal: false,
   canUpdateProjectClosureState: false,
   canUpdateProjectSuspensionOverride: false,
   canEditProjectOnboarding: false,
@@ -189,6 +190,7 @@ describe("getPortalAccess", () => {
     expect(getPortalAccess(["cs_engineer"])).toEqual({
       ...all,
       canCreateUser: false,
+      canMakeUserInternal: false,
       canUpdateProjectClosureState: false,
       canUpdateProjectSuspensionOverride: false,
       canEditProjectOnboarding: false,
@@ -202,6 +204,7 @@ describe("getPortalAccess", () => {
     expect(getPortalAccess(["admin"])).toEqual({
       ...all,
       canCreateUser: true,
+      canMakeUserInternal: true,
       canUpdateProjectClosureState: true,
       canUpdateProjectSuspensionOverride: true,
       canEditProjectOnboarding: true,
@@ -249,6 +252,21 @@ describe("getPortalAccess", () => {
       "dashboard_designer",
     ]) {
       expect(getPortalAccess([role]).canCreateUser).toBe(false);
+    }
+  });
+
+  it("only admin can make a user internal -- CS engineer does not share this one", () => {
+    expect(getPortalAccess(["admin"]).canMakeUserInternal).toBe(true);
+    for (const role of [
+      "cs_engineer",
+      "viewer",
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "timecard_approver",
+      "dashboard_designer",
+    ]) {
+      expect(getPortalAccess([role]).canMakeUserInternal).toBe(false);
     }
   });
 

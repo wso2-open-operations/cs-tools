@@ -298,6 +298,36 @@ from SCIM) while doing nothing anyone could observe. `CreateUser`'s own `grantRo
 identical guard at the same time, for the same reason — it had none before either, despite sharing
 the exact same `GrantableRole`/SCIM mechanism.
 
+## Flipping an existing user to internal (`POST /users/{id}/internalize`)
+
+A different, unrelated gap from the two sections above: entity-service's `user_type` (internal vs.
+external/customer) is trigger-derived from `user_role` membership, not a plain settable column — a
+one-off manual fix (editing the column directly in the database) reverts the moment any role row
+for that user changes, found live chasing exactly that symptom. There was no admin action anywhere
+to fix it properly. `UsersHandler.InternalizeUser` closes this: admin-only, same `PermAdmin` gate
+as `POST /users`/`GET /roles/grantable`/`POST /users/{id}/roles`, forwards to entity-service's own
+`POST /users/{id}/internalize` (see that repo's own `CLAUDE.md`), which does the actual grant
+(`internal`) and revoke (`external`/`customer`/`partner`/`customer_admin`/`partner_admin`) in one
+transaction.
+
+**Same `@wso2.com` pre-check as `GrantUserRoles`, for the same reason.** The target's email is
+resolved via `entity.GetUser(id)` first (identical identity-resolution step `GrantUserRoles` already
+takes), and a non-`@wso2.com` address is refused with a 400 before entity-service is ever called —
+a fast, friendly failure. This is **not** the real enforcement boundary: entity-service's own
+`userService.MakeUserInternal` runs the identical restriction and is what actually protects the
+database, the same relationship `CreateUser`'s own wso2-email check already has to its
+entity-service-side twin (see "Creating a user" above).
+
+**Whether the caller is a CSM admin is decided once, by this route's own `PermAdmin` gate — not a
+second time by entity-service.** entity-service re-checks only that the call came from this backend
+specifically (`CSM_PORTAL_BACKEND_CLIENT_ID` plus a forwarded signed-in person), the same posture
+`POST /case-escalation-access/deescalators/{userId}` already has (see "De-escalation: team leads and
+the admin-named list" above) — not a second, independently-configured admin-role list that could
+silently disagree with this backend's own `PermAdmin`.
+
+The response is passed through untouched (`{"id": "...", "userType": "internal"}`) — no reshaping,
+same posture as `AccountHandler.GetAccount`'s own simple proxy.
+
 ## Provisioning a "user" row on demand (`ensureUserProvisioned`)
 
 A `worknote_creator`- or `escalator`-only caller reaches `POST /cases/{id}/comments`

@@ -76,6 +76,14 @@ type UserRepository interface {
 	// empty one clears it to NULL. Returns the row's resulting updated_on,
 	// timezone and phone, or a NotFoundError if userID does not exist.
 	UpdateUserProfile(ctx context.Context, userID string, timezone, phone *string) (domain.UserProfileUpdate, error)
+	// MakeUserInternal grants userID the "internal" role and revokes every
+	// externalSideRoles role it holds, in one transaction, then returns the
+	// resulting user_type (trigger-derived, migration 0011). Returns a
+	// NotFoundError if userID does not exist, a ServiceUnavailableError if
+	// "internal" is not seeded in the role table. Caller (UserService)
+	// enforces the @wso2.com restriction -- this method does not look at
+	// email at all.
+	MakeUserInternal(ctx context.Context, userID, actor string) (domain.UserType, error)
 }
 
 type userRepo struct {
@@ -650,6 +658,49 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, userID string, timezon
 		return domain.UserProfileUpdate{}, fmt.Errorf("update user profile: %w", err)
 	}
 	return out, nil
+}
+
+// externalSideRoles are the role names migration 0011's recompute_user_type
+// trigger maps to EXTERNAL user_type. MakeUserInternal revokes every one of
+// these the user holds, the same managed-pair reasoning syncGlobalRoles
+// already uses for a Salesforce-driven account reclassification (see that
+// function's own doc comment) -- just invoked directly here for an admin
+// action instead of from inside a membership upsert.
+var externalSideRoles = []string{"external", "customer", "partner", "customer_admin", "partner_admin"}
+
+// MakeUserInternal implements UserRepository.
+func (r *userRepo) MakeUserInternal(ctx context.Context, userID, actor string) (domain.UserType, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("make user internal: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// user_type (migration 0011) is trigger-derived from user_role membership,
+	// so granting "internal" and revoking the external-side set is the only
+	// way to actually change it -- writing the column directly would be
+	// silently overwritten by the next role change (confirmed live: a prod
+	// user_type flipped by hand reverted the moment any user_role row for
+	// that user changed).
+	if err := syncGlobalRoles(ctx, tx, userID, []string{"internal"}, externalSideRoles, actor); err != nil {
+		return "", fmt.Errorf("make user internal: %w", err)
+	}
+
+	var userType *string
+	if err := tx.QueryRow(ctx, `SELECT user_type::TEXT FROM "user" WHERE id = $1`, userID).Scan(&userType); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", &apierror.NotFoundError{Msg: "no user found with id: " + userID}
+		}
+		return "", fmt.Errorf("make user internal: read user_type: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("make user internal: commit: %w", err)
+	}
+	if userType == nil {
+		return "", nil
+	}
+	return userTypeFromEnum[*userType], nil
 }
 
 // grantRoles resolves each of names (role.name, migration 0008) to its id

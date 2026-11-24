@@ -4552,6 +4552,59 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /users/{id}/internalize:
+    post:
+      summary: Flip a user from EXTERNAL to INTERNAL.
+      description: >-
+        Grants the "internal" role and revokes the external-side role set
+        (external/customer/partner/customer_admin/partner_admin) — the only
+        way to actually change user_type, which is trigger-derived from
+        user_role membership. Restricted to a @wso2.com target, and callable
+        only through apps/csm-portal/backend acting on behalf of a signed-in
+        CSM admin (its own PermAdmin gate decides who may call this; a
+        service credential with no forwarded user, or a client id other than
+        csm-portal-backend's, is refused). No request body.
+      operationId: makeUserInternal
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The user's resulting id and user type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MakeUserInternalResponse'
+        '400':
+          description: Bad request (malformed id, or the target is not a @wso2.com user).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller is not apps/csm-portal/backend acting on behalf of a signed-in person.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/search:
     post:
       summary: Search users with optional filters, sort, and pagination.
@@ -23301,6 +23354,18 @@ components:
             type: string
         grantsCaseAccess:
           type: boolean
+
+    MakeUserInternalResponse:
+      type: object
+      description: The result of POST /users/{id}/internalize.
+      required: [id, userType]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userType:
+          type: string
+          enum: [internal, customer, system]
 
     UserDetail:
       type: object

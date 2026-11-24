@@ -99,6 +99,19 @@ func (h *UserHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// MakeUserInternal handles POST /users/{id}/internalize -- no request body.
+// UserService.MakeUserInternal enforces both gates: apps/csm-portal/backend
+// as the only caller, and a @wso2.com target.
+func (h *UserHandler) MakeUserInternal(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.MakeUserInternal(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // GetUser handles GET /users/{id} for the PostgreSQL data source.
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.GetUser(r.Context(), r.PathValue("id"))
