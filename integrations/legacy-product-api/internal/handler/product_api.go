@@ -34,7 +34,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/apierror"
 )
 
 // This file is the Legacy Product API: the read contract (v1) of the retired

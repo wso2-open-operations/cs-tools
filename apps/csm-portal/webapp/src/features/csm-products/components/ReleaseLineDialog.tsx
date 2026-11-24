@@ -92,7 +92,7 @@ export default function ReleaseLineDialog({ line, onClose, onSaved }: ReleaseLin
 
   const field = (key: keyof ReleaseLineFormValues) => ({
     value: form[key],
-    onChange: (event: { target: { value: string } }) => setForm({ ...form, [key]: event.target.value }),
+    onChange: (event: { target: { value: string } }) => setForm((prev) => ({ ...prev, [key]: event.target.value })),
     error: submitted && Boolean(errors[key]),
     helperText: submitted ? errors[key] : undefined,
     size: "small" as const,

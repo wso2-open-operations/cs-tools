@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/apierror"
 )
 
 // ErrMsgInternal is the body of a failure with no more specific message.

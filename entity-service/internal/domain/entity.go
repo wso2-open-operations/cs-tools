@@ -2439,7 +2439,10 @@ type SearchProductVersionsRequest struct {
 	// row, retired ones included, as before the catalogue existed.
 	ExcludeRetired bool `json:"excludeRetired,omitempty"`
 	// Feed (support-matrix or release-matrix) restricts to the live rows with
-	// a public listing on that feed. POST /product-versions/search only.
+	// a public listing on that feed. Feed and PublicID apply to both version
+	// searches (POST /product-versions/search and
+	// POST /products/{id}/versions/search); the CSM Portal and
+	// legacy-product-api use them on the first.
 	Feed string `json:"feed,omitempty"`
 	// PublicID restricts to the rows of one public listing.
 	PublicID *int64 `json:"publicId,omitempty"`

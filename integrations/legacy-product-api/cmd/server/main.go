@@ -29,10 +29,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/entity"
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/handler"
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/middleware"
 )
+
+// requestBudget bounds each request, all upstream calls included. It must
+// stay below the server's WriteTimeout.
+const requestBudget = 20 * time.Second
 
 func main() {
 	loadDotEnv(".env")
@@ -72,7 +76,9 @@ func main() {
 	srv := &http.Server{
 		Handler: middleware.SecurityHeaders(
 			middleware.CorrelationID(
-				middleware.Logger(mux),
+				// One budget for the whole request, below WriteTimeout (30s),
+				// so a slow entity-service answers 503, not a cut-off body.
+				middleware.Logger(middleware.Deadline(requestBudget, mux)),
 			),
 		),
 		ReadHeaderTimeout: 10 * time.Second,

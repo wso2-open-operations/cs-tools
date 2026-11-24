@@ -29,7 +29,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/apierror"
 )
 
 // decodeJSON decodes a recorded response body into T, failing the test on error.

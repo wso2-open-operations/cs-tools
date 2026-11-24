@@ -158,6 +158,12 @@ func (s *productCatalogService) GetProductVersion(ctx context.Context, id string
 // CreateProductVersions adds a version of a product: one row per deployment
 // profile in payload.profiles, all on one public listing.
 func (s *productCatalogService) CreateProductVersions(ctx context.Context, productID string, payload json.RawMessage) (domain.ProductVersionList, error) {
+	// Authorise before reading the request, like every other write: a caller
+	// without the manager role gets 403, never a validation message. write
+	// checks it again and takes the actor from there.
+	if _, err := s.requireManager(ctx); err != nil {
+		return domain.ProductVersionList{}, err
+	}
 	if err := validateUUIDs("productId", []string{productID}); err != nil {
 		return domain.ProductVersionList{}, err
 	}
@@ -167,6 +173,11 @@ func (s *productCatalogService) CreateProductVersions(ctx context.Context, produ
 	}
 	if _, ok := raw["productId"]; ok {
 		return domain.ProductVersionList{}, &apierror.ValidationError{Msg: "productId: comes from the path"}
+	}
+	// An explicit null would create rows with no public id, which never reach
+	// the feeds; leaving publicId out is how a new listing is started.
+	if v, ok := raw["publicId"]; ok && strings.TrimSpace(string(v)) == "null" {
+		return domain.ProductVersionList{}, &apierror.ValidationError{Msg: "publicId: leave it out to start a new listing"}
 	}
 	raw["productId"], _ = json.Marshal(productID)
 	body, _ := json.Marshal(raw)

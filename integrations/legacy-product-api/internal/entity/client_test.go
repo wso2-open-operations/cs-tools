@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/apierror"
 )
 
 // tokenServer returns an httptest.Server that always issues a client-credentials

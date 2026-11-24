@@ -299,15 +299,18 @@ export function buildVersionUpdatePayload(live: CatalogVersion, form: VersionFor
 /**
  * The body of POST /products/{id}/versions without its `profiles`: the
  * version plus every field that is set. Unset fields are left out so
- * entity-service applies its defaults. A `publicId` is sent only when joining
- * an existing listing; otherwise entity-service takes the next value.
+ * entity-service applies its defaults. `false` is left out only for the two
+ * feed flags, whose default is false; any other false (e.g. `legacyStatus`,
+ * default true) is sent. A `publicId` is sent only when joining an existing
+ * listing; otherwise entity-service takes the next value.
  */
 export function buildVersionCreatePayload(form: VersionFormValues, joinPublicId?: number | null): CatalogChangePayload {
   const payload: CatalogChangePayload = { version: form.version.trim() };
   for (const key of VERSION_UPDATE_KEYS) {
     if (key === "publicId" || key === "deploymentProfile") continue;
     const value = formWireValue(form, key);
-    if (value === null || value === false || (Array.isArray(value) && value.length === 0)) continue;
+    const falseIsDefault = key === "isPublic" || key === "showInSupportMatrix";
+    if (value === null || (value === false && falseIsDefault) || (Array.isArray(value) && value.length === 0)) continue;
     payload[key] = value;
   }
   if (joinPublicId !== undefined && joinPublicId !== null) payload.publicId = joinPublicId;

@@ -279,6 +279,11 @@ describe("copying the publishing settings from the latest version", () => {
     });
   });
 
+  it("sends a false legacyStatus (its default is true) but leaves out false feed flags", () => {
+    const form = { ...emptyVersionForm(), version: "1.0.0", legacyStatus: "false" as const };
+    expect(buildVersionCreatePayload(form)).toEqual({ version: "1.0.0", legacyStatus: false });
+  });
+
   it("copies nothing from a product with no versions", () => {
     const form = { ...emptyVersionForm(), version: "1.0.0" };
     expect(buildVersionCreatePayload({ ...form, ...listingFormFrom(null) })).toEqual({ version: "1.0.0" });

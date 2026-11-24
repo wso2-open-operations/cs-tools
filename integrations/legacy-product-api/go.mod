@@ -1,4 +1,4 @@
-module github.com/wso2-open-operations/cs-tools/operations/legacy-product-api
+module github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api
 
 go 1.26.9
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -103,6 +104,44 @@ func TestProductCatalogChangesNeedTheManagerRole(t *testing.T) {
 	var forbidden *apierror.ForbiddenError
 	if !errors.As(err, &forbidden) {
 		t.Fatalf("err = %v", err)
+	}
+	if repo.applied != nil {
+		t.Fatal("repo was called")
+	}
+}
+
+// A caller without the manager role is refused before the request is read,
+// so it learns nothing from validation messages (a bad id, a non-object body
+// or a productId in the body would otherwise answer 400).
+func TestCreateProductVersionsChecksTheRoleBeforeTheRequest(t *testing.T) {
+	for name, tc := range map[string]struct{ id, body string }{
+		"bad product id":     {"not-a-uuid", `{"version":"1.0.0"}`},
+		"body not an object": {catalogProductID, `[1]`},
+		"productId in body":  {catalogProductID, `{"productId":"x"}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeCatalogRepo{exists: true}
+			_, err := newCatalogService(repo).CreateProductVersions(catalogCtx("cs_engineer"), tc.id, json.RawMessage(tc.body))
+			var forbidden *apierror.ForbiddenError
+			if !errors.As(err, &forbidden) {
+				t.Fatalf("err = %v, want ForbiddenError", err)
+			}
+			if repo.applied != nil {
+				t.Fatal("repo was called")
+			}
+		})
+	}
+}
+
+// "publicId": null on create would leave the rows off every feed, so it is
+// refused; omitting publicId starts a new listing.
+func TestCreateProductVersionsRefusesANullPublicID(t *testing.T) {
+	repo := &fakeCatalogRepo{exists: true}
+	_, err := newCatalogService(repo).CreateProductVersions(catalogCtx(manager), catalogProductID,
+		json.RawMessage(`{"version":"9.9.9","publicId":null}`))
+	var verr *apierror.ValidationError
+	if !errors.As(err, &verr) || !strings.Contains(verr.Msg, "publicId") {
+		t.Fatalf("err = %v, want a publicId ValidationError", err)
 	}
 	if repo.applied != nil {
 		t.Fatal("repo was called")

@@ -25,7 +25,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/entity"
 )
 
 const correlationIDHeader = "X-CSM-Correlation-ID"

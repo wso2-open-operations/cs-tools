@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/middleware"
 )
 
 func TestCorrelationID_GeneratesWhenAbsent(t *testing.T) {

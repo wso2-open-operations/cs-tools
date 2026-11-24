@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/apierror"
 )
 
 func TestSummarizeErrNeverLogsTheUpstreamBody(t *testing.T) {

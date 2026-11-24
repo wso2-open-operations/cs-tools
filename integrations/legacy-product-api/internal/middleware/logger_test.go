@@ -21,7 +21,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/middleware"
 )
 
 func TestLogger_CallsNextAndPreservesResponse(t *testing.T) {

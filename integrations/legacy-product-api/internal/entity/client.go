@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/legacy-product-api/internal/apierror"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
