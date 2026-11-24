@@ -69,7 +69,7 @@ func pillRow(cells []pillCell) string {
 			`<div style="background-color:#f1f3f5; border:1px solid #e8eaed; border-bottom:0; border-radius:6px 6px 0 0; text-align:center; padding:4px 6px; font-size:12px; color:#465868; word-wrap:break-word;">` +
 			escapeHTML(c.label) + `</div></td>`)
 		values.WriteString(`<td style="padding:0 4px 0 0; vertical-align:top;">` +
-			`<div style="background-color:#ff7101; border-radius:0 0 6px 6px; text-align:center; padding:4px 6px; font-size:13px; font-weight:700; color:#ffffff;">` +
+			`<div style="background-color:#0B1633; border-radius:0 0 6px 6px; text-align:center; padding:4px 6px; font-size:13px; font-weight:700; color:#ffffff;">` +
 			escapeHTML(c.value) + `</div></td>`)
 	}
 	return `<table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout:fixed; margin:0 0 6px;"><tbody>` +
@@ -114,7 +114,7 @@ func caseLink(caseLinkBase string, iss worklogreport.IssueRef) string {
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(iss.ID)
 	return `<a href="` + escapeHTML(href) +
-		`" style="color:#ff7300; text-decoration:none;">` + key + `</a>`
+		`" style="color:#0B1633; text-decoration:underline;">` + key + `</a>`
 }
 
 func WorklogsReportSubject(r worklogreport.Report) string {

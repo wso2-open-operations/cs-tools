@@ -195,7 +195,7 @@ func eolUsageLink(portalBaseURL, kind, id, text string) string {
 		return escapeHTML(text)
 	}
 	href := strings.TrimRight(portalBaseURL, "/") + "/customers/" + kind + "/" + url.PathEscape(id)
-	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#0B1633;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
 
 // eolUsageMailto is the person's email as a mailto link, blank when there is

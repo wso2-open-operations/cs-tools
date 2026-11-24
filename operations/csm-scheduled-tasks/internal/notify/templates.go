@@ -635,7 +635,7 @@ func openCaseNumberCell(caseLinkBase string, c entitycases.Case) string {
 		return text
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + path + "/" + url.PathEscape(c.ID)
-	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), text)
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#0B1633;">%s</a>`, escapeHTML(href), text)
 }
 
 // caseTitle returns a short display title for a case row: its subject, or
