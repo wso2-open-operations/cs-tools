@@ -1,0 +1,14 @@
+schemaVersion: 1.2
+
+endpoints:
+  # The retired wso2-product-service's read contract, at the root, so a
+  # consumer moves by changing the base URL only.
+  - name: legacy-product-api
+    displayName: Legacy Product API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: openapi.yaml

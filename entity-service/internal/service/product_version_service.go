@@ -19,9 +19,7 @@ package service
 
 import (
 	"context"
-	"unicode/utf8"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -43,11 +41,8 @@ func (s *productVersionService) SearchProductVersions(ctx context.Context, req d
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchProductVersionsResponse{}, err
 	}
-	if err := validateSearchQuery(req.SearchQuery); err != nil {
+	if err := validateVersionSearch(req); err != nil {
 		return domain.SearchProductVersionsResponse{}, err
-	}
-	if req.DeploymentProfile != nil && utf8.RuneCountInString(*req.DeploymentProfile) > maxDeploymentProfileLen {
-		return domain.SearchProductVersionsResponse{}, &apierror.ValidationError{Msg: "deploymentProfile cannot exceed 255 characters"}
 	}
 
 	versions, total, err := s.repo.SearchProductVersions(ctx, req)
