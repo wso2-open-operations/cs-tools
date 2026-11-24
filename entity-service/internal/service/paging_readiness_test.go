@@ -356,6 +356,57 @@ func TestComputePagingReadiness_SREInactiveWindowsOnly(t *testing.T) {
 	}
 }
 
+// U2 and B-Central get a chain of their own, named after their assignment
+// groups, once migration 0242 has made their rotas SRE rotas -- and none while
+// the rotas are still SME ones, so nothing is shown twice before it runs.
+func TestComputePagingReadiness_U2AndBCentralChains(t *testing.T) {
+	chainsOf := func(resp domain.PagingReadinessResponse) []string {
+		var out []string
+		for _, c := range resp.Chains {
+			out = append(out, c.Chain+"="+c.Label)
+		}
+		return out
+	}
+
+	before := readinessFixture()
+	before.Rotas = append(before.Rotas,
+		repository.PagingReadinessRota{Code: "SME_U2", Label: "U2", Family: "SME"},
+		repository.PagingReadinessRota{Code: "SME_B_CENTRAL", Label: "B-Central", Family: "SME"})
+	if got := chainsOf(computePagingReadiness(before, nil, readinessFrom, 3, time.Now())); !reflect.DeepEqual(got,
+		[]string{"CRE=CRE chain", "SRE_SAAS=SaaS SRE chain", "SRE_IAAS=IaaS SRE chain", "SME=SME chain"}) {
+		t.Errorf("SME rotas: chains %v", got)
+	}
+
+	after := readinessFixture()
+	after.Rotas = append(after.Rotas,
+		repository.PagingReadinessRota{Code: "SME_U2", Label: "U2", Family: "SRE"},
+		repository.PagingReadinessRota{Code: "SME_B_CENTRAL", Label: "B-Central", Family: "SRE"})
+	after.Windows = append(after.Windows, repository.PagingReadinessWindow{
+		ShiftCode: "SME_U2_DAY", ShiftLabel: "U2 day escalation", ZoneCode: "U2_D", ZoneLabel: "U2 · Day", ZoneSortOrder: 101, RotaCode: "SME_U2", DayScope: "ANY",
+	})
+	for _, d := range readinessDates[:1] {
+		for _, tier := range []string{"L1", "L2", "L3"} {
+			after.Assignments = append(after.Assignments, repository.PagingReadinessAssignment{
+				RotaDate: d, ShiftCode: "SME_U2_DAY", ZoneCode: "U2_D", RotaCode: "SME_U2", TeamKey: "u2", Tier: tier,
+				Name: "U" + tier, Email: "u" + strings.ToLower(tier) + "@wso2.com",
+			})
+		}
+	}
+	resp := computePagingReadiness(after, nil, readinessFrom, 1, time.Now())
+	if got := chainsOf(resp); !reflect.DeepEqual(got, []string{
+		"CRE=CRE chain", "SRE_SAAS=SaaS SRE chain", "SRE_IAAS=IaaS SRE chain",
+		"SRE_U2=U2-SRE chain", "SRE_B_CENTRAL=B-Central-SRE chain", "SME=SME chain",
+	}) {
+		t.Errorf("SRE rotas: chains %v", got)
+	}
+	if u2 := chainOf(t, resp, "SRE_U2"); !u2.Ready || len(u2.People) != 3 {
+		t.Errorf("U2-SRE with L1-L3 rostered: ready=%v gaps=%v people=%d", u2.Ready, gapKeys(u2.Gaps), len(u2.People))
+	}
+	if bc := chainOf(t, resp, "SRE_B_CENTRAL"); bc.Ready || len(bc.Gaps) != 1 || bc.Gaps[0].Code != "ROTA_INACTIVE" {
+		t.Errorf("B-Central-SRE with no windows: ready=%v gaps=%v", bc.Ready, gapKeys(bc.Gaps))
+	}
+}
+
 func TestComputePagingReadiness_SME(t *testing.T) {
 	c := chainOf(t, computePagingReadiness(readinessFixture(), readinessHandoff(t), readinessFrom, 3, time.Now()), "SME")
 	// Each Day and Night window needs an L1, an L2 and an L3: only L1s are
