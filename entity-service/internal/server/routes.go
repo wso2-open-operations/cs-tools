@@ -2556,7 +2556,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
 		mux.HandleFunc("POST /users", userHandler.CreateUser)
 		mux.HandleFunc("PATCH /users/{id}", userHandler.UpdateUser)
-		mux.HandleFunc("POST /users/{id}/internalize", userHandler.MakeUserInternal)
 	}
 	if snAccountHandler != nil {
 		mux.HandleFunc("GET /accounts/{id}", internalOnly(accessSvc, snAccountHandler.GetAccount))

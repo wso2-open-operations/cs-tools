@@ -599,7 +599,6 @@ func main() {
 	// -- grants a portal permission role to a user who already exists,
 	// instead of only at the moment a new one is created.
 	route("POST /users/{id}/roles", handler.PermAdmin, usersHandler.GrantUserRoles)
-	route("POST /users/{id}/internalize", handler.PermAdmin, usersHandler.InternalizeUser)
 	// Registered unconditionally, even when timecardApproverRoleIDs is empty:
 	// GetTimeCardApprovers itself returns 404 when disabled. Registering it
 	// only when configured would instead let the request fall through to the

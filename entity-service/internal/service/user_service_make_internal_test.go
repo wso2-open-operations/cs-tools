@@ -26,6 +26,8 @@ import (
 
 const makeInternalTestClientID = "csm-portal-backend-client"
 
+var makeInternalTrue = true
+
 // viaCSMPortalForUsers mirrors viaCSMPortal (case_escalation_access_service_test.go):
 // csm-portal-backend's own client id plus the forwarded signed-in person.
 func viaCSMPortalForUsers(email string) context.Context {
@@ -36,10 +38,15 @@ func newMakeInternalUserService(repo stubUserRepo) UserService {
 	return NewUserService(repo, alwaysUnrestrictedAccess{}, makeInternalTestClientID)
 }
 
-// A call from any other client, or with no signed-in person, is refused
-// before the repository is ever reached -- the admin decision was already
-// made by csm-portal-backend's own PermAdmin gate, so this service only
-// needs to know the call genuinely came from there.
+func makeInternalReq() domain.UpdateUserRequest {
+	return domain.UpdateUserRequest{MakeInternal: &makeInternalTrue}
+}
+
+// req.MakeInternal is for apps/csm-portal/backend only -- a call from any
+// other client, or with no signed-in person, is refused before the
+// repository is ever reached. (A plain timeZone/phone PATCH through
+// UpdateUser is unaffected -- see TestUserService_UpdateUser_RequiresInternalCaller
+// in user_service_test.go, which still only needs RequireInternalCaller.)
 func TestMakeUserInternal_IsForTheCSMPortalBackendOnly(t *testing.T) {
 	called := false
 	repo := stubUserRepo{
@@ -59,7 +66,7 @@ func TestMakeUserInternal_IsForTheCSMPortalBackendOnly(t *testing.T) {
 		}),
 		"no signed-in user": auth.WithIdentity(context.Background(), auth.Identity{Validated: true, ClientID: makeInternalTestClientID}),
 	} {
-		_, err := svc.MakeUserInternal(ctx, userDetailTestID)
+		_, err := svc.UpdateUser(ctx, userDetailTestID, makeInternalReq())
 		wantForbidden(t, err, name)
 	}
 	if called {
@@ -71,7 +78,7 @@ func TestMakeUserInternal_IsForTheCSMPortalBackendOnly(t *testing.T) {
 func TestMakeUserInternal_RefusesEveryoneWithoutAConfiguredClientID(t *testing.T) {
 	svc := NewUserService(stubUserRepo{}, alwaysUnrestrictedAccess{}, "")
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: "admin@example.com"})
-	_, err := svc.MakeUserInternal(ctx, userDetailTestID)
+	_, err := svc.UpdateUser(ctx, userDetailTestID, makeInternalReq())
 	wantForbidden(t, err, "make internal with no configured client id")
 }
 
@@ -90,7 +97,7 @@ func TestMakeUserInternal_RequiresAWso2EmailTarget(t *testing.T) {
 		},
 	}
 	svc := newMakeInternalUserService(repo)
-	_, err := svc.MakeUserInternal(viaCSMPortalForUsers("admin@wso2.com"), userDetailTestID)
+	_, err := svc.UpdateUser(viaCSMPortalForUsers("admin@wso2.com"), userDetailTestID, makeInternalReq())
 	wantInvalid(t, err, "non-wso2 target")
 	if granted {
 		t.Fatal("roles were synced for a non-@wso2.com target")
@@ -98,7 +105,8 @@ func TestMakeUserInternal_RequiresAWso2EmailTarget(t *testing.T) {
 }
 
 // The happy path: a @wso2.com target through csm-portal-backend grants
-// "internal" via the repository and returns the resulting user_type.
+// "internal" via the repository and returns the resulting user_type on the
+// PATCH response.
 func TestMakeUserInternal_GrantsInternalForAWso2Target(t *testing.T) {
 	var gotUserID, gotActor string
 	repo := stubUserRepo{
@@ -111,9 +119,9 @@ func TestMakeUserInternal_GrantsInternalForAWso2Target(t *testing.T) {
 		},
 	}
 	svc := newMakeInternalUserService(repo)
-	resp, err := svc.MakeUserInternal(viaCSMPortalForUsers("admin@wso2.com"), userDetailTestID)
+	resp, err := svc.UpdateUser(viaCSMPortalForUsers("admin@wso2.com"), userDetailTestID, makeInternalReq())
 	if err != nil {
-		t.Fatalf("MakeUserInternal: %v", err)
+		t.Fatalf("UpdateUser: %v", err)
 	}
 	if gotUserID != userDetailTestID {
 		t.Fatalf("repo called with userID %q, want %q", gotUserID, userDetailTestID)
@@ -121,8 +129,11 @@ func TestMakeUserInternal_GrantsInternalForAWso2Target(t *testing.T) {
 	if gotActor != "admin@wso2.com" {
 		t.Fatalf("repo called with actor %q, want the signed-in person's email", gotActor)
 	}
-	if resp.ID != userDetailTestID || resp.UserType != domain.UserTypeInternal {
-		t.Fatalf("response = %+v, want id=%s userType=internal", resp, userDetailTestID)
+	if resp.User.ID != userDetailTestID || resp.User.UserType != domain.UserTypeInternal {
+		t.Fatalf("response = %+v, want id=%s userType=internal", resp.User, userDetailTestID)
+	}
+	if resp.User.UpdatedOn == "" {
+		t.Fatal("UpdatedOn is empty even though no profile field was touched -- should fall back to now()")
 	}
 }
 
@@ -136,9 +147,35 @@ func TestMakeUserInternal_RejectsAMalformedID(t *testing.T) {
 		},
 	}
 	svc := newMakeInternalUserService(repo)
-	_, err := svc.MakeUserInternal(viaCSMPortalForUsers("admin@wso2.com"), "not-a-uuid")
+	_, err := svc.UpdateUser(viaCSMPortalForUsers("admin@wso2.com"), "not-a-uuid", makeInternalReq())
 	wantInvalid(t, err, "malformed id")
 	if called {
 		t.Fatal("repository reached with a malformed id")
+	}
+}
+
+// makeInternal combines with timeZone/phone in the same call: both the
+// profile write and the role sync happen, and the response carries both.
+func TestMakeUserInternal_CombinesWithTimeZone(t *testing.T) {
+	var call patchCall
+	repo := patchRepo(&call)
+	repo.getUserDetail = func(context.Context, string) (domain.UserDetail, error) {
+		return domain.UserDetail{Email: "staff@wso2.com"}, nil
+	}
+	repo.makeUserInternal = func(context.Context, string, string) (domain.UserType, error) {
+		return domain.UserTypeInternal, nil
+	}
+	svc := newMakeInternalUserService(repo)
+	tz := "Asia/Colombo"
+	req := domain.UpdateUserRequest{TimeZone: &tz, MakeInternal: &makeInternalTrue}
+	resp, err := svc.UpdateUser(viaCSMPortalForUsers("admin@wso2.com"), userDetailTestID, req)
+	if err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	if !call.called {
+		t.Fatal("UpdateUserProfile was not called for the combined timeZone+makeInternal request")
+	}
+	if resp.User.UserType != domain.UserTypeInternal {
+		t.Fatalf("UserType = %q, want internal", resp.User.UserType)
 	}
 }

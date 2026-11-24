@@ -505,11 +505,39 @@ func (s *userService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest
 // never reachable by an ordinary authenticated end user for an arbitrary id.
 // Fine-grained authorization beyond "internal service" (e.g. Asgardeo admin
 // only) is the caller's job (apps/csm-portal/backend), same posture as
-// TeamService.AssignTeamLead.
+// TeamService.AssignTeamLead -- except for req.MakeInternal, which this
+// service itself restricts further (see requireCSMPortalBackendCaller below):
+// that one field needs a narrower gate than the rest of this endpoint,
+// because unlike a timezone or phone number it changes who the platform
+// trusts as staff.
+//
+// req.MakeInternal true grants the "internal" role and revokes the
+// external-side role set (external/customer/partner/customer_admin/
+// partner_admin) -- the only way to actually change user_type, which
+// migration 0011's trigger derives from user_role membership; writing the
+// column directly would be silently overwritten by the next role change
+// (confirmed live against a real deployment, which is why this exists at
+// all: there was no admin action anywhere to fix that kind of mistake
+// properly). Restricted to a @wso2.com target the same way CreateUser
+// restricts an internal-type user at creation (see that method's own
+// wso2EmailDomain check, above) -- an external/customer address must never
+// become internal regardless of who asks. Combinable with timeZone/phone in
+// the same call (e.g. an admin sets a newly-internalized user's timezone in
+// one request), or sent alone.
 func (s *userService) UpdateUser(ctx context.Context, userID string, req domain.UpdateUserRequest) (domain.PatchUserMeResponse, error) {
-	if err := RequireInternalCaller(ctx, s.access, "updating another user's profile is only available to internal services"); err != nil {
+	makeInternal := req.MakeInternal != nil && *req.MakeInternal
+
+	var actor string
+	if makeInternal {
+		a, err := s.requireCSMPortalBackendCaller(ctx)
+		if err != nil {
+			return domain.PatchUserMeResponse{}, err
+		}
+		actor = a
+	} else if err := RequireInternalCaller(ctx, s.access, "updating another user's profile is only available to internal services"); err != nil {
 		return domain.PatchUserMeResponse{}, err
 	}
+
 	if err := validateUUIDs("id", []string{userID}); err != nil {
 		return domain.PatchUserMeResponse{}, err
 	}
@@ -526,36 +554,65 @@ func (s *userService) UpdateUser(ctx context.Context, userID string, req domain.
 		}
 		phone = &trimmed
 	}
-	if timezone == nil && phone == nil {
-		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "at least one of timeZone or phone is required"}
+	if timezone == nil && phone == nil && !makeInternal {
+		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "at least one of timeZone, phone or makeInternal is required"}
 	}
 
-	updated, err := s.repo.UpdateUserProfile(ctx, userID, timezone, phone)
-	if err != nil {
-		return domain.PatchUserMeResponse{}, err
-	}
-
-	actor := "internal"
-	if token := middleware.UserIDTokenFromContext(ctx); token != "" {
-		if email, err := emailFromJWT(token); err == nil {
-			actor = email
+	var updated domain.UserProfileUpdate
+	if timezone != nil || phone != nil {
+		var err error
+		updated, err = s.repo.UpdateUserProfile(ctx, userID, timezone, phone)
+		if err != nil {
+			return domain.PatchUserMeResponse{}, err
 		}
 	}
 
-	return domain.PatchUserMeResponse{
-		Message: "User updated successfully",
-		User: domain.PatchUserMeUpdated{
-			ID:        userID,
-			UpdatedBy: actor,
-			UpdatedOn: updated.UpdatedOn.UTC().Format(time.RFC3339),
-			TimeZone:  updated.Timezone,
-			Phone:     updated.Phone,
-		},
-	}, nil
+	var userType domain.UserType
+	if makeInternal {
+		target, err := s.repo.GetUserDetail(ctx, userID)
+		if err != nil {
+			return domain.PatchUserMeResponse{}, err
+		}
+		if !strings.HasSuffix(strings.ToLower(target.Email), wso2EmailDomain) {
+			return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "only a " + wso2EmailDomain + " user can be made internal"}
+		}
+		userType, err = s.repo.MakeUserInternal(ctx, userID, actor)
+		if err != nil {
+			return domain.PatchUserMeResponse{}, err
+		}
+	}
+
+	if actor == "" {
+		actor = "internal"
+		if token := middleware.UserIDTokenFromContext(ctx); token != "" {
+			if email, err := emailFromJWT(token); err == nil {
+				actor = email
+			}
+		}
+	}
+
+	updatedOn := updated.UpdatedOn
+	if updatedOn.IsZero() {
+		// No profile write happened (makeInternal was the only field set),
+		// so there is no UpdateUserProfile result to read it from.
+		updatedOn = time.Now().UTC()
+	}
+
+	resp := domain.PatchUserMeUpdated{
+		ID:        userID,
+		UpdatedBy: actor,
+		UpdatedOn: updatedOn.UTC().Format(time.RFC3339),
+		TimeZone:  updated.Timezone,
+		Phone:     updated.Phone,
+	}
+	if makeInternal {
+		resp.UserType = userType
+	}
+	return domain.PatchUserMeResponse{Message: "User updated successfully", User: resp}, nil
 }
 
-// requireCSMPortalBackendCaller gates MakeUserInternal on the caller being
-// apps/csm-portal/backend itself, mirroring
+// requireCSMPortalBackendCaller gates req.MakeInternal (UpdateUser) on the
+// caller being apps/csm-portal/backend itself, mirroring
 // caseEscalationAccessService.requireCSMPortalBackendCaller/
 // portalBannerService.requireCSMPortalBackendCaller/
 // slaStatusService.requireCSMPortalBackendCaller exactly (see any of those
@@ -576,42 +633,6 @@ func (s *userService) requireCSMPortalBackendCaller(ctx context.Context) (string
 		return "", &apierror.ForbiddenError{Msg: "a user can only be made internal through the CSM Portal"}
 	}
 	return id.UserEmail, nil
-}
-
-// MakeUserInternal implements UserService. Flips userID from EXTERNAL to
-// INTERNAL: grants the "internal" role and revokes the external-side role
-// set (external/customer/partner/customer_admin/partner_admin) -- the only
-// way to actually change user_type, which migration 0011's trigger derives
-// from user_role membership; writing the column directly would be silently
-// overwritten by the next role change (confirmed live against a real
-// deployment).
-//
-// Restricted to a @wso2.com target the same way CreateUser restricts an
-// internal-type user at creation (see that method's own wso2EmailDomain
-// check, just above) -- an external/customer address must never become
-// internal regardless of who asks.
-func (s *userService) MakeUserInternal(ctx context.Context, userID string) (domain.MakeUserInternalResponse, error) {
-	actor, err := s.requireCSMPortalBackendCaller(ctx)
-	if err != nil {
-		return domain.MakeUserInternalResponse{}, err
-	}
-	if err := validateUUIDs("id", []string{userID}); err != nil {
-		return domain.MakeUserInternalResponse{}, err
-	}
-
-	target, err := s.repo.GetUserDetail(ctx, userID)
-	if err != nil {
-		return domain.MakeUserInternalResponse{}, err
-	}
-	if !strings.HasSuffix(strings.ToLower(target.Email), wso2EmailDomain) {
-		return domain.MakeUserInternalResponse{}, &apierror.ValidationError{Msg: "only a " + wso2EmailDomain + " user can be made internal"}
-	}
-
-	userType, err := s.repo.MakeUserInternal(ctx, userID, actor)
-	if err != nil {
-		return domain.MakeUserInternalResponse{}, err
-	}
-	return domain.MakeUserInternalResponse{ID: userID, UserType: userType}, nil
 }
 
 // CreateUser implements UserService.

@@ -68,20 +68,19 @@ type UserService interface {
 	// resolving the caller from their own token the way PatchMe does -- an
 	// internal caller (RequireInternalCaller) acting on someone else's
 	// profile, e.g. a portal admin recording a newly-assigned team lead's
-	// paging number. Both fields are optional but at least one must be
-	// present. A ValidationError is returned for a malformed id, neither
-	// field present, or an over-long phone; a NotFoundError when no user has
+	// paging number. At least one of timeZone, phone or makeInternal must be
+	// present. A ValidationError is returned for a malformed id, none of the
+	// three present, or an over-long phone; a NotFoundError when no user has
 	// that id.
+	//
+	// req.MakeInternal true additionally grants the "internal" role and
+	// revokes the external-side role set (external/customer/partner/
+	// customer_admin/partner_admin) -- the only way to actually change
+	// user_type (trigger-derived, migration 0011) -- restricted further, to a
+	// @wso2.com target and to apps/csm-portal/backend as the caller
+	// (requireCSMPortalBackendCaller): a ForbiddenError for any other caller,
+	// a ValidationError for a non-@wso2.com target.
 	UpdateUser(ctx context.Context, userID string, req domain.UpdateUserRequest) (domain.PatchUserMeResponse, error)
-	// MakeUserInternal flips the given user from EXTERNAL to INTERNAL: grants
-	// the "internal" role and revokes the external-side role set
-	// (external/customer/partner/customer_admin/partner_admin), the only way
-	// to actually change user_type (trigger-derived, migration 0011).
-	// Restricted to a @wso2.com target and to apps/csm-portal/backend as the
-	// caller (requireCSMPortalBackendCaller) -- a ForbiddenError otherwise.
-	// A ValidationError is returned for a malformed id or a non-@wso2.com
-	// target; a NotFoundError when no user has that id.
-	MakeUserInternal(ctx context.Context, userID string) (domain.MakeUserInternalResponse, error)
 }
 
 // UserCacheInvalidator clears a user's cached GET /users/{id} and

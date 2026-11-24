@@ -32,7 +32,7 @@ const useGetUserByIdMock = vi.fn();
 // which goes through this same client.
 const backendPostMock = vi.fn();
 const backendGetMock = vi.fn();
-const backendPostEmptyMock = vi.fn();
+const backendPatchMock = vi.fn();
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
@@ -41,7 +41,7 @@ vi.mock("@api/backend/client", () => ({
       this.status = status;
     }
   },
-  useBackendApi: () => ({ post: backendPostMock, get: backendGetMock, postEmpty: backendPostEmptyMock }),
+  useBackendApi: () => ({ post: backendPostMock, get: backendGetMock, patch: backendPatchMock }),
 }));
 vi.mock("@features/csm-users/api/useGetUserById", () => ({
   useGetUserById: () => useGetUserByIdMock(),
@@ -170,8 +170,8 @@ describe("UserProfilePage", () => {
     backendPostMock.mockResolvedValue(ROLES_RESPONSE);
     backendGetMock.mockReset();
     backendGetMock.mockResolvedValue({ roles: [{ key: "cs_engineer" }, { key: "escalator" }] });
-    backendPostEmptyMock.mockReset();
-    backendPostEmptyMock.mockResolvedValue({ id: "user-2", userType: "internal" });
+    backendPatchMock.mockReset();
+    backendPatchMock.mockResolvedValue({ id: "user-2", userType: "internal" });
     mockCanMakeUserInternal = true;
   });
 
@@ -323,7 +323,7 @@ describe("UserProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Make internal" }));
 
     expect(await screen.findByText(/is now internal/i)).toBeInTheDocument();
-    expect(backendPostEmptyMock).toHaveBeenCalledWith("/users/user-2/internalize");
+    expect(backendPatchMock).toHaveBeenCalledWith("/users/user-2", { makeInternal: true });
   });
 
   it("shows an internal user's mobile number under a 'Mobile number' label", () => {

@@ -24,7 +24,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { usePostMakeUserInternal } from "@features/csm-users/api/usePostMakeUserInternal";
+import { usePatchUser } from "@features/csm-users/api/usePatchUser";
 
 export interface MakeUserInternalDialogProps {
   open: boolean;
@@ -35,16 +35,25 @@ export interface MakeUserInternalDialogProps {
 
 /**
  * Confirms, then flips an existing @wso2.com user from external to internal
- * (`POST /users/{id}/internalize`) — grants the "internal" role and revokes
- * the external-side role set (external/customer/partner/customer_admin/
- * partner_admin), the only way to actually change `userType` (trigger-derived
- * from role membership on the entity-service side, not a plain settable
- * column). Only shown for a @wso2.com target that isn't internal already
- * (`UserProfilePage.tsx`'s own gating), and only to an admin
- * (`usePortalAccess().canMakeUserInternal`) — a deliberate frontend-hide
- * exception, same shape as `AddUserDialog.tsx`'s "Add user" gating, since the
- * backend genuinely enforces the identical restriction (`PermAdmin`, see
- * `apps/csm-portal/backend`'s own CLAUDE.md).
+ * via `PATCH /users/{id}` with `{makeInternal: true}` (`usePatchUser`, the
+ * same hook/route the team-lead phone-number update already uses — a
+ * dedicated `POST /users/{id}/internalize` was the first design, folded into
+ * this existing endpoint once it was clear it could serve the same request)
+ * — grants the "internal" role and revokes the external-side role set
+ * (external/customer/partner/customer_admin/partner_admin), the only way to
+ * actually change `userType` (trigger-derived from role membership on the
+ * entity-service side, not a plain settable column). Only shown for a
+ * @wso2.com target that isn't internal already (`UserProfilePage.tsx`'s own
+ * gating), and only to an admin (`usePortalAccess().canMakeUserInternal`) —
+ * a deliberate frontend-hide exception, same shape as `AddUserDialog.tsx`'s
+ * "Add user" gating, since the backend genuinely enforces the identical
+ * restriction (`PermAdmin`, see `apps/csm-portal/backend`'s own CLAUDE.md).
+ *
+ * The caller (`UserProfilePage.tsx`) keys the component that owns this
+ * dialog's `open` state by `user.id`, so navigating to a different user's
+ * profile remounts both the dialog's open flag and this mutation's result —
+ * without that, a success/error message from one user's confirmation could
+ * still be showing (misleadingly) after switching to another user's profile.
  */
 export default function MakeUserInternalDialog({
   open,
@@ -52,7 +61,7 @@ export default function MakeUserInternalDialog({
   userId,
   userEmail,
 }: MakeUserInternalDialogProps): JSX.Element {
-  const { mutate, isPending, error, isSuccess, reset } = usePostMakeUserInternal();
+  const { mutate, isPending, error, isSuccess, reset } = usePatchUser();
 
   const handleClose = (): void => {
     if (isPending) return;
@@ -61,7 +70,7 @@ export default function MakeUserInternalDialog({
   };
 
   const handleConfirm = (): void => {
-    mutate(userId);
+    mutate({ id: userId, patch: { makeInternal: true } });
   };
 
   return (

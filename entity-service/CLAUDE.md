@@ -11786,7 +11786,7 @@ unaffected and keeps creating external users exactly as before. `apps/csm-portal
 disables the "External" option in its type selector rather than offering a choice the backend will
 reject — all three are temporary, meant to come out together once external-type creation is ready.
 
-## Flipping an existing user to INTERNAL (`POST /users/{id}/internalize`)
+## Flipping an existing user to INTERNAL (`PATCH /users/{id}`'s `makeInternal` field)
 
 `POST /users` (above) only sets `user_type` at creation time. There was no way to fix an
 existing user afterward: a production user mistakenly flipped by hand (writing `"user".user_type`
@@ -11794,28 +11794,37 @@ directly, in a one-off SQL fix) reverts the moment any `user_role` row for that 
 because `user_type` is trigger-derived from role membership (`recompute_user_type`, migration
 0011) and never a plain settable column — confirmed live, chasing exactly that symptom.
 
-`userService.MakeUserInternal` (`user_service.go`) is the real fix: it grants the `internal` role
-and revokes every `externalSideRoles` role the user holds
+This is `req.MakeInternal` on the existing `UpdateUser` (`PATCH /users/{id}`), not a separate
+route — a dedicated `POST /users/{id}/internalize` was the first design, dropped once it was clear
+an existing endpoint could serve it the same way `PATCH /projects/{id}`'s `closureState` narrows a
+shared route in-handler rather than getting its own endpoint (see that pattern's own reasoning
+below). `true` grants the `internal` role and revokes every `externalSideRoles` role the user holds
 (`external`/`customer`/`partner`/`customer_admin`/`partner_admin` — the same set
 `recompute_user_type`'s trigger maps to `user_type = EXTERNAL`) in one transaction
 (`UserRepository.MakeUserInternal`, `user_repo.go`), reusing the identical grant-and-revoke shape
 `project_membership_repo.go`'s own `syncGlobalRoles` already established for a Salesforce-driven
 account reclassification — just invoked directly here instead of from inside a membership upsert.
+Combinable with `timeZone`/`phone` in the same call, or sent alone; `UpdateUser`'s own "at least one
+field" check now accepts any of the three.
 
 - **Restricted to a `@wso2.com` target**, the same `wso2EmailDomain` check `CreateUser`'s own
   `requestsInternalUserType` branch already enforces (see above) — an external/customer address
   must never become internal regardless of who asks.
-- **Callable only by `apps/csm-portal/backend`**, via `requireCSMPortalBackendCaller` — the same
-  pattern (and the same reasoning) as `CaseEscalationAccessService`/`portalBannerService`/
-  `slaStatusService`/`caseSLARecalcService`'s own copies of this method: `RequireInternalCaller`
-  first, then the caller's `ClientID` must equal `CSMPortalBackendClientID` *and* a forwarded
-  `x-user-id-token` must carry a real signed-in person (`auth.IdentityFromContext(ctx).UserEmail`)
-  — a pure M2M credential with no forwarded user is refused even from the right client id. Whether
-  that signed-in person is a CSM admin is decided once, by that backend's own `PermAdmin` gate on
-  the route; this service does not re-check it against a second, independently-configured role
-  list.
-- Returns `domain.MakeUserInternalResponse{ID, UserType}` — the resulting `user_type`, read fresh
-  after the role sync commits, not merely echoed back.
+- **`req.MakeInternal` needs a narrower gate than the rest of `UpdateUser`.** The route is
+  internal-callers-only in general (`RequireInternalCaller`), but flipping a user's trust level is
+  callable only by `apps/csm-portal/backend` specifically, via `requireCSMPortalBackendCaller` — the
+  same pattern (and the same reasoning) as `CaseEscalationAccessService`/`portalBannerService`/
+  `slaStatusService`/`caseSLARecalcService`'s own copies of this method: the caller's `ClientID`
+  must equal `CSMPortalBackendClientID` *and* a forwarded `x-user-id-token` must carry a real
+  signed-in person (`auth.IdentityFromContext(ctx).UserEmail`) — a pure M2M credential with no
+  forwarded user is refused even from the right client id. Whether that signed-in person is a CSM
+  admin is decided once, by that backend's own `PermAdmin` gate on the route; this service does not
+  re-check it against a second, independently-configured role list. `UpdateUser` runs this check
+  only when `req.MakeInternal` is true, so a plain timezone/phone PATCH keeps its existing,
+  broader `RequireInternalCaller`-only gate.
+- `PatchUserMeUpdated.UserType` carries the resulting `user_type` — read fresh after the role sync
+  commits, not merely echoed back — set only when this request's `makeInternal` was true, omitted
+  on every other `PATCH /users/{id}`.
 
 ## Creating a deployed product on PostgreSQL (`POST /deployed-products`)
 

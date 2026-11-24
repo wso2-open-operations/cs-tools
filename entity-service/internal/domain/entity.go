@@ -331,14 +331,6 @@ type UserDetail struct {
 	ProjectAccess []UserContactAccess `json:"projectAccess,omitempty"`
 }
 
-// MakeUserInternalResponse is the result of flipping a user from EXTERNAL to
-// INTERNAL (UserService.MakeUserInternal) -- the resulting user_type,
-// trigger-derived (migration 0011), not merely echoed back.
-type MakeUserInternalResponse struct {
-	ID       string   `json:"id"`
-	UserType UserType `json:"userType"`
-}
-
 // UserContactAccess is one project_contact row for a customer, reported as stored
 // rather than as filtered, so a caller can see why a contact does or does not
 // reach a project's cases.
@@ -415,6 +407,14 @@ type PatchUserMeRequest struct {
 type UpdateUserRequest struct {
 	TimeZone *string `json:"timeZone"`
 	Phone    *string `json:"phone"`
+	// MakeInternal, when true, grants the "internal" role and revokes the
+	// external-side role set (external/customer/partner/customer_admin/
+	// partner_admin) -- the only way to actually change user_type (trigger-
+	// derived from user_role membership, migration 0011). Restricted to a
+	// @wso2.com target and to apps/csm-portal/backend as the caller -- see
+	// UserService.UpdateUser's own doc comment. false/absent leave roles
+	// untouched; there is no "make external" via this field.
+	MakeInternal *bool `json:"makeInternal"`
 }
 
 // UserProfileUpdate is the row state UpdateUserProfile returns after the write.
@@ -433,6 +433,11 @@ type PatchUserMeUpdated struct {
 	// NULL. Filled by the Postgres data source only.
 	TimeZone *string `json:"timeZone,omitempty"`
 	Phone    *string `json:"phone,omitempty"`
+	// UserType is set only when this request's makeInternal was true -- the
+	// resulting user_type (trigger-derived, migration 0011), not merely
+	// echoed back. Omitted on every other PATCH /users/{id}, same as
+	// TimeZone/Phone are omitted when this request didn't touch them.
+	UserType UserType `json:"userType,omitempty"`
 }
 
 // PatchUserMeResponse is the response for PATCH /users/me.

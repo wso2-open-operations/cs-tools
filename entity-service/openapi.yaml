@@ -4494,17 +4494,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Update another user's profile (timezone and/or phone).
+      summary: Update another user's profile (timezone and/or phone), or flip them to internal.
       description: >-
         Internal callers only — unlike PATCH /users/me, the id comes from the
         path, not the caller's own token, so a trusted caller (e.g. an
         Asgardeo admin acting through apps/csm-portal/backend, when
         reassigning a team lead whose paging number needs to be set) can
-        update someone else's profile. Both fields are optional but at least
-        one must be present; phone has the same trim/E.164/length/clear rules as
-        PATCH /users/me. The incident call-escalation ladder dials this
+        update someone else's profile. At least one of timeZone, phone or
+        makeInternal must be present; phone has the same trim/E.164/length/clear
+        rules as PATCH /users/me. The incident call-escalation ladder dials this
         number for a team's lead, so fine-grained authorization beyond
-        "internal service" (e.g. admin-only) is the caller's own job.
+        "internal service" (e.g. admin-only) is the caller's own job — except
+        for makeInternal, which this service itself restricts further: true
+        grants the "internal" role and revokes the external-side role set
+        (external/customer/partner/customer_admin/partner_admin) — the only
+        way to actually change user_type, which is trigger-derived from
+        user_role membership. Restricted to a @wso2.com target, and callable
+        only through apps/csm-portal/backend acting on behalf of a signed-in
+        CSM admin (its own PermAdmin gate decides who may call this; a
+        service credential with no forwarded user, or a client id other than
+        csm-portal-backend's, is refused). Combinable with timeZone/phone in
+        the same call, or sent alone.
       operationId: updateUser
       tags: [Users]
       parameters:
@@ -4528,66 +4538,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PatchUserMeResponse'
         '400':
-          description: Bad request (malformed id, neither field present, or phone too long or not E.164).
+          description: Bad request (malformed id, none of the three fields present, phone too long or not E.164, or makeInternal on a non-@wso2.com target).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Caller is not an internal service.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: User not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /users/{id}/internalize:
-    post:
-      summary: Flip a user from EXTERNAL to INTERNAL.
-      description: >-
-        Grants the "internal" role and revokes the external-side role set
-        (external/customer/partner/customer_admin/partner_admin) — the only
-        way to actually change user_type, which is trigger-derived from
-        user_role membership. Restricted to a @wso2.com target, and callable
-        only through apps/csm-portal/backend acting on behalf of a signed-in
-        CSM admin (its own PermAdmin gate decides who may call this; a
-        service credential with no forwarded user, or a client id other than
-        csm-portal-backend's, is refused). No request body.
-      operationId: makeUserInternal
-      tags: [Users]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The user's resulting id and user type.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MakeUserInternalResponse'
-        '400':
-          description: Bad request (malformed id, or the target is not a @wso2.com user).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '403':
-          description: Caller is not apps/csm-portal/backend acting on behalf of a signed-in person.
+          description: Caller is not an internal service (or, for makeInternal, not apps/csm-portal/backend acting on behalf of a signed-in person).
           content:
             application/json:
               schema:
@@ -23040,9 +22997,9 @@ components:
       description: >
         The admin-targeted counterpart to PatchUserMeRequest, for
         PATCH /users/{id} -- updating someone else's profile by id rather
-        than the caller's own. Both fields are optional pointers (unlike
-        PatchUserMeRequest.timeZone, which can never be cleared), but at
-        least one must be present.
+        than the caller's own, or flipping them to internal. All three
+        fields are optional pointers (unlike PatchUserMeRequest.timeZone,
+        which can never be cleared), but at least one must be present.
       properties:
         timeZone:
           type: string
@@ -23054,9 +23011,19 @@ components:
           description: >
             Trimmed. At most 32 characters after trimming (400 otherwise). An
             empty (or whitespace-only) value clears it.
+        makeInternal:
+          type: boolean
+          description: >
+            true grants the "internal" role and revokes the external-side
+            role set (external/customer/partner/customer_admin/partner_admin)
+            -- the only way to actually change user_type. Restricted to a
+            @wso2.com target and to apps/csm-portal/backend as the caller
+            (see this operation's own description). false/absent leave roles
+            untouched; there is no "make external" via this field.
       anyOf:
         - required: [timeZone]
         - required: [phone]
+        - required: [makeInternal]
 
     PatchUserMeUpdated:
       type: object
@@ -23075,6 +23042,12 @@ components:
         phone:
           type: string
           description: The profile's phone number after the update. Omitted when none is stored (PostgreSQL data source only).
+        userType:
+          type: string
+          enum: [internal, customer, system]
+          description: >
+            Set only when this request's makeInternal was true -- the
+            resulting user_type. Omitted on every other PATCH /users/{id}.
 
     PatchUserMeResponse:
       type: object
@@ -23354,18 +23327,6 @@ components:
             type: string
         grantsCaseAccess:
           type: boolean
-
-    MakeUserInternalResponse:
-      type: object
-      description: The result of POST /users/{id}/internalize.
-      required: [id, userType]
-      properties:
-        id:
-          type: string
-          format: uuid
-        userType:
-          type: string
-          enum: [internal, customer, system]
 
     UserDetail:
       type: object

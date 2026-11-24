@@ -761,7 +761,7 @@ export default function UserProfilePage(): JSX.Element {
         </Box>
       </Card>
 
-      <PermissionsCard user={user} />
+      <PermissionsCard key={user.id} user={user} />
 
       {!internal && <AccessibleProjectsCard user={user} />}
     </Box>

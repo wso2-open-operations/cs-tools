@@ -156,17 +156,29 @@ itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role i
 Portal roles"/"Platform roles", `aria-label="Make user internal"`, `MakeUserInternalDialog.tsx`) is a
 fourth deliberate hide-it exception, gated on `usePortalAccess().canMakeUserInternal` — `admin` only,
 same shape and same reasoning as `canCreateUser`/`canUpdateProjectClosureState`: the backend genuinely
-enforces it too (`POST /users/{id}/internalize` requires `PermAdmin` — see `apps/csm-portal/backend`'s
-own `CLAUDE.md`). Shown only for a `@wso2.com` target (`isWso2Email(user.email)`) that isn't already
-internal — there's nothing to do once a user already is, and a non-wso2.com address can never become
-internal regardless of who asks (entity-service's own enforcement, not this frontend's). The dialog is a
-plain confirm/cancel (no fields to fill): confirming calls `usePostMakeUserInternal` (`POST
-/users/{id}/internalize`, no body), which grants the "internal" role and revokes the external-side
-role set (external/customer/partner/customer_admin/partner_admin) on the backend — the only way to
-actually change `userType`, which entity-service derives from role membership rather than a plain
-settable column (same `recompute_user_type` trigger `AddUserDialog.tsx`'s own "User type" selector
+enforces it too (`makeInternal` on `PATCH /users/{id}` is narrowed to `PermAdmin` in-handler — see
+`apps/csm-portal/backend`'s own `CLAUDE.md`). Shown only for a `@wso2.com` target (`isWso2Email(user.email)`)
+that isn't already internal — there's nothing to do once a user already is, and a non-wso2.com address
+can never become internal regardless of who asks (entity-service's own enforcement, not this frontend's).
+The dialog is a plain confirm/cancel (no fields to fill): confirming calls `usePatchUser` (`PATCH
+/users/{id}` with `{makeInternal: true}` — the same hook/route the team-lead phone-number update
+already uses; a dedicated `POST /users/{id}/internalize` was the first design, folded into this existing
+endpoint once it was clear it could serve the same request), which grants the "internal" role and revokes
+the external-side role set (external/customer/partner/customer_admin/partner_admin) on the backend — the
+only way to actually change `userType`, which entity-service derives from role membership rather than a
+plain settable column (same `recompute_user_type` trigger `AddUserDialog.tsx`'s own "User type" selector
 already has to work around, see above). On success, invalidates the profile query so the "Customer
 Portal roles" chips refresh (Internal, External/Customer/Partner gone) without a manual reload.
+
+**`PermissionsCard` (the component that owns `makeInternalDialogOpen` and renders both
+`MakeUserInternalDialog`/`GrantUserRoleDialog`) is keyed by `user.id`** in `UserProfilePage.tsx` —
+found on review: the `people/:id` route doesn't remount on a param change alone, so without the key,
+navigating from one user's profile straight to another's (the cached-data case, no loading state in
+between) kept the previous user's dialog-open flag and mutation result. A success message could then
+read "`<other user's email>` is now internal" for a confirmation that only ever applied to the
+original user. Keying the component that owns the open state (not just the dialog itself) is what
+resets both together — keying only the dialog would leave the open flag set and have it reopen for
+the new user with no action taken.
 
 ## `visibleCaseTypes`'s eligibility flag must mirror the exact backend permission, not a related-but-narrower one
 
