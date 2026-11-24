@@ -763,7 +763,12 @@ func main() {
 	}
 	eolUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, eolusagescan.TaskName))
 	eolUsageSchedule := scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule)
-	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled}
+	// EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS (comma-separated, e.g.
+	// "wso2.com") limits the account managers and technical owners added to
+	// the report's To list to those email domains; unset adds every valid
+	// address (see eolusagescan.Options.AllowedRecipientDomains).
+	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled,
+		AllowedRecipientDomains: splitComma(os.Getenv("EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS"))}
 	// A scheduled run (and its retries) takes its date from its period; a
 	// run-now below keeps the clock.
 	eolUsageScheduled := eolUsageOptions

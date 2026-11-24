@@ -1,3 +1,19 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // Package eolusagescan is the monthly EOL product usage report sub-cron: on
 // the first Monday of each month it fetches, from entity-service, the
 // customers still running a product version past its EOL date in an active
@@ -12,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -56,9 +73,19 @@ type Options struct {
 	// EmailsEnabled is cmd/server/main.go's ALERTS_ENABLED. When false the
 	// handler succeeds without contacting entity-service.
 	EmailsEnabled bool
-	// AnyDay sends whatever the date. The schedule fires every Monday and a
-	// scheduled run sends only in the month's first week; a manual run-now
-	// sets this, because it is asked for on purpose.
+	// AllowedRecipientDomains, when set, limits the account managers and
+	// technical owners added to the To list to these email domains (matched
+	// exactly, ignoring case), e.g. ["wso2.com"]. The report names customers,
+	// projects and versions, so an address from a user row outside these
+	// domains is dropped rather than mailed. Empty applies no domain check;
+	// a malformed address is dropped either way. The configured to/cc are not
+	// filtered: they are set by whoever deploys the task.
+	AllowedRecipientDomains []string
+	// AnyDay sends whatever the date. A scheduled run sends only when its
+	// date is a Monday in the month's first week (the default schedule fires
+	// every Monday; an overridden schedule that fires on other days still
+	// sends only on that Monday). A manual run-now sets this, because it is
+	// asked for on purpose.
 	AnyDay bool
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
@@ -88,6 +115,7 @@ type Options struct {
 func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts Options) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !opts.EmailsEnabled {
+			slog.Info("EOL product usage report: emails are disabled (ALERTS_ENABLED); not sent")
 			return nil
 		}
 		if len(to) == 0 {
@@ -100,7 +128,7 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			clock = opts.Anchor
 		}
 		asOf := runDate(clock)
-		if !opts.AnyDay && asOf.Day() > 7 {
+		if !opts.AnyDay && (asOf.Weekday() != time.Monday || asOf.Day() > 7) {
 			slog.Info("EOL product usage report: not the first Monday of the month; not sent", "date", asOf.Format("2006-01-02"))
 			return nil
 		}
@@ -121,7 +149,11 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			return nil
 		}
 
-		audience := Audience(report, to)
+		audience, dropped := Audience(report, to, opts.AllowedRecipientDomains)
+		if dropped > 0 {
+			slog.Warn("EOL product usage report: account contacts left out of the recipients (malformed or outside the allowed domains)",
+				"dropped", dropped)
+		}
 		slog.Info("sending the EOL product usage report",
 			"asOf", report.AsOf, "versions", report.TotalVersions, "accounts", report.TotalAccounts,
 			"to", len(audience), "cc", len(cc))
@@ -150,9 +182,11 @@ func runDate(now func() time.Time) time.Time {
 
 // Audience is the report's To: the configured to first, then every listed
 // account's manager and technical owner, each address once (compared
-// ignoring case and surrounding space), in the order first seen.
-func Audience(r eolusagereport.Report, to []string) []string {
-	var out []string
+// ignoring case and surrounding space), in the order first seen. An account
+// contact is added only when it is one plain address (net/mail) and, when
+// allowedDomains is set, its domain is one of them; dropped counts the
+// contacts left out. The configured to is taken as given.
+func Audience(r eolusagereport.Report, to []string, allowedDomains []string) (audience []string, dropped int) {
 	seen := map[string]bool{}
 	add := func(addr string) {
 		addr = strings.TrimSpace(addr)
@@ -161,22 +195,53 @@ func Audience(r eolusagereport.Report, to []string) []string {
 			return
 		}
 		seen[key] = true
-		out = append(out, addr)
+		audience = append(audience, addr)
 	}
 	for _, a := range to {
 		add(a)
 	}
+	contact := func(p *eolusagereport.Person) {
+		if p == nil || strings.TrimSpace(p.Email) == "" {
+			return
+		}
+		if !allowedRecipient(p.Email, allowedDomains) {
+			dropped++
+			return
+		}
+		add(p.Email)
+	}
 	for _, region := range r.Regions {
 		for _, acc := range region.Accounts {
-			if acc.AccountManager != nil {
-				add(acc.AccountManager.Email)
-			}
-			if acc.TechnicalOwner != nil {
-				add(acc.TechnicalOwner.Email)
-			}
+			contact(acc.AccountManager)
+			contact(acc.TechnicalOwner)
 		}
 	}
-	return out
+	return audience, dropped
+}
+
+// allowedRecipient reports whether addr is a single plain address (no
+// display name, no list) and, when domains is non-empty, its domain is one
+// of them, compared ignoring case.
+func allowedRecipient(addr string, domains []string) bool {
+	addr = strings.TrimSpace(addr)
+	parsed, err := mail.ParseAddress(addr)
+	if err != nil || parsed.Name != "" || !strings.EqualFold(parsed.Address, addr) {
+		return false
+	}
+	at := strings.LastIndex(parsed.Address, "@")
+	if at < 1 || at == len(parsed.Address)-1 {
+		return false
+	}
+	if len(domains) == 0 {
+		return true
+	}
+	domain := parsed.Address[at+1:]
+	for _, d := range domains {
+		if strings.EqualFold(strings.TrimSpace(d), domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // Cc is cc without the addresses already in to (compared ignoring case), so

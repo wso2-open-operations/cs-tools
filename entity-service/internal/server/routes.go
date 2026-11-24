@@ -1779,10 +1779,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
 		// Monthly EOL product usage report: customers running a product
 		// version past its EOL date in Primary Production, for the scheduled
-		// task that mails it to account managers and CS leadership.
-		eolProductUsageReportHandler = handler.NewEolProductUsageReportHandler(
-			service.NewEolProductUsageReportService(
-				repository.NewEolProductUsageReportRepository(repository.NewScoped(db))))
+		// task that mails it to account managers and CS leadership. Offered
+		// only when deployed products are read from Postgres: under
+		// DATA_SOURCE=servicenow or USAGE_READ_MODE=legacy the deployed_product
+		// table may be empty or stale, and the task would mail a wrong "no
+		// customers" note. Without the route it gets a 404 and alerts instead.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			eolProductUsageReportHandler = handler.NewEolProductUsageReportHandler(
+				service.NewEolProductUsageReportService(
+					repository.NewEolProductUsageReportRepository(repository.NewScoped(db))))
+		}
 		// Weekly SLA breach reports: the clocks that breached last week, under
 		// each report's own stage and onboarding-status filters, for the
 		// scheduled tasks that mail them.

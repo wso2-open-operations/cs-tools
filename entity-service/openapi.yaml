@@ -33842,7 +33842,7 @@ components:
             $ref: '#/components/schemas/EolProductUsageAccount'
     EolProductUsageAccount:
       type: object
-      required: [accountId, accountName, csAbt, region, projects]
+      required: [accountId, accountName, csAbt, region, accountManager, technicalOwner, projects]
       properties:
         accountId: {type: string, format: uuid}
         accountName: {type: string}
@@ -33882,7 +33882,7 @@ components:
             $ref: '#/components/schemas/EolProductUsageVersion'
     EolProductUsageVersion:
       type: object
-      required: [productVersionId, productName, version, eolDate]
+      required: [productVersionId, productName, version, supportStatus, eolDate]
       properties:
         productVersionId: {type: string, format: uuid}
         productName: {type: string}

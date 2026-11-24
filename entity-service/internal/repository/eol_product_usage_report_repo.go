@@ -101,6 +101,9 @@ FROM (
       AND pv.support_eol_date < $1::date
     ORDER BY p.id, pv.id
 ) r
+-- version sorts as text (10.0.0 before 2.6.0). It only decides the order of two
+-- versions of one product with the same EOL date in one project, so it is left
+-- as text on purpose; a numeric sort would need parsing every version string.
 ORDER BY (region = ''), lower(region), lower(account_name), account_id, lower(project_name), project_id,
          eol_date, lower(product_name), version`
 

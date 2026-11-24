@@ -1159,6 +1159,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
 | `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
+| `EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the EOL product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
@@ -1237,6 +1238,13 @@ spanning its versions.
   product versions" note to the configured to/cc only, so the leadership group knows the report ran.
 - `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset
   keeps plain text, and a non-https value refuses to start.
+- **Account contacts are checked before they are mailed.** The report names customers, projects and versions, and the
+  manager and owner addresses come from user rows. `Audience` adds one only when it is a single plain address
+  (`net/mail`) and, when `EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` is set, in one of those domains; the rest are
+  dropped and counted in a warning. The configured to/cc are taken as given.
+- **First Monday, checked on the run's own date.** A scheduled run sends only when its date (the claimed period, so a
+  retry later in the week still counts) is a Monday from the 1st to the 7th, so a schedule overridden to fire daily
+  does not mail the report seven times.
 
 ## Monthly time card report
 

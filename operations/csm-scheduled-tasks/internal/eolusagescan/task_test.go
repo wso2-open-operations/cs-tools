@@ -1,3 +1,19 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package eolusagescan_test
 
 import (
@@ -120,13 +136,30 @@ func TestSendReportSkipsMondaysAfterTheFirstWeek(t *testing.T) {
 			t.Errorf("day %d: fetched %d, sent %d; want nothing", day, reports.calls, email.calls)
 		}
 	}
-	for _, day := range []int{1, 7} {
+	// 7 December 2026 is the month's first Monday: it sends.
+	reports := &fakeReports{report: sampleReport()}
+	email := &fakeEmail{}
+	handler := eolusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.calls != 1 {
+		t.Errorf("7 Dec: err=%v sent=%d, want one mail", err, email.calls)
+	}
+}
+
+// A schedule overridden to fire on other days (SUB_CRON_SCHEDULES) still
+// sends only on the first Monday: the 1st to the 6th of December 2026 are
+// Tuesday to Sunday.
+func TestSendReportSendsOnlyOnAMonday(t *testing.T) {
+	for day := 1; day <= 6; day++ {
 		reports := &fakeReports{report: sampleReport()}
 		email := &fakeEmail{}
 		handler := eolusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
-			eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, day)})
-		if err := handler(context.Background()); err != nil || email.calls != 1 {
-			t.Errorf("day %d: err=%v sent=%d, want one mail", day, err, email.calls)
+			eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, day), Anchor: at(2026, 12, day)})
+		if err := handler(context.Background()); err != nil {
+			t.Fatalf("day %d: %v", day, err)
+		}
+		if reports.calls != 0 || email.calls != 0 {
+			t.Errorf("day %d: fetched %d, sent %d; want nothing", day, reports.calls, email.calls)
 		}
 	}
 }
@@ -210,11 +243,45 @@ func TestSendReportFailures(t *testing.T) {
 	}
 }
 
+// Account contacts must be one plain address and, when domains are set, in
+// one of them; the configured to is taken as given.
+func TestAudienceDropsMalformedAndOutsideDomainContacts(t *testing.T) {
+	r := eolusagereport.Report{Regions: []eolusagereport.Region{{Accounts: []eolusagereport.Account{
+		{AccountManager: &eolusagereport.Person{Email: "am@example.com"}, TechnicalOwner: &eolusagereport.Person{Email: "owner@other.org"}},
+		{AccountManager: &eolusagereport.Person{Email: "not-an-address"}, TechnicalOwner: &eolusagereport.Person{Email: "Someone <x@example.com>"}},
+		{AccountManager: &eolusagereport.Person{Email: "a@example.com, b@example.com"}, TechnicalOwner: &eolusagereport.Person{Email: "TO@EXAMPLE.COM"}},
+	}}}}
+
+	got, dropped := eolusagescan.Audience(r, []string{"lead@leadership.example.net"}, []string{"example.com"})
+	want := []string{"lead@leadership.example.net", "am@example.com", "TO@EXAMPLE.COM"}
+	if !reflect.DeepEqual(got, want) || dropped != 4 {
+		t.Errorf("with domains: Audience = %v (dropped %d), want %v (dropped 4)", got, dropped, want)
+	}
+
+	got, dropped = eolusagescan.Audience(r, nil, nil)
+	want = []string{"am@example.com", "owner@other.org", "TO@EXAMPLE.COM"}
+	if !reflect.DeepEqual(got, want) || dropped != 3 {
+		t.Errorf("no domains: Audience = %v (dropped %d), want %v (dropped 3)", got, dropped, want)
+	}
+}
+
+func TestSendReportMailsOnlyAllowedDomains(t *testing.T) {
+	email := &fakeEmail{}
+	handler := eolusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 11, 2), AllowedRecipientDomains: []string{"wso2.example"}})
+	if err := handler(context.Background()); err != nil || email.calls != 1 {
+		t.Fatalf("err=%v sent=%d", err, email.calls)
+	}
+	if !reflect.DeepEqual(email.to, []string{"lead@example.com"}) {
+		t.Errorf("to = %v, want only the configured leadership address", email.to)
+	}
+}
+
 func TestAudienceAndCc(t *testing.T) {
-	got := eolusagescan.Audience(sampleReport(), []string{" lead@example.com ", "", "AM.ONE@example.com"})
+	got, dropped := eolusagescan.Audience(sampleReport(), []string{" lead@example.com ", "", "AM.ONE@example.com"}, nil)
 	want := []string{"lead@example.com", "AM.ONE@example.com", "TO.One@example.com"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Audience = %v, want %v", got, want)
+	if !reflect.DeepEqual(got, want) || dropped != 0 {
+		t.Errorf("Audience = %v (dropped %d), want %v", got, dropped, want)
 	}
 	if cc := eolusagescan.Cc([]string{"a@x.com"}, []string{"A@x.com", "b@x.com", "b@x.com", " "}); !reflect.DeepEqual(cc, []string{"b@x.com"}) {
 		t.Errorf("Cc = %v, want [b@x.com]", cc)
