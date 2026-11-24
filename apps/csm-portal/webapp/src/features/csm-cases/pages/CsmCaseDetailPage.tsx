@@ -675,7 +675,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // Skipped for announcements (undefined caseId disables the query) since
   // neither tab is shown there, and for a caller without canViewSlaTab, since
   // the tab itself is hidden for them.
-  const { data: slaList } = useGetWorkItemSlas(
+  const { data: slaList, isLoading: isSlasLoading, isError: isSlasError } = useGetWorkItemSlas(
     isAnnouncement || !canViewSlaTab ? undefined : caseId,
   );
   const {
@@ -3359,6 +3359,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRetry={() => void refetchActivities()}
             openedAt={c?.createdAt}
             currentState={c?.state}
+            closedAt={c?.closedAt}
+            slas={slaList?.slas}
+            isSlasLoading={isSlasLoading}
+            isSlasError={isSlasError}
           />
         </>
       )}

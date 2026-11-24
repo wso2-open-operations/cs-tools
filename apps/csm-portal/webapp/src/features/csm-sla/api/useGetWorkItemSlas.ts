@@ -46,19 +46,24 @@ export function useGetWorkItemSlas(
     queryKey: [ApiQueryKeys.WORK_ITEM_SLAS, workItemId ?? ""],
     queryFn: async (): Promise<WorkItemSlaList | null> => {
       if (!workItemId) return null;
-      const res = await api.post<TaskSlaSearchPayload, TaskSlaSearchResponse>(
-        "/slas/search",
-        {
-          filters: { taskIds: [workItemId] },
-          pagination: { limit: TASK_SLA_PAGE_LIMIT, offset: 0 },
-        },
-      );
-      const slas = (res.slas ?? []).map(toWorkItemSla);
-      // Count reflects the backend's true total for the work item, which may
-      // exceed the page of rows actually fetched/rendered (page is capped at
-      // TASK_SLA_PAGE_LIMIT). Fall back to the fetched length if the backend
-      // omits `total`.
-      return { count: res.total ?? slas.length, slas };
+      const slas: WorkItemSlaList["slas"] = [];
+      let count = 0;
+      // Include historical SLA instances too (severity changes can attach new
+      // definitions), so older breached SLA records are not lost after page one.
+      for (let page = 0; page < 200; page += 1) {
+        const res = await api.post<TaskSlaSearchPayload, TaskSlaSearchResponse>(
+          "/slas/search",
+          {
+            filters: { taskIds: [workItemId] },
+            pagination: { limit: TASK_SLA_PAGE_LIMIT, offset: page * TASK_SLA_PAGE_LIMIT },
+          },
+        );
+        const rows = res.slas ?? [];
+        slas.push(...rows.map(toWorkItemSla));
+        count = res.total ?? slas.length;
+        if (rows.length < TASK_SLA_PAGE_LIMIT || slas.length >= count) break;
+      }
+      return { count, slas };
     },
     enabled,
     staleTime: 30_000,
