@@ -117,11 +117,90 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		return nil, err
 	}
 
+	if out.UTMSources, err = r.countBy(ctx, `
+		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'), COUNT(*)::INT
+		FROM   plg_org_platform op
+		LEFT   JOIN plg_registration_metadata m ON m.org_platform_id = op.id
+		WHERE  op.registered_on BETWEEN $1 AND $2
+		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to); err != nil {
+		return nil, err
+	}
+
+	if out.EmailClassification, err = r.countBy(ctx, `
+		SELECT COALESCE(x.value_text, 'NOT_CLASSIFIED'), COUNT(*)::INT
+		FROM   plg_org_platform op
+		`+registrationTaskValue+`
+		WHERE  op.registered_on BETWEEN $1 AND $2
+		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to, domain.TaskCodeEmailClassification); err != nil {
+		return nil, err
+	}
+
+	if out.QualificationOverview, err = r.countBy(ctx, `
+		SELECT COALESCE(x.value_text, 'NOT_ASSESSED'), COUNT(*)::INT
+		FROM   plg_org_platform op
+		`+registrationTaskValue+`
+		WHERE  op.registered_on BETWEEN $1 AND $2
+		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to, domain.TaskCodeEligibilityOutcome); err != nil {
+		return nil, err
+	}
+
+	if out.QualifiedByUTM, err = r.qualifiedByUTM(ctx, from, to); err != nil {
+		return nil, err
+	}
+
 	return out, nil
 }
 
-func (r *analyticsRepository) countBy(ctx context.Context, q string, from, to time.Time) ([]domain.CountByLabel, error) {
-	rows, err := r.db.Query(ctx, q, from, to)
+// registrationTaskValue joins, as x, the value of the pairing's registration task
+// with code $3; NULL when there is no run or no answer.
+const registrationTaskValue = `LEFT JOIN LATERAL (
+		    SELECT t.value_text
+		    FROM   plg_playbook_run run
+		    JOIN   plg_playbook pb ON pb.id = run.playbook_id
+		    JOIN   plg_playbook_run_task t ON t.playbook_run_id = run.id
+		    WHERE  run.org_platform_id = op.id AND run.detached_on IS NULL
+		      AND  pb.lifecycle_stage = 'REGISTRATION' AND pb.playbook_type = 'PROGRESSIVE'
+		      AND  t.code = $3
+		    ORDER  BY run.created_at
+		    LIMIT  1) x ON TRUE`
+
+// maxUTMSources bounds the qualified-stats chart; the rest is not shown.
+const maxUTMSources = 10
+
+// qualifiedByUTM counts eligibility outcomes per utm_source.
+func (r *analyticsRepository) qualifiedByUTM(ctx context.Context, from, to time.Time) ([]domain.UTMQualification, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'),
+		       COUNT(*) FILTER (WHERE x.value_text = 'ELIGIBLE')::INT,
+		       COUNT(*) FILTER (WHERE x.value_text = 'MONITOR')::INT,
+		       COUNT(*) FILTER (WHERE x.value_text = 'EXCLUDED')::INT,
+		       COUNT(*) FILTER (WHERE x.value_text IS NULL
+		                           OR x.value_text NOT IN ('ELIGIBLE', 'MONITOR', 'EXCLUDED'))::INT,
+		       COUNT(*)::INT
+		FROM   plg_org_platform op
+		LEFT   JOIN plg_registration_metadata m ON m.org_platform_id = op.id
+		`+registrationTaskValue+`
+		WHERE  op.registered_on BETWEEN $1 AND $2
+		GROUP  BY 1 ORDER BY 6 DESC, 1
+		LIMIT  $4`, from, to, domain.TaskCodeEligibilityOutcome, maxUTMSources)
+	if err != nil {
+		return nil, fmt.Errorf("analytics qualified by utm: %w", err)
+	}
+	defer rows.Close()
+
+	out := []domain.UTMQualification{}
+	for rows.Next() {
+		var q domain.UTMQualification
+		if err := rows.Scan(&q.Label, &q.Eligible, &q.Monitor, &q.Excluded, &q.NotAssessed, &q.Total); err != nil {
+			return nil, fmt.Errorf("scan qualified by utm: %w", err)
+		}
+		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
+func (r *analyticsRepository) countBy(ctx context.Context, q string, from, to time.Time, extra ...any) ([]domain.CountByLabel, error) {
+	rows, err := r.db.Query(ctx, q, append([]any{from, to}, extra...)...)
 	if err != nil {
 		return nil, fmt.Errorf("analytics breakdown: %w", err)
 	}

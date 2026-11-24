@@ -111,6 +111,9 @@ func (r *ingestRepository) Register(ctx context.Context, in domain.Registration,
 			return nil, err
 		}
 		res.OrgPlatformID, pairingCreated = &pairID, created
+		if err := upsertRegistrationMetadata(ctx, tx, pairID, in.Metadata); err != nil {
+			return nil, err
+		}
 	}
 
 	// Attributes land last, because a platform-scoped one needs the pairing that
@@ -362,6 +365,61 @@ func upsertOrgPlatform(ctx context.Context, tx pgx.Tx, in domain.Registration,
 		}
 	}
 	return id, inserted, nil
+}
+
+// maxMetadataLen bounds a stored visit field; a longer value is cut.
+const maxMetadataLen = 255
+
+// upsertRegistrationMetadata stores a pairing's visit context. A known value is
+// kept; a later event only fills what is missing.
+func upsertRegistrationMetadata(ctx context.Context, tx pgx.Tx, pairingID string, m *domain.RegistrationMetadata) error {
+	if m == nil {
+		return nil
+	}
+	v := []string{
+		m.UTMSource, m.UTMMedium, m.UTMCampaign,
+		m.InitialUTMSource, m.InitialUTMMedium, m.InitialUTMCampaign,
+		m.ReferringDomain, m.InitialReferringDomain, m.SignInMethod, m.PreferredLanguage,
+	}
+	hasValue := false
+	for i := range v {
+		if v[i] = truncateRunes(strings.TrimSpace(v[i]), maxMetadataLen); v[i] != "" {
+			hasValue = true
+		}
+	}
+	if !hasValue {
+		return nil
+	}
+	const q = `
+		INSERT INTO plg_registration_metadata (
+		    org_platform_id, utm_source, utm_medium, utm_campaign,
+		    initial_utm_source, initial_utm_medium, initial_utm_campaign,
+		    referring_domain, initial_referring_domain, sign_in_method, preferred_language)
+		VALUES ($1::UUID, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''),
+		        NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''))
+		ON CONFLICT (org_platform_id) DO UPDATE
+		SET utm_source               = COALESCE(plg_registration_metadata.utm_source,               EXCLUDED.utm_source),
+		    utm_medium               = COALESCE(plg_registration_metadata.utm_medium,               EXCLUDED.utm_medium),
+		    utm_campaign             = COALESCE(plg_registration_metadata.utm_campaign,             EXCLUDED.utm_campaign),
+		    initial_utm_source       = COALESCE(plg_registration_metadata.initial_utm_source,       EXCLUDED.initial_utm_source),
+		    initial_utm_medium       = COALESCE(plg_registration_metadata.initial_utm_medium,       EXCLUDED.initial_utm_medium),
+		    initial_utm_campaign     = COALESCE(plg_registration_metadata.initial_utm_campaign,     EXCLUDED.initial_utm_campaign),
+		    referring_domain         = COALESCE(plg_registration_metadata.referring_domain,         EXCLUDED.referring_domain),
+		    initial_referring_domain = COALESCE(plg_registration_metadata.initial_referring_domain, EXCLUDED.initial_referring_domain),
+		    sign_in_method           = COALESCE(plg_registration_metadata.sign_in_method,           EXCLUDED.sign_in_method),
+		    preferred_language       = COALESCE(plg_registration_metadata.preferred_language,       EXCLUDED.preferred_language),
+		    updated_at               = NOW()`
+	if _, err := tx.Exec(ctx, q, pairingID, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]); err != nil {
+		return fmt.Errorf("upsert registration metadata: %w", err)
+	}
+	return nil
+}
+
+func truncateRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // upsertAttributes stores the extra source fields the source map named.

@@ -19,6 +19,8 @@ package plgvalidation
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,7 +63,7 @@ func (f *fakeEntity) Apply(_ context.Context, id string, req ApplyRequest) (Appl
 func hit(company string, at time.Time, action string) moesif.Hit {
 	return moesif.Hit{Source: map[string]any{
 		"company_id": company, "request.time": at.Format("2006-01-02T15:04:05.000"),
-		"metadata": map[string]any{"action": action},
+		"action_name": action,
 	}}
 }
 
@@ -299,5 +301,46 @@ func TestAStaleExclusionIsNotAFailure(t *testing.T) {
 	opts := Options{Products: []string{"AGENT_PLATFORM"}, Window: 12 * time.Hour}
 	if err := Run(&fakeMoesif{}, ent, opts, func() time.Time { return now })(context.Background()); err != nil {
 		t.Fatalf("a stale answer failed the run: %v", err)
+	}
+}
+
+func TestEveryPlatformReadsItsActionFromActionName(t *testing.T) {
+	reg := now.Add(-24 * time.Hour)
+	for product, want := range map[string]struct{ platform, action string }{
+		"AGENT_PLATFORM":       {"Agent Manager", "amp.console.onboarding.wizard-step-viewed"},
+		"IAM":                  {"Identity Platform", "identity-platform.organization.overview-view"},
+		"API_PLATFORM":         {"API Platform", "apip.admin.landing-page-open"},
+		"INTEGRATION_PLATFORM": {"Integration Platform", "integration-platform.console.navigation.page-view"},
+	} {
+		ent := &fakeEntity{items: []QueueItem{{OrgPlatformID: "p", CompanyID: "c1", RegisteredOn: reg}}, applied: map[string]ApplyRequest{}}
+		var hits []moesif.Hit
+		for i := range 6 {
+			hits = append(hits, moesif.Hit{Source: map[string]any{
+				"company_id": "c1", "request.time": reg.Add(time.Duration(i) * time.Minute).Format("2006-01-02T15:04:05.000"),
+				"action_name": want.action,
+			}})
+		}
+		// An account event on the same company is counted as an event, not as work.
+		hits = append(hits, moesif.Hit{Source: map[string]any{
+			"company_id": "c1", "request.time": reg.Add(time.Minute).Format("2006-01-02T15:04:05.000"),
+			"action_name": "cloud-core.billing.select-subscription-plan",
+		}})
+		src := &fakeMoesif{hits: hits}
+		opts := Options{Products: []string{product}, Window: 12 * time.Hour, Grace: 24 * time.Hour,
+			Thresholds: Thresholds{Eligible: 10, Moderate: 5}}
+		if err := Run(src, ent, opts, func() time.Time { return now })(context.Background()); err != nil {
+			t.Fatalf("%s: %v", product, err)
+		}
+		raw := fmt.Sprint(src.queries[0].Filter)
+		if !strings.Contains(raw, want.platform) || !strings.Contains(raw, "action_name") {
+			t.Errorf("%s: filter %s does not select platform %q on action_name", product, raw, want.platform)
+		}
+		if got := strings.Join(src.queries[0].Fields, ","); !strings.Contains(got, "action_name") || strings.Contains(got, "metadata.action") {
+			t.Errorf("%s: fields = %s", product, got)
+		}
+		applied := ent.applied["p"]
+		if applied.Summary.EventCount != 7 || value(applied, codeLevel) != LevelModerate {
+			t.Errorf("%s: events %d level %q; want 7 events, 6 actions = MODERATE", product, applied.Summary.EventCount, value(applied, codeLevel))
+		}
 	}
 }

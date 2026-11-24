@@ -1076,8 +1076,13 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
   event id (a partial unique index, migration 0288), so later runs do not repeat it. Neither fails the
   run, but a failure that cannot be recorded does, after every other failure was attempted. Moesif or entity-service unreachable,
   or a window larger than `PLG_MOESIF_SYNC_MAX_PAGES` pages, fails it (retried and alerted as usual).
-- **Personal data.** Only time, action, user id, company id and the product fields are requested from
-  Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
+- **Visit and UTM metadata.** Each registration also carries the event's `utm_source` / `utm_medium` /
+  `utm_campaign` (the landing URL of the visit that led to the signup), `initial_utm_*` (the first visit,
+  kept across visits only with Targeting cookie consent), `referring_domain`, `initial_referring_domain`,
+  `sign_in_method` and `preferred_language`, read from `metadata.<name>` (`PLG_MOESIF_SYNC_METADATA_PREFIX`,
+  `-` for top-level fields) and sent as `metadata`; entity-service stores them per pairing.
+- **Personal data.** Only time, action, user id, company id, the product fields and that marketing
+  metadata (no names or emails) are requested from Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
 - **`internal/moesif`** is the shared Management API client (event search with `search_after` paging).
   Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
   sub-crons run one after another.
@@ -1086,18 +1091,24 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
 
 **`plg_registration_validation`** (default `20 * * * *`) fills each product's registration playbook from
 its Moesif activity. **Off unless `PLG_REGISTRATION_VALIDATION_ENABLED=true`**, and a dry run (derive and
-log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. Only `AGENT_PLATFORM` (Moesif
-platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the others when they do.
+log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. `plgvalidation.Platforms` maps each
+product to its Moesif `metadata.platform`: `AGENT_PLATFORM` `Agent Manager`, `IAM` `Identity Platform`,
+`API_PLATFORM` `API Platform`, `INTEGRATION_PLATFORM` `Integration Platform` (all four by default). Every
+product's action is read from the event's `action_name` (`plgvalidation.ActionField`), the one property
+populated in all of them: `amp.console.onboarding.wizard-step-viewed` (Agent Manager),
+`identity-platform.organization.overview-view`, `apip.admin.landing-page-open`,
+`integration-platform.console.navigation.page-view`.
 
 - **Each run**: `POST /plg/registrations/validation-queue` lists the product's REGISTRATION pairings signed
   up within `WINDOW_HOURS` (12) plus `GRACE_HOURS` (24); Moesif is read for 50 companies per query
-  (company id, time and action only); `internal/plgactivity` counts the user's actions in the first
+  (company id, time and `action_name` only); `internal/plgactivity` counts the user's actions in the first
   `WINDOW_HOURS` after signup; one `PUT /plg/pairings/{id}/registration-validation` per pairing writes the
   summary and values. entity-service attaches the playbook, never overwrites an engineer's value, and
   closes and abandons the pairing when the outcome is EXCLUDED. This client's id must be in
   entity-service's `M2M_CLIENT_IDS`.
-- **Rules**: Agent Manager has no onboarding wizard, so the onboarding tasks are left to the engineer.
-  An action is any Agent Manager action, deletions included; `registered-gateway` and
+- **Rules**: the onboarding tasks are not derived, they are left to the engineer.
+  An action is any platform action, deletions and page views included (the dotted names above count; an
+  action starting `cloud-core.` is an account event and does not); `registered-gateway` and
   `rotated-gateway-token` are not (the platform emits them minutes after signup), nor are account events
   such as `Select Subscription Plan`. `ELIGIBLE_ACTIONS` (10) or more is ELIGIBLE and HIGH;
   `MODERATE_ACTIONS` (5) or more is MODERATE, fewer LOW, none NONE, all MONITOR. A CORPORATE email is

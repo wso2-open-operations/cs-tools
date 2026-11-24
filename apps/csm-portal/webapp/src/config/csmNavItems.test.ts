@@ -274,10 +274,10 @@ describe("navNodeMatchForPath", () => {
     expect(navNodeMatchForPath("/nothing-here")).toBeUndefined();
   });
 
-  it("prefers a child over its parent on an equal-length prefix tie (plg's href aliases plg.dashboard's)", () => {
-    expect(navNodeMatchForPath("/plg/dashboard")).toMatchObject({
-      node: { id: "plg.dashboard" },
-      prefix: "/plg/dashboard",
+  it("prefers a child over its parent on an equal-length prefix tie (plg's href aliases plg.overview's)", () => {
+    expect(navNodeMatchForPath("/plg/overview")).toMatchObject({
+      node: { id: "plg.overview" },
+      prefix: "/plg/overview",
     });
   });
 });

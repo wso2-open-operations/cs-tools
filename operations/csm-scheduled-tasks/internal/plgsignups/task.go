@@ -44,6 +44,16 @@ var (
 	DefaultProductFields = []string{"metadata.initiating_product", "metadata.product"}
 )
 
+// DefaultMetadataPrefix is where the event holds the visit and UTM fields.
+const DefaultMetadataPrefix = "metadata."
+
+// metadataNames are the fields read, in the order of Metadata.
+var metadataNames = []string{
+	"utm_source", "utm_medium", "utm_campaign",
+	"initial_utm_source", "initial_utm_medium", "initial_utm_campaign",
+	"referring_domain", "initial_referring_domain", "sign_in_method", "preferred_language",
+}
+
 // successStatuses are the ingest outcomes of a registration that landed.
 var successStatuses = map[string]bool{"created": true, "updated": true, "unchanged": true}
 
@@ -62,15 +72,19 @@ type Entity interface {
 type Options struct {
 	Events        []string
 	ProductFields []string
-	Window        time.Duration
-	BatchSize     int
-	MaxPages      int
+	// MetadataPrefix is prepended to each visit and UTM field name; empty means
+	// DefaultMetadataPrefix. Use "-" for fields at the event's top level.
+	MetadataPrefix string
+	Window         time.Duration
+	BatchSize      int
+	MaxPages       int
 }
 
 // event is one signup, reduced to what the portal needs.
 type event struct {
 	id, action, userID, companyID, product string
 	at                                     time.Time
+	meta                                   Metadata
 }
 
 // Sync returns a registry.Task.Handler that lands the signups of the last
@@ -80,6 +94,7 @@ func Sync(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = 100
 	}
+	prefix := metadataPrefix(opts.MetadataPrefix)
 	return func(ctx context.Context) error {
 		to := now().UTC()
 		from := to.Add(-opts.Window)
@@ -87,7 +102,7 @@ func Sync(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx
 			From:     from,
 			To:       to,
 			Filter:   moesif.TermsFilter("action_name.raw", opts.Events),
-			Fields:   append([]string{"request.time", "action_name", "user_id", "company_id"}, opts.ProductFields...),
+			Fields:   append(append([]string{"request.time", "action_name", "user_id", "company_id"}, opts.ProductFields...), metadataFields(prefix)...),
 			MaxPages: opts.MaxPages,
 		})
 		if err != nil {
@@ -101,7 +116,7 @@ func Sync(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx
 		)
 		read := 0
 		for _, h := range hits {
-			e := toEvent(h, opts.ProductFields)
+			e := toEvent(h, opts.ProductFields, prefix)
 			// Moesif applies the window; this guards against one it did not.
 			if !e.at.IsZero() && (e.at.Before(from) || !e.at.Before(to)) {
 				continue
@@ -116,6 +131,7 @@ func Sync(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx
 				CompanyID:         e.companyID,
 				UserID:            e.userID,
 				InitiatingProduct: strings.ToLower(e.product),
+				Metadata:          e.metadata(),
 			})
 			owners = append(owners, e)
 		}
@@ -161,7 +177,7 @@ func Sync(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx
 	}
 }
 
-func toEvent(h moesif.Hit, productFields []string) event {
+func toEvent(h moesif.Hit, productFields []string, prefix string) event {
 	e := event{
 		id:        h.ID,
 		action:    moesif.Text(h.Source, "action_name"),
@@ -174,7 +190,44 @@ func toEvent(h moesif.Hit, productFields []string) event {
 			break
 		}
 	}
+	text := func(name string) string { return moesif.Text(h.Source, prefix+name) }
+	e.meta = Metadata{
+		UTMSource: text("utm_source"), UTMMedium: text("utm_medium"), UTMCampaign: text("utm_campaign"),
+		InitialUTMSource: text("initial_utm_source"), InitialUTMMedium: text("initial_utm_medium"),
+		InitialUTMCampaign: text("initial_utm_campaign"),
+		ReferringDomain:    text("referring_domain"), InitialReferringDomain: text("initial_referring_domain"),
+		SignInMethod: text("sign_in_method"), PreferredLanguage: text("preferred_language"),
+	}
 	return e
+}
+
+// metadata is the event's marketing context, or nil when it has none.
+func (e event) metadata() *Metadata {
+	if e.meta.empty() {
+		return nil
+	}
+	m := e.meta
+	return &m
+}
+
+// metadataPrefix resolves the configured prefix ("-" = none).
+func metadataPrefix(p string) string {
+	switch strings.TrimSpace(p) {
+	case "":
+		return DefaultMetadataPrefix
+	case "-":
+		return ""
+	}
+	return p
+}
+
+// metadataFields lists the Moesif fields to ask for.
+func metadataFields(prefix string) []string {
+	out := make([]string, len(metadataNames))
+	for i, n := range metadataNames {
+		out[i] = prefix + n
+	}
+	return out
 }
 
 func invalid(e event) string {

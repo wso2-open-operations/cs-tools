@@ -13,9 +13,8 @@
  * switcher. All five are csm-portal's now. What is left is the route table,
  * which is the only part that was ever PLG's own.
  */
-import { Route } from "react-router";
+import { Navigate, Route } from "react-router";
 
-import DashboardPage from "./pages/dashboard/DashboardPage";
 import LeadershipDashboardPage from "./pages/dashboard/LeadershipDashboardPage";
 import OrganizationDetailPage from "./pages/organizations/OrganizationDetailPage";
 import OrganizationsPage from "./pages/organizations/OrganizationsPage";
@@ -37,10 +36,9 @@ import WorkQueuePage from "./pages/work-queue/WorkQueuePage";
 export function plgRoutes() {
   return (
     <Route path="plg">
-      {/* Standalone, PLG's landing page was its Workspace dashboard at "/".
-          Keeping that here means /plg opens on the same page it always did. */}
-      <Route index element={<DashboardPage />} />
-      <Route path="dashboard" element={<DashboardPage />} />
+      {/* /plg and the removed /plg/dashboard go to the Overview. */}
+      <Route index element={<Navigate to="overview" replace />} />
+      <Route path="dashboard" element={<Navigate to="/plg/overview" replace />} />
       <Route path="work-queue" element={<WorkQueuePage />} />
       <Route path="organizations" element={<OrganizationsPage />} />
       {/* One organisation, optionally opened on one platform's tab. */}
@@ -48,11 +46,7 @@ export function plgRoutes() {
       <Route path="organizations/:organizationId/:productCode" element={<OrganizationDetailPage />} />
       <Route path="new-registrations" element={<NewRegistrationsPage />} />
       <Route path="playbooks" element={<PlaybooksPage />} />
-      {/* The leadership view: its own page, not a variant of the one above.
-          Both draw the same cohort charts and differ in their tiles — the
-          leadership view carries no queue counts, because those are a to-do
-          list. They were one component reading its own URL to decide which it
-          was, which broke silently when the merge moved the path. */}
+      {/* The Overview: the cohort charts. */}
       <Route path="overview" element={<LeadershipDashboardPage />} />
     </Route>
   );

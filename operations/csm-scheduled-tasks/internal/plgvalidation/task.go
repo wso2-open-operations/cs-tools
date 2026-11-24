@@ -37,7 +37,18 @@ import (
 )
 
 // Platforms maps a portal product to its Moesif metadata.platform.
-var Platforms = map[string]string{"AGENT_PLATFORM": "Agent Manager"}
+var Platforms = map[string]string{
+	"AGENT_PLATFORM":       "Agent Manager",
+	"IAM":                  "Identity Platform",
+	"API_PLATFORM":         "API Platform",
+	"INTEGRATION_PLATFORM": "Integration Platform",
+}
+
+// ActionField is the Moesif field every product's events name their action in:
+// created-agent style for Agent Manager, identity-platform.organization.overview-view,
+// apip.admin.landing-page-open or integration-platform.console.navigation.page-view
+// for the others. It is the one property populated in all products.
+const ActionField = "action_name"
 
 // Task codes and option codes of the registration playbook.
 const (
@@ -236,7 +247,7 @@ func readEvents(ctx context.Context, src Searcher, opts Options, platform string
 			From:     from,
 			To:       minTime(to, now),
 			Filter:   platformFilter(platform, ids),
-			Fields:   []string{"company_id", "request.time", "metadata.action"},
+			Fields:   []string{"company_id", "request.time", ActionField},
 			MaxPages: opts.MaxPages,
 		})
 		if err != nil {
@@ -251,7 +262,7 @@ func readEvents(ctx context.Context, src Searcher, opts Options, platform string
 			if !ok || company == "" {
 				continue
 			}
-			byCompany[company] = append(byCompany[company], plgactivity.Event{At: at, Action: moesif.Text(h.Source, "metadata.action")})
+			byCompany[company] = append(byCompany[company], plgactivity.Event{At: at, Action: moesif.Text(h.Source, ActionField)})
 		}
 	}
 	return byCompany, nil
@@ -261,7 +272,7 @@ func platformFilter(platform string, companyIDs []string) map[string]any {
 	return map[string]any{"bool": map[string]any{"must": []map[string]any{
 		{"term": map[string]any{"metadata.platform.raw": platform}},
 		{"terms": map[string]any{"company_id.raw": companyIDs}},
-		{"exists": map[string]any{"field": "metadata.action"}},
+		{"exists": map[string]any{"field": ActionField}},
 	}}}
 }
 

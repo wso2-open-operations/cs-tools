@@ -81,7 +81,27 @@ type Registration struct {
 	CompanyID         string `json:"companyId"`
 	UserID            string `json:"userId,omitempty"`
 	InitiatingProduct string `json:"initiatingProduct"`
+	// Metadata is the signup's visit context; nil when the event had none.
+	Metadata *Metadata `json:"metadata,omitempty"`
 }
+
+// Metadata is a signup's visit context: UTM of the landing URL, Initial* of the
+// first visit. It identifies no person.
+type Metadata struct {
+	UTMSource              string `json:"utmSource,omitempty"`
+	UTMMedium              string `json:"utmMedium,omitempty"`
+	UTMCampaign            string `json:"utmCampaign,omitempty"`
+	InitialUTMSource       string `json:"initialUtmSource,omitempty"`
+	InitialUTMMedium       string `json:"initialUtmMedium,omitempty"`
+	InitialUTMCampaign     string `json:"initialUtmCampaign,omitempty"`
+	ReferringDomain        string `json:"referringDomain,omitempty"`
+	InitialReferringDomain string `json:"initialReferringDomain,omitempty"`
+	SignInMethod           string `json:"signInMethod,omitempty"`
+	PreferredLanguage      string `json:"preferredLanguage,omitempty"`
+}
+
+// empty reports whether no field is set.
+func (m Metadata) empty() bool { return m == Metadata{} }
 
 // Result is what became of one registration.
 type Result struct {

@@ -555,9 +555,11 @@ type OrganizationDetail struct {
 	CloudUserID *string `json:"cloudUserId"`
 	// EmailClassification is the owner's email classification from a
 	// registration playbook, the most recently set one; nil when unanswered.
-	EmailClassification *string        `json:"emailClassification"`
-	FieldsInherited     bool           `json:"fieldsInherited"`
-	PlatformCards       []PlatformCard `json:"platformCards"`
+	EmailClassification *string `json:"emailClassification"`
+	// RegistrationMetadata is the earliest registration's visit context; nil when none.
+	RegistrationMetadata *OrganizationRegistrationMetadata `json:"registrationMetadata"`
+	FieldsInherited      bool                              `json:"fieldsInherited"`
+	PlatformCards        []PlatformCard                    `json:"platformCards"`
 }
 
 // ---------------------------------------------------------------------------
@@ -1225,6 +1227,24 @@ type DashboardAnalytics struct {
 	RegistrationsByLifecycleStage []CountByLabel   `json:"registrationsByLifecycleStage"`
 	SubscriptionMix               []CountByLabel   `json:"subscriptionMix"`
 	RegistrationsOverTime         TimeSeries       `json:"registrationsOverTime"`
+	// UTMSources counts registrations by utm_source; NOT_RECORDED when none.
+	UTMSources []CountByLabel `json:"utmSources"`
+	// EmailClassification counts registrations by email class; NOT_CLASSIFIED until set.
+	EmailClassification []CountByLabel `json:"emailClassification"`
+	// QualificationOverview counts registrations by eligibility outcome; NOT_ASSESSED until set.
+	QualificationOverview []CountByLabel `json:"qualificationOverview"`
+	// QualifiedByUTM breaks the outcomes down by utm_source, busiest first.
+	QualifiedByUTM []UTMQualification `json:"qualifiedByUtm"`
+}
+
+// UTMQualification is one utm_source's registrations by eligibility outcome.
+type UTMQualification struct {
+	Label       string `json:"label"`
+	Eligible    int    `json:"eligible"`
+	Monitor     int    `json:"monitor"`
+	Excluded    int    `json:"excluded"`
+	NotAssessed int    `json:"notAssessed"`
+	Total       int    `json:"total"`
 }
 
 // ---------------------------------------------------------------------------
@@ -1256,10 +1276,42 @@ type Registration struct {
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 
+	// Metadata is a Cloud signup's visit and UTM context; nil when none.
+	Metadata *RegistrationMetadata `json:"metadata,omitempty"`
+
 	// Extra holds the mapped extra fields, keyed by their portal-side name.
 	// Not part of the wire contract: the caller sends Attributes instead, which
 	// is Extra already resolved through the source map.
 	Extra map[string]string `json:"-"`
+}
+
+// RegistrationMetadata is a signup's visit context: UTM of the landing URL,
+// Initial* of the first visit. It identifies no person.
+type RegistrationMetadata struct {
+	UTMSource              string `json:"utmSource,omitempty"`
+	UTMMedium              string `json:"utmMedium,omitempty"`
+	UTMCampaign            string `json:"utmCampaign,omitempty"`
+	InitialUTMSource       string `json:"initialUtmSource,omitempty"`
+	InitialUTMMedium       string `json:"initialUtmMedium,omitempty"`
+	InitialUTMCampaign     string `json:"initialUtmCampaign,omitempty"`
+	ReferringDomain        string `json:"referringDomain,omitempty"`
+	InitialReferringDomain string `json:"initialReferringDomain,omitempty"`
+	SignInMethod           string `json:"signInMethod,omitempty"`
+	PreferredLanguage      string `json:"preferredLanguage,omitempty"`
+}
+
+// OrganizationRegistrationMetadata is RegistrationMetadata with null for unsent fields.
+type OrganizationRegistrationMetadata struct {
+	UTMSource              *string `json:"utmSource"`
+	UTMMedium              *string `json:"utmMedium"`
+	UTMCampaign            *string `json:"utmCampaign"`
+	InitialUTMSource       *string `json:"initialUtmSource"`
+	InitialUTMMedium       *string `json:"initialUtmMedium"`
+	InitialUTMCampaign     *string `json:"initialUtmCampaign"`
+	ReferringDomain        *string `json:"referringDomain"`
+	InitialReferringDomain *string `json:"initialReferringDomain"`
+	SignInMethod           *string `json:"signInMethod"`
+	PreferredLanguage      *string `json:"preferredLanguage"`
 }
 
 // SourceTime is a timestamp as a source actually sends it.

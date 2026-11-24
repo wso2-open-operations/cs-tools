@@ -442,10 +442,37 @@ func (r *organizationRepository) Get(ctx context.Context, id string) (*domain.Or
 	}
 	d.Owner = userRef(ownerID, ownerEmail, ownerName)
 
+	if d.RegistrationMetadata, err = r.loadRegistrationMetadata(ctx, d.ID); err != nil {
+		return nil, err
+	}
 	if d.PlatformCards, err = r.loadPlatformCards(ctx, d.ID); err != nil {
 		return nil, err
 	}
 	return &d, nil
+}
+
+// loadRegistrationMetadata reads the earliest registration's visit context; nil when none.
+func (r *organizationRepository) loadRegistrationMetadata(ctx context.Context, orgID string) (*domain.OrganizationRegistrationMetadata, error) {
+	const q = `
+		SELECT m.utm_source, m.utm_medium, m.utm_campaign,
+		       m.initial_utm_source, m.initial_utm_medium, m.initial_utm_campaign,
+		       m.referring_domain, m.initial_referring_domain, m.sign_in_method, m.preferred_language
+		FROM   plg_registration_metadata m
+		JOIN   plg_org_platform op ON op.id = m.org_platform_id
+		WHERE  op.organization_id::TEXT = $1
+		ORDER  BY op.registered_on, op.id
+		LIMIT  1`
+	var m domain.OrganizationRegistrationMetadata
+	err := r.db.QueryRow(ctx, q, orgID).Scan(&m.UTMSource, &m.UTMMedium, &m.UTMCampaign,
+		&m.InitialUTMSource, &m.InitialUTMMedium, &m.InitialUTMCampaign,
+		&m.ReferringDomain, &m.InitialReferringDomain, &m.SignInMethod, &m.PreferredLanguage)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load registration metadata: %w", err)
+	}
+	return &m, nil
 }
 
 func (r *organizationRepository) loadPlatformCards(ctx context.Context, orgID string) ([]domain.PlatformCard, error) {

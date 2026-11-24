@@ -45618,6 +45618,43 @@ components:
           type: string
           nullable: true
           description: The owner's email classification from a registration playbook, the most recently set one.
+        registrationMetadata:
+          type: object
+          nullable: true
+          description: >-
+            Visit and UTM context of the earliest registration that carried any; null when none did. The utm*
+            fields are those of the landing URL of the visit that led to the signup.
+          properties:
+            utmSource:
+              type: string
+              nullable: true
+            utmMedium:
+              type: string
+              nullable: true
+            utmCampaign:
+              type: string
+              nullable: true
+            initialUtmSource:
+              type: string
+              nullable: true
+            initialUtmMedium:
+              type: string
+              nullable: true
+            initialUtmCampaign:
+              type: string
+              nullable: true
+            referringDomain:
+              type: string
+              nullable: true
+            initialReferringDomain:
+              type: string
+              nullable: true
+            signInMethod:
+              type: string
+              nullable: true
+            preferredLanguage:
+              type: string
+              nullable: true
         fieldsInherited:
           type: boolean
         platformCards:
@@ -46232,6 +46269,54 @@ components:
                     type: array
                     items:
                       type: integer
+        utmSources:
+          type: array
+          description: Registrations by utm_source of the landing URL; NOT_RECORDED when the signup carried none.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        emailClassification:
+          type: array
+          description: Registrations by the owner's email classification; NOT_CLASSIFIED until the validation has answered.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        qualificationOverview:
+          type: array
+          description: Registrations by eligibility outcome (ELIGIBLE, MONITOR, EXCLUDED); NOT_ASSESSED until one is set.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        qualifiedByUtm:
+          type: array
+          description: Eligibility outcomes per utm_source, busiest first, at most 10.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              eligible:
+                type: integer
+              monitor:
+                type: integer
+              excluded:
+                type: integer
+              notAssessed:
+                type: integer
+              total:
+                type: integer
     PlgWorkQueue:
       type: object
       properties:
@@ -47190,6 +47275,33 @@ components:
             agent-manager, api-platform, integration-platform or identity-platform. Makes the registration a Cloud
             one. Unknown, or naming another product than initiatedPlatform, fails it.
           example: api-platform
+        metadata:
+          type: object
+          description: >-
+            Visit and UTM context of a Cloud signup. The utm* fields are those of the landing URL of the visit
+            that led to the signup; the initial* ones are of the visitor's first visit. Stored per pairing; a
+            value once known is kept, a later one only fills what is missing. Nothing identifies a person.
+          properties:
+            utmSource:
+              type: string
+            utmMedium:
+              type: string
+            utmCampaign:
+              type: string
+            initialUtmSource:
+              type: string
+            initialUtmMedium:
+              type: string
+            initialUtmCampaign:
+              type: string
+            referringDomain:
+              type: string
+            initialReferringDomain:
+              type: string
+            signInMethod:
+              type: string
+            preferredLanguage:
+              type: string
         countryName:
           type: string
         companyNameFromDomain:

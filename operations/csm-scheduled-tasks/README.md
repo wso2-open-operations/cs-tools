@@ -355,6 +355,7 @@ treated as unset, except where noted. All example values are placeholders.
 | `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` | No | `https://api.moesif.com` / `30s` | Moesif API host and the ceiling on one call. | – |
 | `PLG_MOESIF_SYNC_WINDOW_MINUTES` | No | 2 × `DRIVER_INTERVAL`, at least 120 | How far back each run reads. Keep it above the interval so a missed run is covered. | `120` |
 | `PLG_MOESIF_SYNC_EVENTS` | No | registration and subscription events | Comma-separated `action_name`s that mark a signup. | – |
+| `PLG_MOESIF_SYNC_METADATA_PREFIX` | No | `metadata.` | Prefix of the visit and UTM fields on an event (`utm_source`, `initial_utm_campaign`, `referring_domain`, `preferred_language`, …); `-` for none. | – |
 | `PLG_MOESIF_SYNC_PRODUCT_FIELDS` | No | `metadata.initiating_product,metadata.product` | Where an event holds the product; the first present wins. | – |
 | `PLG_MOESIF_SYNC_BATCH_SIZE` / `PLG_MOESIF_SYNC_MAX_PAGES` | No | `100` / `100` | Registrations per ingest call; pages of 100 events per run. | – |
 | `ACP_ENABLED` | No | `false` | Registers `acp_closure`. No other `ACP_*` setting is read while false. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. | `true` |
