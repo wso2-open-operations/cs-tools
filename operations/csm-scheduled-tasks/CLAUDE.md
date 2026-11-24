@@ -1115,6 +1115,13 @@ a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
   `time_card_report.html` (the one genuinely customer-facing email in this component) and the rota
   reminder emails carry no logo or company name at all, by design — see "Monthly time card report"
   and "Rota reminders" above.
+- **Gmail dark mode.** Gmail ignores `prefers-color-scheme` and recolours emails itself, which turned the navy
+  header and its white title grey. Each template's header band and title cell therefore carry the navy as
+  `background-image: linear-gradient(...)` as well as `background-color`, the white title and the worklogs
+  figures sit in a span with the white gradient clipped to the text (`-webkit-background-clip: text`, transparent
+  fill), and a `.headerBand` rule pins the band in the dark-mode block. The span is wrapped in `[if !mso]`
+  comments because Outlook desktop ignores the clip and would show an invisible title; there the cell's own white
+  applies. Reuse this for any new white-on-navy text.
 - A template baked with `bakeLogo` must also be listed in `logoTemplates()` (internal/notify), or neither
   override reaches it; `TestLogoTemplates_ListsEveryBakedTemplate` fails when one is missing.
 - Wired once, unconditionally, in `cmd/server/main.go`, right after `loadDotEnv`/the logger setup —
