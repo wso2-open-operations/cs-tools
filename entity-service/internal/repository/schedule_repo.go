@@ -555,9 +555,13 @@ func (r *scheduleRepository) OnDutyAt(ctx context.Context, at time.Time, include
 	// would only reintroduce the bug for whichever bucket was left out.
 	//
 	// The span is closed at both ends because a leave day is a whole day, and
-	// it is compared against the date in the shift's own authoring zone: leave
-	// is granted as a calendar day by someone in that office, not as an
-	// instant.
+	// it is compared against the turn's own rota day: leave is granted against
+	// the day a turn is rostered for, as the rota reminders read it
+	// (reminderAbsenceOn). An overnight turn belongs to the day it starts, so
+	// leave that begins the next calendar day leaves its hours after midnight
+	// alone. Comparing against the instant's date instead dropped a weekend
+	// night's on-call from 00:00 to 06:00 on the Monday their lieu leave
+	// begins, with nobody else on that tier.
 	//
 	// includeOnLeave is for a caller that decides for itself what to do with
 	// somebody on leave (Case Paging's onLeave: call): the excluded rows come
@@ -577,11 +581,11 @@ func (r *scheduleRepository) OnDutyAt(ctx context.Context, at time.Time, include
 }
 
 // onDutyRows is the assignments live at the instant whose engineer is (exists
-// "EXISTS") or is not ("NOT EXISTS") away that day.
+// "EXISTS") or is not ("NOT EXISTS") away on the assignment's rota day.
 func (r *scheduleRepository) onDutyRows(ctx context.Context, at time.Time, exists string) ([]domain.ScheduleAssignment, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+assignmentColumns+assignmentFrom+`
 		WHERE tstzrange(a.starts_at, a.ends_at, '[)') @> $1::timestamptz
-		  AND `+absenceOn(exists, "($1::timestamptz AT TIME ZONE s.authoring_time_zone)::date")+`
+		  AND `+absenceOn(exists, "a.rota_date")+`
 		ORDER BY a.tier NULLS LAST, s.sort_order, u.name`, at)
 	if err != nil {
 		return nil, fmt.Errorf("query on-duty assignments: %w", err)

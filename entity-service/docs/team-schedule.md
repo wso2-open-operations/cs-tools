@@ -51,6 +51,14 @@ correct across DST.
 `rota_date` is the day the **crew** is rostered for. A Monday 21:00–06:00
 block is Monday's, even though six of its hours fall on Tuesday.
 
+Leave and every other absence are asked of that day too, everywhere: the
+on-duty read (`GET /team-schedule/on-duty`, `absenceOn`), the rota reminders'
+`excludeAbsent` and holiday availability. So someone on that Monday night
+whose leave starts on the Tuesday stays on duty until 06:00 Tuesday, and leave
+on the Monday covers the whole block. The on-duty read used to ask the
+instant's own date instead, which dropped a weekend night's on-call, whose lieu
+leave starts the Monday after, from the pager from 00:00 to 06:00 that Monday.
+
 ### The rules the database enforces
 
 | Rule | How |
