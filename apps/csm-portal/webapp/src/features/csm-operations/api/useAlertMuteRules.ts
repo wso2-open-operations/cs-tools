@@ -87,8 +87,14 @@ export function useAlertMuteRuleCounts(searchQuery: string): Record<AlertMuteRul
 /**
  * One page of the alerts a rule muted (`GET /alert-mute-rules/{id}/muted-alerts`), newest first. They live in
  * alert-core's database, which keeps them for its retention period (30 days by default). `live` polls every 30 s,
- * for a rule that is still muting.
+ * for a rule that is still muting. Polling also goes on while any alert is still muted or being delivered: alert-core
+ * releases them on its own cycle after the rule ends, so their final outcome comes in after `live` turns off.
  */
+/** Whether any of a rule's muted alerts has no final outcome yet (still muted, or being delivered). */
+export function mutedAlertsUnsettled(data: AlertMuteRuleMutedAlertsResponse | undefined): boolean {
+  return (data?.summary.muted ?? 0) > 0 || (data?.summary.delivering ?? 0) > 0;
+}
+
 export function useAlertMuteRuleMutedAlerts(
   id: string | undefined,
   page: { limit: number; offset: number },
@@ -112,7 +118,7 @@ export function useAlertMuteRuleMutedAlerts(
     },
     enabled: Boolean(id),
     placeholderData: keepPreviousData,
-    refetchInterval: live ? 30_000 : false,
+    refetchInterval: (query) => (live || mutedAlertsUnsettled(query.state.data) ? 30_000 : false),
   });
 }
 
