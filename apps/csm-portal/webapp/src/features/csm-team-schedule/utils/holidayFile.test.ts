@@ -85,3 +85,42 @@ describe("holidayFileToLines: a table or plain lines", () => {
     expect(parseHolidayLines(r.text).errors.map((e) => e.line)).toEqual([3]);
   });
 });
+
+describe("holidayFileToLines: what CodeRabbit found", () => {
+  it("walks only the chosen year of an event that spans centuries", () => {
+    const calendar = ics(["DTSTART;VALUE=DATE:20270101\nDTEND;VALUE=DATE:99991231\nSUMMARY:Forever"]);
+    const started = Date.now();
+    const r = holidayFileToLines("x.ics", calendar, 2027);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(r.count).toBe(365);
+    expect(r.text.split("\n").at(-1)).toBe("2027-12-31, Forever");
+  });
+
+  it("keeps an event that crosses into the chosen year, end day still left out", () => {
+    const calendar = ics(["DTSTART;VALUE=DATE:20261231\nDTEND;VALUE=DATE:20270102\nSUMMARY:New Year"]);
+    expect(holidayFileToLines("x.ics", calendar, 2027).text).toBe("2027-01-01, New Year");
+    expect(holidayFileToLines("x.ics", calendar, 2026).text).toBe("2026-12-31, New Year");
+  });
+
+  it("leaves out a day that does not exist instead of moving it", () => {
+    const calendar = ics([
+      "DTSTART;VALUE=DATE:20270230\nSUMMARY:Not a day",
+      "DTSTART;VALUE=DATE:20270301\nDTEND;VALUE=DATE:20270232\nSUMMARY:Bad end",
+      "DTSTART;VALUE=DATE:20270302\nSUMMARY:Real",
+    ]);
+    const r = holidayFileToLines("x.ics", calendar, 2027);
+    expect(r.text).toBe("2027-03-02, Real");
+    expect(r.note).toBe("1 holiday in 2027 read from the calendar; left out 2 events with a date that does not exist.");
+  });
+
+  it("keeps the whole name of a plain line with commas", () => {
+    const r = holidayFileToLines("x.txt", "2027-02-04, National Day, Example\n", 2027);
+    expect(r.text).toBe("2027-02-04, National Day, Example");
+    expect(parseHolidayLines(r.text).holidays).toEqual([{ date: "2027-02-04", title: "National Day, Example" }]);
+  });
+
+  it("takes the separator from outside the quotes", () => {
+    const r = holidayFileToLines("x.csv", '2027-02-04;"National Day, Example";Public\n2027-02-05,Plain,Public\n', 2027);
+    expect(r.text).toBe("2027-02-04, National Day, Example\n2027-02-05, Plain");
+  });
+});

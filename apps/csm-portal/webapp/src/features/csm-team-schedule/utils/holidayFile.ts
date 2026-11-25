@@ -40,11 +40,14 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
  *   event's end day not included, events with a time of day left out, and
  *   Google's "Observance" entries (not days off) left out. Two holidays on one
  *   day become one line, names joined with " / ".
- * - **A table (.csv, .tsv, or text with commas, semicolons or tabs)**: the first
- *   column is the date and the second the name; quotes are removed and a header
- *   row (a first line naming "date") is skipped.
+ *   A day that does not exist (20270230) is left out and counted, never moved
+ *   to the day the date rolls over to.
+ * - **A table (.csv or .tsv, or a line with tabs)**: the first column is the
+ *   date and the second the name; quotes are removed, the separator is the one
+ *   used outside quotes, and a header row (a first line naming "date") is
+ *   skipped.
  * - **Anything else** is kept line by line, so a file already written as
- *   `YYYY-MM-DD, Name` lines reads as it is.
+ *   `YYYY-MM-DD, Name` lines reads as it is, a name with commas included.
  */
 export function holidayFileToLines(fileName: string, content: string, year: number): HolidayFileLines {
   // A file saved with a byte order mark (Excel does) starts with U+FEFF.
@@ -52,15 +55,23 @@ export function holidayFileToLines(fileName: string, content: string, year: numb
   if (/\.ics$/i.test(fileName) || text.trimStart().startsWith("BEGIN:VCALENDAR")) {
     return calendarLines(text, year);
   }
-  return tableLines(text);
+  return tableLines(text, /\.(csv|tsv)$/i.test(fileName));
 }
 
 function calendarLines(text: string, year: number): HolidayFileLines {
   const days = new Map<string, string[]>();
   let timed = 0;
   let observances = 0;
+  let impossible = 0;
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const nextYearStart = new Date(Date.UTC(year + 1, 0, 1));
   for (const ev of calendarEvents(text)) {
     const start = wholeDay(ev.get("DTSTART"));
+    const end = wholeDay(ev.get("DTEND"));
+    if (start === "impossible" || end === "impossible") {
+      impossible++;
+      continue;
+    }
     if (!start) {
       timed++;
       continue;
@@ -71,9 +82,12 @@ function calendarLines(text: string, year: number): HolidayFileLines {
     }
     const title = unescapeIcs(ev.get("SUMMARY")?.value ?? "");
     if (!title) continue;
-    const endExclusive = wholeDay(ev.get("DTEND")) ?? addDays(start, 1);
-    for (let d = start; d < endExclusive; d = addDays(d, 1)) {
-      if (d.getUTCFullYear() !== year) continue;
+    const endExclusive = end ?? addDays(start, 1);
+    // Only the days inside the chosen year are visited: an event can span
+    // centuries, and walking all of it would hang the page.
+    const from = start > yearStart ? start : yearStart;
+    const until = endExclusive < nextYearStart ? endExclusive : nextYearStart;
+    for (let d = from; d < until; d = addDays(d, 1)) {
       const key = d.toISOString().slice(0, 10);
       const names = days.get(key) ?? [];
       if (!names.includes(title)) names.push(title);
@@ -84,6 +98,7 @@ function calendarLines(text: string, year: number): HolidayFileLines {
   const left: string[] = [];
   if (observances) left.push(`${observances} observance${observances === 1 ? "" : "s"}`);
   if (timed) left.push(`${timed} event${timed === 1 ? "" : "s"} with a time of day`);
+  if (impossible) left.push(`${impossible} event${impossible === 1 ? "" : "s"} with a date that does not exist`);
   const note =
     `${lines.length} holiday${lines.length === 1 ? "" : "s"} in ${year} read from the calendar` +
     (left.length ? `; left out ${left.join(" and ")}.` : ".");
@@ -117,13 +132,21 @@ function calendarEvents(text: string): Map<string, IcsProp>[] {
   return events;
 }
 
-/** The day of a whole-day DTSTART / DTEND (YYYYMMDD), or null for a timed or missing one. */
-function wholeDay(prop: IcsProp | undefined): Date | null {
+/**
+ * The day of a whole-day DTSTART / DTEND (YYYYMMDD), null for a timed or
+ * missing one, or "impossible" for a day that does not exist (20270230, which
+ * Date.UTC would quietly turn into 2 March).
+ */
+function wholeDay(prop: IcsProp | undefined): Date | "impossible" | null {
   if (!prop) return null;
   const v = prop.value.trim();
   if (prop.params.includes("VALUE=DATE-TIME") || !/^\d{8}$/.test(v)) return null;
-  const d = new Date(Date.UTC(Number(v.slice(0, 4)), Number(v.slice(4, 6)) - 1, Number(v.slice(6, 8))));
-  return Number.isNaN(d.getTime()) ? null : d;
+  const y = Number(v.slice(0, 4));
+  const m = Number(v.slice(4, 6)) - 1;
+  const day = Number(v.slice(6, 8));
+  const d = new Date(Date.UTC(y, m, day));
+  if (d.getUTCFullYear() !== y || d.getUTCMonth() !== m || d.getUTCDate() !== day) return "impossible";
+  return d;
 }
 
 function addDays(d: Date, n: number): Date {
@@ -137,7 +160,12 @@ function unescapeIcs(value: string): string {
     .trim();
 }
 
-function tableLines(text: string): HolidayFileLines {
+/**
+ * A table file (.csv / .tsv) or a line with tabs (a spreadsheet column) is read
+ * as date and name columns; any other line is kept as written, so a plain
+ * `YYYY-MM-DD, Name, with commas` keeps its whole name.
+ */
+function tableLines(text: string, isTable: boolean): HolidayFileLines {
   const out: string[] = [];
   let count = 0;
   let header = false;
@@ -148,13 +176,13 @@ function tableLines(text: string): HolidayFileLines {
       out.push(line);
       continue;
     }
-    const cells = splitCells(line);
+    const cells = isTable || line.includes("\t") ? splitCells(line) : [line];
     const first = !seenContent;
     seenContent = true;
     if (cells.length >= 2 && DATE.test(cells[0])) {
       out.push(`${cells[0]}, ${cells[1]}`);
       count++;
-    } else if (first && /date/i.test(line) && !/^\d/.test(cells[0] ?? "")) {
+    } else if (first && /date/i.test(line) && !/^\d/.test(line)) {
       header = true;
     } else {
       // Not a table row: kept as written, for the paste box to read or name.
@@ -167,9 +195,20 @@ function tableLines(text: string): HolidayFileLines {
   return { text: lines, note, count };
 }
 
-/** A row's cells, split on its tab, comma or semicolon (the first one it has), quotes removed. */
+/** The row's separator: a tab, else a comma, else a semicolon, counting only those outside quotes. */
+function separatorOf(line: string): string | null {
+  const found = new Set<string>();
+  let quoted = false;
+  for (const c of line) {
+    if (c === '"') quoted = !quoted;
+    else if (!quoted && (c === "\t" || c === "," || c === ";")) found.add(c);
+  }
+  return ["\t", ",", ";"].find((c) => found.has(c)) ?? null;
+}
+
+/** A row's cells, split on its separator (outside quotes), quotes removed. */
 function splitCells(line: string): string[] {
-  const sep = line.includes("\t") ? "\t" : line.includes(",") ? "," : line.includes(";") ? ";" : null;
+  const sep = separatorOf(line);
   if (!sep) return [line];
   const cells: string[] = [];
   let cur = "";

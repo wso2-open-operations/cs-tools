@@ -336,9 +336,9 @@ func TestHolidayAvailabilityRepository_RemovedHolidayRace(t *testing.T) {
 		t.Fatal("a removed holiday was tagged")
 	}
 
-	// Hold the lead's tag so the cleanup stops between reading the tags and
-	// forgetting the placements; commit a member tag in that gap, as an older
-	// run that passed its checks before the removal would.
+	// Hold the lead's tag so the cleanup waits on it (its read locks the tags
+	// it will remove) after its snapshot was taken; commit a member tag in that
+	// gap, as an older run that passed its checks before the removal would.
 	hold, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)

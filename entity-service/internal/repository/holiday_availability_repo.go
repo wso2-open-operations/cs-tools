@@ -234,7 +234,9 @@ func (r *holidayAvailabilityRepository) removeHolidayTags(ctx context.Context, w
 	}
 	args := append([]any{onOrAfter, domain.HolidayTagActor}, extra...)
 	// The tags still exactly as the Team Schedule placed them: one day,
-	// never edited by anybody. A tag somebody changed is theirs now.
+	// never edited by anybody. A tag somebody changed is theirs now. Locked
+	// as they are read, so an edit waits for this run, and one that committed
+	// first is re-checked against these conditions and left alone.
 	rows, err := tx.Query(ctx, `
 		SELECT a.id::text, a.user_id::text, a.team_key, to_char(a.starts_on, 'YYYY-MM-DD')
 		  FROM team_schedule_holiday_tag_placed p
@@ -242,7 +244,8 @@ func (r *holidayAvailabilityRepository) removeHolidayTags(ctx context.Context, w
 		 WHERE p.holiday_date >= $1::date
 		   AND `+placementCond+`
 		   AND a.created_by = $2 AND a.updated_by = $2
-		   AND a.starts_on = p.holiday_date AND a.ends_on = p.holiday_date`, args...)
+		   AND a.starts_on = p.holiday_date AND a.ends_on = p.holiday_date
+		   FOR UPDATE OF a`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("read %s holiday tags: %w", what, err)
 	}
