@@ -4776,7 +4776,8 @@ changed.
   `watchList` or anything else; the same user in both lists, or a non-UUID, is a 400. Only
   newly added users get the project-contact check, as in the replace branch. The ServiceNow data
   source refuses them (its API only replaces the list; emulating a delta would bring the race back),
-  and a dual-write mirror sends the persisted (non-`Locked`) list after the change. Both portals use
+  and a dual-write mirror sends every stored watcher id (`CaseWatcherUserIDs`, read when the write runs, so
+  concurrent changes cannot land out of order; not the response list, which hides some stored rows). Both portals use
   these for add/remove; `watchList` stays for create-time and bulk replace.
   **Incidents have the same fields** on `PATCH /incidents/{id}` (`UpdateIncidentRequest.AddWatchers` /
   `RemoveWatchers`, `changeIncidentWatchers`): there they are record fields of the update's own

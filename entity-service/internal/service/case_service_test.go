@@ -86,6 +86,7 @@ type stubCaseRepo struct {
 	addCaseTag                    func(ctx context.Context, caseID, label, actorEmail string) (domain.Tag, error)
 	isCaseLikeWorkItem            func(ctx context.Context, workItemID string) (bool, error)
 	setCaseWatchList              func(ctx context.Context, caseID string, userIDs []string, actorEmail string) ([]domain.WatchListUser, time.Time, error)
+	caseWatcherUserIDs            func(ctx context.Context, caseID string) ([]string, error)
 	changeCaseWatchers            func(ctx context.Context, caseID string, addIDs, removeIDs []string, actorEmail string) ([]domain.WatchListUser, time.Time, error)
 	accountDefaultWatcherEmails   func(ctx context.Context, projectID string) ([]string, error)
 	accountSRETeam                func(ctx context.Context, projectID string) (string, string, error)
@@ -269,6 +270,13 @@ func (s *stubCaseRepo) SetCaseWatchList(ctx context.Context, caseID string, user
 func (s *stubCaseRepo) ChangeCaseWatchers(ctx context.Context, caseID string, addIDs, removeIDs []string, actorEmail string) ([]domain.WatchListUser, time.Time, error) {
 	if s.changeCaseWatchers != nil {
 		return s.changeCaseWatchers(ctx, caseID, addIDs, removeIDs, actorEmail)
+	}
+	panic("not implemented")
+}
+
+func (s *stubCaseRepo) CaseWatcherUserIDs(ctx context.Context, caseID string) ([]string, error) {
+	if s.caseWatcherUserIDs != nil {
+		return s.caseWatcherUserIDs(ctx, caseID)
 	}
 	panic("not implemented")
 }

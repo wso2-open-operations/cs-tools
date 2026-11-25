@@ -116,14 +116,28 @@ func TestIncidentService_UpdateIncident_WatchDelta_MirrorGetsTheResultingList(t 
 	}
 }
 
-// The ServiceNow data source refuses the delta rather than emulating it.
+// The ServiceNow data source refuses the delta rather than emulating it, with
+// its own message, and does so before any field is sent, so a request that also
+// carries a field cannot have the delta silently dropped.
 func TestSNIncidentService_UpdateIncident_RefusesWatchDelta(t *testing.T) {
-	svc := &snIncidentService{}
-	_, err := svc.UpdateIncident(context.Background(), domain.UpdateIncidentRequest{
-		ID: testDeploymentUUID, AddWatchers: []string{deltaUserA},
-	})
-	var ve *apierror.ValidationError
-	if !asValidationError(err, &ve) {
-		t.Fatalf("expected a ValidationError, got %v", err)
+	subject := "New subject"
+	const want = "addWatchers and removeWatchers are only supported for the Postgres data source"
+	cases := map[string]domain.UpdateIncidentRequest{
+		"delta only":        {ID: testDeploymentUUID, AddWatchers: []string{deltaUserA}},
+		"remove only":       {ID: testDeploymentUUID, RemoveWatchers: []string{deltaUserA}},
+		"delta and subject": {ID: testDeploymentUUID, AddWatchers: []string{deltaUserA}, Subject: &subject},
+	}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := &snIncidentService{} // nil client: reaching ServiceNow would panic
+			_, err := svc.UpdateIncident(context.Background(), req)
+			var ve *apierror.ValidationError
+			if !asValidationError(err, &ve) {
+				t.Fatalf("expected a ValidationError, got %v", err)
+			}
+			if ve.Msg != want {
+				t.Errorf("message = %q, want %q", ve.Msg, want)
+			}
+		})
 	}
 }

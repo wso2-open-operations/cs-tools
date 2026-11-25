@@ -3003,21 +3003,25 @@ func (s *caseService) updateCaseWatchDelta(ctx context.Context, req domain.Updat
 	}
 
 	// Best-effort ServiceNow mirror (dual-write only), same as the replace
-	// branch: the mirror is a whole-list PATCH, so it sends the persisted list
-	// as it stands after this change. The account's default stakeholders are
-	// resolved, not persisted (Locked), and are left out as they are there.
+	// branch. The mirror is a whole-list PATCH, so the list is read from the
+	// stored watchers when the write runs, not taken from this request: two
+	// changes to one case can commit in one order and be dispatched in
+	// another, and a list captured here would let the earlier commit's list
+	// overwrite the later one. It is the stored rows, not the response list,
+	// because the response hides stored watchers the portal does not show (an
+	// external user who is no longer a project contact), which a replace would
+	// then drop in ServiceNow. The account's default stakeholders are resolved,
+	// never stored, so they are not in it.
 	if s.snWriteback != nil {
 		if patcher, ok := s.snMirror.(snWatchListPatcher); ok {
-			mirrorUserIDs := make([]string, 0, len(watchers))
-			for _, w := range watchers {
-				if !w.Locked && w.ID != "" {
-					mirrorUserIDs = append(mirrorUserIDs, w.ID)
-				}
-			}
 			s.snWriteback.Dispatch(ctx, "case", req.ID, "update",
-				map[string]any{"id": req.ID, "watchList": mirrorUserIDs},
+				map[string]any{"id": req.ID, "addWatchers": req.AddWatchers, "removeWatchers": req.RemoveWatchers},
 				func(writeCtx context.Context) error {
-					_, err := patcher.patchCaseWatchList(writeCtx, req.ID, mirrorUserIDs)
+					storedIDs, err := s.repo.CaseWatcherUserIDs(writeCtx, req.ID)
+					if err != nil {
+						return err
+					}
+					_, err = patcher.patchCaseWatchList(writeCtx, req.ID, storedIDs)
 					return err
 				},
 			)

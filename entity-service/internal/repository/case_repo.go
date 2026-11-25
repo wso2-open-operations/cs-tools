@@ -582,6 +582,11 @@ type CaseRepository interface {
 	// and returns the resulting watch list and the new updated_on. NotFoundError
 	// if caseID does not exist; ValidationError if an added user does not exist.
 	ChangeCaseWatchers(ctx context.Context, caseID string, addIDs, removeIDs []string, callerEmail string) ([]domain.WatchListUser, time.Time, error)
+	// CaseWatcherUserIDs returns the user ids stored as the case's watchers,
+	// all of them: unlike the resolved watch list it leaves out neither the
+	// stored watchers a portal hides nor the account's default stakeholders,
+	// which are never stored. It is what a ServiceNow whole-list mirror must send.
+	CaseWatcherUserIDs(ctx context.Context, caseID string) ([]string, error)
 	// AddCaseWatcherIfAbsent inserts one work_item_watcher row for
 	// (caseID, userID) unless one already exists -- a targeted add, unlike
 	// SetCaseWatchList's full delete+insert replace, so it can run from a
@@ -4360,6 +4365,25 @@ func (r *caseRepo) ChangeCaseWatchers(ctx context.Context, caseID string, addIDs
 		return nil, time.Time{}, err
 	}
 	return watchers, updatedOn, nil
+}
+
+// CaseWatcherUserIDs implements CaseRepository.
+func (r *caseRepo) CaseWatcherUserIDs(ctx context.Context, caseID string) ([]string, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT user_id::text FROM work_item_watcher WHERE work_item_id = $1 ORDER BY user_id`, caseID)
+	if err != nil {
+		return nil, fmt.Errorf("query case watcher ids: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan case watcher id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // AddCaseWatcherIfAbsent implements CaseRepository.

@@ -122,3 +122,46 @@ func TestCaseService_UpdateCase_WatchDelta_RejectsNonProjectMemberOnAdd(t *testi
 		t.Error("ChangeCaseWatchers was called despite a non-member being added")
 	}
 }
+
+// In dual-write ServiceNow can only replace its watch list, so the mirror gets
+// every stored watcher read when the write runs: not the delta, and not the
+// response list, which hides stored watchers the portal does not show.
+func TestCaseService_UpdateCase_WatchDelta_MirrorSendsStoredList(t *testing.T) {
+	called := make(chan []string, 1)
+	mirror := &stubMirrorCaseService{
+		patchCaseWatchListFn: func(_ context.Context, _ string, got []string) (domain.UpdatedCase, error) {
+			called <- got
+			return domain.UpdatedCase{}, nil
+		},
+	}
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
+		changeCaseWatchers: func(context.Context, string, []string, []string, string) ([]domain.WatchListUser, time.Time, error) {
+			// The response list shows one watcher; a second is stored but hidden.
+			return []domain.WatchListUser{{ID: deltaUserA}}, time.Now(), nil
+		},
+		caseWatcherUserIDs: func(context.Context, string) ([]string, error) {
+			return []string{deltaUserA, deltaUserB}, nil
+		},
+	}
+	userRepo := stubUserRepo{getUserByEmail: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: testDeploymentUUID, Email: "jane.doe@example.com"}, nil
+	}}
+	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, nil, dispatcher, mirror, nil, "")
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, AddWatchers: []string{deltaUserA}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case got := <-called:
+		if len(got) != 2 || got[0] != deltaUserA || got[1] != deltaUserB {
+			t.Errorf("mirror got %v, want both stored watchers", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the update was never mirrored")
+	}
+}
