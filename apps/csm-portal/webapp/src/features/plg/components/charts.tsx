@@ -30,9 +30,12 @@ export function DonutChart({
   data,
   humanize,
   keepEmptyLabels,
+  solid,
 }: {
   data: CountByLabel[];
   humanize?: boolean;
+  /** A full pie instead of a ring. */
+  solid?: boolean;
   /** Keep zero-count labels in the legend (no slice), for a fixed vocabulary. */
   keepEmptyLabels?: boolean;
 }): JSX.Element {
@@ -50,9 +53,9 @@ export function DonutChart({
         }))}
         colors={colors}
         nameKey="name"
-        innerRadius={50}
+        innerRadius={solid ? 0 : 50}
         outerRadius={78}
-        paddingAngle={2}
+        paddingAngle={solid ? 0 : 2}
         // Off, so the ring is there the moment the card paints and does not
         // re-animate every time the period changes.
         isAnimationActive={false}

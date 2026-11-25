@@ -69,7 +69,7 @@ export function DashboardCharts({ data }: { data?: DashboardAnalytics }): JSX.El
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 5 }}>
           <SectionCard fill title="UTM Sources of the Registrations">
-            {data ? <CountBarChart data={readable(data.utmSources)} /> : <LoadingBlock />}
+            {data ? <DonutChart data={readable(data.utmSources)} solid /> : <LoadingBlock />}
           </SectionCard>
         </Grid>
         <Grid size={{ xs: 12, md: 7 }}>

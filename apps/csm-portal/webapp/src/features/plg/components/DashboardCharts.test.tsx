@@ -22,8 +22,8 @@ import type { DashboardAnalytics } from "@features/plg/api/types";
 
 // Recharts needs a layout jsdom lacks; the cards and their data are under test.
 vi.mock("@features/plg/components/charts", () => ({
-  DonutChart: ({ data }: { data: { label: string; count: number }[] }) => (
-    <div>donut:{data.map((d) => `${d.label}=${d.count}`).join(",")}</div>
+  DonutChart: ({ data, solid }: { data: { label: string; count: number }[]; solid?: boolean }) => (
+    <div>{solid ? "pie" : "donut"}:{data.map((d) => `${d.label}=${d.count}`).join(",")}</div>
   ),
   MultiLineChart: () => <div>lines</div>,
   CountBarChart: ({ data }: { data: { label: string }[] }) => <div>bars:{data.map((d) => d.label).join(",")}</div>,
@@ -72,7 +72,7 @@ describe("DashboardCharts", () => {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
     // A registration with no UTM source reads as words, a real source as itself.
-    expect(screen.getByText("bars:google,Not recorded")).toBeInTheDocument();
+    expect(screen.getByText("pie:google=2,Not recorded=1")).toBeInTheDocument();
     // The validation's "could not tell" is not a class of email.
     // The four email classes are always listed; Unknown is left out.
     expect(
