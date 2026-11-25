@@ -87,13 +87,7 @@ func (h *AlertMuteRuleMutedAlertsHandler) ListMutedAlerts(w http.ResponseWriter,
 	result, err := h.alertCore.MutedIncidents(r.Context(), id, limit, offset)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "alert-core MutedIncidents failed", "userID", user.UserID, "id", id, "err", err)
-		// alert-core's 401 means this backend's token is wrong, not that the engineer is signed out.
-		var apiErr *apierror.Error
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
-			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-			return
-		}
-		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsUnavailable)
+		writeAlertCoreError(w, err, errMsgMutedAlertsUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -139,7 +133,7 @@ func (h *AlertMuteRuleMutedAlertsHandler) ListMutedCounts(w http.ResponseWriter,
 	result, err := h.alertCore.MutedCounts(r.Context(), ids)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "alert-core MutedCounts failed", "userID", user.UserID, "rules", len(ids), "err", err)
-		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsUnavailable)
+		writeAlertCoreError(w, err, errMsgMutedAlertsUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -168,7 +162,7 @@ func (h *AlertMuteRuleMutedAlertsHandler) ListAlertFieldValues(w http.ResponseWr
 	result, err := h.alertCore.FieldValues(r.Context(), field, query, limit)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "alert-core FieldValues failed", "userID", user.UserID, "field", field, "err", err)
-		writeError(w, http.StatusServiceUnavailable, errMsgFieldValuesUnavailable)
+		writeAlertCoreError(w, err, errMsgFieldValuesUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -185,4 +179,18 @@ func queryInt(r *http.Request, name string, def, lo, hi int) (int, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// writeAlertCoreError is the one mapping of an alert-core read failure, for the three
+// handlers above: alert-core's 400 (a request it refuses) is the caller's 400, with the
+// fixed message; anything else is 503 with unavailableMsg. Its 401 or 403 means this
+// backend's own token was refused, not that the engineer is signed out, so it is 503
+// too, never passed through.
+func writeAlertCoreError(w http.ResponseWriter, err error, unavailableMsg string) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, unavailableMsg)
 }

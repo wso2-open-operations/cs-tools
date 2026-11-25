@@ -169,3 +169,21 @@ func TestListMutedCounts(t *testing.T) {
 	}
 	assertStatus(t, callMutedCounts(NewAlertMuteRuleMutedAlertsHandler(nil), "/alert-mute-rules/muted-counts?ids="+mutedRuleID, true), http.StatusServiceUnavailable)
 }
+
+// TestAlertCoreErrorsMapTheSameOnEveryRoute: all three routes share one mapping: alert-core's
+// 400 is the caller's 400, its 401 or 403 (this backend's token) and anything else is 503.
+func TestAlertCoreErrorsMapTheSameOnEveryRoute(t *testing.T) {
+	for _, c := range []struct {
+		status, want int
+	}{
+		{http.StatusBadRequest, http.StatusBadRequest},
+		{http.StatusUnauthorized, http.StatusServiceUnavailable},
+		{http.StatusForbidden, http.StatusServiceUnavailable},
+		{http.StatusInternalServerError, http.StatusServiceUnavailable},
+	} {
+		h := NewAlertMuteRuleMutedAlertsHandler(&fakeAlertCore{err: &apierror.Error{StatusCode: c.status}})
+		assertStatus(t, callMutedAlerts(h, "/alert-mute-rules/"+mutedRuleID+"/muted-alerts", true), c.want)
+		assertStatus(t, callMutedCounts(h, "/alert-mute-rules/muted-counts?ids="+mutedRuleID, true), c.want)
+		assertStatus(t, callFieldValues(h, "/alert-field-values?field=service", true), c.want)
+	}
+}
