@@ -22778,7 +22778,7 @@ paths:
   /plg/registrations/ingest:
     post:
       summary: Land a batch of registrations.
-      description: "One coarse endpoint because the transaction cannot span HTTP: per registration it upserts the person, the organisation, the pairing and its attributes, and writes the genesis history row \u2014 all together. Each registration lands independently, so one bad record does not reject the rest. Idempotency is structural: `plg_organization.organization_name` is `UNIQUE`, which is what makes a redelivered event a no-op."
+      description: "Service credential only: a client in M2M_CLIENT_IDS, never a user token (403). One coarse endpoint because the transaction cannot span HTTP: per registration it upserts the person, the organisation, the pairing and its attributes, and writes the genesis history row \u2014 all together. Each registration lands independently, so one bad record does not reject the rest. Idempotency is structural: `plg_organization.organization_name` is `UNIQUE`, which is what makes a redelivered event a no-op."
       operationId: plgIngestRegistrations
       requestBody:
         required: true
@@ -22809,6 +22809,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden — the caller is not a service credential in M2M_CLIENT_IDS.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
           content:
@@ -22819,6 +22825,7 @@ paths:
     post:
       summary: Record a registration that could not be landed.
       description: >
+        Service credential only: a client in M2M_CLIENT_IDS, never a user token (403).
         The payload is stored verbatim so the row can be replayed by posting it
         back to the ingest webhook. The response carries no identifier: rows are
         found by querying plg_ingest_failure, not by a reference handed back here.
@@ -22844,6 +22851,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden — the caller is not a service credential in M2M_CLIENT_IDS.
           content:
             application/json:
               schema:
@@ -45618,6 +45631,44 @@ components:
           type: string
           nullable: true
           description: The owner's email classification from a registration playbook, the most recently set one.
+        registrationMetadata:
+          type: object
+          nullable: true
+          description: >-
+            Visit and UTM context of the organisation's earliest registration; null when that registration
+            has none, even if a later registration does. The utm* fields are those of the landing URL of the
+            visit that led to the signup.
+          properties:
+            utmSource:
+              type: string
+              nullable: true
+            utmMedium:
+              type: string
+              nullable: true
+            utmCampaign:
+              type: string
+              nullable: true
+            initialUtmSource:
+              type: string
+              nullable: true
+            initialUtmMedium:
+              type: string
+              nullable: true
+            initialUtmCampaign:
+              type: string
+              nullable: true
+            referringDomain:
+              type: string
+              nullable: true
+            initialReferringDomain:
+              type: string
+              nullable: true
+            signInMethod:
+              type: string
+              nullable: true
+            preferredLanguage:
+              type: string
+              nullable: true
         fieldsInherited:
           type: boolean
         platformCards:
@@ -46195,6 +46246,16 @@ components:
                 type: string
               count:
                 type: integer
+        registrationsByEntryProduct:
+          type: array
+          description: Organisations by the product of their earliest registration, each counted once.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
         registrationsByLifecycleStage:
           type: array
           items:
@@ -46232,6 +46293,54 @@ components:
                     type: array
                     items:
                       type: integer
+        utmSources:
+          type: array
+          description: Entry registrations by utm_source of the landing URL; NOT_RECORDED when the signup carried none.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        emailClassification:
+          type: array
+          description: Entry registrations by the owner's email classification; NOT_CLASSIFIED until the validation has answered.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        qualificationOverview:
+          type: array
+          description: Entry registrations by eligibility outcome (ELIGIBLE, MONITOR, EXCLUDED); NOT_ASSESSED until one is set.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        qualifiedByUtm:
+          type: array
+          description: Eligibility outcomes per utm_source over each organisation's entry registration only, busiest first, at most 10.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              eligible:
+                type: integer
+              monitor:
+                type: integer
+              excluded:
+                type: integer
+              notAssessed:
+                type: integer
+              total:
+                type: integer
     PlgWorkQueue:
       type: object
       properties:
@@ -47190,6 +47299,33 @@ components:
             agent-manager, api-platform, integration-platform or identity-platform. Makes the registration a Cloud
             one. Unknown, or naming another product than initiatedPlatform, fails it.
           example: api-platform
+        metadata:
+          type: object
+          description: >-
+            Visit and UTM context of a Cloud signup. The utm* fields are those of the landing URL of the visit
+            that led to the signup; the initial* ones are of the visitor's first visit. Stored per pairing; a
+            value once known is kept, a later one only fills what is missing. Nothing identifies a person.
+          properties:
+            utmSource:
+              type: string
+            utmMedium:
+              type: string
+            utmCampaign:
+              type: string
+            initialUtmSource:
+              type: string
+            initialUtmMedium:
+              type: string
+            initialUtmCampaign:
+              type: string
+            referringDomain:
+              type: string
+            initialReferringDomain:
+              type: string
+            signInMethod:
+              type: string
+            preferredLanguage:
+              type: string
         countryName:
           type: string
         companyNameFromDomain:

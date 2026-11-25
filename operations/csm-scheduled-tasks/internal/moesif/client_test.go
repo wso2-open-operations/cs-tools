@@ -99,12 +99,39 @@ func TestSearchEventsPagesWithTheLastSortKey(t *testing.T) {
 	if got := queries[1]["search_after"]; !reflect.DeepEqual(got, []any{float64(1794103200001)}) {
 		t.Errorf("search_after = %v, want the last sort key, exact", got)
 	}
+	if got := queries[0]["sort"]; !reflect.DeepEqual(got, []any{
+		map[string]any{"request.time": map[string]any{"order": "asc", "unmapped_type": "long"}},
+		map[string]any{"_id": map[string]any{"order": "asc"}},
+	}) {
+		t.Errorf("sort = %v, want request.time then _id", got)
+	}
 	if got := queries[0]["_source"]; !reflect.DeepEqual(got, []any{"request.time", "company_id"}) {
 		t.Errorf("_source = %v, want only the fields asked for", got)
 	}
 	want := map[string]any{"bool": map[string]any{"must": []any{map[string]any{"terms": map[string]any{"action_name.raw": []any{"a", "b"}}}}}}
 	if !reflect.DeepEqual(queries[0]["post_filter"], want) {
 		t.Errorf("post_filter = %v", queries[0]["post_filter"])
+	}
+}
+
+// Events sharing a timestamp are told apart by _id: the cursor sent for the next
+// page carries both sort components, so none at the page edge is skipped.
+func TestSearchEventsCursorCarriesTheTiebreaker(t *testing.T) {
+	tie := func(id string) string {
+		return fmt.Sprintf(`{"_id":%q,"sort":[1794103200000,%q],"_source":{"company_id":"c-%s"}}`, id, id, id)
+	}
+	var queries []map[string]any
+	c := serve(t, 200, []string{tie("a") + "," + tie("b"), tie("c")}, &queries)
+
+	hits, _, err := c.SearchEvents(context.Background(), query())
+	if err != nil || len(hits) != 3 {
+		t.Fatalf("hits = %d, err = %v", len(hits), err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want 2", len(queries))
+	}
+	if got := queries[1]["search_after"]; !reflect.DeepEqual(got, []any{float64(1794103200000), "b"}) {
+		t.Errorf("search_after = %v, want both the time and the event id", got)
 	}
 }
 

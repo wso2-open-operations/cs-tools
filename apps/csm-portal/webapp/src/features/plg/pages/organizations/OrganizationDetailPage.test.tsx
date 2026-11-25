@@ -168,3 +168,38 @@ describe("OrganizationDetailPage: Cloud ids", () => {
     expect(screen.getByText("Cloud organisation id")).toBeInTheDocument();
   });
 });
+
+describe("OrganizationDetailPage: registration metadata", () => {
+  const withMeta = {
+    ...organization,
+    registrationMetadata: {
+      utmSource: "google",
+      utmMedium: "cpc",
+      utmCampaign: "spring-launch",
+      initialUtmSource: "newsletter",
+      initialUtmMedium: null,
+      initialUtmCampaign: null,
+      referringDomain: "example.com",
+      initialReferringDomain: null,
+      signInMethod: "github",
+      preferredLanguage: "en-GB",
+    },
+  };
+
+  it("shows the campaign, source, medium, referring domain and language of the signup's visit", () => {
+    page.current = withMeta;
+    renderAt("/plg/organizations/org-1", null);
+    expect(screen.getByText("UTM campaign")).toBeInTheDocument();
+    expect(screen.getByText("spring-launch")).toBeInTheDocument();
+    expect(screen.getByText("google")).toBeInTheDocument();
+    expect(screen.getByText("cpc")).toBeInTheDocument();
+    expect(screen.getByText("example.com")).toBeInTheDocument();
+    expect(screen.getByText("en-GB")).toBeInTheDocument();
+  });
+
+  it("shows dashes when the signup carried no metadata", () => {
+    renderAt("/plg/organizations/org-1", null);
+    expect(screen.getByText("UTM campaign")).toBeInTheDocument();
+    expect(screen.queryByText("spring-launch")).not.toBeInTheDocument();
+  });
+});

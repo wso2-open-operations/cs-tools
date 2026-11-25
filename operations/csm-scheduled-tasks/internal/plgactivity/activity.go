@@ -21,6 +21,7 @@ package plgactivity
 import (
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -31,9 +32,17 @@ const SessionGap = 30 * time.Minute
 // 2026-11): counted, but not as the user's actions.
 var setupActions = map[string]bool{"registered-gateway": true, "rotated-gateway-token": true}
 
-// productAction is an Agent Manager action (created-agent, deleted-agent).
-// Account events such as "Select Subscription Plan" share the platform tag.
-var productAction = regexp.MustCompile(`^[a-z]+(-[a-z]+)+$`)
+// productAction matches a platform action name such as created-agent or
+// apip.admin.landing-page-open. Names with spaces or capitals do not match.
+var productAction = regexp.MustCompile(`^[a-z0-9]+(?:[-.][a-z0-9]+)+$`)
+
+// accountPrefix starts WSO2 Cloud account events, which are not platform work.
+const accountPrefix = "cloud-core."
+
+func isUserAction(action string) bool {
+	last := action[strings.LastIndex(action, ".")+1:]
+	return productAction.MatchString(action) && !setupActions[last] && !strings.HasPrefix(action, accountPrefix)
+}
 
 // Event is one Agent Manager event, by time and action only.
 type Event struct {
@@ -46,7 +55,7 @@ type Activity struct {
 	FirstEventOn, LastEventOn *time.Time
 	EventCount                int            // every event
 	ActionCounts              map[string]int // every event, by action
-	Actions                   int            // the user's Agent Manager actions
+	Actions                   int            // the user's platform actions
 	SessionMinutes            *int           // the user's first session; nil without any
 }
 
@@ -66,7 +75,7 @@ func Derive(events []Event, from, to time.Time) Activity {
 		if a.LastEventOn == nil || e.At.After(*a.LastEventOn) {
 			a.LastEventOn = ptr(e.At)
 		}
-		if productAction.MatchString(e.Action) && !setupActions[e.Action] {
+		if isUserAction(e.Action) {
 			user = append(user, e)
 		}
 	}

@@ -37,7 +37,18 @@ import (
 )
 
 // Platforms maps a portal product to its Moesif metadata.platform.
-var Platforms = map[string]string{"AGENT_PLATFORM": "Agent Manager"}
+var Platforms = map[string]string{
+	"AGENT_PLATFORM":       "Agent Manager",
+	"IAM":                  "Identity Platform",
+	"API_PLATFORM":         "API Platform",
+	"INTEGRATION_PLATFORM": "Integration Platform",
+}
+
+// ActionField is the Moesif field every product's events name their action in:
+// created-agent style for Agent Manager, identity-platform.organization.overview-view,
+// apip.admin.landing-page-open or integration-platform.console.navigation.page-view
+// for the others. It is the one property populated in all products.
+const ActionField = "action_name"
 
 // Task codes and option codes of the registration playbook.
 const (
@@ -141,6 +152,9 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 		class := it.EmailClassification
 		var newClass *string
 		if deref(class) == "" || deref(class) == classUnknown {
+			if canClassify(opts, it) {
+				counts["classifyAttempts"]++ // one Directory read each
+			}
 			if c, ok := classify(ctx, opts, it); ok {
 				class, newClass = &c, &c
 				counts["classified"]++
@@ -182,6 +196,7 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 	slog.InfoContext(ctx, "plg registration validation: done", "product", product, "dryRun", opts.DryRun,
 		"pairings", len(items), "eligible", counts[OutcomeEligible], "monitor", counts[OutcomeMonitor],
 		"excluded", counts[OutcomeExcluded], "abandoned", counts["abandoned"], "stale", counts["stale"], "classified", counts["classified"],
+		"classifyAttempts", counts["classifyAttempts"],
 		"valuesWritten", counts["written"],
 		"valuesSkipped", counts["skipped"], "failed", len(failed))
 	return failed, nil
@@ -189,12 +204,18 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 
 const classUnknown = "UNKNOWN"
 
+// canClassify says whether classification is on and the pairing has an owner, so
+// classify will read the Directory.
+func canClassify(opts Options, it QueueItem) bool {
+	return opts.Directory != nil && opts.Classifier != nil && it.OwnerUserID != nil
+}
+
 // classify reads the owner's email, keeps only its domain and whether it is a
 // role mailbox, and asks the AI service about the domain. A personal domain
 // with a role or test mailbox is DISPOSABLE. Any failure leaves the pairing
 // unclassified until the next run; logs carry the pairing id only.
 func classify(ctx context.Context, opts Options, it QueueItem) (string, bool) {
-	if opts.Directory == nil || opts.Classifier == nil || it.OwnerUserID == nil {
+	if !canClassify(opts, it) {
 		return "", false
 	}
 	email, err := opts.Directory.UserEmail(ctx, *it.OwnerUserID)
@@ -236,7 +257,7 @@ func readEvents(ctx context.Context, src Searcher, opts Options, platform string
 			From:     from,
 			To:       minTime(to, now),
 			Filter:   platformFilter(platform, ids),
-			Fields:   []string{"company_id", "request.time", "metadata.action"},
+			Fields:   []string{"company_id", "request.time", ActionField},
 			MaxPages: opts.MaxPages,
 		})
 		if err != nil {
@@ -251,7 +272,7 @@ func readEvents(ctx context.Context, src Searcher, opts Options, platform string
 			if !ok || company == "" {
 				continue
 			}
-			byCompany[company] = append(byCompany[company], plgactivity.Event{At: at, Action: moesif.Text(h.Source, "metadata.action")})
+			byCompany[company] = append(byCompany[company], plgactivity.Event{At: at, Action: moesif.Text(h.Source, ActionField)})
 		}
 	}
 	return byCompany, nil
@@ -261,7 +282,7 @@ func platformFilter(platform string, companyIDs []string) map[string]any {
 	return map[string]any{"bool": map[string]any{"must": []map[string]any{
 		{"term": map[string]any{"metadata.platform.raw": platform}},
 		{"terms": map[string]any{"company_id.raw": companyIDs}},
-		{"exists": map[string]any{"field": "metadata.action"}},
+		{"exists": map[string]any{"field": ActionField}},
 	}}}
 }
 

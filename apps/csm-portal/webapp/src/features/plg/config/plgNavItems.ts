@@ -31,7 +31,6 @@
  */
 import {
   Building2,
-  ChartColumn,
   Gauge,
   LayoutDashboard,
   Rocket,
@@ -47,7 +46,7 @@ export const PLG_BASE = "/plg";
 export const PLG_NAV_SECTION: CsmNavSection = {
   id: "plg",
   label: "PLG",
-  href: `${PLG_BASE}/dashboard`,
+  href: `${PLG_BASE}/overview`,
   icon: Rocket,
   // CS engineer and admin only, mirroring the backend's PermUsePlg. Set on the
   // section so every page inherits it — `requirements()` walks down from here,
@@ -61,28 +60,13 @@ export const PLG_NAV_SECTION: CsmNavSection = {
   requires: "canUsePlg",
   children: [
     {
-      // Labelled Overview, but this is the leadership view — see
-      // LeadershipDashboardPage. The label is what leadership calls the page;
-      // the component name is what it shows.
+      // The PLG landing page (LeadershipDashboardPage); /plg/dashboard redirects here.
       id: "plg.overview",
       tab: "overview",
       label: "Overview",
       href: `${PLG_BASE}/overview`,
       routes: [`${PLG_BASE}/overview`],
       icon: Gauge,
-    },
-    {
-      // Standalone this was Workspace > Dashboard, and PLG's landing page. It
-      // carries two tiles the leadership view above does not — the queue
-      // counts, which belong to whoever works the queue. The two were one
-      // component until the variant flag proved too fragile; they now share
-      // only their charts.
-      id: "plg.dashboard",
-      tab: "dashboard",
-      label: "Dashboard",
-      href: `${PLG_BASE}/dashboard`,
-      routes: [`${PLG_BASE}/dashboard`],
-      icon: ChartColumn,
     },
     {
       id: "plg.work-queue",

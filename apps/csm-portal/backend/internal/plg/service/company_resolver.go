@@ -170,9 +170,11 @@ func (r *CompanyResolver) lookup(ctx context.Context, companyID, ownerUserID str
 		slog.ErrorContext(ctx, "plg reveal: cloud user email lookup failed", "companyId", companyID, "err", err)
 		return name, nil, domain.IdentityFromCloud
 	}
-	// An owner from another organisation gets no email.
-	if user.OrgUUID != "" && !strings.EqualFold(user.OrgUUID, companyID) {
-		slog.ErrorContext(ctx, "plg reveal: owner belongs to a different org", "companyId", companyID)
+	// No email unless the Directory says the owner belongs to this company: an
+	// owner of another organisation, or one with no organisation id, gets none.
+	if !strings.EqualFold(user.OrgUUID, companyID) {
+		slog.ErrorContext(ctx, "plg reveal: owner is not confirmed in this org", "companyId", companyID,
+			"orgIdReturned", user.OrgUUID != "")
 		return name, nil, domain.IdentityFromCloud
 	}
 	return name, nonEmpty(user.Email), domain.IdentityFromCloud

@@ -33802,6 +33802,44 @@ components:
           type: string
           nullable: true
           description: The owner's email classification from a registration playbook.
+        registrationMetadata:
+          type: object
+          nullable: true
+          description: >-
+            Visit and UTM context of the organisation's earliest registration; null when that registration
+            has none, even if a later registration does. The utm* fields are those of the landing URL of the
+            visit that led to the signup.
+          properties:
+            utmSource:
+              type: string
+              nullable: true
+            utmMedium:
+              type: string
+              nullable: true
+            utmCampaign:
+              type: string
+              nullable: true
+            initialUtmSource:
+              type: string
+              nullable: true
+            initialUtmMedium:
+              type: string
+              nullable: true
+            initialUtmCampaign:
+              type: string
+              nullable: true
+            referringDomain:
+              type: string
+              nullable: true
+            initialReferringDomain:
+              type: string
+              nullable: true
+            signInMethod:
+              type: string
+              nullable: true
+            preferredLanguage:
+              type: string
+              nullable: true
         fieldsInherited:
           type: boolean
         platformCards:
@@ -34249,6 +34287,16 @@ components:
                 type: string
               count:
                 type: integer
+        registrationsByEntryProduct:
+          type: array
+          description: Organisations by the product of their earliest registration, each counted once.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
         registrationsByLifecycleStage:
           type: array
           items:
@@ -34286,6 +34334,54 @@ components:
                     type: array
                     items:
                       type: integer
+        utmSources:
+          type: array
+          description: Entry registrations by utm_source of the landing URL; NOT_RECORDED when the signup carried none.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        emailClassification:
+          type: array
+          description: Entry registrations by the owner's email classification; NOT_CLASSIFIED until the validation has answered.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        qualificationOverview:
+          type: array
+          description: Entry registrations by eligibility outcome (ELIGIBLE, MONITOR, EXCLUDED); NOT_ASSESSED until one is set.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        qualifiedByUtm:
+          type: array
+          description: Eligibility outcomes per utm_source over each organisation's entry registration only, busiest first, at most 10.
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              eligible:
+                type: integer
+              monitor:
+                type: integer
+              excluded:
+                type: integer
+              notAssessed:
+                type: integer
+              total:
+                type: integer
     PlgWorkQueue:
       type: object
       properties:

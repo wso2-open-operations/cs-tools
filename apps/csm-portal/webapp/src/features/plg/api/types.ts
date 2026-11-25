@@ -264,6 +264,19 @@ export interface PlatformCard {
   isNew: boolean;
 }
 
+export interface RegistrationMetadata {
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  initialUtmSource: string | null;
+  initialUtmMedium: string | null;
+  initialUtmCampaign: string | null;
+  referringDomain: string | null;
+  initialReferringDomain: string | null;
+  signInMethod: string | null;
+  preferredLanguage: string | null;
+}
+
 export interface OrganizationDetail {
   id: string;
   /** Null for a cloud-platform organisation; reveal it with useCompanyReveal. */
@@ -280,6 +293,8 @@ export interface OrganizationDetail {
   cloudUserId?: string | null;
   /** The owner's email classification from a registration playbook (CORPORATE, PERSONAL, ...). */
   emailClassification?: string | null;
+  /** The signup's visit context (null when none): utm* of the landing URL, initial* of the first visit. */
+  registrationMetadata?: RegistrationMetadata | null;
   /** True when the Lead fields were resolved from the registrant's other organisations. */
   fieldsInherited: boolean;
   platformCards: PlatformCard[];
@@ -678,9 +693,28 @@ export interface DashboardSummary {
 export interface DashboardAnalytics {
   summary: DashboardSummary;
   registrationsByProduct: CountByLabel[];
+  /** Each organisation once, under its earliest registration's product. */
+  registrationsByEntryProduct: CountByLabel[];
   registrationsByLifecycleStage: CountByLabel[];
   subscriptionMix: CountByLabel[];
   registrationsOverTime: TimeSeries;
+  /** By utm_source; NOT_RECORDED when none. */
+  utmSources: CountByLabel[];
+  /** By email class; NOT_CLASSIFIED until set. */
+  emailClassification: CountByLabel[];
+  /** By eligibility outcome; NOT_ASSESSED until set. */
+  qualificationOverview: CountByLabel[];
+  /** Eligibility outcomes per utm_source, busiest first. */
+  qualifiedByUtm: UtmQualification[];
+}
+
+export interface UtmQualification {
+  label: string;
+  eligible: number;
+  monitor: number;
+  excluded: number;
+  notAssessed: number;
+  total: number;
 }
 
 // ---------------------------------------------------------------------------

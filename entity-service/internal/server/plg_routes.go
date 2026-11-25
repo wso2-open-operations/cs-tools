@@ -118,10 +118,10 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool, access service.Acce
 	mux.HandleFunc("DELETE /plg/playbooks/{playbookId}", playbookHandler.DeletePlaybook)          // S4
 
 	// --- ingest --------------------------------------------------------------
-	// The poller lives in the BFF and calls these, so the transaction that
-	// lands a registration stays on this side of the wire.
-	mux.HandleFunc("POST /plg/registrations/ingest", ingestHandler.Register) // I1
-	mux.HandleFunc("POST /plg/ingest-failures", ingestHandler.RecordFailure) // I2
+	// Only the plg_moesif_sync job calls these: a service credential, never a
+	// user token, and a client in M2M_CLIENT_IDS.
+	mux.HandleFunc("POST /plg/registrations/ingest", serviceOnly(access, ingestHandler.Register)) // I1
+	mux.HandleFunc("POST /plg/ingest-failures", serviceOnly(access, ingestHandler.RecordFailure)) // I2
 
 	// --- registration validation ---------------------------------------------
 	// The plg_registration_validation job only: a user token gets 403.

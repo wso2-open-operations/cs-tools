@@ -547,9 +547,29 @@ type OrganizationDetail struct {
 	CloudUserID *string `json:"cloudUserId"`
 	// EmailClassification is the owner's email classification from a
 	// registration playbook; nil when unanswered.
-	EmailClassification *string        `json:"emailClassification"`
-	FieldsInherited     bool           `json:"fieldsInherited"`
-	PlatformCards       []PlatformCard `json:"platformCards"`
+	EmailClassification *string `json:"emailClassification"`
+	// RegistrationMetadata is the visit and UTM context of the earliest
+	// registration; nil when that registration has none.
+	RegistrationMetadata *RegistrationMetadata `json:"registrationMetadata"`
+	FieldsInherited      bool                  `json:"fieldsInherited"`
+	PlatformCards        []PlatformCard        `json:"platformCards"`
+}
+
+// RegistrationMetadata is what a signup said about the visit behind it. The
+// UTM fields are those of the landing URL of the visit that led to the signup;
+// the Initial ones are of the visitor's first visit. A field the source never
+// sent is nil.
+type RegistrationMetadata struct {
+	UTMSource              *string `json:"utmSource"`
+	UTMMedium              *string `json:"utmMedium"`
+	UTMCampaign            *string `json:"utmCampaign"`
+	InitialUTMSource       *string `json:"initialUtmSource"`
+	InitialUTMMedium       *string `json:"initialUtmMedium"`
+	InitialUTMCampaign     *string `json:"initialUtmCampaign"`
+	ReferringDomain        *string `json:"referringDomain"`
+	InitialReferringDomain *string `json:"initialReferringDomain"`
+	SignInMethod           *string `json:"signInMethod"`
+	PreferredLanguage      *string `json:"preferredLanguage"`
 }
 
 // ---------------------------------------------------------------------------
@@ -1229,6 +1249,26 @@ type DashboardAnalytics struct {
 	RegistrationsByLifecycleStage []CountByLabel   `json:"registrationsByLifecycleStage"`
 	SubscriptionMix               []CountByLabel   `json:"subscriptionMix"`
 	RegistrationsOverTime         TimeSeries       `json:"registrationsOverTime"`
+	// RegistrationsByEntryProduct counts each organisation once, under its earliest registration's product.
+	RegistrationsByEntryProduct []CountByLabel `json:"registrationsByEntryProduct"`
+	// UTMSources counts entry registrations by the utm_source of the landing URL.
+	UTMSources []CountByLabel `json:"utmSources"`
+	// EmailClassification counts entry registrations by the owner's email classification.
+	EmailClassification []CountByLabel `json:"emailClassification"`
+	// QualificationOverview counts entry registrations by eligibility outcome.
+	QualificationOverview []CountByLabel `json:"qualificationOverview"`
+	// QualifiedByUTM breaks the outcomes down by utm_source, entry registrations only.
+	QualifiedByUTM []UTMQualification `json:"qualifiedByUtm"`
+}
+
+// UTMQualification is one utm_source's registrations by eligibility outcome.
+type UTMQualification struct {
+	Label       string `json:"label"`
+	Eligible    int    `json:"eligible"`
+	Monitor     int    `json:"monitor"`
+	Excluded    int    `json:"excluded"`
+	NotAssessed int    `json:"notAssessed"`
+	Total       int    `json:"total"`
 }
 
 // ---------------------------------------------------------------------------

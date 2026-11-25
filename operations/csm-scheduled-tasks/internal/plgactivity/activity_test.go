@@ -42,6 +42,19 @@ func TestDerive(t *testing.T) {
 			count:  3,
 		},
 		{
+			name:   "setup actions are recognised under a dotted prefix too",
+			events: []Event{ev(1, "agent-manager.gateway.registered-gateway")},
+			count:  1,
+		},
+		{
+			name: "dotted platform actions count, account events do not",
+			events: []Event{
+				ev(0, "identity-platform.organization.overview-view"), ev(1, "amp.console.onboarding.wizard-step-viewed"), ev(2, "apip.admin.landing-page-open"),
+				ev(4, "integration-platform.console.navigation.page-view"), ev(5, "cloud-core.billing.select-subscription-plan"),
+			},
+			count: 5, actions: 4, session: ptr(4),
+		},
+		{
 			name:   "deletions count as actions",
 			events: []Event{ev(0, "created-agent"), ev(5, "deleted-agent"), ev(20, "created-agent")},
 			count:  3, actions: 3, session: ptr(20),

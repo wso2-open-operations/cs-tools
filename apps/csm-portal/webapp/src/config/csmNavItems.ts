@@ -756,8 +756,8 @@ export interface CsmNavMatch {
  *
  * On a length tie, the later match wins (`>=`, not `>`) — `flattenNavNodes`
  * yields parents before their children, and a section whose `href` is just an
- * alias for its own landing child (e.g. "plg"'s href and "plg.dashboard"'s
- * href are both "/plg/dashboard", since the section has no dedicated landing
+ * alias for its own landing child (e.g. "plg"'s href and "plg.overview"'s
+ * href are both "/plg/overview", since the section has no dedicated landing
  * page of its own) would otherwise have the parent win a same-length tie
  * against the more specific child it's aliasing — surfacing as the child
  * never being the one reported active for its own path.

@@ -1,5 +1,5 @@
 import { Box } from "@wso2/oxygen-ui";
-import { LineChart, PieChart } from "@wso2/oxygen-ui-charts-react";
+import { BarChart, LineChart, PieChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
 
 import type { CountByLabel, TimeSeries } from "@features/plg/api/types";
@@ -29,13 +29,19 @@ import { humanizeEnum } from "@features/plg/utils/format";
 export function DonutChart({
   data,
   humanize,
+  keepEmptyLabels,
+  solid,
 }: {
   data: CountByLabel[];
   humanize?: boolean;
+  /** A full pie instead of a ring. */
+  solid?: boolean;
+  /** Keep zero-count labels in the legend (no slice), for a fixed vocabulary. */
+  keepEmptyLabels?: boolean;
 }): JSX.Element {
   const colors = useChartColors();
-  const rows = data.filter((d) => d.count > 0);
-  if (!rows.length) return <EmptyState message="Nothing to show for this period" />;
+  const rows = keepEmptyLabels ? data : data.filter((d) => d.count > 0);
+  if (!rows.some((d) => d.count > 0)) return <EmptyState message="Nothing to show for this period" />;
 
   return (
     <Box height={280}>
@@ -47,9 +53,9 @@ export function DonutChart({
         }))}
         colors={colors}
         nameKey="name"
-        innerRadius={50}
+        innerRadius={solid ? 0 : 50}
         outerRadius={78}
-        paddingAngle={2}
+        paddingAngle={solid ? 0 : 2}
         // Off, so the ring is there the moment the card paints and does not
         // re-animate every time the period changes.
         isAnimationActive={false}
@@ -133,6 +139,86 @@ export function MultiLineChart({
         margin={{ left: 0, right: 16, top: 8 }}
         grid={{ show: true, strokeDasharray: "3 3" }}
         yAxis={integerAxis(peak)}
+        legend={{ show: true }}
+        tooltip={{ show: true }}
+      />
+    </Box>
+  );
+}
+
+/** One bar per label, for free-text labels such as UTM sources. Zero rows are dropped. */
+export function CountBarChart({
+  data,
+  humanize,
+  height = 280,
+}: {
+  data: CountByLabel[];
+  humanize?: boolean;
+  height?: number;
+}): JSX.Element {
+  const colors = useChartColors();
+  const rows = data.filter((d) => d.count > 0);
+  if (!rows.length) return <EmptyState message="Nothing to show for this period" />;
+  const peak = Math.max(...rows.map((r) => r.count));
+
+  return (
+    <Box height={height}>
+      <BarChart
+        height="100%"
+        data={rows.map((r) => ({ name: humanize ? humanizeEnum(r.label) : r.label, Registrations: r.count }))}
+        xAxisDataKey="name"
+        bars={[{ dataKey: "Registrations", fill: colors[0], radius: [4, 4, 0, 0], isAnimationActive: false }]}
+        margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+        grid={{ show: true, strokeDasharray: "3 3" }}
+        yAxis={{ show: true, ...integerAxis(peak) }}
+        legend={{ show: false }}
+        tooltip={{ show: true }}
+      />
+    </Box>
+  );
+}
+
+/** One named, coloured stack segment of a StackedBarChart; `key` names a numeric field of the row. */
+export interface StackSegment<K extends string = string> {
+  key: K;
+  label: string;
+  color: string;
+}
+
+/** A stacked bar per label: the segments add up to the label's total. */
+export function StackedBarChart<K extends string, R extends { label: string } & Record<K, number>>({
+  rows,
+  segments,
+  height = 280,
+}: {
+  rows: R[];
+  segments: Array<StackSegment<K>>;
+  height?: number;
+}): JSX.Element {
+  if (!rows.length) return <EmptyState message="Nothing to show for this period" />;
+  const peak = Math.max(...rows.map((r) => segments.reduce((sum, seg) => sum + r[seg.key], 0)));
+
+  return (
+    <Box height={height}>
+      <BarChart
+        height="100%"
+        data={rows.map((r) => {
+          const row: Record<string, string | number> = { name: r.label };
+          segments.forEach((seg) => {
+            row[seg.label] = r[seg.key];
+          });
+          return row;
+        })}
+        xAxisDataKey="name"
+        bars={segments.map((seg) => ({
+          dataKey: seg.label,
+          stackId: "outcome",
+          fill: seg.color,
+          isAnimationActive: false,
+        }))}
+        margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+        grid={{ show: true, strokeDasharray: "3 3" }}
+        yAxis={{ show: true, ...integerAxis(peak) }}
         legend={{ show: true }}
         tooltip={{ show: true }}
       />

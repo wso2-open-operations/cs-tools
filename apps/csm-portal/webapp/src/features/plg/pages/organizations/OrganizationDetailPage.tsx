@@ -261,6 +261,12 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
           <Field label="Cloud user id" value={org.cloudUserId ?? "—"} />
           <Field label="Registered on" value={formatDate(org.createdOn)} />
           <Field label="Country" value={org.countryName ?? "—"} />
+          {/* UTM values are those of the signup's landing URL. First-visit UTM and sign-in method are stored, not shown. */}
+          <Field label="UTM campaign" value={org.registrationMetadata?.utmCampaign ?? "—"} />
+          <Field label="UTM source" value={org.registrationMetadata?.utmSource ?? "—"} />
+          <Field label="UTM medium" value={org.registrationMetadata?.utmMedium ?? "—"} />
+          <Field label="Referring domain" value={org.registrationMetadata?.referringDomain ?? "—"} />
+          <Field label="Language" value={org.registrationMetadata?.preferredLanguage ?? "—"} />
 
           {org.fieldsInherited ? (
             <Tooltip title="The source sent only the mandatory fields for this organisation. The rest are shown from the same person's earlier registration and are not stored here.">

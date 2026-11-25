@@ -143,7 +143,11 @@ func TestOnlyTheFieldsUsedAreRequested(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(src.q.Fields, ",")
-	if got != "request.time,action_name,user_id,company_id,metadata.initiating_product,metadata.product" {
+	want := "request.time,action_name,user_id,company_id,metadata.initiating_product,metadata.product," +
+		"metadata.utm_source,metadata.utm_medium,metadata.utm_campaign," +
+		"metadata.initial_utm_source,metadata.initial_utm_medium,metadata.initial_utm_campaign," +
+		"metadata.referring_domain,metadata.initial_referring_domain,metadata.sign_in_method,metadata.preferred_language"
+	if got != want {
 		t.Errorf("fields = %s", got)
 	}
 }
@@ -208,5 +212,44 @@ func TestARefusedFailureRecordDoesNotHideTheRest(t *testing.T) {
 	}
 	if ent.attempts != 3 || len(ent.failures) != 2 {
 		t.Errorf("attempts = %d, recorded = %d; want all 3 attempted, 2 recorded", ent.attempts, len(ent.failures))
+	}
+}
+
+func TestVisitAndUTMMetadataIsSentWithTheRegistration(t *testing.T) {
+	h := registration("1", "c-1", "api-platform")
+	h.Source["metadata"] = map[string]any{
+		"initiating_product": "api-platform", "utm_source": "google", "utm_medium": "cpc",
+		"utm_campaign": "spring-launch", "initial_utm_source": "newsletter",
+		"referring_domain": "example.com", "preferred_language": "en-GB", "sign_in_method": "github",
+	}
+	ent := &fakeEntity{}
+	if err := run(&fakeSearcher{hits: []moesif.Hit{h, registration("2", "c-2", "core")}}, ent); err != nil {
+		t.Fatal(err)
+	}
+	got := ent.batches[0]
+	m := got[0].Metadata
+	if m == nil || m.UTMSource != "google" || m.UTMMedium != "cpc" || m.UTMCampaign != "spring-launch" ||
+		m.InitialUTMSource != "newsletter" || m.ReferringDomain != "example.com" ||
+		m.PreferredLanguage != "en-GB" || m.SignInMethod != "github" {
+		t.Errorf("metadata = %+v", m)
+	}
+	if got[1].Metadata != nil {
+		t.Errorf("an event with no marketing fields carried %+v", got[1].Metadata)
+	}
+}
+
+func TestMetadataPrefixIsTrimmed(t *testing.T) {
+	for in, want := range map[string]string{
+		"":              DefaultMetadataPrefix,
+		"  ":            DefaultMetadataPrefix,
+		"-":             "",
+		" - ":           "",
+		"metadata.":     "metadata.",
+		"metadata. ":    "metadata.",
+		"  metadata.\t": "metadata.",
+	} {
+		if got := metadataPrefix(in); got != want {
+			t.Errorf("metadataPrefix(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

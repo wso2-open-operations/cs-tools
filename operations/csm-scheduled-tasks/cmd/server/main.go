@@ -453,7 +453,7 @@ func main() {
 	} else if plgValidationEnabled {
 		slog.Warn("plg registration validation: email classification is off; set CSM_AI_SERVICE_BASE_URL and CLOUD_API_BASE_URL")
 	}
-	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM"))
+	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM,IAM,API_PLATFORM,INTEGRATION_PLATFORM"))
 	if plgValidationEnabled {
 		for i, p := range plgValidationProducts {
 			plgValidationProducts[i] = strings.ToUpper(p)
@@ -1466,11 +1466,12 @@ func main() {
 			Name:     plgMoesifSyncTaskName,
 			Schedule: plgMoesifSyncSchedule,
 			Handler: plgsignups.Sync(moesifClient, plgSignupsClient, plgsignups.Options{
-				Events:        events,
-				ProductFields: productFields,
-				Window:        window,
-				BatchSize:     envInt("PLG_MOESIF_SYNC_BATCH_SIZE", 100),
-				MaxPages:      envInt("PLG_MOESIF_SYNC_MAX_PAGES", 100),
+				Events:         events,
+				ProductFields:  productFields,
+				MetadataPrefix: os.Getenv("PLG_MOESIF_SYNC_METADATA_PREFIX"),
+				Window:         window,
+				BatchSize:      envInt("PLG_MOESIF_SYNC_BATCH_SIZE", 100),
+				MaxPages:       envInt("PLG_MOESIF_SYNC_MAX_PAGES", 100),
 			}, time.Now),
 			To: plgMoesifSyncTo,
 			Cc: plgMoesifSyncCc,
