@@ -41,6 +41,8 @@ type fakeHolidayRepo struct {
 	sent          map[string][]string
 	recipients    []domain.HolidayReminderRecipient
 	removed       int
+	// countryByUser is the map the last RemoveMisplacedHolidayTags call got.
+	countryByUser map[string]string
 }
 
 // CREMembers returns the fake's configured CRE members.
@@ -68,6 +70,26 @@ func (f *fakeHolidayRepo) PlaceHolidayTag(_ context.Context, p domain.HolidayTag
 // RemoveCancelledHolidayTags reports the fake's configured removed count without changing anything.
 func (f *fakeHolidayRepo) RemoveCancelledHolidayTags(context.Context, string) (int, error) {
 	return f.removed, nil
+}
+
+// RemoveMisplacedHolidayTags removes the placed tags, from onOrAfter on, whose
+// country is no longer the person's, and records the map it was given.
+func (f *fakeHolidayRepo) RemoveMisplacedHolidayTags(_ context.Context, onOrAfter string, countryByUser map[string]string) (int, error) {
+	f.countryByUser = countryByUser
+	if len(countryByUser) == 0 {
+		return 0, nil
+	}
+	kept := f.placed[:0]
+	n := 0
+	for _, p := range f.placed {
+		if p.Date >= onOrAfter && countryByUser[p.UserID] != p.Country {
+			n++
+			continue
+		}
+		kept = append(kept, p)
+	}
+	f.placed = kept
+	return n, nil
 }
 
 // PlacedBetween returns the placed tags dated in the range, limited to the given teams when any are named.
@@ -168,7 +190,8 @@ func newHolidaySvc(repo *fakeHolidayRepo, holidays *fakePublicHolidayRepo, now t
 }
 
 // TestPlaceUpcoming_PlacesWeekdayHolidaysOncePerPersonAndSkipsTaggedDays checks that
-// only in-window weekday holidays are placed, once per person, and that a day already tagged is skipped.
+// every coming weekday holiday is placed, however far ahead within the horizon, once per
+// person, that past days and days past the horizon are not, and that a day already tagged is skipped.
 func TestPlaceUpcoming_PlacesWeekdayHolidaysOncePerPersonAndSkipsTaggedDays(t *testing.T) {
 	repo := &fakeHolidayRepo{
 		members: []domain.SchedulePerson{
@@ -181,7 +204,9 @@ func TestPlaceUpcoming_PlacesWeekdayHolidaysOncePerPersonAndSkipsTaggedDays(t *t
 	}
 	hol := &fakePublicHolidayRepo{indiaKey: "phoenix", stored: map[string][]domain.PublicHolidayDay{
 		"Sri Lanka": {{Country: "Sri Lanka", Date: "2026-11-16", Title: "Poya"}, {Country: "Sri Lanka", Date: "2026-11-21", Title: "Weekend day"},
-			{Country: "Sri Lanka", Date: "2026-12-25", Title: "Too far"}},
+			{Country: "Sri Lanka", Date: "2026-11-09", Title: "Yesterday"},
+			{Country: "Sri Lanka", Date: "2026-12-25", Title: "Christmas, weeks ahead"},
+			{Country: "Sri Lanka", Date: "2028-11-14", Title: "Past the horizon"}},
 		"India":  {{Country: "India", Date: "2026-11-17", Title: "Diwali"}},
 		"France": {{Country: "France", Date: "2026-11-20", Title: "Leave wins"}},
 	}}
@@ -191,21 +216,68 @@ func TestPlaceUpcoming_PlacesWeekdayHolidaysOncePerPersonAndSkipsTaggedDays(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Placed: lk on the 16th, in on the 17th. Skipped: fr on the 20th (leave).
-	// Not considered: the Saturday, and the 25th (past three weeks).
-	if res.Placed != 2 || res.Skipped != 1 || res.Removed != 1 {
-		t.Fatalf("got %+v, want placed 2, skipped 1, removed 1", res)
+	// Placed: lk on the 16th and on 25 Dec, in on the 17th. Skipped: fr on the
+	// 20th (leave). Not considered: yesterday, the Saturday, and 2028 (past
+	// the two-year horizon).
+	if res.Placed != 3 || res.Skipped != 1 || res.Removed != 1 {
+		t.Fatalf("got %+v, want placed 3, skipped 1, removed 1", res)
+	}
+	var christmas bool
+	for _, p := range repo.placed {
+		if p.Date == "2026-11-09" || p.Date == "2028-11-14" {
+			t.Errorf("placed %s, want only coming days within the horizon", p.Date)
+		}
+		christmas = christmas || (p.UserID == lkUser && p.Date == "2026-12-25")
+	}
+	if !christmas {
+		t.Error("25 Dec, weeks ahead, was not placed")
 	}
 	again, err := svc.PlaceUpcoming(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Placed != 0 || again.Skipped != 3 {
+	if again.Placed != 0 || again.Skipped != 4 {
 		t.Fatalf("a second run placed again: %+v", again)
 	}
 	for _, p := range repo.placed {
 		if p.UserID == lkUser && p.TeamKey != "atlas" {
 			t.Errorf("filed under %q, want the member's team", p.TeamKey)
+		}
+	}
+}
+
+// TestPlaceUpcoming_MovesTagsToThePersonsCountryNow covers a member tagged as
+// Sri Lanka before the India team was known: the run removes that tag and
+// places India's holiday instead.
+func TestPlaceUpcoming_MovesTagsToThePersonsCountryNow(t *testing.T) {
+	repo := &fakeHolidayRepo{
+		members: []domain.SchedulePerson{
+			{UserID: lkUser, TeamKeys: []string{"atlas"}},
+			{UserID: inUser, TeamKeys: []string{"phoenix"}},
+		},
+		placed: []domain.HolidayPlacedRow{
+			{UserID: inUser, TeamKey: "phoenix", Date: "2026-11-16", Country: "Sri Lanka", Title: "Poya"},
+		},
+	}
+	hol := &fakePublicHolidayRepo{indiaKey: "phoenix", stored: map[string][]domain.PublicHolidayDay{
+		"Sri Lanka": {{Country: "Sri Lanka", Date: "2026-11-16", Title: "Poya"}},
+		"India":     {{Country: "India", Date: "2026-11-17", Title: "Diwali"}},
+	}}
+	svc := newHolidaySvc(repo, hol, time.Date(2026, 11, 10, 3, 30, 0, 0, time.UTC))
+
+	res, err := svc.PlaceUpcoming(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Removed != 1 || res.Placed != 2 {
+		t.Fatalf("got %+v, want the Sri Lanka tag removed and two placed", res)
+	}
+	if repo.countryByUser[inUser] != "India" || repo.countryByUser[lkUser] != "Sri Lanka" {
+		t.Errorf("countries handed to the cleanup: %v", repo.countryByUser)
+	}
+	for _, p := range repo.placed {
+		if p.UserID == inUser && p.Country != "India" {
+			t.Errorf("the India team member still has %s's %s", p.Country, p.Date)
 		}
 	}
 }

@@ -31,9 +31,12 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// holidayTagLeadDays is how far ahead a Public holiday tag is placed: past
-// the 14-day notice, so the notice can already say who is tagged.
-const holidayTagLeadDays = 21
+// holidayTagHorizonYears is how far ahead Public holiday tags are placed:
+// every stored holiday from today on, so the roster shows each one as soon as
+// it is stored. The bound only guards against a mistyped year tagging every
+// CRE member decades ahead. Leave added later over a tagged day cuts the tag
+// out (ApplyAbsence), so an early tag blocks nobody.
+const holidayTagHorizonYears = 2
 
 // holidayReminderLeadDays is how far ahead the reminders look.
 const holidayReminderLeadDays = 14
@@ -44,7 +47,7 @@ const holidayReminderLeadDays = 14
 // whoever may remove a member's tag may also confirm the team.
 type RotaWriterAuthorizer func(ctx context.Context, teamKey string) error
 
-// HolidayTagPlacer places the coming weeks' Public holiday tags. The public
+// HolidayTagPlacer places the coming Public holiday tags. The public
 // holiday refresh runs it after every successful refresh.
 type HolidayTagPlacer interface {
 	PlaceUpcoming(ctx context.Context) (domain.HolidayTagPlacementResult, error)
@@ -93,12 +96,13 @@ func (s *holidayAvailabilityService) today() time.Time {
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// PlaceUpcoming removes tags of cancelled holidays, then places a holiday tag on
-// each CRE member for every weekday holiday of their country in the lead window.
+// PlaceUpcoming removes tags of cancelled holidays and tags that are no longer
+// the person's (their country changed, or they left CRE), then places a holiday
+// tag on each CRE member for every coming weekday holiday of their country.
 func (s *holidayAvailabilityService) PlaceUpcoming(ctx context.Context) (domain.HolidayTagPlacementResult, error) {
 	res := domain.HolidayTagPlacementResult{}
 	from := s.today()
-	to := from.AddDate(0, 0, holidayTagLeadDays)
+	to := from.AddDate(holidayTagHorizonYears, 0, 0)
 
 	removed, err := s.repo.RemoveCancelledHolidayTags(ctx, from.Format(time.DateOnly))
 	if err != nil {
@@ -115,13 +119,23 @@ func (s *holidayAvailabilityService) PlaceUpcoming(ctx context.Context) (domain.
 		return res, err
 	}
 	byCountry := map[string][]domain.SchedulePerson{}
+	countryByUser := map[string]string{}
 	for _, p := range members {
 		if len(p.TeamKeys) == 0 {
 			continue
 		}
 		c, _ := holidayCountryFor(p, indiaKey)
 		byCountry[c] = append(byCountry[c], p)
+		countryByUser[p.UserID] = c
 	}
+	// A tag placed while the person's country was read differently (a stored
+	// location that changed, or the India team not known yet) stays wrong
+	// otherwise: its placement is recorded, so nothing would revisit it.
+	misplaced, err := s.repo.RemoveMisplacedHolidayTags(ctx, from.Format(time.DateOnly), countryByUser)
+	if err != nil {
+		return res, err
+	}
+	res.Removed += misplaced
 	countries := make([]string, 0, len(byCountry))
 	for c := range byCountry {
 		countries = append(countries, c)

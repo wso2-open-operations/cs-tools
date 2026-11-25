@@ -75,7 +75,8 @@ type HolidayTagPlacementResult struct {
 	// Skipped: the person already had a tag that day (leave wins), or a
 	// tag was placed for them before.
 	Skipped int `json:"skipped"`
-	// Removed: tags of holidays the calendar no longer has, still untouched.
+	// Removed: untouched tags of holidays the calendar no longer has, or of a
+	// country that is no longer the person's (or of somebody no longer in CRE).
 	Removed int `json:"removed"`
 }
 

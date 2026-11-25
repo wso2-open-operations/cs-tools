@@ -142,7 +142,23 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
   One run at a time per process. It upserts the current and next year for every country in
   use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
-  transient answer never wipes a year. Re-running is safe.
+  transient answer never wipes a year. Re-running is safe. The daily run starts **always**,
+  calendar configured or not: with neither `HOLIDAY_CALENDAR_*` nor `HR_ENTITY_*` it fetches
+  nothing but still places the Public holiday tags for the stored (manual) days.
+- **Added by hand** (migration 0293, `team_schedule_public_holiday.source` = `CALENDAR` /
+  `MANUAL`, `updated_by`): where no calendar is configured (prod today) this is the only
+  source. `GET /team-schedule/public-holidays?from&to&country` (internal staff, at most 366
+  days) lists the stored days with their source, the countries (stored ones plus Sri Lanka
+  and India) and `canEdit`; `POST /team-schedule/public-holidays {country, holidays:[{date,
+  title}]}` (up to 200 days, last year to two years ahead) stores them as MANUAL, a day
+  already stored taking the new title; `DELETE /team-schedule/public-holidays/{country}/{date}`
+  removes any stored day (404 when none). Writes are for a portal admin or a rota admin of
+  any family (`HolidayEditorCheck`, `schedule_holiday_editor.go`); a lead or Rota Manager may
+  not, because a holiday is per country and shared by every family. Each write places the
+  tags again in the background (`placeSoon`, past the request deadline), which also takes
+  away a removed day's untouched tags. **The refresh replaces only CALENDAR rows**
+  (`ReplaceCountryRange`): it never deletes a manual day or retitles one, so a calendar
+  configured later cannot wipe what was added by hand.
 - **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
   roster works while the services are down. A holiday is not leave and moves no shift.
 - **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
@@ -151,8 +167,11 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
     places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
     colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
-    on every member of a rostered CRE team (management left out) for each weekday holiday of
-    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    on every member of a rostered CRE team (management left out) for each coming weekday holiday
+    of their country, however far ahead (two years at most, a guard against a mistyped year), so
+    the roster shows a holiday's tags as soon as it is stored; a past day is never tagged. Leave
+    marked later over a tagged day cuts the tag out (`ApplyAbsence`), so an early tag blocks
+    nobody, and since the placement is recorded the tag does not come back. Like every tag it takes the day off the timesheet (the
     worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
     Alerts does not call them. A lead or rota manager makes somebody available by removing the
     tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
@@ -161,7 +180,18 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     placement and is kept after the tag is removed, so a removed tag is never placed again. A
     day the person already has any tag on (leave wins) is skipped and tried again the next day.
     A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
-    touched (still one day, created and updated by the actor) and forgets the placements.
+    touched (still one day, created and updated by the actor) and forgets the placements. So does
+    a tag whose country is no longer the person's (location changed, the India team became known)
+    or whose person left CRE (`RemoveMisplacedHolidayTags`, every run); their own country's holiday
+    is then placed. An empty member read removes nothing.
+    **Removal versus a run already placing:** `PlaceHolidayTag` tags only a day still stored and
+    holds that holiday row `FOR SHARE` until the tag commits, so a removal (by hand or by the
+    calendar) waits for it and the cleanup it starts sees the tag; and the cleanup never
+    forgets a placement whose tag is still standing untouched (one committed after its read),
+    so the next run removes that tag instead of leaving it with no record. A tag the cleanup
+    removes has its placement forgotten by its tag id in the same transaction, so a holiday
+    stored again meanwhile cannot leave a placement with no tag. Both are covered by
+    `TestHolidayAvailabilityRepository_RemovedHolidayRace`.
   - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
     its person available (no tag that day) **and** the team is confirmed
     (`team_schedule_holiday_confirmation`, one row per team and day). Confirm

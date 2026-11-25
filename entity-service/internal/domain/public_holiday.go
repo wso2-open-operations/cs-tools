@@ -74,6 +74,65 @@ type PublicHolidayDay struct {
 	Title   string
 }
 
+// Where a stored holiday row came from (team_schedule_public_holiday.source,
+// migration 0293).
+const (
+	// PublicHolidaySourceCalendar: the daily refresh from the calendar-events
+	// service. Only these rows are replaced or deleted by a refresh.
+	PublicHolidaySourceCalendar = "CALENDAR"
+	// PublicHolidaySourceManual: added in the portal by a portal or rota admin.
+	PublicHolidaySourceManual = "MANUAL"
+)
+
+// StoredPublicHoliday is one stored holiday row as the holiday editor lists it.
+type StoredPublicHoliday struct {
+	Country string `json:"country"`
+	Date    string `json:"date"`
+	Title   string `json:"title"`
+	Source  string `json:"source"`
+	// UpdatedBy is who added or last changed a manual row; absent for the
+	// refresh's rows.
+	UpdatedBy *string `json:"updatedBy,omitempty"`
+}
+
+// ListPublicHolidaysRequest is GET /team-schedule/public-holidays's query:
+// a window of at most a year and, optionally, one country.
+type ListPublicHolidaysRequest struct {
+	From    string
+	To      string
+	Country string
+}
+
+// PublicHolidaysListResponse answers the list.
+type PublicHolidaysListResponse struct {
+	Holidays []StoredPublicHoliday `json:"holidays"`
+	// Countries is every country stored plus the two the teams fall back to,
+	// for the editor's country picker.
+	Countries []string `json:"countries"`
+	// CanEdit says whether the caller may add or remove holidays (a portal
+	// admin or a rota admin of any family).
+	CanEdit bool `json:"canEdit"`
+}
+
+// ManualPublicHoliday is one day in an add request.
+type ManualPublicHoliday struct {
+	Date  string `json:"date"`
+	Title string `json:"title"`
+}
+
+// AddPublicHolidaysRequest is the body of POST /team-schedule/public-holidays:
+// one country's holidays, added (or retitled) as manual rows.
+type AddPublicHolidaysRequest struct {
+	Country  string                `json:"country"`
+	Holidays []ManualPublicHoliday `json:"holidays"`
+}
+
+// AddPublicHolidaysResponse says how many days were stored. The Public holiday
+// tags are placed in the background right after.
+type AddPublicHolidaysResponse struct {
+	Stored int `json:"stored"`
+}
+
 // PublicHolidayRefreshResult reports one refresh run.
 type PublicHolidayRefreshResult struct {
 	CalendarConfigured  bool      `json:"calendarConfigured"`

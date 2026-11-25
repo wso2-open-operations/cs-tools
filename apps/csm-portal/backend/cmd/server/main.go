@@ -777,6 +777,11 @@ func main() {
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
 	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
 	route("POST /team-schedule/public-holidays/search", handler.PermView, scheduleHandler.SearchSchedulePublicHolidays)
+	// The holiday editor: anyone may read it; adding and removing a day is for a
+	// portal or rota admin, which entity-service decides (403 with its reason).
+	route("GET /team-schedule/public-holidays", handler.PermView, scheduleHandler.ListPublicHolidays)
+	route("POST /team-schedule/public-holidays", handler.PermWrite, scheduleHandler.AddPublicHolidays)
+	route("DELETE /team-schedule/public-holidays/{country}/{date}", handler.PermWrite, scheduleHandler.DeletePublicHoliday)
 	route("POST /team-schedule/holiday-availability/search", handler.PermView, scheduleHandler.SearchHolidayAvailability)
 	// Confirming a team's holiday availability (CRE): entity-service allows
 	// the team's lead, its rota manager, a CRE rota admin or an admin.

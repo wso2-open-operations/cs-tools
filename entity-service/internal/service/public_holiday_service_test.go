@@ -41,6 +41,47 @@ type fakePublicHolidayRepo struct {
 	stored    map[string][]domain.PublicHolidayDay // country -> days
 	locations map[string]string
 	replaced  []string // "country:from"
+
+	// The manual editor's side: rows listed, days upserted by hand (with the
+	// actor) and days deleted.
+	listed    []domain.StoredPublicHoliday
+	countries []string
+	manual    []domain.PublicHolidayDay
+	actor     string
+	deleted   []string // "country|date"
+	missing   bool     // DeleteHoliday finds nothing
+}
+
+// StoredHolidays returns the fake's listed rows of the country (all when "").
+func (f *fakePublicHolidayRepo) StoredHolidays(_ context.Context, country string, _, _ time.Time) ([]domain.StoredPublicHoliday, error) {
+	out := []domain.StoredPublicHoliday{}
+	for _, d := range f.listed {
+		if country == "" || d.Country == country {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// StoredCountries returns the fake's stored countries.
+func (f *fakePublicHolidayRepo) StoredCountries(context.Context) ([]string, error) {
+	return f.countries, nil
+}
+
+// UpsertManualHolidays records the days and the actor.
+func (f *fakePublicHolidayRepo) UpsertManualHolidays(_ context.Context, _ string, days []domain.PublicHolidayDay, actor string, _ time.Time) (int, error) {
+	f.manual = append(f.manual, days...)
+	f.actor = actor
+	return len(days), nil
+}
+
+// DeleteHoliday records the delete, finding nothing when missing is set.
+func (f *fakePublicHolidayRepo) DeleteHoliday(_ context.Context, country, date string) (bool, error) {
+	if f.missing {
+		return false, nil
+	}
+	f.deleted = append(f.deleted, country+"|"+date)
+	return true, nil
 }
 
 // SchedulePeople returns the fake's people, with stored locations applied, limited to ids when given.
