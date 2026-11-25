@@ -188,6 +188,10 @@ export default function AsyncEntityMultiSelect<T>({
           for (const o of next) if (o.label !== o.id) merged[o.id] = o.label;
           return merged;
         });
+        // A selection change (picking, or removing a chip, which Autocomplete
+        // reports only here and then as a "reset" below) clears the text, as
+        // Autocomplete itself did. The search term is left as it was.
+        setInputValue("");
         onChange(next.map((o) => o.id));
       }}
       inputValue={inputValue}

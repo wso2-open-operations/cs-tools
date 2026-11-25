@@ -190,6 +190,39 @@ describe("AsyncEntityMultiSelect — typing", () => {
   });
 });
 
+describe("AsyncEntityMultiSelect — removing a chip", () => {
+  // Regression: removing a chip reaches the picker only as a selection change
+  // and a "reset", and "reset" is ignored to keep typed text, so the text
+  // stayed after the chip was removed.
+  it("clears what is typed when a chip is removed", () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <AsyncEntityMultiSelect<Item>
+        id="test-multi"
+        label="Watch list"
+        values={["group-1"]}
+        onChange={onChange}
+        useSearch={useSearch}
+        getId={(i) => i.id}
+        getLabel={(i) => i.name}
+        knownLabels={{ "group-1": "Choreo SRE Team" }}
+      />,
+    );
+    const input = screen.getByRole("combobox", { name: "Watch list" });
+
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "cab" } });
+    expect(input).toHaveValue("cab");
+
+    const deleteIcon = container.querySelector(".MuiChip-deleteIcon");
+    expect(deleteIcon).not.toBeNull();
+    fireEvent.click(deleteIcon as Element);
+
+    expect(onChange).toHaveBeenCalledWith([]);
+    expect(input).toHaveValue("");
+  });
+});
+
 describe("AsyncEntityMultiSelect — label precedence", () => {
   // Regression: the name cached at mount (or when a value was picked) beat a
   // newer name from the caller's lookup, so a renamed group kept its old name.
