@@ -1118,7 +1118,7 @@ populated in all of them: `amp.console.onboarding.wizard-step-viewed` (Agent Man
   flag (`admin@`, `test+1@`). Only the domain goes to the CSM AI service's
   `POST /ai/email-domains/classify`; a PERSONAL domain with a role mailbox becomes DISPOSABLE. A Directory
   or AI failure leaves it unset for the next run. Off, with a warning at start, unless
-  `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain.
+  `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain. Each run's "done" line counts the Directory reads it made (`classifyAttempts`).
 - **Queue order**: pairings never validated come first, then the least recently validated, so a
   queue over `QueueLimit` (1000) cannot starve the same pairings every run.
 - **Stale exclusions**: entity-service abandons only when the classification the run will hold still

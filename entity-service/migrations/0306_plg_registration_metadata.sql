@@ -35,6 +35,3 @@ CREATE TABLE IF NOT EXISTS plg_registration_metadata (
 
 COMMENT ON TABLE plg_registration_metadata IS
     'Signup visit context from Moesif: utm_* of the landing URL, initial_* of the first visit.';
-
-CREATE INDEX IF NOT EXISTS idx_plg_registration_metadata_source
-    ON plg_registration_metadata (utm_source);

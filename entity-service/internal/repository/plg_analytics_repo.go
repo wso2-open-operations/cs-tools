@@ -130,6 +130,8 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		return nil, err
 	}
 
+	// utm_source is free text a visitor sets in the landing URL, so the number of
+	// distinct values is unbounded: the busiest are kept and the rest folded into OTHER.
 	if out.UTMSources, err = r.countBy(ctx, `
 		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'), COUNT(*)::INT
 		FROM   plg_org_platform op
@@ -139,6 +141,7 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to); err != nil {
 		return nil, err
 	}
+	out.UTMSources = foldRemainder(out.UTMSources, maxUTMSources)
 
 	if out.EmailClassification, err = r.countBy(ctx, `
 		SELECT COALESCE(x.value_text, 'NOT_CLASSIFIED'), COUNT(*)::INT
@@ -175,7 +178,8 @@ const entryRegistrationOnly = `AND  op.id IN (SELECT DISTINCT ON (e.organization
 		                 ORDER  BY e.organization_id, e.registered_on, e.id)`
 
 // registrationTaskValue joins, as x, the value of the pairing's registration task
-// with code $3; NULL when there is no run or no answer.
+// with code $3; NULL when there is no run or no answer. A pairing has one attached
+// run; should it ever have more, the latest one answers, as on the organisation page.
 const registrationTaskValue = `LEFT JOIN LATERAL (
 		    SELECT t.value_text
 		    FROM   plg_playbook_run run
@@ -184,11 +188,28 @@ const registrationTaskValue = `LEFT JOIN LATERAL (
 		    WHERE  run.org_platform_id = op.id AND run.detached_on IS NULL
 		      AND  pb.lifecycle_stage = 'REGISTRATION' AND pb.playbook_type = 'PROGRESSIVE'
 		      AND  t.code = $3
-		    ORDER  BY run.created_at
+		    ORDER  BY run.created_at DESC
 		    LIMIT  1) x ON TRUE`
 
-// maxUTMSources bounds the qualified-stats chart; the rest is not shown.
+// maxUTMSources bounds the UTM charts: the qualified-stats chart shows no more
+// sources, and the UTM sources pie folds the rest into OTHER.
 const maxUTMSources = 10
+
+// otherLabel is the label of the folded remainder of a capped breakdown.
+const otherLabel = "OTHER"
+
+// foldRemainder keeps the first n rows (the query orders them busiest first) and
+// adds the rest together as OTHER, so a breakdown's size stays bounded.
+func foldRemainder(rows []domain.CountByLabel, n int) []domain.CountByLabel {
+	if len(rows) <= n {
+		return rows
+	}
+	rest := 0
+	for _, r := range rows[n:] {
+		rest += r.Count
+	}
+	return append(rows[:n:n], domain.CountByLabel{Label: otherLabel, Count: rest})
+}
 
 // qualifiedByUTM counts eligibility outcomes per utm_source, over each
 // organisation's entry registration only (its earliest, as in the entry-product chart).

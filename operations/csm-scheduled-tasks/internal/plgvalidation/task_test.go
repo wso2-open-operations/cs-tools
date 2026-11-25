@@ -344,3 +344,24 @@ func TestEveryPlatformReadsItsActionFromActionName(t *testing.T) {
 		}
 	}
 }
+
+func TestCanClassifyNeedsBothClientsAndAnOwner(t *testing.T) {
+	owner := "u-corp"
+	on := Options{Directory: fakeDirectory{}, Classifier: &fakeClassifier{}}
+	cases := []struct {
+		name string
+		opts Options
+		item QueueItem
+		want bool
+	}{
+		{"on, with an owner", on, QueueItem{OwnerUserID: &owner}, true},
+		{"no owner", on, QueueItem{}, false},
+		{"no directory", Options{Classifier: &fakeClassifier{}}, QueueItem{OwnerUserID: &owner}, false},
+		{"no classifier", Options{Directory: fakeDirectory{}}, QueueItem{OwnerUserID: &owner}, false},
+	}
+	for _, tc := range cases {
+		if got := canClassify(tc.opts, tc.item); got != tc.want {
+			t.Errorf("%s: canClassify = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

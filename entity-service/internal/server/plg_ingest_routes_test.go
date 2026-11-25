@@ -17,29 +17,31 @@
 package server
 
 import (
-	"os"
-	"regexp"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
 // The ingest routes write registrations and set a company's owner user id, so
-// only a service credential may call them.
-func TestPlgIngestRoutesAreServiceOnly(t *testing.T) {
-	src, err := os.ReadFile("plg_routes.go")
-	if err != nil {
-		t.Fatalf("read plg_routes.go: %v", err)
-	}
-	for _, route := range []string{"POST /plg/registrations/ingest", "POST /plg/ingest-failures"} {
-		re := regexp.MustCompile(`HandleFunc\("` + regexp.QuoteMeta(route) + `",\s*([^\n]+)`)
-		matches := re.FindAllStringSubmatch(string(src), -1)
-		if len(matches) == 0 {
-			t.Errorf("%s is not registered in plg_routes.go", route)
-			continue
-		}
-		for _, m := range matches {
-			if !strings.HasPrefix(strings.TrimSpace(m[1]), "serviceOnly(") {
-				t.Errorf("%s must be wrapped in serviceOnly, got %q", route, strings.TrimSpace(m[1]))
+// only a service credential may call them: a person, internal or not, gets 403
+// from the mux itself, before any handler runs.
+func TestPlgIngestRoutesRefuseAPerson(t *testing.T) {
+	mux := http.NewServeMux()
+	// No pool: a refused request never reaches a handler, and an accepted one would fail loudly.
+	registerPLGRoutes(mux, nil, fakeAccess{scope: service.AccessScope{Unrestricted: true}})
+
+	for _, route := range []string{"/plg/registrations/ingest", "/plg/ingest-failures"} {
+		for _, user := range []string{"engineer@example.com", "customer@example.com"} {
+			req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(`{}`))
+			req = req.WithContext(auth.WithIdentity(req.Context(), auth.Identity{Validated: true, UserEmail: user}))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("POST %s as a person: status %d, want 403", route, rec.Code)
 			}
 		}
 	}

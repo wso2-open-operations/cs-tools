@@ -7,7 +7,7 @@ import { LoadingBlock, SectionCard } from "@features/plg/components/common";
 import { humanizeEnum } from "@features/plg/utils/format";
 
 /** The labels the API uses for "the source never said". */
-const PLACEHOLDERS = new Set(["NOT_RECORDED", "NOT_CLASSIFIED", "NOT_ASSESSED"]);
+const PLACEHOLDERS = new Set(["NOT_RECORDED", "NOT_CLASSIFIED", "NOT_ASSESSED", "OTHER"]);
 
 /** The email classes, always listed in this order. */
 const EMAIL_CLASSES = ["CORPORATE", "PERSONAL", "DISPOSABLE", "INTERNAL"];
@@ -19,7 +19,7 @@ function emailClasses(rows: CountByLabel[]): CountByLabel[] {
   return [...EMAIL_CLASSES.map((label) => ({ label, count: counts.get(label) ?? 0 })), ...rest];
 }
 
-/** Reads a placeholder as words; a real value (a UTM source) stays as is. */
+/** Reads a placeholder (or the folded OTHER) as words; a real value (a UTM source) stays as is. */
 function readable<T extends { label: string }>(rows: T[]): T[] {
   return rows.map((r) => (PLACEHOLDERS.has(r.label) ? { ...r, label: humanizeEnum(r.label) } : r));
 }
@@ -61,7 +61,7 @@ export function DashboardCharts({ data }: { data?: DashboardAnalytics }): JSX.El
         </Grid>
         <Grid size={{ xs: 12, md: 5 }}>
           <SectionCard fill title="Email Classification by Registration">
-            {data ? <DonutChart data={readable(emailClasses(data.emailClassification))} humanize keepEmptyLabels /> : <LoadingBlock />}
+            {data ? <DonutChart data={emailClasses(data.emailClassification)} humanize keepEmptyLabels /> : <LoadingBlock />}
           </SectionCard>
         </Grid>
       </Grid>
@@ -75,10 +75,7 @@ export function DashboardCharts({ data }: { data?: DashboardAnalytics }): JSX.El
         <Grid size={{ xs: 12, md: 7 }}>
           <SectionCard fill title="Qualified Registrations with UTM">
             {data ? (
-              <StackedBarChart
-                rows={readable(data.qualifiedByUtm).map((r) => ({ ...r }))}
-                segments={segments}
-              />
+              <StackedBarChart rows={readable(data.qualifiedByUtm)} segments={segments} />
             ) : (
               <LoadingBlock />
             )}

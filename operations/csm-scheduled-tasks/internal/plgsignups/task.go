@@ -212,7 +212,8 @@ func (e event) metadata() *Metadata {
 
 // metadataPrefix resolves the configured prefix ("-" = none).
 func metadataPrefix(p string) string {
-	switch strings.TrimSpace(p) {
+	p = strings.TrimSpace(p)
+	switch p {
 	case "":
 		return DefaultMetadataPrefix
 	case "-":

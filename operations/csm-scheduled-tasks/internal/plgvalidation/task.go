@@ -152,7 +152,9 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 		class := it.EmailClassification
 		var newClass *string
 		if deref(class) == "" || deref(class) == classUnknown {
-			counts["classifyAttempts"]++ // one Directory read each
+			if canClassify(opts, it) {
+				counts["classifyAttempts"]++ // one Directory read each
+			}
 			if c, ok := classify(ctx, opts, it); ok {
 				class, newClass = &c, &c
 				counts["classified"]++
@@ -202,12 +204,18 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 
 const classUnknown = "UNKNOWN"
 
+// canClassify says whether classification is on and the pairing has an owner, so
+// classify will read the Directory.
+func canClassify(opts Options, it QueueItem) bool {
+	return opts.Directory != nil && opts.Classifier != nil && it.OwnerUserID != nil
+}
+
 // classify reads the owner's email, keeps only its domain and whether it is a
 // role mailbox, and asks the AI service about the domain. A personal domain
 // with a role or test mailbox is DISPOSABLE. Any failure leaves the pairing
 // unclassified until the next run; logs carry the pairing id only.
 func classify(ctx context.Context, opts Options, it QueueItem) (string, bool) {
-	if opts.Directory == nil || opts.Classifier == nil || it.OwnerUserID == nil {
+	if !canClassify(opts, it) {
 		return "", false
 	}
 	email, err := opts.Directory.UserEmail(ctx, *it.OwnerUserID)

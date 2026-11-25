@@ -390,6 +390,8 @@ func upsertRegistrationMetadata(ctx context.Context, tx pgx.Tx, pairingID string
 	if !hasValue {
 		return nil
 	}
+	// A value once known is kept, so a redelivered event changes nothing: the row is
+	// only touched, and updated_on only moves, when a column gains a value it lacked.
 	const q = `
 		INSERT INTO plg_registration_metadata (
 		    org_platform_id, utm_source, utm_medium, utm_campaign,
@@ -408,7 +410,17 @@ func upsertRegistrationMetadata(ctx context.Context, tx pgx.Tx, pairingID string
 		    initial_referring_domain = COALESCE(plg_registration_metadata.initial_referring_domain, EXCLUDED.initial_referring_domain),
 		    sign_in_method           = COALESCE(plg_registration_metadata.sign_in_method,           EXCLUDED.sign_in_method),
 		    preferred_language       = COALESCE(plg_registration_metadata.preferred_language,       EXCLUDED.preferred_language),
-		    updated_on               = NOW()`
+		    updated_on               = NOW()
+		WHERE  (plg_registration_metadata.utm_source IS NULL AND EXCLUDED.utm_source IS NOT NULL) OR
+		   (plg_registration_metadata.utm_medium IS NULL AND EXCLUDED.utm_medium IS NOT NULL) OR
+		   (plg_registration_metadata.utm_campaign IS NULL AND EXCLUDED.utm_campaign IS NOT NULL) OR
+		   (plg_registration_metadata.initial_utm_source IS NULL AND EXCLUDED.initial_utm_source IS NOT NULL) OR
+		   (plg_registration_metadata.initial_utm_medium IS NULL AND EXCLUDED.initial_utm_medium IS NOT NULL) OR
+		   (plg_registration_metadata.initial_utm_campaign IS NULL AND EXCLUDED.initial_utm_campaign IS NOT NULL) OR
+		   (plg_registration_metadata.referring_domain IS NULL AND EXCLUDED.referring_domain IS NOT NULL) OR
+		   (plg_registration_metadata.initial_referring_domain IS NULL AND EXCLUDED.initial_referring_domain IS NOT NULL) OR
+		   (plg_registration_metadata.sign_in_method IS NULL AND EXCLUDED.sign_in_method IS NOT NULL) OR
+		   (plg_registration_metadata.preferred_language IS NULL AND EXCLUDED.preferred_language IS NOT NULL)`
 	if _, err := tx.Exec(ctx, q, pairingID, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]); err != nil {
 		return fmt.Errorf("upsert registration metadata: %w", err)
 	}

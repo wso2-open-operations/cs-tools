@@ -178,27 +178,25 @@ export function CountBarChart({
   );
 }
 
-/** One named, coloured stack segment of a StackedBarChart. */
-export interface StackSegment {
-  key: string;
+/** One named, coloured stack segment of a StackedBarChart; `key` names a numeric field of the row. */
+export interface StackSegment<K extends string = string> {
+  key: K;
   label: string;
   color: string;
 }
 
 /** A stacked bar per label: the segments add up to the label's total. */
-export function StackedBarChart({
+export function StackedBarChart<K extends string, R extends { label: string } & Record<K, number>>({
   rows,
   segments,
   height = 280,
 }: {
-  rows: Array<{ label: string } & Record<string, number | string>>;
-  segments: StackSegment[];
+  rows: R[];
+  segments: Array<StackSegment<K>>;
   height?: number;
 }): JSX.Element {
   if (!rows.length) return <EmptyState message="Nothing to show for this period" />;
-  const peak = Math.max(
-    ...rows.map((r) => segments.reduce((sum, seg) => sum + (Number(r[seg.key]) || 0), 0)),
-  );
+  const peak = Math.max(...rows.map((r) => segments.reduce((sum, seg) => sum + r[seg.key], 0)));
 
   return (
     <Box height={height}>
@@ -207,7 +205,7 @@ export function StackedBarChart({
         data={rows.map((r) => {
           const row: Record<string, string | number> = { name: r.label };
           segments.forEach((seg) => {
-            row[seg.label] = Number(r[seg.key]) || 0;
+            row[seg.label] = r[seg.key];
           });
           return row;
         })}

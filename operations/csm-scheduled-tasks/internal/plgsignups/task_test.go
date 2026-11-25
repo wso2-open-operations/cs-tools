@@ -237,3 +237,19 @@ func TestVisitAndUTMMetadataIsSentWithTheRegistration(t *testing.T) {
 		t.Errorf("an event with no marketing fields carried %+v", got[1].Metadata)
 	}
 }
+
+func TestMetadataPrefixIsTrimmed(t *testing.T) {
+	for in, want := range map[string]string{
+		"":              DefaultMetadataPrefix,
+		"  ":            DefaultMetadataPrefix,
+		"-":             "",
+		" - ":           "",
+		"metadata.":     "metadata.",
+		"metadata. ":    "metadata.",
+		"  metadata.\t": "metadata.",
+	} {
+		if got := metadataPrefix(in); got != want {
+			t.Errorf("metadataPrefix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -49,6 +49,7 @@ const data: DashboardAnalytics = {
   utmSources: [
     { label: "google", count: 2 },
     { label: "NOT_RECORDED", count: 1 },
+    { label: "OTHER", count: 4 },
   ],
   emailClassification: [
     { label: "CORPORATE", count: 3 },
@@ -71,8 +72,8 @@ describe("DashboardCharts", () => {
     ]) {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
-    // A registration with no UTM source reads as words, a real source as itself.
-    expect(screen.getByText("pie:google=2,Not recorded=1")).toBeInTheDocument();
+    // A registration with no UTM source and the folded remainder read as words, a real source as itself.
+    expect(screen.getByText("pie:google=2,Not recorded=1,Other=4")).toBeInTheDocument();
     // The validation's "could not tell" is not a class of email.
     // The four email classes are always listed; Unknown is left out.
     expect(
