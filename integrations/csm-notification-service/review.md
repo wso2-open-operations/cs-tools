@@ -20,6 +20,10 @@ review catches it too.
       of the submitted card (title/text) verbatim; log ids and status codes, never the error body.
       That includes the fallback branch for errors that are not `*apierror.Error`: an OAuth token
       error's text carries the token endpoint's response body too, so log its type, not `err`.
+- [ ] A fallback keyed on a blank `clockState` field (e.g. `TeamEmail == ""` meaning "no ABT")
+      excludes incidents: `sendIncidentBreachAlert` blanks `TeamEmail`/`TeamLeadName` on purpose,
+      so a case-only fallback without a `CaseType` check fires on every incident (caught when
+      rebasing the CRE head fallback onto main's incident SLA alerts).
 - [ ] New behavior has a test exercising it, not just a happy-path smoke test — this service has
       an unusually high density of named regression tests for exactly this reason (real,
       live-observed duplicate-send/race bugs each got one).

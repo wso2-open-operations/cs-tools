@@ -199,3 +199,34 @@ func TestTick_BreachEmail_NoABT_DebugMode_ShowsTheCREHeadFallback(t *testing.T) 
 		t.Error("debug email does not show the CRE head it was meant for")
 	}
 }
+
+// TestTick_IncidentBreach_NoSRETeam_DoesNotEmailTheCREHead: an incident's
+// team email goes to its SRE team(s), and sendIncidentBreachAlert blanks
+// TeamEmail on purpose -- that is not "no ABT", so the CRE head is never
+// asked, even when the incident has no SRE team at all.
+func TestTick_IncidentBreach_NoSRETeam_DoesNotEmailTheCREHead(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, &fakePublisher{})
+	e.email = email
+	heads := &fakeCREHeads{emails: []string{"cre-head@example.com"}}
+	e.SetCREHeads(heads)
+	sreTeamWiring(e, chat, nil, []string{"apollo"}, map[string]string{"apollo": "apollo@example.com"})
+	past := time.Now().Add(-5 * time.Hour)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"inc-1|" + ClockResolution: {Found: true, IsActive: true, Stage: "BREACHED", HasBreached: true, StartedOn: &past, AssigneeEmail: "melan@example.com"},
+	}}
+	st.clocks["inc-1|"+ClockResolution] = ClockMeta{CaseNumber: "INC0091536", CaseType: CaseTypeIncident, Team: "Choreo Runtime Group", Priority: "CRITICAL", StartedAt: past}
+	st.wake[wakeMember("inc-1", ClockResolution, 100)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if heads.calls != 0 {
+		t.Errorf("CRE head lookups = %d, want 0 for an incident", heads.calls)
+	}
+	if want := []string{"melan@example.com"}; !slices.Equal(incidentRecipients(email.calls), want) {
+		t.Errorf("email recipients = %v, want the assignee only", incidentRecipients(email.calls))
+	}
+}

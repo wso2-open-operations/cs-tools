@@ -552,6 +552,8 @@ only a phone gets no email (the role holders are not emailed in its place). With
 Team row reads "No ABT assigned (sent to the CRE head)". A lookup that failed
 or found no clock does not count as "no team" (it says nothing about the
 team), so an entity-service outage does not send the head every case's alert.
+Cases only: an incident's team email goes to its SRE team(s), never the CRE
+head, even when it has none.
 
 One known, accepted limitation specific to the overnight email: the fixed
 team it goes to is resolved from the same reference data the chat space's
