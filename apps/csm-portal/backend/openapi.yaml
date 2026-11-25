@@ -29569,6 +29569,24 @@ components:
           items:
             type: string
             format: uuid
+          description: |
+            The full watch list, replacing whatever is stored (so a stale caller overwrites watchers
+            added since). Prefer `addWatchers` / `removeWatchers`.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to add to the watch list, applied against the list stored at that
+            moment so concurrent changes are kept. PostgreSQL data source only. May be combined with
+            `removeWatchers` and other fields, not with `watchList`.
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Platform user ids to remove from the watch list (not watching is a no-op).
 
     UpdateIncidentResponse:
       type: object
