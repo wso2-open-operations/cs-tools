@@ -857,9 +857,13 @@ paths:
     patch:
       summary: Update a case.
       description: >
-        Exactly one of stateKey or watchList is required; watchList must be
-        a non-empty array — an empty array does not count as "provided" and
-        is rejected the same as an omitted field. This is not a bug in this
+        Exactly one of stateKey, watchList, or addWatchers/removeWatchers
+        (alone or together) is required. Use addWatchers/removeWatchers to
+        edit the watch list: they apply against the list stored at that
+        moment, so a colleague's concurrent change is kept, and removeWatchers
+        can take off the last watcher. watchList replaces the whole list and
+        must be a non-empty array — an empty array does not count as
+        "provided" and is rejected the same as an omitted field. This is not a bug in this
         endpoint: entity-service's own ServiceNow implementation only
         forwards watchList upstream when it is non-empty, so there is
         currently no way to clear every watcher via this API at all, at any
@@ -7213,15 +7217,25 @@ components:
 
     CaseUpdateRequest:
       description: >
-        Exactly one of stateKey or watchList is required. stateKey carries
-        ServiceNow's numeric choice-list id (see case_enum_mapping.go), not
-        entity-service's own string enum.
+        Exactly one of stateKey, watchList, or addWatchers/removeWatchers is
+        required. stateKey carries ServiceNow's numeric choice-list id (see
+        case_enum_mapping.go), not entity-service's own string enum.
       type: object
       properties:
         stateKey:
           type: integer
         watchList:
           type: array
+          items:
+            type: string
+        addWatchers:
+          type: array
+          description: Emails to add to the watch list, applied against the stored list.
+          items:
+            type: string
+        removeWatchers:
+          type: array
+          description: Emails to remove from the watch list, applied against the stored list.
           items:
             type: string
 

@@ -390,13 +390,14 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	// entity-service requires exactly one of these primary fields per PATCH —
 	// see dto.UpdateCaseRequest's doc comment.
 	primaryFieldsSet := 0
-	for _, set := range []bool{req.StateKey != nil, len(req.WatchList) > 0} {
+	hasWatchDelta := len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0
+	for _, set := range []bool{req.StateKey != nil, len(req.WatchList) > 0, hasWatchDelta} {
 		if set {
 			primaryFieldsSet++
 		}
 	}
 	if primaryFieldsSet != 1 {
-		writeError(w, http.StatusBadRequest, "Exactly one of stateKey or watchList must be provided.")
+		writeError(w, http.StatusBadRequest, "Exactly one of stateKey, watchList, or addWatchers/removeWatchers must be provided.")
 		return
 	}
 
@@ -436,6 +437,31 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		entityReq.WatchList = resolvedIDs
+	}
+
+	// addWatchers/removeWatchers carry emails too and are resolved the same way.
+	// A remove that names nobody entity-service knows has nothing to remove, so
+	// it is dropped like an unresolved add; the request is refused only when
+	// nothing at all is left to apply.
+	if hasWatchDelta {
+		addIDs, err := h.resolveWatchListUserIDs(r.Context(), req.AddWatchers)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "resolving watcher emails failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+			mapUpstreamError(w, err, "Failed to resolve watch list.")
+			return
+		}
+		removeIDs, err := h.resolveWatchListUserIDs(r.Context(), req.RemoveWatchers)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "resolving watcher emails failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+			mapUpstreamError(w, err, "Failed to resolve watch list.")
+			return
+		}
+		if len(addIDs) == 0 && len(removeIDs) == 0 {
+			writeError(w, http.StatusBadRequest, "None of the provided watch list users could be found.")
+			return
+		}
+		entityReq.AddWatchers = addIDs
+		entityReq.RemoveWatchers = removeIDs
 	}
 
 	result, err := h.entity.UpdateCase(r.Context(), id, entityReq)

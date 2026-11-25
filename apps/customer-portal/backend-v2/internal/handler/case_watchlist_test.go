@@ -224,3 +224,87 @@ func TestPatchCase_WatchList_AllUnresolved_Rejects400(t *testing.T) {
 		t.Fatalf("entity UpdateCase must not be called when every watch-list email is unresolved, got %+v", fake.gotUpdateCaseReq)
 	}
 }
+
+// TestPatchCase_WatchDelta_ResolvesBothListsAndNeverSendsAWholeList: the delta
+// fields carry emails like watchList does, so each is resolved to ids, and the
+// entity request holds only the delta -- no WatchList that would replace (and
+// drop a concurrently added watcher from) the stored list.
+func TestPatchCase_WatchDelta_ResolvesBothListsAndNeverSendsAWholeList(t *testing.T) {
+	fake := &fakeWatchListEntityClient{
+		usersByEmail: map[string]string{
+			"alice@example.com": "11111111-1111-1111-1111-111111111111",
+			"bob@example.com":   "22222222-2222-2222-2222-222222222222",
+		},
+	}
+	h := NewCaseHandler(fake)
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /cases/{id}", h.PatchCase)
+
+	req := authedRequest(http.MethodPatch, "/cases/33333333-3333-3333-3333-333333333333",
+		`{"addWatchers":["alice@example.com"],"removeWatchers":["bob@example.com"]}`)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	got := fake.gotUpdateCaseReq
+	if len(got.AddWatchers) != 1 || got.AddWatchers[0] != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("AddWatchers = %v, want alice's id", got.AddWatchers)
+	}
+	if len(got.RemoveWatchers) != 1 || got.RemoveWatchers[0] != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("RemoveWatchers = %v, want bob's id", got.RemoveWatchers)
+	}
+	if len(got.WatchList) != 0 {
+		t.Fatalf("WatchList = %v, want none: a whole list would overwrite concurrent changes", got.WatchList)
+	}
+}
+
+// A remove-only request is valid, and it is how the last watcher goes (a
+// watchList replace cannot be empty).
+func TestPatchCase_WatchDelta_RemoveOnly(t *testing.T) {
+	fake := &fakeWatchListEntityClient{
+		usersByEmail: map[string]string{"bob@example.com": "22222222-2222-2222-2222-222222222222"},
+	}
+	h := NewCaseHandler(fake)
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /cases/{id}", h.PatchCase)
+
+	req := authedRequest(http.MethodPatch, "/cases/33333333-3333-3333-3333-333333333333", `{"removeWatchers":["bob@example.com"]}`)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.gotUpdateCaseReq.RemoveWatchers) != 1 || len(fake.gotUpdateCaseReq.AddWatchers) != 0 {
+		t.Fatalf("got %+v", fake.gotUpdateCaseReq)
+	}
+}
+
+func TestPatchCase_WatchDelta_Refusals(t *testing.T) {
+	cases := map[string]struct {
+		body  string
+		users map[string]string
+	}{
+		"with a state change":    {`{"stateKey":1,"addWatchers":["a@example.com"]}`, map[string]string{"a@example.com": "11111111-1111-1111-1111-111111111111"}},
+		"with watchList":         {`{"watchList":["a@example.com"],"addWatchers":["a@example.com"]}`, map[string]string{"a@example.com": "11111111-1111-1111-1111-111111111111"}},
+		"every email is unknown": {`{"addWatchers":["x@example.com"],"removeWatchers":["y@example.com"]}`, map[string]string{}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeWatchListEntityClient{usersByEmail: tc.users}
+			h := NewCaseHandler(fake)
+			mux := http.NewServeMux()
+			mux.HandleFunc("PATCH /cases/{id}", h.PatchCase)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, authedRequest(http.MethodPatch, "/cases/33333333-3333-3333-3333-333333333333", tc.body))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if fake.gotUpdateCaseReq.ID != "" {
+				t.Fatalf("entity UpdateCase must not be called, got %+v", fake.gotUpdateCaseReq)
+			}
+		})
+	}
+}
