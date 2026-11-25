@@ -451,17 +451,18 @@ func (r *organizationRepository) Get(ctx context.Context, id string) (*domain.Or
 	return &d, nil
 }
 
-// loadRegistrationMetadata reads the earliest registration's visit context; nil when none.
+// loadRegistrationMetadata reads the earliest registration's visit context; nil
+// when that registration has none (a later registration's is never substituted).
 func (r *organizationRepository) loadRegistrationMetadata(ctx context.Context, orgID string) (*domain.OrganizationRegistrationMetadata, error) {
 	const q = `
 		SELECT m.utm_source, m.utm_medium, m.utm_campaign,
 		       m.initial_utm_source, m.initial_utm_medium, m.initial_utm_campaign,
 		       m.referring_domain, m.initial_referring_domain, m.sign_in_method, m.preferred_language
-		FROM   plg_registration_metadata m
-		JOIN   plg_org_platform op ON op.id = m.org_platform_id
-		WHERE  op.organization_id::TEXT = $1
-		ORDER  BY op.registered_on, op.id
-		LIMIT  1`
+		FROM  (SELECT e.id FROM plg_org_platform e
+		       WHERE  e.organization_id::TEXT = $1
+		       ORDER  BY e.registered_on, e.id
+		       LIMIT  1) op
+		JOIN   plg_registration_metadata m ON m.org_platform_id = op.id`
 	var m domain.OrganizationRegistrationMetadata
 	err := r.db.QueryRow(ctx, q, orgID).Scan(&m.UTMSource, &m.UTMMedium, &m.UTMCampaign,
 		&m.InitialUTMSource, &m.InitialUTMMedium, &m.InitialUTMCampaign,

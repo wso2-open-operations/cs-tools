@@ -137,26 +137,31 @@ func TestRegistrationMetadataIsStoredKeptAndReported(t *testing.T) {
 		t.Errorf("entry products moved by IAM %d, API %d, Integration %d; want 1, 1, 0",
 			delta("Identity & Access Management"), delta("API Platform"), delta("Integration Platform"))
 	}
-	if count(got.UTMSources, "google") != 1 || count(got.UTMSources, "NOT_RECORDED") < 1 {
+	// Counts are compared with the baseline: other tests share this database.
+	gain := func(now, was []domain.CountByLabel, label string) int { return count(now, label) - count(was, label) }
+	if gain(got.UTMSources, before.UTMSources, "google") != 1 || count(got.UTMSources, "NOT_RECORDED") < 1 {
 		t.Errorf("utm sources = %+v", got.UTMSources)
 	}
 	if count(got.UTMSources, "linkedin") != 0 || count(got.UTMSources, "x") != 0 {
 		t.Errorf("utm sources count a non-entry registration: %+v", got.UTMSources)
 	}
-	if count(got.QualificationOverview, "ELIGIBLE") != 1 || count(got.QualificationOverview, "NOT_ASSESSED") < 1 {
+	if gain(got.QualificationOverview, before.QualificationOverview, "ELIGIBLE") != 1 || count(got.QualificationOverview, "NOT_ASSESSED") < 1 {
 		t.Errorf("qualification = %+v", got.QualificationOverview)
 	}
-	if count(got.EmailClassification, "CORPORATE") != 1 || count(got.EmailClassification, "NOT_CLASSIFIED") < 1 {
+	if gain(got.EmailClassification, before.EmailClassification, "CORPORATE") != 1 || count(got.EmailClassification, "NOT_CLASSIFIED") < 1 {
 		t.Errorf("email classification = %+v", got.EmailClassification)
 	}
-	var google *domain.UTMQualification
-	for i := range got.QualifiedByUTM {
-		if got.QualifiedByUTM[i].Label == "google" {
-			google = &got.QualifiedByUTM[i]
+	googleRow := func(rows []domain.UTMQualification) domain.UTMQualification {
+		for _, q := range rows {
+			if q.Label == "google" {
+				return q
+			}
 		}
+		return domain.UTMQualification{}
 	}
-	if google == nil || google.Eligible != 1 || google.Total != 1 || google.NotAssessed != 0 {
-		t.Errorf("qualified by utm = %+v", got.QualifiedByUTM)
+	g, g0 := googleRow(got.QualifiedByUTM), googleRow(before.QualifiedByUTM)
+	if g.Eligible-g0.Eligible != 1 || g.Total-g0.Total != 1 || g.NotAssessed-g0.NotAssessed != 0 {
+		t.Errorf("qualified by utm = %+v (was %+v)", g, g0)
 	}
 	// Later registrations of the same organisation (linkedin, x) are not entry registrations.
 	for _, q := range got.QualifiedByUTM {
@@ -211,5 +216,39 @@ func seedValidationRun(t *testing.T, pairing, product string, values map[string]
 			runID, code, v); err != nil {
 			t.Fatalf("set %s: %v", code, err)
 		}
+	}
+}
+
+// The organisation detail shows the earliest registration's visit context, and
+// shows none when that registration has none: a later product's is not borrowed.
+func TestOrganizationDetailDoesNotBorrowALaterRegistrationsMetadata(t *testing.T) {
+	pool := requireDB(t)
+	ctx := context.Background()
+	ingest := NewIngestRepository(pool)
+	const owner = "019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"
+	const company = "meta-company-3"
+	now := time.Now()
+
+	first, err := ingest.Register(ctx, domain.Registration{
+		CompanyID: company, UserID: owner, InitiatingProduct: "api-platform",
+		CreatedOn: &domain.SourceTime{Time: now.Add(-2 * time.Hour)},
+	}, nil)
+	if err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+	if _, err := ingest.Register(ctx, domain.Registration{
+		CompanyID: company, UserID: owner, InitiatingProduct: "integration-platform",
+		CreatedOn: &domain.SourceTime{Time: now.Add(-time.Hour)},
+		Metadata:  &domain.RegistrationMetadata{UTMSource: "later-product"},
+	}, nil); err != nil {
+		t.Fatalf("later registration: %v", err)
+	}
+
+	d, err := NewOrganizationRepository(pool).Get(ctx, first.OrganizationID)
+	if err != nil {
+		t.Fatalf("get organization: %v", err)
+	}
+	if d.RegistrationMetadata != nil {
+		t.Errorf("metadata of a later registration shown as the original: %+v", d.RegistrationMetadata)
 	}
 }

@@ -408,7 +408,7 @@ func upsertRegistrationMetadata(ctx context.Context, tx pgx.Tx, pairingID string
 		    initial_referring_domain = COALESCE(plg_registration_metadata.initial_referring_domain, EXCLUDED.initial_referring_domain),
 		    sign_in_method           = COALESCE(plg_registration_metadata.sign_in_method,           EXCLUDED.sign_in_method),
 		    preferred_language       = COALESCE(plg_registration_metadata.preferred_language,       EXCLUDED.preferred_language),
-		    updated_at               = NOW()`
+		    updated_on               = NOW()`
 	if _, err := tx.Exec(ctx, q, pairingID, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]); err != nil {
 		return fmt.Errorf("upsert registration metadata: %w", err)
 	}

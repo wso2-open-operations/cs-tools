@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS plg_registration_metadata (
     initial_referring_domain TEXT,
     sign_in_method           TEXT,
     preferred_language       TEXT,
-    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_on               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_on               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE plg_registration_metadata IS
