@@ -49,6 +49,7 @@ const (
 	regressionLabel          = "regression"
 	originLabel              = "Origin/CS"
 	patchIssueTypeLabel      = "Type/Patch"
+	featureIssueTypeLabel    = "Type/Feature"
 	patchExtraLabel          = "patch"
 	discussionIssueTypeLabel = "Type/Discussion"
 	incidentIssueTypeLabel   = "Type/Incident"
@@ -128,11 +129,13 @@ type caseGitHubIssueRequest struct {
 	IssueTypeLabel       string `json:"issueTypeLabel"`
 	PriorityLevel        string `json:"priorityLevel"`
 	OnboardingInProgress bool   `json:"onboardingInProgress"`
-	// The four below only add to the issue body; none of them is a label.
+	// The fields below only add to the issue body; none of them is a label.
 	PriorityJustification string `json:"priorityJustification"`
 	ReproducingSteps      string `json:"reproducingSteps"`
 	HotFixReason          string `json:"hotFixReason"`
 	RelatedInternalIssues string `json:"relatedInternalIssues"`
+	BusinessUseCase       string `json:"businessUseCase"`
+	RelatedGitIssues      string `json:"relatedGitIssues"`
 }
 
 // priorityJustification is the request's free-text justification when its
@@ -354,7 +357,8 @@ const issueInfoBlankValue = "undefined"
 
 // buildGitHubIssueBody is the caller's own description, then the optional
 // sections the engineer filled in (Reproducing Steps, Priority Justification,
-// the Hotfix Required line with its Hotfix Reason, Related Internal Issue(s)),
+// the Hotfix Required line with its Hotfix Reason, Related Internal Issue(s),
+// and for a Feature Request Business Use Case and Related Git Issue(s)),
 // then the info block as the footer: always the same
 // seven lines (Product, Update level, WSO2 case id, Case number, Public Git
 // Issue, ABT Team, Opened by), in this order and spelling, as the issues filed
@@ -399,8 +403,9 @@ func buildGitHubIssueBody(req caseGitHubIssueRequest, productLabel string, caseC
 }
 
 // gitHubIssueSections are the optional sections the engineer filled in, in body
-// order: Reproducing Steps, Priority Justification, the Hotfix Required line
-// with its Hotfix Reason, Related Internal Issue(s). A section left empty is
+// order: Reproducing Steps, Business Use Case, Priority Justification, the
+// Hotfix Required line with its Hotfix Reason, Related Internal Issue(s),
+// Related Git Issue(s). A section left empty is
 // not in the list.
 func gitHubIssueSections(req caseGitHubIssueRequest) []string {
 	var sections []string
@@ -412,6 +417,7 @@ func gitHubIssueSections(req caseGitHubIssueRequest) []string {
 		}
 	}
 	labelled("Reproducing Steps", req.ReproducingSteps)
+	labelled("Business Use Case", req.BusinessUseCase)
 	if j := req.priorityJustification(); j != "" {
 		sections = append(sections, "Priority Justification : "+j)
 	}
@@ -424,6 +430,7 @@ func gitHubIssueSections(req caseGitHubIssueRequest) []string {
 		sections = append(sections, hotfix)
 	}
 	labelled("Related Internal Issue(s)", req.RelatedInternalIssues)
+	labelled("Related Git Issue(s)", req.RelatedGitIssues)
 	return sections
 }
 
@@ -436,7 +443,7 @@ func joinGitHubIssueSections(sections []string) string {
 // entity service's POST /cases/{id}/github-issues decodes with unknown fields
 // refused, and matches a key whatever its case, so these are removed from the
 // forwarded request in any spelling.
-var gitHubIssueBodyOnlyFields = []string{"reproducingSteps", "priorityJustification", "hotFixReason", "relatedInternalIssues"}
+var gitHubIssueBodyOnlyFields = []string{"reproducingSteps", "priorityJustification", "hotFixReason", "relatedInternalIssues", "businessUseCase", "relatedGitIssues"}
 
 // entityGitHubIssueRequest prepares the request for the entity service, the
 // path used when no engineering client is configured. The fields the entity
@@ -507,7 +514,8 @@ func githubPriorityLabel(level string) string {
 
 // buildGitHubIssueLabels applies the sheet's rules. Origin/CS and the product
 // label always go on. Patch adds Type/Patch and patch. Discussion adds
-// Type/Incident and the (Pn) priority label. The switches add Require/Hotfix,
+// Type/Incident and the (Pn) priority label. Feature adds Type/Feature only,
+// no priority label. The switches add Require/Hotfix,
 // regression, and Affected/Migration. An in-progress project adds
 // Onboarding/affected.
 func buildGitHubIssueLabels(productLabel string, req caseGitHubIssueRequest) []string {
@@ -528,6 +536,8 @@ func buildGitHubIssueLabels(productLabel string, req caseGitHubIssueRequest) []s
 	case patchIssueTypeLabel:
 		add(patchIssueTypeLabel)
 		add(patchExtraLabel)
+	case featureIssueTypeLabel:
+		add(featureIssueTypeLabel)
 	case discussionIssueTypeLabel:
 		add(incidentIssueTypeLabel)
 		add(githubPriorityLabel(req.PriorityLevel))

@@ -906,3 +906,57 @@ func TestGitHubIssueChoiceListsMatchTheWebapp(t *testing.T) {
 		t.Errorf("hotfix reasons: webapp = %q, backend = %q", options.HotfixReasons, gitHubHotfixReasons)
 	}
 }
+
+func TestBuildGitHubIssueLabels_FeatureRequest(t *testing.T) {
+	got := buildGitHubIssueLabels("product/is", caseGitHubIssueRequest{IssueTypeLabel: "Type/Feature", PriorityLevel: "Priority/High"})
+	want := []string{"Origin/CS", "product/is", "Type/Feature"}
+	if !slices.Equal(got, want) {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+	for _, l := range got {
+		if strings.HasPrefix(l, "Priority/") || l == "Type/Incident" {
+			t.Errorf("unexpected label %q on a Feature Request", l)
+		}
+	}
+	got = buildGitHubIssueLabels("product/is", caseGitHubIssueRequest{IssueTypeLabel: "Type/Feature", Reason: "migration"})
+	want = []string{"Origin/CS", "product/is", "Type/Feature", "Affected/Migration"}
+	if !slices.Equal(got, want) {
+		t.Errorf("migration labels = %v, want %v", got, want)
+	}
+}
+
+func TestBuildGitHubIssueBody_FeatureRequestSections(t *testing.T) {
+	got := buildGitHubIssueBody(
+		caseGitHubIssueRequest{Description: "d", BusinessUseCase: " Needs X\nfor Y ", RelatedGitIssues: "org/repo#1"},
+		"product/is", caseGitHubIssueContext{})
+	want := "d\n\nBusiness Use Case :\nNeeds X\nfor Y\n\nRelated Git Issue(s) :\norg/repo#1\n\n" + infoBlock("product/is", "", "", "", "", "", "")
+	if got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestEntityGitHubIssueRequest_FeatureRequestFields(t *testing.T) {
+	body := `{"title":"t","description":"d","issueTypeLabel":"Type/Feature","businessUseCase":"use","BusinessUseCase":"use2","relatedGitIssues":"org/repo#1"}`
+	forward, msg := entityGitHubIssueRequest([]byte(body))
+	if msg != "" {
+		t.Fatalf("unexpected refusal: %q", msg)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(forward, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for key := range fields {
+		if strings.EqualFold(key, "businessUseCase") || strings.EqualFold(key, "relatedGitIssues") {
+			t.Errorf("field %q was forwarded", key)
+		}
+	}
+	var label, description string
+	_ = json.Unmarshal(fields["issueTypeLabel"], &label)
+	_ = json.Unmarshal(fields["description"], &description)
+	if label != "Type/Feature" {
+		t.Errorf("issueTypeLabel = %q, want Type/Feature", label)
+	}
+	if !strings.Contains(description, "Business Use Case :\n") || !strings.Contains(description, "Related Git Issue(s) :\norg/repo#1") {
+		t.Errorf("description = %q, want both sections", description)
+	}
+}

@@ -46,16 +46,25 @@ import { useGetProductRepoMapping } from "@features/csm-cases/api/useGetProductR
 import githubIssueOptions from "@features/csm-cases/utils/githubIssueOptions.json";
 
 // ---------------------------------------------------------------------------
-// Option lists. Every select starts unset ("" → "-- Select --"). Every issue
-// is filed as a Discussion (Type/Discussion → Type/Incident on GitHub), so
-// there is no type selector. Priority is sent as the GitHub priority label.
+// Option lists. Every select starts unset ("" → "-- Select --"). An issue is
+// filed as a Discussion (Type/Discussion → Type/Incident on GitHub) or a
+// Feature Request (Type/Feature); the Type select decides which fields show.
+// Priority is sent as the GitHub priority label.
 // ---------------------------------------------------------------------------
 
 const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
 
-/** Every Git issue raised from a case is a Discussion. */
+/** A Discussion: a problem on the case, with priority, hotfix and regression details. */
 const GITHUB_DISCUSSION_ISSUE_TYPE = "Type/Discussion";
+
+/** A Feature Request: a short form with a business use case and no urgency fields. */
+const GITHUB_FEATURE_ISSUE_TYPE = "Type/Feature";
+
+const ISSUE_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: GITHUB_DISCUSSION_ISSUE_TYPE, label: "Discussion" },
+  { value: GITHUB_FEATURE_ISSUE_TYPE, label: "Feature Request" },
+];
 
 // The priorities of the Internal Issue Handling Policy. Each value is the
 // GitHub priority label the backend applies (case_github_issue.go).
@@ -154,8 +163,14 @@ export interface CreateGithubIssueDialogProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Form for filing an internal GitHub issue from a case (ISSU-020). Every issue
- * is a Discussion. Fields, in order: Subject*, Description*, Reproducing Steps,
+ * Form for filing an internal GitHub issue from a case (ISSU-020). Type* comes
+ * first and starts unset; Raise stays disabled until one is chosen.
+ *
+ * Feature Request shows only Subject*, Description*, Business Use Case,
+ * Related Git Issue(s) and Migration. Values typed under the other type are
+ * kept in state but never sent.
+ *
+ * Discussion fields, in order: Subject*, Description*, Reproducing Steps,
  * Priority* (P0 to P3, per the Internal Issue Handling Policy), Priority
  * Justification* (free text) and Approved by CS Leadership* (P0/P1 only; the
  * tick only gates Create and is not sent), Update Level, Public Git Issue (both hidden on cloud cases, never required),
@@ -183,6 +198,7 @@ export function CreateGithubIssueDialog({
   onSubmit,
   onOpenConfirm,
 }: CreateGithubIssueDialogProps): JSX.Element {
+  const [issueType, setIssueType] = useState<string>(UNSET);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [reproducingSteps, setReproducingSteps] = useState("");
@@ -196,6 +212,8 @@ export function CreateGithubIssueDialog({
   const [regression, setRegression] = useState(false);
   const [migration, setMigration] = useState(defaultMigration ?? false);
   const [relatedInternalIssues, setRelatedInternalIssues] = useState("");
+  const [businessUseCase, setBusinessUseCase] = useState("");
+  const [relatedGitIssues, setRelatedGitIssues] = useState("");
   // Set once the user clicks "Raise issue…" on the form; holds the built
   // payload until they confirm on the follow-up step below. Filing this issue
   // is a real write to an external GitHub repo, so it gets an explicit
@@ -221,6 +239,9 @@ export function CreateGithubIssueDialog({
       }
     : undefined;
 
+  const isDiscussion = issueType === GITHUB_DISCUSSION_ISSUE_TYPE;
+  const isFeature = issueType === GITHUB_FEATURE_ISSUE_TYPE;
+
   // Only P0 and P1 carry a justification and need CS leadership's approval.
   const needsApproval = PRIORITIES_NEEDING_APPROVAL.has(priorityLevel);
   const prioritySummary = PRIORITY_OPTIONS.find((o) => o.value === priorityLevel)?.summary;
@@ -245,6 +266,7 @@ export function CreateGithubIssueDialog({
 
   /** Returns every field to its initial value (empty, or the case's default) and closes the dialog. */
   const resetAndClose = () => {
+    setIssueType(UNSET);
     setTitle("");
     setDescription("");
     setReproducingSteps("");
@@ -258,16 +280,22 @@ export function CreateGithubIssueDialog({
     setRegression(false);
     setMigration(defaultMigration ?? false);
     setRelatedInternalIssues("");
+    setBusinessUseCase("");
+    setRelatedGitIssues("");
     setConfirmPayload(null);
     onClose();
   };
 
+  const typeFieldsValid = isDiscussion
+    ? !!priorityLevel &&
+      (!needsApproval || (priorityJustification.trim().length > 0 && leadershipApproved)) &&
+      (!hotFix || !!hotFixReason)
+    : isFeature;
+
   const canSubmit =
     title.trim().length > 0 &&
     description.trim().length > 0 &&
-    !!priorityLevel &&
-    (!needsApproval || (priorityJustification.trim().length > 0 && leadershipApproved)) &&
-    (!hotFix || !!hotFixReason) &&
+    typeFieldsValid &&
     !repoOptionsUnavailable &&
     !!selectedRepoOption &&
     !projectStatusPending &&
@@ -280,6 +308,25 @@ export function CreateGithubIssueDialog({
    */
   const handleSubmit = () => {
     if (!canSubmit || !selectedRepoOption) return;
+
+    if (isFeature) {
+      const featurePayload: BeCreateCaseGithubIssuePayload = {
+        reason: migration ? "migration" : "default",
+        title: title.trim(),
+        description: description.trim(),
+        issueTypeLabel: GITHUB_FEATURE_ISSUE_TYPE,
+        repoOverride: {
+          owner: selectedRepoOption.owner,
+          repo: selectedRepoOption.repo,
+        },
+      };
+      if (businessUseCase.trim()) featurePayload.businessUseCase = businessUseCase.trim();
+      if (relatedGitIssues.trim()) featurePayload.relatedGitIssues = relatedGitIssues.trim();
+      if (onboardingInProgress) featurePayload.onboardingInProgress = true;
+      onOpenConfirm?.();
+      setConfirmPayload(featurePayload);
+      return;
+    }
 
     const payload: BeCreateCaseGithubIssuePayload = {
       reason: migration ? "migration" : "default",
@@ -425,13 +472,16 @@ export function CreateGithubIssueDialog({
         {section(
           "Issue",
           <>
+            {renderSelect("ghi-type", "Type", issueType, setIssueType, ISSUE_TYPE_OPTIONS, {
+              required: true,
+            })}
             <TextField
               {...fieldProps}
               label="Subject"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
-              placeholder="Short summary of the problem"
+              placeholder={isFeature ? "Short summary of the feature" : "Short summary of the problem"}
             />
             <TextField
               {...fieldProps}
@@ -441,22 +491,36 @@ export function CreateGithubIssueDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               required
-              placeholder="What needs to be fixed?"
+              placeholder={isFeature ? "What should the feature do?" : "What needs to be fixed?"}
             />
-            <TextField
-              {...fieldProps}
-              label="Reproducing Steps"
-              multiline
-              minRows={3}
-              value={reproducingSteps}
-              onChange={(e) => setReproducingSteps(e.target.value)}
-              placeholder="Steps that show the problem"
-            />
+            {isFeature && (
+              <TextField
+                {...fieldProps}
+                label="Business Use Case"
+                multiline
+                minRows={3}
+                value={businessUseCase}
+                onChange={(e) => setBusinessUseCase(e.target.value)}
+                placeholder="Why the customer needs it and what it enables"
+              />
+            )}
+            {!isFeature && (
+              <TextField
+                {...fieldProps}
+                label="Reproducing Steps"
+                multiline
+                minRows={3}
+                value={reproducingSteps}
+                onChange={(e) => setReproducingSteps(e.target.value)}
+                placeholder="Steps that show the problem"
+              />
+            )}
           </>,
           true,
         )}
 
-        {section(
+        {!isFeature &&
+          section(
           "Urgency",
           <>
             {renderSelect("ghi-priority", "Priority", priorityLevel, handlePriorityChange, PRIORITY_OPTIONS, {
@@ -517,7 +581,8 @@ export function CreateGithubIssueDialog({
           </>,
         )}
 
-        {section(
+        {!isFeature &&
+          section(
           showUpdateLevelAndIssueUrl ? "Version and references" : "References",
           <>
             {showUpdateLevelAndIssueUrl && (
@@ -555,11 +620,26 @@ export function CreateGithubIssueDialog({
           </>,
         )}
 
+        {isFeature &&
+          section(
+            "References",
+            <TextField
+              {...fieldProps}
+              label="Related Git Issue(s)"
+              multiline
+              minRows={2}
+              value={relatedGitIssues}
+              onChange={(e) => setRelatedGitIssues(e.target.value)}
+              placeholder="Links or numbers of related Git issues"
+            />,
+          )}
+
         {section(
           "Flags",
           // The switches carry their own vertical padding; the set is pulled up
           // so it keeps the same 16px rhythm under the heading.
           <Box sx={{ display: "flex", flexDirection: "column", mt: -0.75 }}>
+            {!isFeature && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
@@ -571,7 +651,8 @@ export function CreateGithubIssueDialog({
               }
               label="Hotfix Required"
             />
-            {hotFix && (
+            )}
+            {!isFeature && hotFix && (
               // Indented to the switch labels so it reads as part of Hotfix Required.
               <Box sx={{ pl: `${FLAG_LABEL_INSET}px`, pt: 0.5, pb: 1.5 }}>
                 {renderSelect(
@@ -584,6 +665,7 @@ export function CreateGithubIssueDialog({
                 )}
               </Box>
             )}
+            {!isFeature && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
@@ -595,6 +677,7 @@ export function CreateGithubIssueDialog({
               }
               label="Regression"
             />
+            )}
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
