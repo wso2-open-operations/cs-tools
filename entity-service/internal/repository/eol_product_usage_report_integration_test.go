@@ -84,9 +84,9 @@ func TestEolProductUsageReportIntegration(t *testing.T) {
 		($1::uuid, 'eol-am', 'eol-am@example.com', 'Ann', 'Manager', NOW(), NOW()),
 		($2::uuid, 'eol-to', 'eol-to@example.com', 'Tom', 'Owner', NOW(), NOW())`, eolID(1), eolID(2))
 	exec(`INSERT INTO "group" (id, name, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'EOL IT Team', `+audit+`)`, eolID(3))
-	exec(`INSERT INTO account (id, number, name, region, cre_team_id, account_manager_id, technical_owner_id, created_on, created_by, updated_on, updated_by) VALUES
-		($1::uuid, 'EOLIT-A', 'EOL IT Account', 'APAC', $3::uuid, $4::uuid, $5::uuid, `+audit+`),
-		($2::uuid, 'EOLIT-B', 'EOL IT No Region', NULL, NULL, NULL, NULL, `+audit+`)`, eolID(10), eolID(11), eolID(3), eolID(1), eolID(2))
+	exec(`INSERT INTO account (id, number, name, region, cre_team_id, account_manager_id, technical_owner_id, life_cycle, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, 'EOLIT-A', 'EOL IT Account', 'APAC', $3::uuid, $4::uuid, $5::uuid, 'Customer', `+audit+`),
+		($2::uuid, 'EOLIT-B', 'EOL IT No Region', NULL, NULL, NULL, NULL, 'Customer', `+audit+`)`, eolID(10), eolID(11), eolID(3), eolID(1), eolID(2))
 	exec(`INSERT INTO project (id, account_id, name, key, created_on, created_by, updated_on, updated_by) VALUES
 		($1::uuid, $3::uuid, 'EOL IT Project', 'EOLITPROJ', `+audit+`),
 		($2::uuid, $4::uuid, 'EOL IT Other', 'EOLITOTHER', `+audit+`)`, eolID(20), eolID(21), eolID(10), eolID(11))
@@ -157,9 +157,9 @@ func TestEolProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
 		}
 	}
 	// 60: a current account; 61: an account deleted in Salesforce.
-	exec(`INSERT INTO account (id, number, name, region, deleted_on, created_on, created_by, updated_on, updated_by) VALUES
-		($1::uuid, 'EOLIT-C', 'EOL IT Current', 'EMEA', NULL, `+audit+`),
-		($2::uuid, 'EOLIT-D', 'EOL IT Deleted', 'EMEA', NOW(), `+audit+`)`, eolID(60), eolID(61))
+	exec(`INSERT INTO account (id, number, name, region, deleted_on, life_cycle, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, 'EOLIT-C', 'EOL IT Current', 'EMEA', NULL, 'Customer', `+audit+`),
+		($2::uuid, 'EOLIT-D', 'EOL IT Deleted', 'EMEA', NOW(), 'Customer', `+audit+`)`, eolID(60), eolID(61))
 	// Projects: 62 open, 63 inactive, 64 closed by WSO2, 65 suspended (still a
 	// customer), 66 the deleted account's.
 	exec(`INSERT INTO project (id, account_id, name, key, is_active, wso2_closure_state, created_on, created_by, updated_on, updated_by) VALUES
@@ -196,5 +196,57 @@ func TestEolProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
 	want := []string{"EOLITOPEN", "EOLITSUSP"}
 	if len(keys) != len(want) || keys[0] != want[0] || keys[1] != want[1] {
 		t.Fatalf("projects = %v, want %v", keys, want)
+	}
+}
+
+// Only customer accounts are listed: an account whose Salesforce life cycle
+// is anything but 'Customer' (lost, possibly lost, prospect, partner, or none)
+// is left out even though its Primary Production deployment runs
+// a version past its EOL date and is marked active.
+func TestEolProductUsageReportListsOnlyCustomerAccounts(t *testing.T) {
+	pool := eolPool(t)
+	ctx := context.Background()
+	eolCleanup(t, pool)
+	t.Cleanup(func() { eolCleanup(t, pool) })
+
+	const audit = `NOW(), 'it', NOW(), 'it'`
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	lifeCycles := []any{"Customer", "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner", nil}
+	exec(`INSERT INTO product (id, name, category, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'EOL IT Product', 'SOFTWARE', `+audit+`)`, eolID(1))
+	exec(`INSERT INTO product_version (id, product_id, version, support_eol_date, current_support_status, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, $2::uuid, '1.0.0', '2022-10-22', 'EXTENDED', `+audit+`)`, eolID(2), eolID(1))
+	// Account 10+i (life cycle i), project 20+i, deployment 30+i, deployed product 40+i.
+	for i, lc := range lifeCycles {
+		n := string(rune('0' + i))
+		exec(`INSERT INTO account (id, number, name, region, life_cycle, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2, $3, 'APAC', $4, `+audit+`)`, eolID(10+i), "EOLIT-LC"+n, "EOL IT Life Cycle "+n, lc)
+		exec(`INSERT INTO project (id, account_id, name, key, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2::uuid, $3, $4, `+audit+`)`, eolID(20+i), eolID(10+i), "EOL IT LC Project "+n, "EOLITLC"+n)
+		exec(`INSERT INTO deployment (id, project_id, name, number, type, is_active, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2::uuid, 'pp', $3, 'PRIMARY_PRODUCTION', TRUE, `+audit+`)`, eolID(30+i), eolID(20+i), "EOLIT-LCD"+n)
+		exec(`INSERT INTO deployed_product (id, number, deployment_id, version_id, active, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2, $3::uuid, $4::uuid, TRUE, `+audit+`)`, eolID(40+i), "EOLIT-LCQ"+n, eolID(30+i), eolID(2))
+	}
+
+	repo := repository.NewEolProductUsageReportRepository(repository.NewScoped(pool))
+	rows, err := repo.ListEolUsage(repository.WithSystemIdentity(ctx), "2026-11-02")
+	if err != nil {
+		t.Fatalf("ListEolUsage: %v", err)
+	}
+	var listed []string
+	for _, r := range rows {
+		for i := range lifeCycles {
+			if r.AccountID == eolID(10+i) {
+				listed = append(listed, r.AccountName)
+			}
+		}
+	}
+	if len(listed) != 1 || listed[0] != "EOL IT Life Cycle 0" {
+		t.Fatalf("listed %v, want only the Customer account", listed)
 	}
 }
