@@ -1517,6 +1517,143 @@ func TestGrantUserRoles(t *testing.T) {
 	})
 }
 
+// ----- UpdateUser: makeInternal -----
+//
+// makeInternal folded into PATCH /users/{id} rather than getting its own
+// route -- these subtests replace what used to be a standalone
+// TestInternalizeUser against POST /users/{id}/internalize.
+
+func withUsersCaller(r *http.Request, roles ...string) *http.Request {
+	return r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{
+		Email: "admin@example.com", UserID: "caller-1", Roles: roles,
+	}))
+}
+
+func TestUpdateUser_MakeInternal(t *testing.T) {
+	targetID := "11111111-1111-1111-1111-111111111111"
+
+	newHandler := func(entityClient *mockEntityUserClient) *UsersHandler {
+		return NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), nil).
+			WithAccessGuard(NewAccessGuard(testAccessConfig()))
+	}
+
+	t.Run("rejects a non-admin caller before calling entity-service at all", func(t *testing.T) {
+		called := false
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(context.Context, string) ([]byte, error) {
+				called = true
+				return []byte(`{"id":"` + targetID + `","email":"jane@wso2.com"}`), nil
+			},
+			updateUserFn: func(context.Context, string, []byte) ([]byte, error) {
+				called = true
+				return nil, nil
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUsersCaller(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"makeInternal":true}`)), "test-cs-engineer")
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.UpdateUser(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		if called {
+			t.Fatal("entity-service must not be reached for a non-admin caller")
+		}
+	})
+
+	t.Run("rejects a target whose email isn't a wso2.com address, before calling entity-service's update route", func(t *testing.T) {
+		called := false
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"id":"` + targetID + `","email":"jane@example.com"}`), nil
+			},
+			updateUserFn: func(context.Context, string, []byte) ([]byte, error) {
+				called = true
+				return nil, nil
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUsersCaller(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"makeInternal":true}`)), "test-admin")
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.UpdateUser(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		if called {
+			t.Fatal("entity-service's update route must not be called for a non-wso2.com target")
+		}
+	})
+
+	t.Run("makes a wso2.com target internal and passes the entity-service response through", func(t *testing.T) {
+		var gotID string
+		var gotBody []byte
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(_ context.Context, id string) ([]byte, error) {
+				if id != targetID {
+					t.Fatalf("GetUser called with id = %q, want %q", id, targetID)
+				}
+				return []byte(`{"id":"` + targetID + `","email":"jane@wso2.com"}`), nil
+			},
+			updateUserFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				gotID, gotBody = id, body
+				return []byte(`{"message":"User updated successfully","user":{"id":"` + id + `","userType":"internal"}}`), nil
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUsersCaller(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"makeInternal":true}`)), "test-admin")
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.UpdateUser(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if gotID != targetID {
+			t.Fatalf("entity UpdateUser called with id = %q, want %q", gotID, targetID)
+		}
+		if !strings.Contains(string(gotBody), `"makeInternal":true`) {
+			t.Fatalf("upstream body = %s, want it to carry makeInternal:true", gotBody)
+		}
+		if body := w.Body.String(); !strings.Contains(body, `"userType":"internal"`) {
+			t.Fatalf("response body = %s, want it to pass the entity-service response through", body)
+		}
+	})
+
+	t.Run("combines with phone in the same call", func(t *testing.T) {
+		var gotBody []byte
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"id":"` + targetID + `","email":"jane@wso2.com"}`), nil
+			},
+			updateUserFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				gotBody = body
+				return []byte(`{"message":"User updated successfully","user":{"id":"` + id + `"}}`), nil
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUsersCaller(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"makeInternal":true,"phone":"+94777654321"}`)), "test-admin")
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.UpdateUser(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if !strings.Contains(string(gotBody), `"makeInternal":true`) || !strings.Contains(string(gotBody), "+94777654321") {
+			t.Fatalf("upstream body = %s, want it to carry both makeInternal and phone", gotBody)
+		}
+	})
+
+	t.Run("reports an upstream failure from entity-service's update route", func(t *testing.T) {
+		entityClient := &mockEntityUserClient{
+			getUserFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"id":"` + targetID + `","email":"jane@wso2.com"}`), nil
+			},
+			updateUserFn: func(context.Context, string, []byte) ([]byte, error) {
+				return nil, &apierror.Error{StatusCode: http.StatusNotFound, Body: `{"message":"no user found with id: ` + targetID + `"}`}
+			},
+		}
+		h := newHandler(entityClient)
+		r := withUsersCaller(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"makeInternal":true}`)), "test-admin")
+		r.SetPathValue("id", targetID)
+		w := httptest.NewRecorder()
+		h.UpdateUser(w, r)
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
 // ----- GetTimeCardApprovers -----
 
 func TestGetTimeCardApprovers(t *testing.T) {

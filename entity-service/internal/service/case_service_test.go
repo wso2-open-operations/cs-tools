@@ -398,6 +398,7 @@ type stubUserRepo struct {
 	getUserProjectAccess func(ctx context.Context, email string) ([]domain.UserContactAccess, error)
 	createUser           func(ctx context.Context, req domain.CreateUserRequest, actor string) (domain.User, error)
 	updateUserProfile    func(ctx context.Context, userID string, timezone, phone *string) (domain.UserProfileUpdate, error)
+	makeUserInternal     func(ctx context.Context, userID, actor string) (domain.UserType, error)
 }
 
 func (s stubUserRepo) CreateUser(ctx context.Context, req domain.CreateUserRequest, actor string) (domain.User, error) {
@@ -461,6 +462,15 @@ func (s stubUserRepo) GetUserGroups(ctx context.Context, id string) ([]domain.Us
 // file exercises it.
 func (stubUserRepo) GetUsersByIDs(context.Context, []string) ([]domain.User, error) {
 	return nil, nil
+}
+
+// MakeUserInternal returns the zero UserType rather than panicking by
+// default, same reason as GetUsersByIDs above.
+func (s stubUserRepo) MakeUserInternal(ctx context.Context, userID, actor string) (domain.UserType, error) {
+	if s.makeUserInternal != nil {
+		return s.makeUserInternal(ctx, userID, actor)
+	}
+	return "", nil
 }
 
 // TestCaseService_SearchCases_RejectsUnsupportedPostgresFields proves the

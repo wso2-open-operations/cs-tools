@@ -3235,10 +3235,16 @@ export interface BeAssignTeamLeadPayload {
 
 /** `PATCH /users/{id}` request body — both fields optional, at least one
  * required. See `apps/csm-portal/backend`'s own CLAUDE.md: restricted to
- * cs_engineer/admin, for updating someone else's profile by id. */
+ * cs_engineer/admin, for updating someone else's profile by id.
+ *
+ * makeInternal is narrower: admin-only, and only for a @wso2.com target --
+ * true grants the "internal" role and revokes the external-side role set,
+ * the only way to actually change the backend's user_type. Combinable with
+ * timeZone/phone in the same call, or sent alone. */
 export interface BeUpdateUserPayload {
   timeZone?: string;
   phone?: string;
+  makeInternal?: boolean;
 }
 
 export interface BeTeamSearchResponse {

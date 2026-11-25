@@ -102,6 +102,9 @@ func (f *fakeUserRepoForEscalationService) CreateUser(context.Context, domain.Cr
 func (f *fakeUserRepoForEscalationService) UpdateUserProfile(context.Context, string, *string, *string) (domain.UserProfileUpdate, error) {
 	panic("fakeUserRepoForEscalationService.UpdateUserProfile: not expected to be called by these tests")
 }
+func (f *fakeUserRepoForEscalationService) MakeUserInternal(context.Context, string, string) (domain.UserType, error) {
+	panic("fakeUserRepoForEscalationService.MakeUserInternal: not expected to be called by these tests")
+}
 
 // caseFoundInScopeRepo is the default stubCaseRepo.GetCaseByID for tests
 // unrelated to authorization: the case is always found and always in scope,

@@ -2099,15 +2099,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
     patch:
-      summary: Update another user's profile (timezone and/or phone).
+      summary: Update another user's profile (timezone and/or phone), or flip them to internal.
       description: >
         Restricted to cs_engineer or admin. Lets one of those roles update
         someone else's profile — unlike PATCH /users/me, which only ever
-        resolves the caller's own id from their token. Both fields are
-        optional but at least one must be present. Needed when reassigning a
-        team's lead (POST /teams/{id}/lead): the incident call-escalation
-        ladder dials the lead's own phone number, so a newly assigned lead
-        with none on file is a silent paging gap until this is set here.
+        resolves the caller's own id from their token. At least one of
+        timeZone, phone or makeInternal must be present. Needed when
+        reassigning a team's lead (POST /teams/{id}/lead): the incident
+        call-escalation ladder dials the lead's own phone number, so a newly
+        assigned lead with none on file is a silent paging gap until this is
+        set here.
+
+        makeInternal is narrower: admin-only (a cs_engineer reaches this
+        route via its PermWrite floor but is refused in-handler the moment
+        this field is present), and restricted to a @wso2.com target —
+        checked here (a fast, friendly 400) and again by entity-service
+        itself (the real enforcement boundary). It grants the user the
+        "internal" role and revokes the external-side role set
+        (external/customer/partner/customer_admin/partner_admin) — the only
+        way to actually change user_type, which is trigger-derived from role
+        membership. Combinable with timeZone/phone in the same call, or sent
+        alone.
       operationId: updateUser
       parameters:
         - name: id
@@ -2130,7 +2142,7 @@ paths:
               schema:
                 type: object
         "400":
-          description: Bad request (malformed id, neither field present, or phone too long).
+          description: Bad request (malformed id, none of the three fields present, phone too long, or makeInternal on a non-@wso2.com target).
           content:
             application/json:
               schema:
@@ -2142,7 +2154,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden (cs_engineer or admin only).
+          description: Forbidden (cs_engineer or admin only; admin only for makeInternal).
           content:
             application/json:
               schema:
@@ -24237,10 +24249,11 @@ components:
 
     BeUpdateUserRequest:
       type: object
-      description: At least one of timeZone or phone is required.
+      description: At least one of timeZone, phone or makeInternal is required.
       anyOf:
         - required: [timeZone]
         - required: [phone]
+        - required: [makeInternal]
       properties:
         timeZone:
           type: string
@@ -24249,6 +24262,14 @@ components:
           description: >-
             Trimmed. At most 32 characters after trimming (400 otherwise).
             Empty (after trimming) clears the stored phone.
+        makeInternal:
+          type: boolean
+          description: >-
+            Admin-only, and only for a @wso2.com target. true grants the
+            "internal" role and revokes the external-side role set
+            (external/customer/partner/customer_admin/partner_admin) -- the
+            only way to actually change user_type. false/absent leave roles
+            untouched; there is no "make external" via this field.
 
     UserGroupRef:
       type: object

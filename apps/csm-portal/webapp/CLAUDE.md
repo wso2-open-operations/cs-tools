@@ -134,14 +134,15 @@ only ever renders inside `AddUserDialog`, which `CsmUsersPage.tsx`'s own `canCre
 keeps out of a non-admin's reach entirely (see the "Add User" exception at the top of this section) —
 no second, redundant permission check was added inside the dialog itself.
 
-**Granting a portal role to an already-existing user** (`UserProfilePage.tsx`'s "Grant role" button next
-to "CSM Platform roles", `GrantUserRoleDialog.tsx`) reuses `AddUserDialog.tsx`'s own "Portal roles"
-machinery (`useGetGrantableRoles`, `grantableRoleLabel`) against `POST /users/{id}/roles`
+**Granting a portal role to an already-existing user** (`UserProfilePage.tsx`'s pencil icon button next
+to "CSM Platform roles" — a plain `aria-label="Grant role"` icon button, `<Pencil size={14} />`, not a
+text-labeled `Button` any more — `GrantUserRoleDialog.tsx`) reuses `AddUserDialog.tsx`'s own "Portal
+roles" machinery (`useGetGrantableRoles`, `grantableRoleLabel`) against `POST /users/{id}/roles`
 (`usePostGrantUserRoles.ts`) instead of duplicating it — the backend's own `GrantableRole`/SCIM
 mechanism (see `apps/csm-portal/backend`'s `CLAUDE.md`) is shared between the two. Unlike `AddUserDialog`,
-this button is **shown unconditionally** rather than gated behind `usePortalAccess()` — the
-default "show the action, let the backend reject" norm from the top of this section, not a fourth
-deliberate hide-it exception: there's no reported reason yet to hide it from a non-admin the way
+this icon is **shown unconditionally** rather than gated behind `usePortalAccess()` — the
+default "show the action, let the backend reject" norm from the top of this section, not a deliberate
+hide-it exception: there's no reported reason yet to hide it from a non-admin the way
 `canCreateUser`/`canUpdateProjectClosureState` are. A role the target already holds
 (`user.csmPlatformRoles`) is rendered checked-and-disabled rather than left off the list, so an admin
 can see at a glance what's already granted instead of risking a duplicate grant. The backend reports
@@ -150,6 +151,34 @@ dialog reads the body to tell a partial failure from a full one), so a partial f
 failed role(s) still checked for a quick retry rather than clearing the whole form. This section only
 ever renders for a wso2.com-email target (`showCsmPlatformRoles`) — same gating as "CSM Platform roles"
 itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role in the first place.
+
+**Making an existing user internal** (`UserProfilePage.tsx`'s pencil icon button next to "Customer
+Portal roles"/"Platform roles", `aria-label="Make user internal"`, `MakeUserInternalDialog.tsx`) is a
+fourth deliberate hide-it exception, gated on `usePortalAccess().canMakeUserInternal` — `admin` only,
+same shape and same reasoning as `canCreateUser`/`canUpdateProjectClosureState`: the backend genuinely
+enforces it too (`makeInternal` on `PATCH /users/{id}` is narrowed to `PermAdmin` in-handler — see
+`apps/csm-portal/backend`'s own `CLAUDE.md`). Shown only for a `@wso2.com` target (`isWso2Email(user.email)`)
+that isn't already internal — there's nothing to do once a user already is, and a non-wso2.com address
+can never become internal regardless of who asks (entity-service's own enforcement, not this frontend's).
+The dialog is a plain confirm/cancel (no fields to fill): confirming calls `usePatchUser` (`PATCH
+/users/{id}` with `{makeInternal: true}` — the same hook/route the team-lead phone-number update
+already uses; a dedicated `POST /users/{id}/internalize` was the first design, folded into this existing
+endpoint once it was clear it could serve the same request), which grants the "internal" role and revokes
+the external-side role set (external/customer/partner/customer_admin/partner_admin) on the backend — the
+only way to actually change `userType`, which entity-service derives from role membership rather than a
+plain settable column (same `recompute_user_type` trigger `AddUserDialog.tsx`'s own "User type" selector
+already has to work around, see above). On success, invalidates the profile query so the "Customer
+Portal roles" chips refresh (Internal, External/Customer/Partner gone) without a manual reload.
+
+**`PermissionsCard` (the component that owns `makeInternalDialogOpen` and renders both
+`MakeUserInternalDialog`/`GrantUserRoleDialog`) is keyed by `user.id`** in `UserProfilePage.tsx` —
+found on review: the `people/:id` route doesn't remount on a param change alone, so without the key,
+navigating from one user's profile straight to another's (the cached-data case, no loading state in
+between) kept the previous user's dialog-open flag and mutation result. A success message could then
+read "`<other user's email>` is now internal" for a confirmation that only ever applied to the
+original user. Keying the component that owns the open state (not just the dialog itself) is what
+resets both together — keying only the dialog would leave the open flag set and have it reopen for
+the new user with no action taken.
 
 ## `visibleCaseTypes`'s eligibility flag must mirror the exact backend permission, not a related-but-narrower one
 

@@ -478,17 +478,41 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 type updateUserRequest struct {
 	TimeZone *string `json:"timeZone"`
 	Phone    *string `json:"phone"`
+	// MakeInternal, when true, flips the target to internal -- see
+	// UpdateUser's own doc comment for the narrower gate this field needs
+	// on top of the route's ordinary PermWrite floor.
+	MakeInternal *bool `json:"makeInternal"`
 }
 
 // UpdateUser handles PATCH /users/{id} -- restricted to cs_engineer or admin
 // via the route's PermWrite permission (cmd/server/main.go, held by exactly
 // those two roles), same posture as CreateUser: this handler does not
-// re-check the caller's role itself. Unlike PatchMe, which only ever
-// resolves the caller's OWN id from their token, this lets one of those
-// roles update someone else's profile -- needed once an admin can reassign a
-// team's lead (POST /teams/{id}/lead): the incident call-escalation ladder
-// dials the lead's own "user".phone, so a newly assigned lead with no number
-// on file is a silent paging gap until this is set here.
+// re-check the caller's role itself, EXCEPT for makeInternal (below), which
+// it narrows in-handler the same way ProjectHandler.UpdateProject narrows
+// closureState/suspensionProcessOverridden to PermAdmin on an otherwise
+// PermWrite route. Unlike PatchMe, which only ever resolves the caller's OWN
+// id from their token, this lets one of those roles update someone else's
+// profile -- needed once an admin can reassign a team's lead (POST
+// /teams/{id}/lead): the incident call-escalation ladder dials the lead's
+// own "user".phone, so a newly assigned lead with no number on file is a
+// silent paging gap until this is set here.
+//
+// makeInternal flips the target from EXTERNAL to INTERNAL. Admin-only
+// (PermAdmin, same gate as CreateUser/GrantUserRoles/GET /roles/grantable) --
+// a cs_engineer reaches this handler at all via the route's PermWrite floor,
+// but is refused with 403 the moment this field is present. Whether the
+// caller is a CSM admin is decided once, here: entity-service does not
+// re-check it, it only re-checks that the call came from this backend
+// specifically (its own CSM_PORTAL_BACKEND_CLIENT_ID), the same posture as
+// POST /case-escalation-access/deescalators/{userId}. Pre-checks the target
+// is a @wso2.com account before calling entity-service at all, same
+// precedent as GrantUserRoles' own isWso2Email guard above -- entity-service
+// enforces the identical restriction itself (the real boundary; this is a
+// fast, friendly failure), so the two must never disagree. Combinable with
+// timeZone/phone in the same call, or sent alone -- a dedicated
+// POST /users/{id}/internalize was the first design, folded into this
+// existing endpoint instead once it was clear it could serve the same
+// request shape with no change to any other caller's behavior.
 func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -512,12 +536,19 @@ func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
-	if payload.TimeZone == nil && payload.Phone == nil {
+	makeInternal := payload.MakeInternal != nil && *payload.MakeInternal
+	if payload.TimeZone == nil && payload.Phone == nil && !makeInternal {
 		writeError(w, http.StatusBadRequest, "At least one field must be provided for update.")
 		return
 	}
 
-	entityFields := map[string]string{}
+	if makeInternal && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
+		slog.WarnContext(r.Context(), "access denied: non-admin attempted to set makeInternal", "userID", user.UserID, "targetID", id)
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
+		return
+	}
+
+	entityFields := map[string]any{}
 	if payload.TimeZone != nil {
 		entityFields["timeZone"] = *payload.TimeZone
 	}
@@ -528,6 +559,28 @@ func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		entityFields["phone"] = phone
+	}
+	if makeInternal {
+		// Same precedent as GrantUserRoles' own isWso2Email guard: a fast,
+		// friendly 400 before ever calling entity-service, which enforces
+		// the identical restriction itself (the real boundary).
+		target, err := h.entity.GetUser(r.Context(), id)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "UpdateUser: entity GetUser failed", "userID", user.UserID, "targetID", id, "err", err)
+			mapUpstreamErrorGeneric(w, err, "Failed to look up the user.")
+			return
+		}
+		var targetUser entityUserMeResponse
+		if err := json.Unmarshal(target, &targetUser); err != nil || targetUser.Email == "" {
+			slog.ErrorContext(r.Context(), "UpdateUser: parse target user failed", "userID", user.UserID, "targetID", id, "err", err)
+			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+			return
+		}
+		if !isWso2Email(targetUser.Email) {
+			writeError(w, http.StatusBadRequest, "a user can only be made internal for a "+wso2EmailDomain+" account")
+			return
+		}
+		entityFields["makeInternal"] = true
 	}
 	entityBody, err := json.Marshal(entityFields)
 	if err != nil {

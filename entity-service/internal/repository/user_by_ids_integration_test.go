@@ -57,7 +57,7 @@ func TestUsersByIDsToleratesNonUUIDIDs(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	svc := service.NewUserService(repository.NewUserRepository(pool), nil)
+	svc := service.NewUserService(repository.NewUserRepository(pool), nil, "")
 
 	resp, err := svc.GetUsersByIDs(ctx, []string{
 		usersByIDsUserID,

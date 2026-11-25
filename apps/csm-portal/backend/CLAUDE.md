@@ -298,6 +298,47 @@ from SCIM) while doing nothing anyone could observe. `CreateUser`'s own `grantRo
 identical guard at the same time, for the same reason — it had none before either, despite sharing
 the exact same `GrantableRole`/SCIM mechanism.
 
+## Flipping an existing user to internal (`PATCH /users/{id}`'s `makeInternal` field)
+
+A different, unrelated gap from the two sections above: entity-service's `user_type` (internal vs.
+external/customer) is trigger-derived from `user_role` membership, not a plain settable column — a
+one-off manual fix (editing the column directly in the database) reverts the moment any role row
+for that user changes, found live chasing exactly that symptom. There was no admin action anywhere
+to fix it properly.
+
+This is `makeInternal` on the existing `PATCH /users/{id}` (`UsersHandler.UpdateUser`), not a
+dedicated route — a standalone `POST /users/{id}/internalize` was the first design, folded into
+this existing endpoint once it was clear it could serve the same request with no change to any
+other caller's behavior (`updateUserRequest.MakeInternal`, combinable with `timeZone`/`phone` in
+the same call or sent alone). The route stays `PermWrite` (cs_engineer or admin) like every other
+`PATCH /users/{id}` write, but `UpdateUser` narrows `makeInternal` specifically to admin in-handler
+— the same shape `ProjectHandler.UpdateProject` already uses to narrow `closureState`/
+`suspensionProcessOverridden` to `PermAdmin` on its own otherwise-`PermWrite` route (see "PATCH
+/projects/{id}" above): `h.access.Permits(PermAdmin, user.Roles)`, checked only when
+`payload.MakeInternal` is true, so a plain timezone/phone PATCH is unaffected. `true` forwards to
+entity-service's own `PATCH /users/{id}` with `{"makeInternal": true}` (see that repo's own
+`CLAUDE.md`), which does the actual grant (`internal`) and revoke
+(`external`/`customer`/`partner`/`customer_admin`/`partner_admin`) in one transaction.
+
+**Same `@wso2.com` pre-check as `GrantUserRoles`, for the same reason.** The target's email is
+resolved via `entity.GetUser(id)` first (identical identity-resolution step `GrantUserRoles` already
+takes), and a non-`@wso2.com` address is refused with a 400 before entity-service is ever called —
+a fast, friendly failure. This is **not** the real enforcement boundary: entity-service's own
+`userService.UpdateUser` runs the identical restriction on `req.MakeInternal` and is what actually
+protects the database, the same relationship `CreateUser`'s own wso2-email check already has to its
+entity-service-side twin (see "Creating a user" above).
+
+**Whether the caller is a CSM admin is decided once, by this handler's own in-body `PermAdmin`
+check — not a second time by entity-service.** entity-service re-checks only that the call came
+from this backend specifically (`CSM_PORTAL_BACKEND_CLIENT_ID` plus a forwarded signed-in person),
+the same posture `POST /case-escalation-access/deescalators/{userId}` already has (see
+"De-escalation: team leads and the admin-named list" above) — not a second, independently-configured
+admin-role list that could silently disagree with this backend's own `PermAdmin`.
+
+The response is passed through untouched — `userType` rides along inside the same
+`PatchUserMeResponse` shape (`{"id", "updatedBy", "updatedOn", "userType": "internal", ...}`), set
+only when this request's `makeInternal` was true.
+
 ## Provisioning a "user" row on demand (`ensureUserProvisioned`)
 
 A `worknote_creator`- or `escalator`-only caller reaches `POST /cases/{id}/comments`

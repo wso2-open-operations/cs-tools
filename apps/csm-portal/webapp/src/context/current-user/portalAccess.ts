@@ -141,6 +141,13 @@ export interface PortalAccess {
    */
   canCreateUser: boolean;
   /**
+   * Flipping an existing @wso2.com user from external to internal
+   * (`POST /users/{id}/internalize`). `admin` only, same reasoning as
+   * {@link canCreateUser} — mirrors the backend's own `PermAdmin` gate on
+   * that route.
+   */
+  canMakeUserInternal: boolean;
+  /**
    * Directly overriding a project's overall closure state (OPEN/READ_ONLY/
    * CLOSED/RESTRICTED/SUSPENDED) via `PATCH /projects/{id}`'s `closureState`
    * field. `admin` only, same reasoning as {@link canCreateUser} — mirrors
@@ -391,6 +398,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canWrite: true,
       canAddWorkNotes: true,
       canCreateUser: true,
+      canMakeUserInternal: true,
       canUpdateProjectClosureState: true,
       canUpdateProjectSuspensionOverride: true,
       canEditProjectOnboarding: true,
@@ -432,6 +440,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canWrite: full,
     canAddWorkNotes: full || has(PORTAL_ROLE.worknoteCreator),
     canCreateUser: isAdmin,
+    canMakeUserInternal: isAdmin,
     canUpdateProjectClosureState: isAdmin,
     canUpdateProjectSuspensionOverride: isAdmin,
     canEditProjectOnboarding: isAdmin || has(PORTAL_ROLE.onboardingLead),
