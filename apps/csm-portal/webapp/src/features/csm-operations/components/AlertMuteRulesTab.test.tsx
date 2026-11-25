@@ -66,6 +66,22 @@ describe("AlertMuteRulesTab", () => {
     backend.current = createFakeAlertMuteRulesApi();
   });
 
+  it("moves back to the last page with rows when the current page empties", async () => {
+    const b = backend.current!;
+    const rules = Array.from({ length: 21 }, (_, i) => b.seed(rule(`Rule ${String(i + 1).padStart(2, "0")}`, 5 + i, 1)));
+    renderTab();
+    const ruleNames = (): HTMLElement[] => screen.queryAllByText(/^Rule \d\d$/);
+    await waitFor(() => expect(ruleNames()).toHaveLength(20));
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    await waitFor(() => expect(ruleNames()).toHaveLength(1));
+
+    // One rule goes away: 20 are left, so page 2 is past the end.
+    await b.api.delete(`/alert-mute-rules/${rules[0].id}`);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh alert mute rules" }));
+    await waitFor(() => expect(ruleNames()).toHaveLength(20));
+    expect(screen.queryByText(/No alert mute rules/)).not.toBeInTheDocument();
+  });
+
   it("shows the empty state", async () => {
     renderTab();
     expect(await screen.findByText(/No alert mute rules yet/)).toBeInTheDocument();

@@ -137,7 +137,12 @@ export default function AlertMuteRuleMutedAlerts({
           error={error}
         />
       ) : isLoading && !data ? (
-        <Skeleton variant="rounded" height={120} />
+        // One placeholder row per row of the page, so the section loads at its final height.
+        <Box aria-busy="true" aria-label="Loading muted alerts">
+          {Array.from({ length: rowsPerPage }).map((_, i) => (
+            <Skeleton key={i} variant="text" height={33} />
+          ))}
+        </Box>
       ) : !data || data.total === 0 ? (
         <Typography variant="body2" color="text.secondary">
           No alerts muted by this rule.

@@ -116,6 +116,10 @@ export default function AlertMuteRulesTab(): JSX.Element {
   const returnTo = `${location.pathname}${location.search}`;
   const pageRows = (data?.alertMuteRules ?? []).map((rule) => ({ rule, state: alertMuteRuleState(rule, now) }));
   const total = data?.total ?? 0;
+  // A page past the end (a rule on the last page expired or was deleted since): go to the last page that has rows,
+  // once this page's own answer is in, instead of saying no rule matches.
+  const lastPage = Math.max(0, Math.ceil(total / rowsPerPage) - 1);
+  if (data && !isFetching && page > lastPage) setPage(lastPage);
   const startedIds = pageRows.filter(({ state }) => state !== "scheduled").map(({ rule }) => rule.id);
   const mutedCounts = useAlertMuteRuleMutedCounts(
     startedIds,
