@@ -370,6 +370,13 @@ func upsertOrgPlatform(ctx context.Context, tx pgx.Tx, in domain.Registration,
 // maxMetadataLen bounds a stored visit field; a longer value is cut.
 const maxMetadataLen = 255
 
+// cleanMetadata prepares a visitor-controlled value for storage: Postgres text
+// cannot hold a NUL byte, and one in a UTM value would otherwise reject the whole
+// registration, so NULs are dropped before the value is trimmed and cut.
+func cleanMetadata(s string) string {
+	return truncateRunes(strings.TrimSpace(strings.ReplaceAll(s, "\x00", "")), maxMetadataLen)
+}
+
 // upsertRegistrationMetadata stores a pairing's visit context. A known value is
 // kept; a later event only fills what is missing.
 func upsertRegistrationMetadata(ctx context.Context, tx pgx.Tx, pairingID string, m *domain.RegistrationMetadata) error {
@@ -383,7 +390,7 @@ func upsertRegistrationMetadata(ctx context.Context, tx pgx.Tx, pairingID string
 	}
 	hasValue := false
 	for i := range v {
-		if v[i] = truncateRunes(strings.TrimSpace(v[i]), maxMetadataLen); v[i] != "" {
+		if v[i] = cleanMetadata(v[i]); v[i] != "" {
 			hasValue = true
 		}
 	}

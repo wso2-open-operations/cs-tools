@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -133,7 +134,7 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 	// utm_source is free text a visitor sets in the landing URL, so the number of
 	// distinct values is unbounded: the busiest are kept and the rest folded into OTHER.
 	if out.UTMSources, err = r.countBy(ctx, `
-		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'), COUNT(*)::INT
+		SELECT COALESCE(LOWER(m.utm_source), 'NOT_RECORDED'), COUNT(*)::INT
 		FROM   plg_org_platform op
 		LEFT   JOIN plg_registration_metadata m ON m.org_platform_id = op.id
 		WHERE  op.registered_on BETWEEN $1 AND $2
@@ -191,8 +192,9 @@ const registrationTaskValue = `LEFT JOIN LATERAL (
 		    ORDER  BY run.created_at DESC, run.id DESC
 		    LIMIT  1) x ON TRUE`
 
-// maxUTMSources bounds the UTM charts: the qualified-stats chart shows no more
-// sources, and the UTM sources pie folds the rest into OTHER.
+// maxUTMSources bounds the UTM charts: both keep the busiest sources and fold the
+// rest into OTHER, so they stay readable and add up to the same cohort. Sources are
+// compared lower-cased ("Google" and "google" are one).
 const maxUTMSources = 10
 
 // otherLabel is the label of the folded remainder of a capped breakdown. A real
@@ -212,7 +214,7 @@ func foldRemainder(rows []domain.CountByLabel, n int) []domain.CountByLabel {
 	kept := make([]domain.CountByLabel, n, n+1)
 	copy(kept, rows[:n])
 	for i := range kept {
-		if kept[i].Label == otherLabel {
+		if strings.EqualFold(kept[i].Label, otherLabel) {
 			kept[i].Label = realOtherLabel
 		}
 	}
@@ -223,11 +225,35 @@ func foldRemainder(rows []domain.CountByLabel, n int) []domain.CountByLabel {
 	return append(kept, domain.CountByLabel{Label: otherLabel, Count: rest})
 }
 
+// foldQualificationRemainder is foldRemainder for the outcomes per source: the
+// rows after the first n are added together, outcome by outcome, as OTHER.
+func foldQualificationRemainder(rows []domain.UTMQualification, n int) []domain.UTMQualification {
+	if len(rows) <= n {
+		return rows
+	}
+	kept := make([]domain.UTMQualification, n, n+1)
+	copy(kept, rows[:n])
+	for i := range kept {
+		if strings.EqualFold(kept[i].Label, otherLabel) {
+			kept[i].Label = realOtherLabel
+		}
+	}
+	rest := domain.UTMQualification{Label: otherLabel}
+	for _, r := range rows[n:] {
+		rest.Eligible += r.Eligible
+		rest.Monitor += r.Monitor
+		rest.Excluded += r.Excluded
+		rest.NotAssessed += r.NotAssessed
+		rest.Total += r.Total
+	}
+	return append(kept, rest)
+}
+
 // qualifiedByUTM counts eligibility outcomes per utm_source, over each
 // organisation's entry registration only (its earliest, as in the entry-product chart).
 func (r *analyticsRepository) qualifiedByUTM(ctx context.Context, from, to time.Time) ([]domain.UTMQualification, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'),
+		SELECT COALESCE(LOWER(m.utm_source), 'NOT_RECORDED'),
 		       COUNT(*) FILTER (WHERE x.value_text = 'ELIGIBLE')::INT,
 		       COUNT(*) FILTER (WHERE x.value_text = 'MONITOR')::INT,
 		       COUNT(*) FILTER (WHERE x.value_text = 'EXCLUDED')::INT,
@@ -239,8 +265,7 @@ func (r *analyticsRepository) qualifiedByUTM(ctx context.Context, from, to time.
 		`+registrationTaskValue+`
 		WHERE  op.registered_on BETWEEN $1 AND $2
 		  `+entryRegistrationOnly+`
-		GROUP  BY 1 ORDER BY 6 DESC, 1
-		LIMIT  $4`, from, to, domain.TaskCodeEligibilityOutcome, maxUTMSources)
+		GROUP  BY 1 ORDER BY 6 DESC, 1`, from, to, domain.TaskCodeEligibilityOutcome)
 	if err != nil {
 		return nil, fmt.Errorf("analytics qualified by utm: %w", err)
 	}
@@ -254,7 +279,10 @@ func (r *analyticsRepository) qualifiedByUTM(ctx context.Context, from, to time.
 		}
 		out = append(out, q)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return foldQualificationRemainder(out, maxUTMSources), nil
 }
 
 func (r *analyticsRepository) countBy(ctx context.Context, q string, from, to time.Time, extra ...any) ([]domain.CountByLabel, error) {

@@ -1236,7 +1236,8 @@ type DashboardAnalytics struct {
 	EmailClassification []CountByLabel `json:"emailClassification"`
 	// QualificationOverview counts entry registrations by eligibility outcome; NOT_ASSESSED until set.
 	QualificationOverview []CountByLabel `json:"qualificationOverview"`
-	// QualifiedByUTM breaks the outcomes down by utm_source, entry registrations only, busiest first.
+	// QualifiedByUTM breaks the outcomes down by utm_source, entry registrations only, busiest
+	// first; sources past the 10th are added together as OTHER.
 	QualifiedByUTM []UTMQualification `json:"qualifiedByUtm"`
 }
 

@@ -46295,7 +46295,7 @@ components:
                       type: integer
         utmSources:
           type: array
-          description: Entry registrations by utm_source of the landing URL; NOT_RECORDED when the signup carried none.
+          description: Entry registrations by utm_source of the landing URL, lower-cased; NOT_RECORDED when the signup carried none. The 10 busiest sources are listed and the rest are added together as OTHER.
           items:
             type: object
             properties:
@@ -46325,7 +46325,7 @@ components:
                 type: integer
         qualifiedByUtm:
           type: array
-          description: Eligibility outcomes per utm_source over each organisation's entry registration only, busiest first, at most 10.
+          description: Eligibility outcomes per utm_source (lower-cased) over each organisation's entry registration only, busiest first. The 10 busiest sources are listed and the rest are added together as OTHER.
           items:
             type: object
             properties:
