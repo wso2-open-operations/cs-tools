@@ -28145,14 +28145,20 @@ components:
           description: Whether a hot fix is required.
         issueTypeLabel:
           type: string
-          description: GitHub label for the issue type.
+          description: >
+            GitHub label for the issue type: Type/Discussion (filed with Type/Incident and the
+            priority label), Type/Feature (filed with Type/Feature, no priority label) or
+            Type/Patch (legacy). Fields of the other type are ignored: a Feature Request's
+            priority, justification, reproducing steps, hotfix, regression and related internal
+            issues, and a Discussion's business use case and related Git issues. The dialog
+            sends updateLevel "-" with a Feature Request.
         priorityLevel:
           type: string
           description: GitHub priority label for a Discussion, per the Internal Issue Handling Policy. Sent as Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). Bare Priority/Immediate (etc.) is rewritten to the (Pn) form; any other value is applied as sent. Discussion also gets Type/Incident.
         priorityJustification:
           type: string
           description: >
-            Why a P0 or P1 Discussion has that priority, free text. Written to the issue body as
+            Why a P0, P1 or P2 Discussion has that priority, free text. Written to the issue body as
             "Priority Justification : <value>", on one line. Ignored for any other priority.
         reproducingSteps:
           type: string
@@ -28166,6 +28172,12 @@ components:
         relatedInternalIssues:
           type: string
           description: Related internal issues, written to the issue body under "Related Internal Issue(s) :".
+        businessUseCase:
+          type: string
+          description: The business use case of a Feature Request, written to the issue body under "Business Use Case :".
+        relatedGitIssues:
+          type: string
+          description: Related Git issues of a Feature Request, written to the issue body under "Related Git Issue(s) :".
         onboardingInProgress:
           type: boolean
           description: The case's project is onboarding. Adds Onboarding/affected.

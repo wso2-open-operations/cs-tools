@@ -2424,11 +2424,11 @@ export interface BeCreateCaseGithubIssuePayload {
   regression?: boolean;
   /** When true: appends "Hotfix Required : Yes" to the issue body. */
   hotFixRequired?: boolean;
-  /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
+  /** Issue-type label to apply on GitHub: "Type/Discussion" or "Type/Feature" (legacy "Type/Patch"). */
   issueTypeLabel?: string;
   /** Priority label for Discussion: Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). */
   priorityLevel?: string;
-  /** Why the issue is P0 or P1 (free text). Written to the issue body. */
+  /** Why the issue is P0, P1 or P2 (free text). Written to the issue body. */
   priorityJustification?: string;
   /** Steps to reproduce, written to the issue body. */
   reproducingSteps?: string;
@@ -2438,6 +2438,10 @@ export interface BeCreateCaseGithubIssuePayload {
   relatedInternalIssues?: string;
   /** Project onboarding status is In-Progress. Adds Onboarding/affected. */
   onboardingInProgress?: boolean;
+  /** Feature Request: business use case, written to the issue body. */
+  businessUseCase?: string;
+  /** Feature Request: related Git issue links or numbers, written to the issue body. */
+  relatedGitIssues?: string;
 }
 
 /** `POST /cases/{id}/github-issues` response. */

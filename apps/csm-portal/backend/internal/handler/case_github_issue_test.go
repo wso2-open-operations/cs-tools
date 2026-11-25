@@ -238,8 +238,17 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		}
 	})
 
-	t.Run("a justification sent with a P2 or P3, or a hotfix reason without a hotfix, is not written", func(t *testing.T) {
-		for _, priority := range []string{"Priority/Medium(P2)", "Priority/Low(P3)"} {
+	t.Run("a P2 carries its justification", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Medium(P2)","priorityJustification":"Blocks a customer upgrade"}`)
+		assertStatus(t, w, http.StatusCreated)
+		if want := "It fails.\n\nPriority Justification : Blocks a customer upgrade"; !strings.HasPrefix(eng.calls[0].body, want) {
+			t.Errorf("body = %q, want it to start with %q", eng.calls[0].body, want)
+		}
+	})
+
+	t.Run("a justification sent with a P3, or a hotfix reason without a hotfix, is not written", func(t *testing.T) {
+		for _, priority := range []string{"Priority/Low(P3)"} {
 			eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
 			w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"`+priority+`","priorityJustification":"anything","hotFixReason":"anything"}`)
 			assertStatus(t, w, http.StatusCreated)
@@ -904,5 +913,107 @@ func TestGitHubIssueChoiceListsMatchTheWebapp(t *testing.T) {
 	}
 	if !slices.Equal(options.HotfixReasons, gitHubHotfixReasons) {
 		t.Errorf("hotfix reasons: webapp = %q, backend = %q", options.HotfixReasons, gitHubHotfixReasons)
+	}
+}
+
+func TestBuildGitHubIssueLabels_FeatureRequest(t *testing.T) {
+	got := buildGitHubIssueLabels("product/is", caseGitHubIssueRequest{IssueTypeLabel: "Type/Feature", PriorityLevel: "Priority/High"})
+	want := []string{"Origin/CS", "product/is", "Type/Feature"}
+	if !slices.Equal(got, want) {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+	for _, l := range got {
+		if strings.HasPrefix(l, "Priority/") || l == "Type/Incident" {
+			t.Errorf("unexpected label %q on a Feature Request", l)
+		}
+	}
+	got = buildGitHubIssueLabels("product/is", caseGitHubIssueRequest{IssueTypeLabel: "Type/Feature", Reason: "migration"})
+	want = []string{"Origin/CS", "product/is", "Type/Feature", "Affected/Migration"}
+	if !slices.Equal(got, want) {
+		t.Errorf("migration labels = %v, want %v", got, want)
+	}
+}
+
+func TestBuildGitHubIssueBody_FeatureRequestSections(t *testing.T) {
+	got := buildGitHubIssueBody(
+		caseGitHubIssueRequest{Description: "d", BusinessUseCase: " Needs X\nfor Y ", RelatedGitIssues: "org/repo#1"},
+		"product/is", caseGitHubIssueContext{})
+	want := "d\n\nBusiness Use Case :\nNeeds X\nfor Y\n\nRelated Git Issue(s) :\norg/repo#1\n\n" + infoBlock("product/is", "", "", "", "", "", "")
+	if got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestEntityGitHubIssueRequest_FeatureRequestFields(t *testing.T) {
+	body := `{"title":"t","description":"d","issueTypeLabel":"Type/Feature","businessUseCase":"use","BusinessUseCase":"use2","relatedGitIssues":"org/repo#1"}`
+	forward, msg := entityGitHubIssueRequest([]byte(body))
+	if msg != "" {
+		t.Fatalf("unexpected refusal: %q", msg)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(forward, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for key := range fields {
+		if strings.EqualFold(key, "businessUseCase") || strings.EqualFold(key, "relatedGitIssues") {
+			t.Errorf("field %q was forwarded", key)
+		}
+	}
+	var label, description string
+	_ = json.Unmarshal(fields["issueTypeLabel"], &label)
+	_ = json.Unmarshal(fields["description"], &description)
+	if label != "Type/Feature" {
+		t.Errorf("issueTypeLabel = %q, want Type/Feature", label)
+	}
+	if !strings.Contains(description, "Business Use Case :\n") || !strings.Contains(description, "Related Git Issue(s) :\norg/repo#1") {
+		t.Errorf("description = %q, want both sections", description)
+	}
+}
+
+// A field of the other issue type reaches neither the body nor the labels.
+func TestCaseGitHubIssueRequest_ScopedToIssueType(t *testing.T) {
+	all := caseGitHubIssueRequest{
+		Description:           "What it is.",
+		PriorityLevel:         "Priority/High(P1)",
+		PriorityJustification: "Production is down.",
+		ReproducingSteps:      "1. Log in",
+		HotFixRequired:        true,
+		HotFixReason:          "Customer-Requested Hotfix",
+		Regression:            true,
+		RelatedInternalIssues: "example/internal#12",
+		BusinessUseCase:       "Needed for onboarding.",
+		RelatedGitIssues:      "example/public#7",
+		Reason:                "migration",
+	}
+
+	feature := all
+	feature.IssueTypeLabel = "Type/Feature"
+	feature = feature.scopedToIssueType()
+	if got, want := buildGitHubIssueLabels("product/is", feature), []string{"Origin/CS", "product/is", "Type/Feature", "Affected/Migration"}; !slices.Equal(got, want) {
+		t.Errorf("feature labels = %v, want %v", got, want)
+	}
+	if got, want := gitHubIssueSections(feature), []string{"Business Use Case :\nNeeded for onboarding.", "Related Git Issue(s) :\nexample/public#7"}; !slices.Equal(got, want) {
+		t.Errorf("feature sections = %q, want %q", got, want)
+	}
+
+	discussion := all
+	discussion.IssueTypeLabel = "Type/Discussion"
+	discussion = discussion.scopedToIssueType()
+	for _, s := range gitHubIssueSections(discussion) {
+		if strings.HasPrefix(s, "Business Use Case") || strings.HasPrefix(s, "Related Git Issue(s)") {
+			t.Errorf("unexpected section on a Discussion: %q", s)
+		}
+	}
+	if len(gitHubIssueSections(discussion)) != 4 {
+		t.Errorf("discussion sections = %q, want its own four", gitHubIssueSections(discussion))
+	}
+
+	// The legacy Patch type and a request with no type are left as sent.
+	for _, typ := range []string{"Type/Patch", ""} {
+		other := all
+		other.IssueTypeLabel = typ
+		if got := other.scopedToIssueType(); got != other {
+			t.Errorf("type %q: request changed: %+v", typ, got)
+		}
 	}
 }
