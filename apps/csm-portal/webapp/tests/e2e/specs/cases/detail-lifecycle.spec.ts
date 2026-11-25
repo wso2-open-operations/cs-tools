@@ -470,7 +470,7 @@ test.describe("case detail — attachment upload + delete", () => {
 });
 
 test.describe("case detail — GitHub issue dialog opens (not submitted)", () => {
-  test("opens the Open Git issue dialog and cancels without filing", async ({ page }) => {
+  test("opens the Raise internal Git issue dialog and cancels without filing", async ({ page }) => {
     test.setTimeout(60_000);
 
     const provisioned = await provisionCase(page, "e2e case github issue dialog");
@@ -481,10 +481,10 @@ test.describe("case detail — GitHub issue dialog opens (not submitted)", () =>
     await detail.goto(id);
 
     await detail.moreAction("Raise internal Git issue…");
-    const dialog = page.getByRole("dialog").filter({ hasText: "Open Git issue" });
+    const dialog = page.getByRole("dialog").filter({ hasText: "Raise internal Git issue" });
     await expect(dialog).toBeVisible();
 
-    // MUST NOT submit — Cancel only, since "Create issue" files a real issue
+    // MUST NOT submit — Cancel only, since "Raise issue…" raises a real issue
     // in an external GitHub repo with no delete endpoint of its own.
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toHaveCount(0);

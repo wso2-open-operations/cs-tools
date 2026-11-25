@@ -1952,7 +1952,12 @@ func (h *CaseHandler) CreateCaseGithubIssue(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	result, err := h.entity.CreateCaseGithubIssue(r.Context(), caseID, body)
+	forward, msg := entityGitHubIssueRequest(body)
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	result, err := h.entity.CreateCaseGithubIssue(r.Context(), caseID, forward)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateCaseGithubIssue failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to create GitHub issue.")
