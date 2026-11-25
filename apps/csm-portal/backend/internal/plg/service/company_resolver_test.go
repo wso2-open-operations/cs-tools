@@ -174,6 +174,15 @@ func TestCompanyResolver_OwnerOfAnotherOrgGivesNoEmail(t *testing.T) {
 	}
 }
 
+func TestCompanyResolver_OwnerWithNoOrgIdGivesNoEmail(t *testing.T) {
+	cloud := goodCloud()
+	cloud.user.OrgUUID = ""
+	got := resolveOne(t, NewCompanyResolver(identities(), cloud), orgCloud)
+	if got.Email != nil {
+		t.Errorf("an email was returned without a confirmed organisation")
+	}
+}
+
 func TestCompanyResolver_UnknownOrganisationIsNeverRevealed(t *testing.T) {
 	if got := resolveOne(t, NewCompanyResolver(identities(), goodCloud()), orgMissing); got != nil {
 		t.Errorf("an unknown organisation was revealed: %+v", got)

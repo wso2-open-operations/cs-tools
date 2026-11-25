@@ -1083,7 +1083,7 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
   `-` for top-level fields) and sent as `metadata`; entity-service stores them per pairing.
 - **Personal data.** Only time, action, user id, company id, the product fields and that marketing
   metadata (no names or emails) are requested from Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
-- **`internal/moesif`** is the shared Management API client (event search with `search_after` paging).
+- **`internal/moesif`** is the shared Management API client (event search with `search_after` paging, sorted on `request.time` then `_id` so same-millisecond events are not skipped at a page edge).
   Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
   sub-crons run one after another.
 

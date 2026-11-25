@@ -22778,7 +22778,7 @@ paths:
   /plg/registrations/ingest:
     post:
       summary: Land a batch of registrations.
-      description: "One coarse endpoint because the transaction cannot span HTTP: per registration it upserts the person, the organisation, the pairing and its attributes, and writes the genesis history row \u2014 all together. Each registration lands independently, so one bad record does not reject the rest. Idempotency is structural: `plg_organization.organization_name` is `UNIQUE`, which is what makes a redelivered event a no-op."
+      description: "Service credential only: a client in M2M_CLIENT_IDS, never a user token (403). One coarse endpoint because the transaction cannot span HTTP: per registration it upserts the person, the organisation, the pairing and its attributes, and writes the genesis history row \u2014 all together. Each registration lands independently, so one bad record does not reject the rest. Idempotency is structural: `plg_organization.organization_name` is `UNIQUE`, which is what makes a redelivered event a no-op."
       operationId: plgIngestRegistrations
       requestBody:
         required: true
@@ -22819,6 +22819,7 @@ paths:
     post:
       summary: Record a registration that could not be landed.
       description: >
+        Service credential only: a client in M2M_CLIENT_IDS, never a user token (403).
         The payload is stored verbatim so the row can be replayed by posting it
         back to the ingest webhook. The response carries no identifier: rows are
         found by querying plg_ingest_failure, not by a reference handed back here.

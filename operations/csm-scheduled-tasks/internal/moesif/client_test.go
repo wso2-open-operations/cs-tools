@@ -99,6 +99,12 @@ func TestSearchEventsPagesWithTheLastSortKey(t *testing.T) {
 	if got := queries[1]["search_after"]; !reflect.DeepEqual(got, []any{float64(1794103200001)}) {
 		t.Errorf("search_after = %v, want the last sort key, exact", got)
 	}
+	if got := queries[0]["sort"]; !reflect.DeepEqual(got, []any{
+		map[string]any{"request.time": map[string]any{"order": "asc", "unmapped_type": "long"}},
+		map[string]any{"_id": map[string]any{"order": "asc"}},
+	}) {
+		t.Errorf("sort = %v, want request.time then _id", got)
+	}
 	if got := queries[0]["_source"]; !reflect.DeepEqual(got, []any{"request.time", "company_id"}) {
 		t.Errorf("_source = %v, want only the fields asked for", got)
 	}

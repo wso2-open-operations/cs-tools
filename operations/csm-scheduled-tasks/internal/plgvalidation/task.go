@@ -152,6 +152,7 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 		class := it.EmailClassification
 		var newClass *string
 		if deref(class) == "" || deref(class) == classUnknown {
+			counts["classifyAttempts"]++ // one Directory read each
 			if c, ok := classify(ctx, opts, it); ok {
 				class, newClass = &c, &c
 				counts["classified"]++
@@ -193,6 +194,7 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 	slog.InfoContext(ctx, "plg registration validation: done", "product", product, "dryRun", opts.DryRun,
 		"pairings", len(items), "eligible", counts[OutcomeEligible], "monitor", counts[OutcomeMonitor],
 		"excluded", counts[OutcomeExcluded], "abandoned", counts["abandoned"], "stale", counts["stale"], "classified", counts["classified"],
+		"classifyAttempts", counts["classifyAttempts"],
 		"valuesWritten", counts["written"],
 		"valuesSkipped", counts["skipped"], "failed", len(failed))
 	return failed, nil

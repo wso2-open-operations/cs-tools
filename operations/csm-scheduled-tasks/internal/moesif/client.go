@@ -146,7 +146,8 @@ func (c *Client) searchPage(ctx context.Context, q Query, size int, after []any)
 	body := map[string]any{
 		"post_filter": q.Filter,
 		"size":        size,
-		"sort":        []map[string]any{{"request.time": map[string]any{"order": "asc", "unmapped_type": "long"}}},
+		// _id breaks ties between events with the same millisecond, so search_after never skips one.
+		"sort": []map[string]any{{"request.time": map[string]any{"order": "asc", "unmapped_type": "long"}}, {"_id": map[string]any{"order": "asc"}}},
 	}
 	if len(q.Fields) > 0 {
 		body["_source"] = q.Fields
