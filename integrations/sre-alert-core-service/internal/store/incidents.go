@@ -376,9 +376,28 @@ func (r *IncidentRepo) MuteOutcome(ctx context.Context, inc model.Incident) (res
 // CloseMuted closes a muted incident without delivering anything: it is marked closed and unmuted, every pending note
 // is settled, and nothing more is due. Closing it again (an OK folded in after the quiet close) keeps the first
 // unmuted_at, the time the mute ended. It does nothing, and returns false, if a fold changed it since foldVersion.
+//
+// It holds the fingerprint's fold lock, as Unmute does: Fold reads the incident under that lock and writes it later
+// in the same transaction, so a close between the two would leave a firing alert folded into a closed incident and
+// then settled unsent. Under the lock the close waits for the fold, whose new fold_version then makes it a no-op.
 func (r *IncidentRepo) CloseMuted(ctx context.Context, id, foldVersion int64) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("close muted incident %d: begin: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var fingerprint string
+	if err = tx.QueryRow(ctx, `SELECT fingerprint FROM incidents_processed WHERE id = $1`, id).Scan(&fingerprint); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("close muted incident %d: read fingerprint: %w", id, err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "fold:"+fingerprint); err != nil {
+		return false, fmt.Errorf("close muted incident %d: lock: %w", id, err)
+	}
 	var closed int
-	err := r.pool.QueryRow(ctx, `WITH inc AS (
+	err = tx.QueryRow(ctx, `WITH inc AS (
 		UPDATE incidents_processed SET muted = false, unmuted_at = coalesce(unmuted_at, now()), status = 'closed', delivery_due_at = NULL
 		WHERE id = $1 AND fold_version = $2 RETURNING id),
 	notes AS (
@@ -387,6 +406,9 @@ func (r *IncidentRepo) CloseMuted(ctx context.Context, id, foldVersion int64) (b
 	SELECT count(*) FROM inc`, id, foldVersion).Scan(&closed)
 	if err != nil {
 		return false, fmt.Errorf("close muted incident %d: %w", id, err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("close muted incident %d: commit: %w", id, err)
 	}
 	return closed == 1, nil
 }
