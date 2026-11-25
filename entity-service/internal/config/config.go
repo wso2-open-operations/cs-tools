@@ -2058,13 +2058,20 @@ func SQSRegionFromQueueURL(queueURL string) (string, error) {
 		return "", fmt.Errorf("%q is not an https SQS queue url", queueURL)
 	}
 	labels := strings.Split(u.Hostname(), ".")
-	switch {
-	case len(labels) >= 4 && labels[0] == "sqs" && labels[1] != "":
-		return labels[1], nil
-	case len(labels) >= 4 && labels[1] == "queue" && labels[0] != "":
-		return labels[0], nil
+	if len(labels) >= 4 && isSQSDomain(strings.Join(labels[2:], ".")) {
+		switch {
+		case labels[0] == "sqs" && labels[1] != "":
+			return labels[1], nil
+		case labels[1] == "queue" && labels[0] != "":
+			return labels[0], nil
+		}
 	}
 	return "", fmt.Errorf("%q does not name an SQS region", queueURL)
+}
+
+// isSQSDomain reports whether a host suffix is an AWS domain that serves SQS, so a typo such as amazonaws.co is refused.
+func isSQSDomain(suffix string) bool {
+	return suffix == "amazonaws.com" || suffix == "amazonaws.com.cn"
 }
 
 // validateAlertConsumer rejects an enabled alert consumer that could never receive or store an alert.

@@ -125,6 +125,8 @@ func (q *Queue) Name() string {
 // Receive long polls until at least one message arrives or ctx is done; SQS returns at most 10 at a time.
 func (q *Queue) Receive(ctx context.Context, maxMessages int) ([]*domain.AlertQueueMessage, error) {
 	for {
+		// SQS hides a message before its response arrives, so the expiry counts from the request, not the reply.
+		requestedAt := q.now()
 		out, err := q.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 			QueueUrl:                    aws.String(q.url),
 			MaxNumberOfMessages:         int32(min(max(maxMessages, 1), maxReceiveBatch)), // #nosec G115 -- clamped to 1..10
@@ -137,10 +139,9 @@ func (q *Queue) Receive(ctx context.Context, maxMessages int) ([]*domain.AlertQu
 			return nil, err
 		}
 		if len(out.Messages) > 0 {
-			receivedAt := q.now()
 			messages := make([]*domain.AlertQueueMessage, len(out.Messages))
 			for i := range out.Messages {
-				messages[i] = toAlertQueueMessage(&out.Messages[i], receivedAt)
+				messages[i] = toAlertQueueMessage(&out.Messages[i], requestedAt)
 			}
 			return messages, nil
 		}
@@ -167,10 +168,11 @@ func (q *Queue) Abandon(ctx context.Context, message *domain.AlertQueueMessage) 
 
 // RenewLock keeps the message hidden for another visibility timeout and records the new expiry.
 func (q *Queue) RenewLock(ctx context.Context, message *domain.AlertQueueMessage) error {
+	requestedAt := q.now()
 	if err := q.setVisibility(ctx, message, visibilityTimeout); err != nil {
 		return err
 	}
-	lockedUntil := q.now().Add(visibilityTimeout)
+	lockedUntil := requestedAt.Add(visibilityTimeout)
 	message.LockedUntil = &lockedUntil
 	return nil
 }
@@ -224,7 +226,7 @@ func (q *Queue) setVisibility(ctx context.Context, message *domain.AlertQueueMes
 	return err
 }
 
-func toAlertQueueMessage(m *types.Message, receivedAt time.Time) *domain.AlertQueueMessage {
+func toAlertQueueMessage(m *types.Message, requestedAt time.Time) *domain.AlertQueueMessage {
 	properties := make(map[string]string, len(m.MessageAttributes))
 	for key, value := range m.MessageAttributes {
 		if value.StringValue != nil {
@@ -243,7 +245,7 @@ func toAlertQueueMessage(m *types.Message, receivedAt time.Time) *domain.AlertQu
 		enqueuedOn := time.UnixMilli(sent).UTC()
 		message.EnqueuedOn = &enqueuedOn
 	}
-	lockedUntil := receivedAt.Add(visibilityTimeout)
+	lockedUntil := requestedAt.Add(visibilityTimeout)
 	message.LockedUntil = &lockedUntil
 	return message
 }

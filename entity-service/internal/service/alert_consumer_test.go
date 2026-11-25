@@ -402,6 +402,16 @@ func TestAlertConsumerProcess_StoresTooManyAlertsAsAnErrorRow(t *testing.T) {
 	}
 }
 
+func TestAlertConsumerProcess_StoresAMessageWithNoAlertsAsAnErrorRow(t *testing.T) {
+	repo := newFakeAlertRepo()
+	c, _ := singleQueueConsumer(t, repo)
+
+	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "prometheus", `{"alerts":[1,"two",null]}`))
+	if decision.settlement != alertComplete || repo.rows["priority/m-1/0"].ErrorReason != alertErrorNoAlerts || repo.rowCount() != 1 {
+		t.Fatalf("decision = %+v with %d rows, want one %s error row", decision, repo.rowCount(), alertErrorNoAlerts)
+	}
+}
+
 // An alert the database refuses outright is kept as an error row instead of being retried until the queue gives up.
 func TestAlertConsumerProcess_StoresAnAlertTheDatabaseRefusesAsAnErrorRow(t *testing.T) {
 	repo := newFakeAlertRepo()

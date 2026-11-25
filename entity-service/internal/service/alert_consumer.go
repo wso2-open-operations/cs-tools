@@ -79,6 +79,7 @@ const (
 	alertErrorUnknownSource   = "UnknownSource"
 	alertErrorTransformFailed = "TransformFailed"
 	alertErrorTooManyAlerts   = "TooManyAlerts"
+	alertErrorNoAlerts        = "NoAlerts"
 	alertErrorUnstorable      = "UnstorableAlert"
 )
 
@@ -391,7 +392,8 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 		return c.storeError(ctx, tier, queueName, message, source, alertErrorTooManyAlerts, fmt.Sprintf("%d alerts in one message, at most %d are accepted", len(alerts), maxAlertsPerMessage))
 	}
 	if len(alerts) == 0 {
-		return alertDecision{settlement: alertComplete}
+		// Such as an Alertmanager batch whose entries are all non-objects; keep the body rather than complete with no record.
+		return c.storeError(ctx, tier, queueName, message, source, alertErrorNoAlerts, "the message holds no alert")
 	}
 
 	var ids []string

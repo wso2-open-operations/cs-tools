@@ -34,6 +34,7 @@ type fakeClient struct {
 	receives   [][]types.Message
 	receiveErr error
 	polls      int
+	onCall     func() // runs inside receive and visibility calls, to model a slow response
 	deleted    []string
 	visibility map[string]int32
 	sent       []*sqs.SendMessageInput
@@ -44,6 +45,9 @@ type fakeClient struct {
 
 func (c *fakeClient) ReceiveMessage(ctx context.Context, in *sqs.ReceiveMessageInput, _ ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	c.polls++
+	if c.onCall != nil {
+		c.onCall()
+	}
 	if c.receiveErr != nil {
 		return nil, c.receiveErr
 	}
@@ -65,6 +69,9 @@ func (c *fakeClient) DeleteMessage(_ context.Context, in *sqs.DeleteMessageInput
 }
 
 func (c *fakeClient) ChangeMessageVisibility(_ context.Context, in *sqs.ChangeMessageVisibilityInput, _ ...func(*sqs.Options)) (*sqs.ChangeMessageVisibilityOutput, error) {
+	if c.onCall != nil {
+		c.onCall()
+	}
 	if c.visibility == nil {
 		c.visibility = map[string]int32{}
 	}
@@ -131,6 +138,27 @@ func TestQueue_ReceiveKeepsPollingUntilAMessageArrives(t *testing.T) {
 	}
 	if q.Name() != "sqs/priority-queue" {
 		t.Fatalf("name = %q", q.Name())
+	}
+}
+
+func TestQueue_LockExpiryCountsFromTheRequestNotTheResponse(t *testing.T) {
+	c := &fakeClient{receives: [][]types.Message{{sqsMessage("m-1")}}}
+	q := newQueue(c, priorityURL, "")
+	start := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	now := start
+	q.now = func() time.Time { return now }
+	c.onCall = func() { now = now.Add(20 * time.Second) }
+
+	m := receiveOne(t, q)
+	if !m.LockedUntil.Equal(start.Add(time.Minute)) {
+		t.Fatalf("locked until = %v after a slow receive, want 60 seconds after the request at %v", m.LockedUntil, start)
+	}
+	renewAt := now
+	if err := q.RenewLock(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if !m.LockedUntil.Equal(renewAt.Add(time.Minute)) {
+		t.Fatalf("locked until = %v after a slow renewal, want 60 seconds after the request at %v", m.LockedUntil, renewAt)
 	}
 }
 

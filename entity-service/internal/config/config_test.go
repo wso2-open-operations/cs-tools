@@ -1942,7 +1942,7 @@ func TestSQSRegionFromQueueURL(t *testing.T) {
 			t.Errorf("SQSRegionFromQueueURL(%q) = %q, %v; want %q", queueURL, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "priority-queue", "http://sqs.us-east-1.amazonaws.com/1/q", "https://example.com/1/q", "https://sqs.us-east-1.amazonaws.com", "https://sqs..amazonaws.com/1/q", "https://.queue.amazonaws.com/1/q"} {
+	for _, bad := range []string{"", "priority-queue", "http://sqs.us-east-1.amazonaws.com/1/q", "https://example.com/1/q", "https://sqs.us-east-1.amazonaws.com", "https://sqs..amazonaws.com/1/q", "https://.queue.amazonaws.com/1/q", "https://sqs.us-east-1.amazonaws.co/1/q", "https://sqs.us-east-1.example.com/1/q", "https://eu-west-1.queue.amazonaws.com.evil.io/1/q"} {
 		if _, err := SQSRegionFromQueueURL(bad); err == nil {
 			t.Errorf("SQSRegionFromQueueURL(%q) accepted a bad url", bad)
 		}
