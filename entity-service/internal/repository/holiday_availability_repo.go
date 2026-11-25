@@ -268,8 +268,15 @@ func (r *holidayAvailabilityRepository) removeHolidayTags(ctx context.Context, w
 		if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_absence WHERE id = $1::uuid`, g.id); err != nil {
 			return 0, fmt.Errorf("remove %s holiday tag: %w", what, err)
 		}
+		// Forget this tag's placement by its tag, not by the condition below:
+		// a holiday stored again before that statement runs would keep the
+		// placement, and the day would count as placed with no tag on it.
+		if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_holiday_tag_placed WHERE absence_id = $1::uuid`, g.id); err != nil {
+			return 0, fmt.Errorf("forget removed %s holiday tag: %w", what, err)
+		}
 	}
-	// Forget those placements, except one whose tag is still standing
+	// Forget the other placements that match (their tag was removed or edited
+	// earlier), except one whose tag is still standing
 	// untouched: a placement committed after the read above, whose tag this
 	// run did not remove. Forgetting it would leave its tag with no record,
 	// and no later run could find it; kept, the next run removes both.

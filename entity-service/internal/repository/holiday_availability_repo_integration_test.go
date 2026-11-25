@@ -347,6 +347,10 @@ func TestHolidayAvailabilityRepository_RemovedHolidayRace(t *testing.T) {
 	if _, err := hold.Exec(ctx, `SELECT 1 FROM team_schedule_absence WHERE id = $1::uuid FOR UPDATE`, leadTag); err != nil {
 		t.Fatal(err)
 	}
+	var holdPID int
+	if err := hold.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holdPID); err != nil {
+		t.Fatal(err)
+	}
 	type result struct {
 		removed int
 		err     error
@@ -356,9 +360,12 @@ func TestHolidayAvailabilityRepository_RemovedHolidayRace(t *testing.T) {
 		n, err := repo.RemoveCancelledHolidayTags(ctx, d)
 		done <- result{n, err}
 	}()
+	// Wait until a session is blocked by the hold itself (the cleanup, the
+	// only one that touches the held tag), not on any lock in the database.
 	waiting := false
 	for i := 0; i < 100 && !waiting; i++ {
-		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted)`).Scan(&waiting); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE $1::int = ANY(pg_blocking_pids(pid)))`, holdPID).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if !waiting {

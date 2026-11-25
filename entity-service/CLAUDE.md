@@ -188,7 +188,9 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     holds that holiday row `FOR SHARE` until the tag commits, so a removal (by hand or by the
     calendar) waits for it and the cleanup it starts sees the tag; and the cleanup never
     forgets a placement whose tag is still standing untouched (one committed after its read),
-    so the next run removes that tag instead of leaving it with no record. Both are covered by
+    so the next run removes that tag instead of leaving it with no record. A tag the cleanup
+    removes has its placement forgotten by its tag id in the same transaction, so a holiday
+    stored again meanwhile cannot leave a placement with no tag. Both are covered by
     `TestHolidayAvailabilityRepository_RemovedHolidayRace`.
   - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
     its person available (no tag that day) **and** the team is confirmed
