@@ -3947,6 +3947,17 @@ type UpdateCaseRequest struct {
 	// absent field and an explicitly empty list are distinguishable: nil leaves
 	// the watch list untouched, while an empty list clears it.
 	WatchList *[]string `json:"watchList"`
+	// AddWatchers and RemoveWatchers change the watch list by delta, as platform
+	// user UUIDs, instead of replacing it: the server applies them in one
+	// transaction against whatever list is stored at that moment, so a caller
+	// working from a stale copy cannot drop a watcher someone else added after
+	// it loaded the case (WatchList can, as it is a full replacement). Adding
+	// someone already watching and removing someone not watching are no-ops.
+	// Same exclusivity as WatchList (not combinable with it or any other field);
+	// the two may be sent together but must not name the same user. Supported
+	// for the PostgreSQL data source only.
+	AddWatchers    []string `json:"addWatchers"`
+	RemoveWatchers []string `json:"removeWatchers"`
 	// AssigneeEmail uses json.RawMessage to preserve three states: nil/empty = omit,
 	// "null" = clear (unassign), `"value"` = set -- mirroring
 	// UpdateAttachmentRequest.Description, since a plain *string cannot tell an omitted

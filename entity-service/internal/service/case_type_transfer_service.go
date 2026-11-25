@@ -72,6 +72,8 @@ func otherFieldsAlongsideType(req domain.UpdateCaseRequest) []string {
 	add("state", req.State != nil)
 	add("workState", req.WorkState != nil)
 	add("watchList", req.WatchList != nil)
+	add("addWatchers", len(req.AddWatchers) > 0)
+	add("removeWatchers", len(req.RemoveWatchers) > 0)
 	add("assigneeEmail", len(req.AssigneeEmail) > 0)
 	add("resolutionCode", req.ResolutionCode != nil)
 	add("cause", req.Cause != nil)
