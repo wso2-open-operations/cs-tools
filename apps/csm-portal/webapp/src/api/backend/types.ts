@@ -3812,11 +3812,22 @@ export interface BeUpdateIncidentPayload {
   assignmentGroupId?: string | null;
   assignedEngineerId?: string | null;
   /**
-   * Full replacement watch list, as platform user UUIDs — not a delta. An
-   * explicitly empty array is meaningful and clears the watch list; omitting
-   * the key leaves it unchanged.
+   * Full replacement watch list, as platform user UUIDs. An explicitly empty
+   * array is meaningful and clears the watch list; omitting the key leaves it
+   * unchanged. It overwrites whatever is stored, so a page working from a stale
+   * copy drops watchers added since: prefer `addWatchers` / `removeWatchers`.
+   * Not combinable with them.
    */
   watchList?: string[];
+  /**
+   * Users to add to the watch list (platform user UUIDs), applied by the backend
+   * against the list stored at that moment, so concurrent changes are kept.
+   * PostgreSQL data source only. May be sent with `removeWatchers` and other
+   * fields.
+   */
+  addWatchers?: string[];
+  /** Users to remove from the watch list; the counterpart of `addWatchers`. */
+  removeWatchers?: string[];
   workNotes?: string | null;
   additionalComments?: string | null;
   parentId?: string | null;

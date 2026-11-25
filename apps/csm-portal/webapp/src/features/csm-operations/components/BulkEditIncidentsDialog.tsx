@@ -127,9 +127,12 @@ function problemLinkLabel(p: BeProblemSearchView): string {
  *   offering is never written onto incidents of another service.
  * - Incident report is off while resolving: resolving generates the report,
  *   which would overwrite what was typed seconds later.
- * - The watch list can have people added or removed (from each incident's own
- *   list) or be replaced.
- * - Parent incident never offers a selected incident.
+ * - The watch list can have people added or removed (each incident keeps
+ *   everyone else, whatever its list is by the time the edit lands) or be
+ *   replaced.
+ * - Parent incident never offers a selected incident. It sets the parent
+ *   incident (`parentIncidentId`), as the single Edit dialog does, not the
+ *   generic `parentId`.
  *
  * Priority is not offered: it follows from impact and urgency, as on a single
  * incident. The backend stays the authority: what it refuses for one incident
