@@ -51,6 +51,7 @@ import useGetProjectContacts from "@features/settings/api/useGetProjectContacts"
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePatchCase } from "@features/support/api/usePatchCase";
 import { useGetCaseFeedback } from "@features/support/api/useGetCaseFeedback";
+import { diffWatchList } from "@features/support/utils/watchList";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import DOMPurify from "dompurify";
@@ -99,6 +100,9 @@ export default function CaseDetailsDetailsPanel({
   const [isEditingWatchList, setIsEditingWatchList] = useState(false);
   const [pendingWatchList, setPendingWatchList] = useState<string[]>([]);
   const [savedWatchList, setSavedWatchList] = useState<string[] | null>(null);
+  // The list the current edit started from. The save sends only the difference
+  // to it (see diffWatchList), so a watcher added elsewhere meanwhile is kept.
+  const [watchListBaseline, setWatchListBaseline] = useState<string[]>([]);
 
   const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
   const { data: userDetails, isLoading: isUserDetailsLoading } = useGetUserDetails();
@@ -131,13 +135,23 @@ export default function CaseDetailsDetailsPanel({
       .map((w) => w.email ?? w.userName ?? w.name ?? "")
       .filter(Boolean);
     setPendingWatchList(current);
+    setWatchListBaseline(current);
     setIsEditingWatchList(true);
   };
 
   const handleSaveWatchList = () => {
+    const change = diffWatchList(watchListBaseline, pendingWatchList);
+    if (change.addWatchers.length === 0 && change.removeWatchers.length === 0) {
+      // Nothing changed: no request, and nothing to claim was updated.
+      setIsEditingWatchList(false);
+      return;
+    }
     const optimisticList = [...pendingWatchList];
     setSavedWatchList(optimisticList);
-    patchCase({ watchList: optimisticList }, {
+    patchCase({
+      ...(change.addWatchers.length > 0 && { addWatchers: change.addWatchers }),
+      ...(change.removeWatchers.length > 0 && { removeWatchers: change.removeWatchers }),
+    }, {
       onSuccess: () => {
         setIsEditingWatchList(false);
         setSavedWatchList(null);
