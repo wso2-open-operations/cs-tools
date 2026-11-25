@@ -142,8 +142,8 @@ func definition(rotation, members, local, utc, role, note string) string {
 }
 
 // sreGroup is one support rotation inside a row's support cell.
-func sreGroup(rotation, hours string, names ...string) string {
-	return strings.Join(names, "<br/>") + smallText(rotation+", "+hours)
+func sreGroup(hours string, names ...string) string {
+	return strings.Join(names, "<br/>") + smallText(hours)
 }
 
 // syncNote is the note under a long general-support window shared by several.
@@ -850,10 +850,10 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 		">CRE Team</th>",
 		">SRE Team</th></tr>",
 		// Each SRE turn sits in the CRE window its hours overlap most.
-		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup("SRE Weekend", lkHours, "Kim (L1)", "Lee (L2)")),
-			windowRow("Americas Weekend", americasHours, []string{"Ivy", "Jay (on-call)"}, sreGroup("SRE Night", "09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
-		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup("SRE Weekend", lkHours, "Kim (L1)", "Oli (L2)")),
-			windowRow("Americas Weekend", americasHours, []string{"Ivy"}, sreGroup("SRE Night", "09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup(lkHours, "Kim (L1)", "Lee (L2)")),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy", "Jay (on-call)"}, sreGroup("09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup(lkHours, "Kim (L1)", "Oli (L2)")),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy"}, sreGroup("09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
 	} {
 		if !strings.Contains(summary.body, want) {
 			t.Errorf("summary lacks %q:\n%s", want, summary.body)
@@ -870,9 +870,9 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 			t.Errorf("an SRE person got %q", m.subject)
 		}
 	}
-	// The definitions are the CRE windows only, and there is no SRE label row
-	// or disclaimer.
-	for _, unwanted := range []string{"SRE Weekend (TZ1", "SRE Night (TZ3)", "SRE Weekend Support", "for information", "no calendar invitation"} {
+	// The definitions are the CRE windows only, and there is no SRE label row,
+	// rotation name or disclaimer: the SRE column shows hours and tiers only.
+	for _, unwanted := range []string{"SRE Weekend", "SRE Night", "for information", "no calendar invitation"} {
 		if strings.Contains(summary.body, unwanted) {
 			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
 		}
@@ -1009,12 +1009,16 @@ func TestWeekendNotice_ListsTheSREDayNightWeekendTurns(t *testing.T) {
 		t.Fatalf("handler: %v", err)
 	}
 	summary := emailWith(t, mail.sent, "Weekend Rotation")
-	for _, want := range []string{"Kim (L1)", "Lee (L2)", "Oli (L2)", "Max (L1)", "SRE Weekend", "SRE Night", "06:00 PM &#8211; 06:00 AM IST"} {
+	for _, want := range []string{
+		sreGroup("06:00 AM &#8211; 06:00 PM IST", "Kim (L1)", "Lee (L2)"),
+		sreGroup("06:00 AM &#8211; 06:00 PM IST", "Kim (L1)", "Oli (L2)"),
+		sreGroup("06:00 PM &#8211; 06:00 AM IST", "Max (L1)"),
+	} {
 		if !strings.Contains(summary.body, want) {
 			t.Errorf("summary lacks %q:\n%s", want, summary.body)
 		}
 	}
-	for _, unwanted := range []string{"Pat", "(Day)", "(Weekend Night)"} {
+	for _, unwanted := range []string{"Pat", "(Day)", "(Weekend Night)", "SRE Weekend", "SRE Night"} {
 		if strings.Contains(summary.body, unwanted) {
 			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
 		}

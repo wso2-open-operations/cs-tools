@@ -48,9 +48,10 @@ type SupportRota struct {
 // SREWeekendSupport is the SRE rota the CRE weekend summary lists: the SaaS
 // weekend day turn and the night, on either weekend shape -- TZ1+2 / TZ3
 // (SRE_WE_TZ1, SRE_TZ3) or, once entity-service switches them on, Day / Night
-// (SRE_WE_DAY, SRE_WE_NIGHT). The names up to their bracket are the same, so
-// the summary groups read "SRE Weekend" and "SRE Night" with the turns' own
-// hours either way. IaaS and PaaS are not listed.
+// (SRE_WE_DAY, SRE_WE_NIGHT). The summary shows only each turn's hours and
+// people with their tier ("Kim (L1)"), not these names: the column is already
+// the SRE team's. A code with a name here is what is read. IaaS and PaaS are
+// not listed.
 func SREWeekendSupport() SupportRota {
 	return SupportRota{
 		Family: "SRE",

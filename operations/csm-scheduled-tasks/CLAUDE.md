@@ -269,12 +269,12 @@ schedules assume `TZ=UTC` like every other here.
   second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
   ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days, and
   the weekend Day/Night windows that replace them once switched on, `SRE_WE_DAY` ("SRE
-  Weekend (Day)") and `SRE_WE_NIGHT` ("SRE Night (Weekend Night)"), whose groups read the same. They
+  Weekend (Day)") and `SRE_WE_NIGHT` ("SRE Night (Weekend Night)"). They
   are in each day's SRE Team column, each turn in the CRE window whose hours it overlaps most
   (SRE Weekend with LK, SRE Night with Americas; the nearest start when none overlaps): "Kim (L1)"
-  (name and the turn's `tier`), one per line, with the rotation's name up to its bracket and its
-  IST hours under them ("SRE Night, 09:00 PM – 06:00 AM IST"). No disclaimer (dropped as noise,
-  by request). They are added to the summary's To. That is all: they never count
+  (name and the turn's `tier`), one per line, with only the turn's IST hours under them
+  ("06:00 PM – 06:00 AM IST"): no rotation name, since the column is the SRE team's and the
+  tier and hours say which turn it is (by request). No disclaimer (dropped as noise, by request). They are added to the summary's To. That is all: they never count
   toward the weekend minimums, get no invitation or cancellation, and are not in the weekend
   record; IaaS and PaaS turns are not listed. The SRE read happens only when the summary is
   being sent, and a failed read is logged and the summary goes without the SRE column.
