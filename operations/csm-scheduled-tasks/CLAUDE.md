@@ -1163,7 +1163,7 @@ a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
-| `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
+| `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset uses `CSM_PORTAL_WEB_BASE_URL`; with neither set, plain text |
 | `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the deprecated product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
@@ -1172,7 +1172,7 @@ a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
-| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset uses `CSM_PORTAL_WEB_BASE_URL`; with neither set, plain text |
 | `EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the EOL product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
@@ -1221,7 +1221,8 @@ version rule differs. A deprecated version whose EOL date has passed is in both 
 - **No deprecated usage.** An empty report **is sent**: a short "no customers are using deprecated product
   versions" note to the configured to/cc only, so the leadership group knows the report ran.
 - `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages;
-  unset keeps plain text, and a non-https value refuses to start.
+  unset, the report uses `CSM_PORTAL_WEB_BASE_URL` (the portal URL the other reports link to), and with neither set
+  names stay plain text. A non-https value refuses to start.
 - **An empty `to` only switches the report off for a plain sender.** With a debug list (debug mail mode) or a run-now
   recipient override, `notify.Redirects` is true and both monthly reports still build and send, to the redirect only;
   configuring a debug list without a `to` is how a report is tried without its real recipients.
@@ -1296,8 +1297,9 @@ spanning its versions.
   manager on each retry; `eolUsageTaskWithRecipients` carries its audience to the startup `EMAIL_BASE_URL` check.
 - **No EOL usage.** Unlike the regression reports, an empty report **is sent**: a short "no customers are using EOL
   product versions" note to the configured to/cc only, so the leadership group knows the report ran.
-- `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset
-  keeps plain text, and a non-https value refuses to start.
+- `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset,
+  the report uses `CSM_PORTAL_WEB_BASE_URL` (the portal URL the other reports link to), and with neither set names
+  stay plain text. A non-https value refuses to start.
 - **Account contacts are checked before they are mailed.** The report names customers, projects and versions, and the
   manager and owner addresses come from user rows. `Audience` adds one only when it is a single plain address
   (`net/mail`) and, when `EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` is set, in one of those domains; the rest are
