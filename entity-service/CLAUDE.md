@@ -12374,7 +12374,9 @@ Tests: `deprecated_product_usage_report_service_test.go` (unit),
 (`eol_product_usage_report_repo.go`) with only the version predicate changed (`current_support_status = 'DEPRECATED'`
 instead of the EOL date). The rules for customers who have left (deleted account, inactive or closed project, NULL read
 as active), the Customer-only life-cycle rule, the Primary Production filter, the one-row-per-project-and-version
-rule and the grouping are the same in both. A change to any of them belongs in both repositories (and their integration tests) in the same change.
+rule and the grouping are the same in both.
+A change to any of them belongs in both repositories (and their integration tests) in the same change. The life-cycle
+value is one constant, `reportAccountLifeCycleCustomer`, passed to both queries as a bind parameter.
 
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 

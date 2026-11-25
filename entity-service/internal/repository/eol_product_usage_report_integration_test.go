@@ -200,8 +200,8 @@ func TestEolProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
 }
 
 // Only customer accounts are listed: an account whose Salesforce life cycle
-// is anything but 'Customer' (lost, possibly lost, prospect, partner, or none)
-// is left out even though its Primary Production deployment runs
+// is anything but exactly 'Customer' (lost, possibly lost, prospect, partner,
+// none, or "customer" in another case or with surrounding space) is left out even though its Primary Production deployment runs
 // a version past its EOL date and is marked active.
 func TestEolProductUsageReportListsOnlyCustomerAccounts(t *testing.T) {
 	pool := eolPool(t)
@@ -216,7 +216,7 @@ func TestEolProductUsageReportListsOnlyCustomerAccounts(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	lifeCycles := []any{"Customer", "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner", nil}
+	lifeCycles := []any{"Customer", "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner", nil, "customer", " Customer "}
 	exec(`INSERT INTO product (id, name, category, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'EOL IT Product', 'SOFTWARE', `+audit+`)`, eolID(1))
 	exec(`INSERT INTO product_version (id, product_id, version, support_eol_date, current_support_status, created_on, created_by, updated_on, updated_by) VALUES
 		($1::uuid, $2::uuid, '1.0.0', '2022-10-22', 'EXTENDED', `+audit+`)`, eolID(2), eolID(1))

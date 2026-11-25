@@ -205,8 +205,8 @@ func TestDeprecatedProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
 }
 
 // Only customer accounts are listed: an account whose Salesforce life cycle
-// is anything but 'Customer' (lost, possibly lost, prospect, partner, or none)
-// is left out even though its Primary Production deployment runs
+// is anything but exactly 'Customer' (lost, possibly lost, prospect, partner,
+// none, or "customer" in another case or with surrounding space) is left out even though its Primary Production deployment runs
 // a Deprecated version and is marked active.
 func TestDeprecatedProductUsageReportListsOnlyCustomerAccounts(t *testing.T) {
 	pool := depPool(t)
@@ -221,7 +221,7 @@ func TestDeprecatedProductUsageReportListsOnlyCustomerAccounts(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	lifeCycles := []any{"Customer", "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner", nil}
+	lifeCycles := []any{"Customer", "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner", nil, "customer", " Customer "}
 	exec(`INSERT INTO product (id, name, category, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'DEP IT Product', 'SOFTWARE', `+audit+`)`, depID(1))
 	exec(`INSERT INTO product_version (id, product_id, version, support_eol_date, current_support_status, created_on, created_by, updated_on, updated_by) VALUES
 		($1::uuid, $2::uuid, '1.0.0', NULL, 'DEPRECATED', `+audit+`)`, depID(2), depID(1))
