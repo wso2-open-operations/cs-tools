@@ -17,6 +17,12 @@
 -- PLG: an organisation's entry registration is its earliest pairing. The
 -- dashboard finds it with DISTINCT ON (organization_id) ordered by
 -- (registered_on, id); this index serves that order without a sort. Safe to re-run.
+--
+-- Built CONCURRENTLY so registration writes are not blocked while it builds. That
+-- needs a single statement outside a transaction, as make migrate runs it. A failed
+-- concurrent build can leave an INVALID index that IF NOT EXISTS would then skip, so
+-- before re-running after a failure, drop it:
+--   DROP INDEX CONCURRENTLY IF EXISTS idx_plg_org_platform_org_registered;
 
-CREATE INDEX IF NOT EXISTS idx_plg_org_platform_org_registered
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_plg_org_platform_org_registered
     ON plg_org_platform (organization_id, registered_on, id);

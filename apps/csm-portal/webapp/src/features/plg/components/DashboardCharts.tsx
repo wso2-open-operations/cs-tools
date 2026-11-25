@@ -2,7 +2,13 @@ import { Grid, Stack, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 import type { CountByLabel, DashboardAnalytics } from "@features/plg/api/types";
-import { CountBarChart, DonutChart, MultiLineChart, StackedBarChart } from "@features/plg/components/charts";
+import {
+  CountBarChart,
+  DonutChart,
+  MultiLineChart,
+  StackedBarChart,
+  type StackSegment,
+} from "@features/plg/components/charts";
 import { LoadingBlock, SectionCard } from "@features/plg/components/common";
 import { humanizeEnum } from "@features/plg/utils/format";
 
@@ -31,7 +37,7 @@ function readable<T extends { label: string }>(rows: T[]): T[] {
  */
 export function DashboardCharts({ data }: { data?: DashboardAnalytics }): JSX.Element {
   const theme = useTheme();
-  const segments = [
+  const segments: Array<StackSegment<"eligible" | "monitor" | "excluded" | "notAssessed">> = [
     { key: "eligible", label: "Eligible", color: theme.palette.success.main },
     { key: "monitor", label: "Monitor", color: theme.palette.warning.main },
     { key: "excluded", label: "Excluded", color: theme.palette.error.main },

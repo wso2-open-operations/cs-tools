@@ -188,15 +188,20 @@ const registrationTaskValue = `LEFT JOIN LATERAL (
 		    WHERE  run.org_platform_id = op.id AND run.detached_on IS NULL
 		      AND  pb.lifecycle_stage = 'REGISTRATION' AND pb.playbook_type = 'PROGRESSIVE'
 		      AND  t.code = $3
-		    ORDER  BY run.created_at DESC
+		    ORDER  BY run.created_at DESC, run.id DESC
 		    LIMIT  1) x ON TRUE`
 
 // maxUTMSources bounds the UTM charts: the qualified-stats chart shows no more
 // sources, and the UTM sources pie folds the rest into OTHER.
 const maxUTMSources = 10
 
-// otherLabel is the label of the folded remainder of a capped breakdown.
-const otherLabel = "OTHER"
+// otherLabel is the label of the folded remainder of a capped breakdown. A real
+// source that a visitor named the same is kept apart as realOtherLabel, so the
+// two never share a label.
+const (
+	otherLabel     = "OTHER"
+	realOtherLabel = "OTHER (utm_source)"
+)
 
 // foldRemainder keeps the first n rows (the query orders them busiest first) and
 // adds the rest together as OTHER, so a breakdown's size stays bounded.
@@ -204,11 +209,18 @@ func foldRemainder(rows []domain.CountByLabel, n int) []domain.CountByLabel {
 	if len(rows) <= n {
 		return rows
 	}
+	kept := make([]domain.CountByLabel, n, n+1)
+	copy(kept, rows[:n])
+	for i := range kept {
+		if kept[i].Label == otherLabel {
+			kept[i].Label = realOtherLabel
+		}
+	}
 	rest := 0
 	for _, r := range rows[n:] {
 		rest += r.Count
 	}
-	return append(rows[:n:n], domain.CountByLabel{Label: otherLabel, Count: rest})
+	return append(kept, domain.CountByLabel{Label: otherLabel, Count: rest})
 }
 
 // qualifiedByUTM counts eligibility outcomes per utm_source, over each

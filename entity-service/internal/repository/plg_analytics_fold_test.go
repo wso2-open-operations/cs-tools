@@ -38,3 +38,23 @@ func TestFoldRemainder(t *testing.T) {
 		t.Errorf("the input was changed: %+v", rows)
 	}
 }
+
+// A visitor can name a source OTHER; it must not share a label with the folded remainder.
+func TestFoldRemainderKeepsARealOtherSourceApart(t *testing.T) {
+	rows := []domain.CountByLabel{{Label: "a", Count: 5}, {Label: "OTHER", Count: 4}, {Label: "c", Count: 2}, {Label: "d", Count: 1}}
+	got := foldRemainder(rows, 2)
+	want := []domain.CountByLabel{{Label: "a", Count: 5}, {Label: realOtherLabel, Count: 4}, {Label: otherLabel, Count: 3}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	total := 0
+	for _, r := range got {
+		total += r.Count
+	}
+	if total != 12 {
+		t.Errorf("total = %d, want 12", total)
+	}
+	if rows[1].Label != "OTHER" {
+		t.Errorf("the input was changed: %+v", rows)
+	}
+}
