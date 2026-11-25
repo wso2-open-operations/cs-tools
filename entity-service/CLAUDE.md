@@ -12314,6 +12314,11 @@ product version past its EOL date in Primary Production. Internal callers only; 
 - **Rows** (`eol_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an active
   `PRIMARY_PRODUCTION` deployment whose version's `support_eol_date` is before `asOf` (default today in Asia/Colombo),
   listed once per (project, product version) however many such deployments run it.
+- **Only customer accounts are listed:** `account.life_cycle = 'Customer'` exactly (Salesforce's account status; the
+  rule Customer Health uses). "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner" and a NULL life cycle
+  (e.g. internal accounts) are left out even when their deployments are still marked active, which is common for lost
+  customers whose deployment records were never closed. `lost_date` and `deactivation_date` are not used: `lost_date`
+  is unset on some lost accounts and some customers have a `deactivation_date`.
 - **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
   active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed: they
   are still customers. `deployed_product.life_cycle_stage_status` is deliberately not used: every active product in
@@ -12344,6 +12349,11 @@ differs.
   deprecated version whose EOL date has passed is also in the EOL product usage report, on purpose: it is both
   deprecated and past its EOL date. `asOf` (default today in
   Asia/Colombo) is only the report date shown; the status is the current one.
+- **Only customer accounts are listed:** `account.life_cycle = 'Customer'` exactly (Salesforce's account status; the
+  rule Customer Health uses). "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner" and a NULL life cycle
+  (e.g. internal accounts) are left out even when their deployments are still marked active, which is common for lost
+  customers whose deployment records were never closed. `lost_date` and `deactivation_date` are not used: `lost_date`
+  is unset on some lost accounts and some customers have a `deactivation_date`.
 - **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
   active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed.
   `deployed_product.life_cycle_stage_status` is deliberately not used.
@@ -12363,8 +12373,10 @@ Tests: `deprecated_product_usage_report_service_test.go` (unit),
 **Change the two report queries together.** `listDeprecatedUsageSQL` is the EOL report's query
 (`eol_product_usage_report_repo.go`) with only the version predicate changed (`current_support_status = 'DEPRECATED'`
 instead of the EOL date). The rules for customers who have left (deleted account, inactive or closed project, NULL read
-as active), the Primary Production filter, the one-row-per-project-and-version rule and the grouping are the same in
-both. A change to any of them belongs in both repositories (and their integration tests) in the same change.
+as active), the Customer-only life-cycle rule, the Primary Production filter, the one-row-per-project-and-version
+rule and the grouping are the same in both.
+A change to any of them belongs in both repositories (and their integration tests) in the same change. The life-cycle
+value is one constant, `reportAccountLifeCycleCustomer`, passed to both queries as a bind parameter.
 
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 

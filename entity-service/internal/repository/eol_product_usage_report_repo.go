@@ -46,11 +46,26 @@ func NewEolProductUsageReportRepository(db *Scoped) EolProductUsageReportReposit
 	return &eolProductUsageReportRepository{db: db}
 }
 
+// reportAccountLifeCycleCustomer is the account.life_cycle value (Salesforce's
+// account status) of the accounts the product usage reports list. It is
+// passed to both report queries (listEolUsageSQL, listDeprecatedUsageSQL) as
+// a bind parameter, so the two reports cannot drift apart. Matched exactly:
+// a different case or surrounding space is not a customer.
+const reportAccountLifeCycleCustomer = "Customer"
+
 // listEolUsageSQL is the report. Notes:
 //
 //   - A deployed product, deployment or project with no active flag (NULL)
 //     counts as active, as the deployment pages treat it.
-//   - Customers who have left are not listed: an account deleted in
+//   - Only customer accounts are listed: account.life_cycle (Salesforce's
+//     account status) must be exactly reportAccountLifeCycleCustomer
+//     ("Customer"), the rule Customer Health uses. Lost customers ("Lost
+//     Customer"), "Possibly Lost Customer", prospects, partners and accounts
+//     with no life cycle (e.g. internal ones) are left out even when their
+//     deployments are still marked active. account.lost_date and
+//     account.deactivation_date are not used: lost_date is unset on some
+//     lost accounts, and some customers have a deactivation date.
+//   - Customers who have left are not listed either: an account deleted in
 //     Salesforce (deleted_on), an inactive project, or a project WSO2 has
 //     closed (wso2_closure_state CLOSED). Read-only, restricted and suspended
 //     projects are still customers and are listed.
@@ -98,6 +113,7 @@ FROM (
       AND COALESCE(p.is_active, TRUE)
       AND p.wso2_closure_state IS DISTINCT FROM 'CLOSED'
       AND a.deleted_on IS NULL
+      AND a.life_cycle = $2
       AND pv.support_eol_date < $1::date
     ORDER BY p.id, pv.id
 ) r
@@ -109,7 +125,7 @@ ORDER BY (region = ''), lower(region), lower(account_name), account_id, lower(pr
 
 // ListEolUsage implements EolProductUsageReportRepository.
 func (r *eolProductUsageReportRepository) ListEolUsage(ctx context.Context, asOf string) ([]domain.EolProductUsageRow, error) {
-	rows, err := r.db.Query(ctx, listEolUsageSQL, asOf)
+	rows, err := r.db.Query(ctx, listEolUsageSQL, asOf, reportAccountLifeCycleCustomer)
 	if err != nil {
 		return nil, fmt.Errorf("list eol product usage: %w", err)
 	}

@@ -13711,7 +13711,9 @@ paths:
         One entry per (project, product version) where an active deployed product of an active
         PRIMARY_PRODUCTION deployment runs a version whose support EOL date is before asOf,
         grouped by the account's region (ignoring case; accounts with no region last), then account and project.
-        Customers who have left are not listed: deleted accounts, inactive projects and projects WSO2 has closed.
+        Only customer accounts are listed (account life cycle exactly 'Customer', from Salesforce): lost
+        customers, prospects, partners and accounts with no life cycle are left out. Customers who have left
+        are not listed either: deleted accounts, inactive projects and projects WSO2 has closed.
         A version run by several Primary Production deployments of one project is listed once.
         Internal callers only; the scheduled task that mails the report is the expected caller.
       operationId: getEolProductUsageReport
@@ -13874,7 +13876,9 @@ paths:
         PRIMARY_PRODUCTION deployment runs a version whose support status is DEPRECATED, whether its
         EOL date has passed or not (one past its EOL date is in the EOL product usage report too),
         grouped by the account's region (ignoring case; accounts with no region last), then account and project.
-        Customers who have left are not listed: deleted accounts, inactive projects and projects WSO2 has closed.
+        Only customer accounts are listed (account life cycle exactly 'Customer', from Salesforce): lost
+        customers, prospects, partners and accounts with no life cycle are left out. Customers who have left
+        are not listed either: deleted accounts, inactive projects and projects WSO2 has closed.
         A version run by several Primary Production deployments of one project is listed once.
         Internal callers only; the scheduled task that mails the report is the expected caller.
       operationId: getDeprecatedProductUsageReport
