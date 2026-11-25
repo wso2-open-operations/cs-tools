@@ -116,11 +116,17 @@ func (s *alertMuteRuleService) Update(ctx context.Context, id string, req domain
 		return domain.AlertMuteRule{}, err
 	}
 	now := s.now()
+	const wrongState = "only a scheduled alert mute rule can be edited"
+	// The state first: a started rule is a 409 whatever the edit, not a 400 from the
+	// past-start check below. The repository's guard still catches a rule that starts
+	// between this read and the write.
+	if current.StateAt(now) != domain.AlertMuteRuleStateScheduled {
+		return domain.AlertMuteRule{}, &apierror.ConflictError{Msg: wrongState}
+	}
 	w, err := validateAlertMuteRule(mergeAlertMuteRulePatch(current, req), now)
 	if err != nil {
 		return domain.AlertMuteRule{}, err
 	}
-	const wrongState = "only a scheduled alert mute rule can be edited"
 	b, err := s.repo.Update(ctx, actorOf(ctx), id, w, current.UpdatedOn, now)
 	if err != nil || b != nil {
 		return s.guarded(ctx, id, b, err, wrongState)

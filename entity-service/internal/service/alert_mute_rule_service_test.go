@@ -293,6 +293,22 @@ func TestAlertMuteRuleUpdate_MergesAPartialPatchOntoTheStoredRule(t *testing.T) 
 	}
 }
 
+// TestAlertMuteRuleUpdate_AStartedRuleIsAConflictWhateverTheEdit: a name-only edit of an
+// active rule (its start in the past) is a 409 for the state, not a 400 from the
+// past-start check, and nothing is written.
+func TestAlertMuteRuleUpdate_AStartedRuleIsAConflictWhateverTheEdit(t *testing.T) {
+	active := &domain.AlertMuteRule{ID: alertMuteRuleTestID, Name: "x", TimeZone: "UTC",
+		StartOn: alertMuteRuleTestNow.Add(-2 * time.Hour), EndOn: alertMuteRuleTestNow.Add(time.Hour),
+		Conditions: []domain.AlertMuteRuleCondition{{Field: "service", Value: "gw"}, {Field: "environment", Value: "prod"}}}
+	repo := &fakeAlertMuteRuleRepo{stored: active, written: active}
+	name := "renamed"
+	_, err := newTestAlertMuteRuleService(repo).Update(context.Background(), alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{Name: &name})
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) || ce.Msg != "only a scheduled alert mute rule can be edited" || repo.calls != 0 {
+		t.Fatalf("got %v (writes %d), want the scheduled-only conflict and no write", err, repo.calls)
+	}
+}
+
 func TestAlertMuteRuleUpdate_LostRaceOnAStillEditableRule(t *testing.T) {
 	scheduled := &domain.AlertMuteRule{ID: alertMuteRuleTestID, Name: "x", TimeZone: "UTC",
 		StartOn: alertMuteRuleTestNow.Add(time.Hour), EndOn: alertMuteRuleTestNow.Add(2 * time.Hour),
