@@ -157,8 +157,9 @@ refresh runs and the Team Schedule shows only the holidays already stored.
 members shall have the **Public holiday** tag placed on every coming weekday holiday of their
 country, however far ahead (up to two years), so the roster shows it as soon as it is stored. A
 past day is never tagged. The tag takes the day off the timesheet and the member off the rota until
-a lead removes it; leave marked over the day replaces it. (A holiday is not leave and moves no
-shift by itself.)
+a lead removes it; leave marked over the day replaces it. A tag nobody touched goes away again
+when its holiday is no longer the person's (their country changed, or they left CRE), and their
+own country's holiday is tagged instead. (A holiday is not leave and moves no shift by itself.)
 
 ## 5. Health checks (moved)
 

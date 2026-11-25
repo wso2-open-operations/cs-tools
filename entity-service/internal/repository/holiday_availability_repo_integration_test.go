@@ -396,3 +396,85 @@ func TestHolidayAvailabilityRepository_RemovedHolidayRace(t *testing.T) {
 		t.Error("a removed holiday's tag or record is still there")
 	}
 }
+
+// TestHolidayAvailabilityRepository_RemoveMisplacedHolidayTags covers tags
+// placed for a country that is no longer the person's: the untouched ones go
+// and every such placement is forgotten, so the person's own country can be
+// placed; a tag somebody edited stays, and an empty member map removes nothing.
+func TestHolidayAvailabilityRepository_RemoveMisplacedHolidayTags(t *testing.T) {
+	pool := phPool(t)
+	ctx := context.Background()
+	day := time.Now().AddDate(0, 0, 12)
+	for day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+		day = day.AddDate(0, 0, 1)
+	}
+	d := day.Format(time.DateOnly)
+	seedHolidayTeam(t, pool, d)
+	repo := repository.NewHolidayAvailabilityRepository(pool)
+
+	for _, user := range []string{phLeadID, phMemberID} {
+		ok, err := repo.PlaceHolidayTag(ctx, domain.HolidayTagPlacement{UserID: user, TeamKey: phTeamKey, Date: d, Country: phCountry, Title: "Test Day"})
+		if err != nil || !ok {
+			t.Fatalf("place %s: %v, %v", user, ok, err)
+		}
+	}
+	// The lead's tag was edited by somebody: it is theirs now.
+	if _, err := pool.Exec(ctx, `UPDATE team_schedule_absence SET updated_by = $1
+		WHERE user_id = $2 AND starts_on = $3::date`, phActor, phLeadID, d); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := repo.RemoveMisplacedHolidayTags(ctx, d, nil); err != nil || n != 0 {
+		t.Fatalf("an empty member map removed %d, %v; want nothing", n, err)
+	}
+	// Everybody else keeps the country they were placed for, so the shared
+	// database's other tags are left alone.
+	countryByUser := map[string]string{}
+	others, err := pool.Query(ctx, `SELECT DISTINCT ON (user_id) user_id::text, country
+		FROM team_schedule_holiday_tag_placed WHERE NOT (user_id = ANY($1::uuid[]))`, []string{phLeadID, phMemberID, phOnLeaveID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for others.Next() {
+		var id, c string
+		if err := others.Scan(&id, &c); err != nil {
+			t.Fatal(err)
+		}
+		countryByUser[id] = c
+	}
+	others.Close()
+	if err := others.Err(); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := "Elsewhere (test)"
+	countryByUser[phLeadID] = elsewhere
+	countryByUser[phMemberID] = elsewhere
+	n, err := repo.RemoveMisplacedHolidayTags(ctx, d, countryByUser)
+	if err != nil || n != 1 {
+		t.Fatalf("removed %d, %v; want the member's one untouched tag", n, err)
+	}
+	tags := func(user string) int {
+		t.Helper()
+		var c int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM team_schedule_absence a JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+			WHERE a.user_id = $1 AND k.code = 'PH'`, user).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if tags(phMemberID) != 0 {
+		t.Error("the member's misplaced tag is still there")
+	}
+	if tags(phLeadID) != 1 {
+		t.Error("the lead's edited tag was removed")
+	}
+	rows, err := repo.PlacedBetween(ctx, d, d, []string{phTeamKey})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("placements %+v, %v; want both forgotten (the lead's edited tag is theirs now)", rows, err)
+	}
+	// Forgotten, so the member's own country is placed again.
+	ok, err := repo.PlaceHolidayTag(ctx, domain.HolidayTagPlacement{UserID: phMemberID, TeamKey: phTeamKey, Date: d, Country: phCountry, Title: "Test Day"})
+	if err != nil || !ok {
+		t.Fatalf("placing again after the cleanup: %v, %v", ok, err)
+	}
+}

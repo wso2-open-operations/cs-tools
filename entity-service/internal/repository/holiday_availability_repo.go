@@ -44,6 +44,11 @@ type HolidayAvailabilityRepository interface {
 	// holidays the calendar no longer has, when nobody has touched them, and
 	// forgets every placement of such a holiday.
 	RemoveCancelledHolidayTags(ctx context.Context, onOrAfter string) (int, error)
+	// RemoveMisplacedHolidayTags takes away, from onOrAfter on, the untouched
+	// tags placed for a country that is no longer the person's, or on somebody
+	// no longer a CRE member (countryByUser: user id to holiday country now),
+	// and forgets those placements. An empty map removes nothing.
+	RemoveMisplacedHolidayTags(ctx context.Context, onOrAfter string, countryByUser map[string]string) (int, error)
 	// PlacedBetween is every placement in [from, to], as it stands now.
 	PlacedBetween(ctx context.Context, from, to string, teamKeys []string) ([]domain.HolidayPlacedRow, error)
 	// TurnsBetween is every rota turn of the teams on those days.
@@ -188,14 +193,46 @@ func (r *holidayAvailabilityRepository) PlaceHolidayTag(ctx context.Context, p d
 // date on, whose holiday is no longer stored, forgets those placements, and
 // returns how many tags it removed.
 func (r *holidayAvailabilityRepository) RemoveCancelledHolidayTags(ctx context.Context, onOrAfter string) (int, error) {
+	return r.removeHolidayTags(ctx, "cancelled", `
+		NOT EXISTS (SELECT 1 FROM team_schedule_public_holiday h
+		             WHERE h.country = p.country AND h.holiday_date = p.holiday_date)`,
+		"The public holiday is no longer in the calendar.", onOrAfter)
+}
+
+// RemoveMisplacedHolidayTags deletes the untouched holiday tags, from the given
+// date on, placed for a country that is no longer the person's (countryByUser,
+// every CRE member's holiday country now), or on somebody no longer in it,
+// forgets those placements, and returns how many tags it removed. An empty map
+// removes nothing: a run that read no members must not take every tag away.
+func (r *holidayAvailabilityRepository) RemoveMisplacedHolidayTags(ctx context.Context, onOrAfter string, countryByUser map[string]string) (int, error) {
+	if len(countryByUser) == 0 {
+		return 0, nil
+	}
+	userIDs := make([]string, 0, len(countryByUser))
+	countries := make([]string, 0, len(countryByUser))
+	for id, c := range countryByUser {
+		userIDs = append(userIDs, id)
+		countries = append(countries, c)
+	}
+	return r.removeHolidayTags(ctx, "misplaced", `
+		NOT EXISTS (SELECT 1 FROM unnest($3::uuid[], $4::text[]) AS c(user_id, country)
+		             WHERE c.user_id = p.user_id AND c.country = p.country)`,
+		"The public holiday is not one of this person's country now.", onOrAfter, userIDs, countries)
+}
+
+// removeHolidayTags deletes the untouched tags of the placements, from
+// onOrAfter ($1) on, that match the condition on p (extra arguments from $3),
+// and forgets those placements.
+func (r *holidayAvailabilityRepository) removeHolidayTags(ctx context.Context, what, placementCond, note string, onOrAfter string, extra ...any) (int, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("begin holiday tag cleanup: %w", err)
+		return 0, fmt.Errorf("begin %s holiday tag cleanup: %w", what, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := nameTheActor(ctx, tx, domain.HolidayTagActor); err != nil {
 		return 0, err
 	}
+	args := append([]any{onOrAfter, domain.HolidayTagActor}, extra...)
 	// The tags still exactly as the Team Schedule placed them: one day,
 	// never edited by anybody. A tag somebody changed is theirs now.
 	rows, err := tx.Query(ctx, `
@@ -203,13 +240,11 @@ func (r *holidayAvailabilityRepository) RemoveCancelledHolidayTags(ctx context.C
 		  FROM team_schedule_holiday_tag_placed p
 		  JOIN team_schedule_absence a ON a.id = p.absence_id
 		 WHERE p.holiday_date >= $1::date
-		   AND NOT EXISTS (SELECT 1 FROM team_schedule_public_holiday h
-		                    WHERE h.country = p.country AND h.holiday_date = p.holiday_date)
+		   AND `+placementCond+`
 		   AND a.created_by = $2 AND a.updated_by = $2
-		   AND a.starts_on = p.holiday_date AND a.ends_on = p.holiday_date`,
-		onOrAfter, domain.HolidayTagActor)
+		   AND a.starts_on = p.holiday_date AND a.ends_on = p.holiday_date`, args...)
 	if err != nil {
-		return 0, fmt.Errorf("read cancelled holiday tags: %w", err)
+		return 0, fmt.Errorf("read %s holiday tags: %w", what, err)
 	}
 	type gone struct{ id, userID, teamKey, day string }
 	var tags []gone
@@ -217,42 +252,40 @@ func (r *holidayAvailabilityRepository) RemoveCancelledHolidayTags(ctx context.C
 		var g gone
 		if err := rows.Scan(&g.id, &g.userID, &g.teamKey, &g.day); err != nil {
 			rows.Close()
-			return 0, fmt.Errorf("scan cancelled holiday tag: %w", err)
+			return 0, fmt.Errorf("scan %s holiday tag: %w", what, err)
 		}
 		tags = append(tags, g)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("read cancelled holiday tags: %w", err)
+		return 0, fmt.Errorf("read %s holiday tags: %w", what, err)
 	}
-	note := "The public holiday is no longer in the calendar."
 	for _, g := range tags {
 		if err := recordAbsenceActivity(ctx, tx, g.id, g.userID, g.teamKey, domain.HolidayTagKindCode,
 			g.day, &g.day, "DELETED", domain.HolidayTagActor, nil, nil, nil, &note); err != nil {
 			return 0, err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_absence WHERE id = $1::uuid`, g.id); err != nil {
-			return 0, fmt.Errorf("remove cancelled holiday tag: %w", err)
+			return 0, fmt.Errorf("remove %s holiday tag: %w", what, err)
 		}
 	}
-	// Forget the placements of removed holidays, except one whose tag is still
-	// standing untouched: a placement committed after the read above, whose tag
-	// this run did not remove. Forgetting it would leave its tag with no record,
+	// Forget those placements, except one whose tag is still standing
+	// untouched: a placement committed after the read above, whose tag this
+	// run did not remove. Forgetting it would leave its tag with no record,
 	// and no later run could find it; kept, the next run removes both.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM team_schedule_holiday_tag_placed p
 		 WHERE p.holiday_date >= $1::date
-		   AND NOT EXISTS (SELECT 1 FROM team_schedule_public_holiday h
-		                    WHERE h.country = p.country AND h.holiday_date = p.holiday_date)
+		   AND `+placementCond+`
 		   AND NOT EXISTS (SELECT 1 FROM team_schedule_absence a
 		                    WHERE a.id = p.absence_id
 		                      AND a.created_by = $2 AND a.updated_by = $2
 		                      AND a.starts_on = p.holiday_date AND a.ends_on = p.holiday_date)`,
-		onOrAfter, domain.HolidayTagActor); err != nil {
-		return 0, fmt.Errorf("forget cancelled holidays: %w", err)
+		args...); err != nil {
+		return 0, fmt.Errorf("forget %s holiday placements: %w", what, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit holiday tag cleanup: %w", err)
+		return 0, fmt.Errorf("commit %s holiday tag cleanup: %w", what, err)
 	}
 	return len(tags), nil
 }

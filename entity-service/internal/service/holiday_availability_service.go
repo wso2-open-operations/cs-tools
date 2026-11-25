@@ -96,8 +96,9 @@ func (s *holidayAvailabilityService) today() time.Time {
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// PlaceUpcoming removes tags of cancelled holidays, then places a holiday tag on
-// each CRE member for every coming weekday holiday of their country.
+// PlaceUpcoming removes tags of cancelled holidays and tags that are no longer
+// the person's (their country changed, or they left CRE), then places a holiday
+// tag on each CRE member for every coming weekday holiday of their country.
 func (s *holidayAvailabilityService) PlaceUpcoming(ctx context.Context) (domain.HolidayTagPlacementResult, error) {
 	res := domain.HolidayTagPlacementResult{}
 	from := s.today()
@@ -118,13 +119,23 @@ func (s *holidayAvailabilityService) PlaceUpcoming(ctx context.Context) (domain.
 		return res, err
 	}
 	byCountry := map[string][]domain.SchedulePerson{}
+	countryByUser := map[string]string{}
 	for _, p := range members {
 		if len(p.TeamKeys) == 0 {
 			continue
 		}
 		c, _ := holidayCountryFor(p, indiaKey)
 		byCountry[c] = append(byCountry[c], p)
+		countryByUser[p.UserID] = c
 	}
+	// A tag placed while the person's country was read differently (a stored
+	// location that changed, or the India team not known yet) stays wrong
+	// otherwise: its placement is recorded, so nothing would revisit it.
+	misplaced, err := s.repo.RemoveMisplacedHolidayTags(ctx, from.Format(time.DateOnly), countryByUser)
+	if err != nil {
+		return res, err
+	}
+	res.Removed += misplaced
 	countries := make([]string, 0, len(byCountry))
 	for c := range byCountry {
 		countries = append(countries, c)

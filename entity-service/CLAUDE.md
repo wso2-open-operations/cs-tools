@@ -180,7 +180,10 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     placement and is kept after the tag is removed, so a removed tag is never placed again. A
     day the person already has any tag on (leave wins) is skipped and tried again the next day.
     A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
-    touched (still one day, created and updated by the actor) and forgets the placements.
+    touched (still one day, created and updated by the actor) and forgets the placements. So does
+    a tag whose country is no longer the person's (location changed, the India team became known)
+    or whose person left CRE (`RemoveMisplacedHolidayTags`, every run); their own country's holiday
+    is then placed. An empty member read removes nothing.
     **Removal versus a run already placing:** `PlaceHolidayTag` tags only a day still stored and
     holds that holiday row `FOR SHARE` until the tag commits, so a removal (by hand or by the
     calendar) waits for it and the cleanup it starts sees the tag; and the cleanup never
