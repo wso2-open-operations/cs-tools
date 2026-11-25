@@ -191,6 +191,28 @@ func TestParseGenerated_RejectsOperationsWidgetsItCannotRun(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsEveryRealOnboardingStatus guards against the
+// project resourceType's own "onboardingStatus" allow-list silently falling
+// behind entity-service's real 7-value onboarding_status_enum again --
+// found live: it used to stop at 4 ("Not-Started"/"In-Progress"/"Completed"/
+// "Not-Applicable"), omitting "On-Hold"/"Expired"/"Cancelled", the same drift
+// that made a case dashboard widget wrongly exclude cases on
+// Expired-onboarding projects (webapp's own ALL_ONBOARDING_STATUSES, see
+// that file's onboardingStatus.ts).
+func TestParseGenerated_AcceptsEveryRealOnboardingStatus(t *testing.T) {
+	raw := opsDashboard(
+		`{"id":"on-hold","displayName":"On Hold Projects","resourceType":"project","shape":"count","gridWidth":3,
+		  "query":{"onboardingStatus":["On-Hold"]}}`,
+		`{"id":"expired","displayName":"Expired Onboarding Projects","resourceType":"project","shape":"count","gridWidth":3,
+		  "query":{"onboardingStatus":["Expired"]}}`,
+		`{"id":"cancelled","displayName":"Cancelled Onboarding Projects","resourceType":"project","shape":"count","gridWidth":3,
+		  "query":{"onboardingStatus":["Cancelled"]}}`,
+	)
+	if _, err := ParseGenerated([]byte(raw)); err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+}
+
 func TestParseGenerated_AcceptsAccountAndProjectWidgets(t *testing.T) {
 	raw := opsDashboard(
 		`{"id":"customers","displayName":"Customer Accounts","resourceType":"account","shape":"count","gridWidth":3,

@@ -15,18 +15,35 @@
 // under the License.
 
 /**
- * The fixed ServiceNow choice list for `projectOnboardingStatus`. Shared
- * between the "Onboarding status" bar control (`CasesFilterBar.tsx`, which
- * offers exactly these 4 as options) and `translateCaseDashboardFilters`
+ * The full `projectOnboardingStatus` vocabulary — entity-service's real
+ * 7-value `onboarding_status_enum` (`onboardingStatusLabels` in that repo's
+ * `case_repo.go`), not just the 4 a project is usually in. Shared between
+ * the "Onboarding status" bar control (`CasesFilterBar.tsx`, which offers
+ * all of these as options) and `translateCaseDashboardFilters`
  * (`widgetResourceConfig.ts`, which needs the full set to turn a dashboard
  * widget's `notIn` filter into this field's complement — see that file's
  * doc comment for why).
+ *
+ * This list used to stop at 4 ("the fixed ServiceNow choice list"),
+ * omitting `On-Hold`/`Expired`/`Cancelled` — found live: a dashboard
+ * widget's `excludeInProgressOnboardingStatus` preset
+ * (`{"field":"projectOnboardingStatus","op":"notIn","values":["In-Progress"]}`,
+ * a true exclusion of only "In-Progress") drilled through to the Advanced
+ * Filter Bar as `in: ["Not-Started","Completed","Not-Applicable"]` — this
+ * list's own complement of `["In-Progress"]` — silently re-excluding every
+ * case whose project was `On-Hold`/`Expired`/`Cancelled` even though the
+ * real preset never meant to touch them. A case on an Expired-onboarding
+ * project reportedly disappeared from an "In Progress Cases" dashboard
+ * widget for exactly this reason.
  */
 export const ALL_ONBOARDING_STATUSES = [
   "In-Progress",
   "Not-Started",
   "Completed",
   "Not-Applicable",
+  "On-Hold",
+  "Expired",
+  "Cancelled",
 ] as const;
 
 export const ONBOARDING_STATUS_LABEL: Record<string, string> = {
@@ -34,12 +51,15 @@ export const ONBOARDING_STATUS_LABEL: Record<string, string> = {
   "Not-Started": "Not started",
   Completed: "Completed",
   "Not-Applicable": "Not applicable",
+  "On-Hold": "On hold",
+  Expired: "Expired",
+  Cancelled: "Cancelled",
 };
 
 /**
  * A value no real case's `projectOnboardingStatus` ever has. Used by
  * `translateCaseDashboardFilters` (`widgetResourceConfig.ts`) when a
- * dashboard widget's `notIn` filter excludes every one of the 4 known
+ * dashboard widget's `notIn` filter excludes every one of the known
  * values (or an `in`/`notIn` pair is disjoint) — the resulting complement is
  * genuinely empty, meaning the widget's own filter can never match any
  * case. `CasesFilters.onboardingStatuses` has no way to distinguish that
