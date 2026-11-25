@@ -201,7 +201,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		groupByOn: []Shape{ShapePie, ShapeBar},
 		maxGroups: 50,
 		flat: map[string]valueRule{
-			"onboardingStatus":                      {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable"}},
+			"onboardingStatus":                      {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable", "On-Hold", "Expired", "Cancelled"}},
 			"closureStatus":                         {kind: valuesScalarEnum, values: []string{"Open", "Suspended", "Restricted"}},
 			"excludeClosureStates":                  {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
 			"closureStates":                         {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
