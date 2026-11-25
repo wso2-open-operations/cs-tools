@@ -129,4 +129,77 @@ describe("AsyncEntityMultiSelect — typing", () => {
     expect(screen.getByRole("option", { name: "APIM1" })).toBeInTheDocument();
     expect(input).toHaveValue("apim");
   });
+
+  // Regression: a selected value's label changing (a restored group's name
+  // arriving) is a new `value` too, which Autocomplete answered by clearing
+  // the textbox while the search still ran for what had been typed.
+  it("keeps what is typed when a selected value's name resolves", () => {
+    const ui = (knownLabels?: Record<string, string>) => (
+      <AsyncEntityMultiSelect<Item>
+        id="test-multi"
+        label="Groups"
+        values={["group-1"]}
+        onChange={() => {}}
+        useSearch={useSearch}
+        getId={(i) => i.id}
+        getLabel={(i) => i.name}
+        knownLabels={knownLabels}
+        compactSelectedValues
+      />
+    );
+    const { rerender } = render(ui());
+    const input = screen.getByRole("combobox", { name: "Groups" });
+
+    act(() => input.focus());
+    fireEvent.mouseDown(input);
+    fireEvent.change(input, { target: { value: "apim" } });
+
+    rerender(ui({ "group-1": "Choreo SRE Team" }));
+
+    expect(screen.getByRole("option", { name: "Choreo SRE Team" })).toBeInTheDocument();
+    expect(input).toHaveValue("apim");
+  });
+
+  it("still clears what is typed once an option is picked", () => {
+    const useSearchCab = () => ({
+      data: [{ id: "group-2", name: "CAB Approval" }],
+      isFetching: false,
+      isError: false,
+    });
+    const onChange = vi.fn();
+    render(
+      <AsyncEntityMultiSelect<Item>
+        id="test-multi"
+        label="Groups"
+        values={[]}
+        onChange={onChange}
+        useSearch={useSearchCab}
+        getId={(i) => i.id}
+        getLabel={(i) => i.name}
+      />,
+    );
+    const input = screen.getByRole("combobox", { name: "Groups" });
+
+    act(() => input.focus());
+    fireEvent.mouseDown(input);
+    fireEvent.change(input, { target: { value: "cab" } });
+    fireEvent.click(screen.getByRole("option", { name: "CAB Approval" }));
+
+    expect(onChange).toHaveBeenCalledWith(["group-2"]);
+    expect(input).toHaveValue("");
+  });
+});
+
+describe("AsyncEntityMultiSelect — label precedence", () => {
+  // Regression: the name cached at mount (or when a value was picked) beat a
+  // newer name from the caller's lookup, so a renamed group kept its old name.
+  it("shows the caller's current knownLabels name over the one cached earlier", () => {
+    const { rerender } = render(picker({ "group-1": "Platform Ops" }));
+    expect(screen.getByText("Platform Ops")).toBeInTheDocument();
+
+    rerender(picker({ "group-1": "Platform Support" }));
+
+    expect(screen.getByText("Platform Support")).toBeInTheDocument();
+    expect(screen.queryByText("Platform Ops")).not.toBeInTheDocument();
+  });
 });

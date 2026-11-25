@@ -16,7 +16,7 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const getMock = vi.fn();
@@ -26,36 +26,53 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ get: getMock }),
 }));
 
+// Real group ids are UUIDs (lower case, as the server returns them), so the
+// pinned fixtures are too: the label lookup only ever looks up a UUID.
+const APOLLO = "6a0e1b52-0000-4000-8000-00000000a001";
+const ARTEMIS = "6a0e1b52-0000-4000-8000-00000000a002";
+const SOC = "6a0e1b52-0000-4000-8000-00000000a003";
+const CAB = "6a0e1b52-0000-4000-8000-00000000a004";
+const CHOREO = "6a0e1b52-0000-4000-8000-0000000000c1";
+const GONE = "6a0e1b52-0000-4000-8000-0000000000c2";
+
 const useSearchGroupsMock = vi.fn((query: string, enabled: boolean) => {
   void query;
   void enabled;
   return {
-    data: [
-      { id: "group-cab", name: "CAB Approval", active: true },
-      // Also an SRE team's group: listed once, as the team.
-      { id: "team-apollo", name: "Apollo Group", active: true },
-    ],
+    data: [{ id: CAB, name: "CAB Approval", active: true }],
     isFetching: false,
     isError: false,
+    isPlaceholderData: false,
   };
 });
-// Stable across renders, as React Query's own data is.
-const { EXTRA_GROUPS, TEAMS } = vi.hoisted(() => ({
-  EXTRA_GROUPS: { data: [{ id: "group-soc", name: "Security Operations", active: true }], isError: false },
-  TEAMS: {
-    data: [
-      { id: "apollo", name: "Apollo", family: "sre-abt", sreGroupId: "team-apollo" },
-      { id: "artemis", name: "Artemis", family: "sre-abt", sreGroupId: "team-artemis" },
-      { id: "atlas", name: "Atlas", family: "cre-abt", creGroupId: "team-atlas" },
-    ],
-  },
+
+// The two pinned lists, as `useTeams` / `useSearchIncidentExtraGroups` return
+// them. Each test sets what it needs; the objects are kept stable across
+// renders, as React Query's own results are.
+const pinnedState = vi.hoisted(() => ({
+  teams: {} as { data?: unknown[]; isPending: boolean; isError: boolean },
+  extra: {} as { data?: unknown[]; isPending: boolean; isError: boolean },
 }));
+const TEAMS = [
+  { id: "apollo", name: "Apollo", family: "sre-abt", sreGroupId: APOLLO },
+  { id: "artemis", name: "Artemis", family: "sre-abt", sreGroupId: ARTEMIS },
+  { id: "atlas", name: "Atlas", family: "cre-abt", creGroupId: "6a0e1b52-0000-4000-8000-00000000a009" },
+];
+const EXTRA = [{ id: SOC, name: "Security Operations", active: true }];
+function setPinned(
+  teams: { data?: unknown[]; isPending?: boolean; isError?: boolean },
+  extra: { data?: unknown[]; isPending?: boolean; isError?: boolean },
+): void {
+  pinnedState.teams = { isPending: false, isError: false, ...teams };
+  pinnedState.extra = { isPending: false, isError: false, ...extra };
+}
+
 vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: (query: string, enabled: boolean) => useSearchGroupsMock(query, enabled),
-  useSearchIncidentExtraGroups: () => EXTRA_GROUPS,
+  useSearchIncidentExtraGroups: () => pinnedState.extra,
 }));
 vi.mock("@features/csm-dashboard/api/useTeams", () => ({
-  useTeams: () => TEAMS,
+  useTeams: () => pinnedState.teams,
 }));
 
 import {
@@ -68,15 +85,30 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
+beforeEach(() => {
+  setPinned({ data: TEAMS }, { data: EXTRA });
+  getMock.mockReset();
+});
+
 describe("useSearchIncidentFilterGroups", () => {
   it("lists the SRE teams and extra groups first, then the searched groups, each id once", () => {
+    useSearchGroupsMock.mockReturnValueOnce({
+      data: [
+        { id: CAB, name: "CAB Approval", active: true },
+        // Also an SRE team's group: listed once, as the team.
+        { id: APOLLO, name: "Apollo Group", active: true },
+      ],
+      isFetching: false,
+      isError: false,
+      isPlaceholderData: false,
+    });
     const { result } = renderHook(() => useSearchIncidentFilterGroups("", true));
 
     expect(result.current.data).toEqual([
-      { id: "team-apollo", name: "Apollo" },
-      { id: "team-artemis", name: "Artemis" },
-      { id: "group-soc", name: "Security Operations" },
-      { id: "group-cab", name: "CAB Approval" },
+      { id: APOLLO, name: "Apollo" },
+      { id: ARTEMIS, name: "Artemis" },
+      { id: SOC, name: "Security Operations" },
+      { id: CAB, name: "CAB Approval" },
     ]);
   });
 
@@ -85,38 +117,57 @@ describe("useSearchIncidentFilterGroups", () => {
 
     expect(useSearchGroupsMock).toHaveBeenLastCalledWith(" ART ", true);
     // Artemis matches; Apollo and Security Operations don't. The search's own
-    // results are whatever the server matched, except a pinned team's group:
-    // Apollo's group is not listed again under the group's own name.
+    // results are whatever the server matched.
     expect(result.current.data.map((g) => g.name)).toEqual(["Artemis", "CAB Approval"]);
+  });
+
+  // Regression: a pinned group hidden by its pinned name was still marked as
+  // seen, so the search's match for it under its own name was dropped too and
+  // the group could not be picked from that search at all.
+  it("lists a pinned group the search matches under its own name, once, by its pinned name", () => {
+    useSearchGroupsMock.mockReturnValueOnce({
+      data: [{ id: APOLLO, name: "Apollo Group", active: true }],
+      isFetching: false,
+      isError: false,
+      isPlaceholderData: false,
+    });
+    const { result } = renderHook(() => useSearchIncidentFilterGroups("Apollo Group", true));
+
+    expect(result.current.data).toEqual([{ id: APOLLO, name: "Apollo" }]);
   });
 
   it("leaves out the previous query's results while the new search is in flight", () => {
     useSearchGroupsMock.mockReturnValueOnce({
-      data: [{ id: "group-cab", name: "CAB Approval", active: true }],
+      data: [{ id: CAB, name: "CAB Approval", active: true }],
       isFetching: true,
       isError: false,
       isPlaceholderData: true,
-    } as ReturnType<typeof useSearchGroupsMock>);
+    });
     const { result } = renderHook(() => useSearchIncidentFilterGroups("sec", true));
 
     expect(result.current.isFetching).toBe(true);
-    expect(result.current.data).toEqual([{ id: "group-soc", name: "Security Operations" }]);
+    expect(result.current.data).toEqual([{ id: SOC, name: "Security Operations" }]);
   });
 
   it("keeps the teams and extra groups while the picker is closed, so a selection stays labelled", () => {
     const { result } = renderHook(() => useSearchIncidentFilterGroups("", false));
 
     expect(useSearchGroupsMock).toHaveBeenLastCalledWith("", false);
-    expect(result.current.data.slice(0, 3).map((g) => g.id)).toEqual(["team-apollo", "team-artemis", "group-soc"]);
+    expect(result.current.data.slice(0, 3).map((g) => g.id)).toEqual([APOLLO, ARTEMIS, SOC]);
+  });
+
+  // Regression: a failed pinned list looked like "no matches".
+  it("reports a failed pinned list as an error, still listing what the search found", () => {
+    setPinned({ isError: true }, { data: EXTRA });
+    const { result } = renderHook(() => useSearchIncidentFilterGroups("", true));
+
+    expect(result.current.isError).toBe(true);
+    expect(result.current.data.map((g) => g.id)).toEqual([SOC, CAB]);
   });
 });
 
 describe("useIncidentFilterGroupLabels", () => {
-  const CHOREO = "6a0e1b52-0000-4000-8000-0000000000c1";
-  const GONE = "6a0e1b52-0000-4000-8000-0000000000c2";
-
   it("looks up each selected group by id and maps it to its name, leaving out one not found", async () => {
-    getMock.mockReset();
     getMock.mockImplementation((path: string) =>
       Promise.resolve(path === `/groups/${CHOREO}` ? { id: CHOREO, name: "Choreo SRE Team", members: [] } : null),
     );
@@ -128,15 +179,52 @@ describe("useIncidentFilterGroupLabels", () => {
   });
 
   it("names a pinned team or extra group from the pinned list without looking it up", () => {
-    getMock.mockReset();
-    const { result } = renderHook(() => useIncidentFilterGroupLabels(["team-apollo", "group-soc"]), { wrapper });
+    const { result } = renderHook(() => useIncidentFilterGroupLabels([APOLLO, SOC]), { wrapper });
 
-    expect(result.current).toEqual({ "team-apollo": "Apollo", "group-soc": "Security Operations" });
+    expect(result.current).toEqual({ [APOLLO]: "Apollo", [SOC]: "Security Operations" });
     expect(getMock).not.toHaveBeenCalled();
   });
 
+  // Regression: on a cold cache a restored pinned group was looked up before
+  // the pinned lists arrived, fetching the group's full member list for a name
+  // the pinned list was about to give.
+  it("looks nothing up until the pinned lists have answered", () => {
+    setPinned({ isPending: true }, { isPending: true });
+    const { result, rerender } = renderHook(() => useIncidentFilterGroupLabels([APOLLO]), { wrapper });
+
+    expect(result.current).toEqual({});
+    expect(getMock).not.toHaveBeenCalled();
+
+    setPinned({ data: TEAMS }, { data: EXTRA });
+    rerender();
+
+    expect(result.current).toEqual({ [APOLLO]: "Apollo" });
+    expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it("looks a group up after all when the pinned list that would name it failed", async () => {
+    setPinned({ isError: true }, { data: EXTRA });
+    getMock.mockResolvedValue({ id: APOLLO, name: "Apollo SRE", members: [] });
+    const { result } = renderHook(() => useIncidentFilterGroupLabels([APOLLO]), { wrapper });
+
+    await waitFor(() => expect(result.current).toEqual({ [APOLLO]: "Apollo SRE" }));
+    expect(getMock).toHaveBeenCalledWith(`/groups/${APOLLO}`);
+  });
+
+  // Regression: names were stored under the server's lower-case id but read
+  // with the id as selected, so an upper-case id from a link got no name.
+  it("names a group selected by an upper-case id", async () => {
+    const upper = CHOREO.toUpperCase();
+    getMock.mockResolvedValue({ id: CHOREO, name: "Choreo SRE Team", members: [] });
+    const { result } = renderHook(() => useIncidentFilterGroupLabels([upper, APOLLO.toUpperCase()]), { wrapper });
+
+    await waitFor(() =>
+      expect(result.current).toEqual({ [upper]: "Choreo SRE Team", [APOLLO.toUpperCase()]: "Apollo" }),
+    );
+    expect(getMock).toHaveBeenCalledTimes(1);
+  });
+
   it("never looks up an id that is not a UUID", () => {
-    getMock.mockReset();
     const { result } = renderHook(() => useIncidentFilterGroupLabels(["foo"]), { wrapper });
 
     expect(result.current).toEqual({});
@@ -144,7 +232,6 @@ describe("useIncidentFilterGroupLabels", () => {
   });
 
   it("keeps the same map across renders while no name changes", async () => {
-    getMock.mockReset();
     getMock.mockResolvedValue({ id: CHOREO, name: "Choreo SRE Team", members: [] });
     const { result, rerender } = renderHook(({ ids }) => useIncidentFilterGroupLabels(ids), {
       wrapper,
@@ -158,7 +245,6 @@ describe("useIncidentFilterGroupLabels", () => {
   });
 
   it("asks for nothing when no group is selected", () => {
-    getMock.mockClear();
     const { result } = renderHook(() => useIncidentFilterGroupLabels([]), { wrapper });
 
     expect(result.current).toEqual({});
