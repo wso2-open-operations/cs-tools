@@ -61,13 +61,14 @@ type Client struct {
 	baseURL string
 }
 
-// NewClient returns a Client, or nil when the base URL or a credential is empty or
-// the base URL is not https (http is allowed only for a loopback host, for local
-// runs): the access token is never sent in plaintext. The routes that need the
-// client then answer 503, so a missing or unsafe setting never fails startup.
+// NewClient returns a Client, or nil when the base URL or a credential is empty, or
+// the base URL or the token URL is not https (http is allowed only for a loopback
+// host, for local runs): neither the client secret nor the access token is ever sent
+// in plaintext. The routes that need the client then answer 503, so a missing or
+// unsafe setting never fails startup.
 func NewClient(cfg Config) *Client {
 	base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	if base == "" || !SafeBaseURL(base) || strings.TrimSpace(cfg.TokenURL) == "" ||
+	if base == "" || !SafeBaseURL(base) || !SafeBaseURL(strings.TrimSpace(cfg.TokenURL)) ||
 		strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
 		return nil
 	}

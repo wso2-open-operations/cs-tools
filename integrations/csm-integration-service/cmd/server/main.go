@@ -102,6 +102,8 @@ func main() {
 			reason = "ALERT_CORE_BASE_URL is not set"
 		case !alertcore.SafeBaseURL(base):
 			reason = "ALERT_CORE_BASE_URL is not https (http only for loopback)"
+		case !alertcore.SafeBaseURL(strings.TrimSpace(cfg.TokenURL)):
+			reason = "ENTITY_TOKEN_URL is not https (http only for loopback)"
 		}
 		slog.Warn("alert-core client not configured; the muted-alerts and alert-field-values routes answer 503", "reason", reason)
 	}

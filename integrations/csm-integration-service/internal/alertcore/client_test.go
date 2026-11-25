@@ -149,6 +149,9 @@ func TestSafeBaseURL(t *testing.T) {
 	if NewClient(Config{BaseURL: "http://alert-core:8080", TokenURL: "https://idp/token", ClientID: "a", ClientSecret: "b"}) != nil {
 		t.Fatal("NewClient accepted a plain-http, non-loopback base URL")
 	}
+	if NewClient(Config{BaseURL: "https://alert-core", TokenURL: "http://idp.example/token", ClientID: "a", ClientSecret: "b"}) != nil {
+		t.Fatal("NewClient accepted a plain-http, non-loopback token URL: the client secret would go in plaintext")
+	}
 }
 
 // TestClient_TokenRequestDoesNotFollowRedirects: a redirect from the token
