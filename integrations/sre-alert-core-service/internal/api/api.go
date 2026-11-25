@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"alert-core-service/internal/model"
 )
@@ -91,7 +92,9 @@ type MutedIncidentsResponse struct {
 
 // MutedIncidents handles GET /alert-mute-rules/{id}/muted-incidents?limit=&offset=.
 func (h *Handler) MutedIncidents(w http.ResponseWriter, r *http.Request) {
-	ruleID := r.PathValue("id")
+	// Lower-cased: mute_rule_id is stored lower-case and compared as text, so an
+	// upper-case id would find nothing.
+	ruleID := strings.ToLower(r.PathValue("id"))
 	if !ruleIDPattern.MatchString(ruleID) {
 		writeError(w, http.StatusBadRequest, "invalid alert mute rule id")
 		return
@@ -138,7 +141,7 @@ func (h *Handler) MutedCounts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "ids is required")
 		return
 	}
-	ids := strings.Split(raw, ",")
+	ids := strings.Split(strings.ToLower(raw), ",") // keyed as stored: lower-case
 	if len(ids) > maxLimit {
 		writeError(w, http.StatusBadRequest, "at most 100 ids")
 		return
@@ -174,7 +177,7 @@ type FieldValuesResponse struct {
 func (h *Handler) FieldValues(w http.ResponseWriter, r *http.Request) {
 	field := r.URL.Query().Get("field")
 	query := r.URL.Query().Get("q")
-	if len(query) > maxQueryLen {
+	if utf8.RuneCountInString(query) > maxQueryLen {
 		writeError(w, http.StatusBadRequest, "q must be at most 255 characters")
 		return
 	}

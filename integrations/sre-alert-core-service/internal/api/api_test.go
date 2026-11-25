@@ -24,6 +24,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,6 +189,34 @@ func TestFieldValuesRejectsBadInput(t *testing.T) {
 	}
 	if w := serve(t, &fakeStore{err: errors.New("db down")}, "/alert-field-values?field=service"); w.Code != http.StatusInternalServerError {
 		t.Errorf("store error: status = %d, want 500", w.Code)
+	}
+}
+
+// TestRuleIDsAreMatchedWhateverTheirCase: ids are stored lower-case, so an upper-case
+// id in the path or the list finds the same rule.
+func TestRuleIDsAreMatchedWhateverTheirCase(t *testing.T) {
+	store := &fakeStore{incs: []model.Incident{{ID: 1, MuteRuleID: ruleID}}}
+	upper := strings.ToUpper(ruleID)
+	if w := serve(t, store, "/alert-mute-rules/"+upper+"/muted-incidents"); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"total":1`) {
+		t.Fatalf("muted incidents by an upper-case id: %d %s", w.Code, w.Body)
+	}
+	w := serve(t, store, "/alert-mute-rules/muted-counts?ids="+upper)
+	var got MutedCountsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Counts[ruleID] != 1 {
+		t.Fatalf("counts by an upper-case id = %s (%v), want 1 under the lower-case id", w.Body, err)
+	}
+}
+
+// TestFieldValuesCountsCharactersNotBytes: the 255 limit is characters, so a query of
+// 255 two-byte characters is accepted and one of 256 is not.
+func TestFieldValuesCountsCharactersNotBytes(t *testing.T) {
+	q := func(n int) string { return url.QueryEscape(strings.Repeat("é", n)) }
+	if w := serve(t, &fakeStore{}, "/alert-field-values?field=service&q="+q(255)); w.Code != http.StatusOK {
+		t.Errorf("255 characters: status = %d, want 200", w.Code)
+	}
+	if w := serve(t, &fakeStore{}, "/alert-field-values?field=service&q="+q(256)); w.Code != http.StatusBadRequest {
+		t.Errorf("256 characters: status = %d, want 400", w.Code)
 	}
 }
 
