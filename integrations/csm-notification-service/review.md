@@ -36,6 +36,8 @@ review catches it too.
 - [ ] No real name/email/URL/org-specific identifier copied from a screenshot, pasted log, or API
       response into code, tests, docs, or commit/PR text — use a generic placeholder.
 - [ ] No ticket/issue number or repo name cited in a code comment — explain the why directly.
+- [ ] Every new `.go` file, tests included, starts with the Apache license header the other files
+      carry — the CRE head fallback added three without it and a reviewer caught it.
 
 ## API design and naming
 
