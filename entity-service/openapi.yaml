@@ -22809,6 +22809,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden — the caller is not a service credential in M2M_CLIENT_IDS.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
           content:
@@ -22845,6 +22851,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden — the caller is not a service credential in M2M_CLIENT_IDS.
           content:
             application/json:
               schema:
@@ -45623,8 +45635,9 @@ components:
           type: object
           nullable: true
           description: >-
-            Visit and UTM context of the earliest registration that carried any; null when none did. The utm*
-            fields are those of the landing URL of the visit that led to the signup.
+            Visit and UTM context of the organisation's earliest registration; null when that registration
+            has none, even if a later registration does. The utm* fields are those of the landing URL of the
+            visit that led to the signup.
           properties:
             utmSource:
               type: string

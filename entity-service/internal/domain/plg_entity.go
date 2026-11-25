@@ -556,7 +556,8 @@ type OrganizationDetail struct {
 	// EmailClassification is the owner's email classification from a
 	// registration playbook, the most recently set one; nil when unanswered.
 	EmailClassification *string `json:"emailClassification"`
-	// RegistrationMetadata is the earliest registration's visit context; nil when none.
+	// RegistrationMetadata is the earliest registration's visit context; nil when that
+	// registration has none (a later registration's is never substituted).
 	RegistrationMetadata *OrganizationRegistrationMetadata `json:"registrationMetadata"`
 	FieldsInherited      bool                              `json:"fieldsInherited"`
 	PlatformCards        []PlatformCard                    `json:"platformCards"`

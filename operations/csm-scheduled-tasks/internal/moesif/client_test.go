@@ -114,6 +114,27 @@ func TestSearchEventsPagesWithTheLastSortKey(t *testing.T) {
 	}
 }
 
+// Events sharing a timestamp are told apart by _id: the cursor sent for the next
+// page carries both sort components, so none at the page edge is skipped.
+func TestSearchEventsCursorCarriesTheTiebreaker(t *testing.T) {
+	tie := func(id string) string {
+		return fmt.Sprintf(`{"_id":%q,"sort":[1794103200000,%q],"_source":{"company_id":"c-%s"}}`, id, id, id)
+	}
+	var queries []map[string]any
+	c := serve(t, 200, []string{tie("a") + "," + tie("b"), tie("c")}, &queries)
+
+	hits, _, err := c.SearchEvents(context.Background(), query())
+	if err != nil || len(hits) != 3 {
+		t.Fatalf("hits = %d, err = %v", len(hits), err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want 2", len(queries))
+	}
+	if got := queries[1]["search_after"]; !reflect.DeepEqual(got, []any{float64(1794103200000), "b"}) {
+		t.Errorf("search_after = %v, want both the time and the event id", got)
+	}
+}
+
 func TestSearchEventsReportsMoreAtThePageLimit(t *testing.T) {
 	full := hit("1", 1) + "," + hit("2", 2)
 	hits, more, err := serve(t, 200, []string{full, full}, nil).SearchEvents(context.Background(), query())

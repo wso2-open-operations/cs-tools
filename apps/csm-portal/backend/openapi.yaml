@@ -33806,8 +33806,9 @@ components:
           type: object
           nullable: true
           description: >-
-            Visit and UTM context of the earliest registration that carried any; null when none did. The utm*
-            fields are those of the landing URL of the visit that led to the signup.
+            Visit and UTM context of the organisation's earliest registration; null when that registration
+            has none, even if a later registration does. The utm* fields are those of the landing URL of the
+            visit that led to the signup.
           properties:
             utmSource:
               type: string

@@ -549,7 +549,7 @@ type OrganizationDetail struct {
 	// registration playbook; nil when unanswered.
 	EmailClassification *string `json:"emailClassification"`
 	// RegistrationMetadata is the visit and UTM context of the earliest
-	// registration that carried any; nil when none did.
+	// registration; nil when that registration has none.
 	RegistrationMetadata *RegistrationMetadata `json:"registrationMetadata"`
 	FieldsInherited      bool                  `json:"fieldsInherited"`
 	PlatformCards        []PlatformCard        `json:"platformCards"`
