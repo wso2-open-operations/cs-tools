@@ -148,7 +148,7 @@ export default function PublicHolidaysEditor(): JSX.Element | null {
         the India team). Add a country&apos;s holidays here, one per line as <code>YYYY-MM-DD, Name</code>, or import
         a file: a holiday calendar (<code>.ics</code>, the chosen year&apos;s days), a table (<code>.csv</code>, date
         then name) or a text file of such lines. CRE members
-        get a Public holiday tag on each weekday holiday, three weeks ahead; their lead removes it for whoever works.
+        get a Public holiday tag on each coming weekday holiday as soon as it is added; their lead removes it for whoever works.
       </p>
 
       <div className="phe-controls">

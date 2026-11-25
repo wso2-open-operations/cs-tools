@@ -167,8 +167,11 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
     places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
     colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
-    on every member of a rostered CRE team (management left out) for each weekday holiday of
-    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    on every member of a rostered CRE team (management left out) for each coming weekday holiday
+    of their country, however far ahead (two years at most, a guard against a mistyped year), so
+    the roster shows a holiday's tags as soon as it is stored; a past day is never tagged. Leave
+    marked later over a tagged day cuts the tag out (`ApplyAbsence`), so an early tag blocks
+    nobody, and since the placement is recorded the tag does not come back. Like every tag it takes the day off the timesheet (the
     worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
     Alerts does not call them. A lead or rota manager makes somebody available by removing the
     tag; then the person is on the rota and called as usual. No worklog or Case Alerts code

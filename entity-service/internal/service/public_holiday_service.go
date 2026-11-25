@@ -110,7 +110,7 @@ type publicHolidayService struct {
 	employees EmployeeLocations
 	now       func() time.Time
 
-	// placer, when set, places the coming weeks' Public holiday tags after
+	// placer, when set, places the coming Public holiday tags after
 	// every successful refresh (WithHolidayTagPlacer).
 	placer HolidayTagPlacer
 	// editor, when set, decides who may add or remove holidays
@@ -122,7 +122,7 @@ type publicHolidayService struct {
 	last    *domain.PublicHolidayRefreshResult
 }
 
-// WithHolidayTagPlacer makes every successful refresh place the coming weeks'
+// WithHolidayTagPlacer makes every successful refresh place the coming
 // Public holiday tags (CRE). Applied after construction so the constructor's
 // callers keep compiling; a service it does not recognise is returned
 // unchanged.
@@ -553,7 +553,7 @@ func (s *publicHolidayService) Remove(ctx context.Context, country, date string)
 // holidayPlacementTimeout bounds one placement started by a hand edit.
 const holidayPlacementTimeout = 2 * time.Minute
 
-// placeSoon places (and takes away) the coming weeks' tags after a hand edit,
+// placeSoon places (and takes away) the coming holiday tags after a hand edit,
 // as the system, as the daily run does. It runs in the background, past the
 // request's own deadline, because placing walks every CRE member; a failure
 // is logged, the edit stands, and the next daily run places them.
