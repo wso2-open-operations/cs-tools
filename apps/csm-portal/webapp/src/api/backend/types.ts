@@ -807,6 +807,8 @@ interface BeCaseUpdateNever {
   workState?: never;
   assigneeEmail?: never;
   watchList?: never;
+  addWatchers?: never;
+  removeWatchers?: never;
   parentId?: never;
   subject?: never;
   description?: never;
@@ -910,6 +912,15 @@ export type BeCaseUpdatePayload =
    * see {@link BeUpdateIncidentPayload}).
    */
   | (Omit<BeCaseUpdateNever, "watchList"> & { watchList: string[] })
+  /**
+   * Add one or more users to the watch list (platform user UUIDs), applied by
+   * the backend against the list stored at that moment — unlike `watchList`,
+   * it cannot drop a watcher someone else added since this page loaded.
+   * PostgreSQL data source only. Still exactly one field per request.
+   */
+  | (Omit<BeCaseUpdateNever, "addWatchers"> & { addWatchers: string[] })
+  /** Remove users from the watch list; the counterpart of `addWatchers`. */
+  | (Omit<BeCaseUpdateNever, "removeWatchers"> & { removeWatchers: string[] })
   /**
    * UUID of another case, incident, change request, or problem to link this
    * case to as its parent (ServiceNow only, the hierarchical

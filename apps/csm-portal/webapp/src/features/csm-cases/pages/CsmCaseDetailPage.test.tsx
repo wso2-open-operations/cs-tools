@@ -723,27 +723,30 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
   // widget's own rendering is covered in CaseDetailWidgets.test.tsx.
   RequestDetailsWidget: () => <div data-testid="request-details-widget" />,
   TagsWidget: () => null,
-  // Probe, not `null`: the real widget computes the replacement watch list and
-  // enforces the per-record-type rules (covered in CaseDetailWidgets.test.tsx).
-  // Here it just hands the page a finished list so these tests can see what
-  // the page does with it.
+  // Probe, not `null`: the real widget enforces the per-record-type rules
+  // (covered in CaseDetailWidgets.test.tsx). Here it just hands the page the
+  // one-user change so these tests can see what the page does with it.
   WatchersWidget: ({
     entityKind,
     watchers,
-    onReplace,
+    onChange,
   }: {
     entityKind: string;
     watchers: Array<{ id: string; name: string }>;
-    onReplace?: (nextWatcherIds: string[], action: "add" | "remove") => void;
+    onChange?: (change: { userId: string; action: "add" | "remove" }) => void;
   }) => (
     <div data-testid="watchers-widget" data-entity-kind={entityKind}>
       <button
         type="button"
-        onClick={() =>
-          onReplace?.([...watchers.map((w) => w.id), NEW_WATCHER_ID], "add")
-        }
+        onClick={() => onChange?.({ userId: NEW_WATCHER_ID, action: "add" })}
       >
         stub add watcher
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange?.({ userId: watchers[0].id, action: "remove" })}
+      >
+        stub remove watcher
       </button>
     </div>
   ),
@@ -2180,12 +2183,26 @@ describe("CsmCaseDetailPage — Watchers tab", () => {
     );
   });
 
-  it("PATCHes the whole replacement list, keeping the watchers already on it", () => {
+  it("PATCHes only the added user, never a whole list that could drop a concurrent watcher", () => {
     openWatchers();
     fireEvent.click(screen.getByRole("button", { name: /stub add watcher/i }));
 
     expect(patchCaseMutateMock).toHaveBeenCalledWith(
-      { watchList: [WATCHER_ID, NEW_WATCHER_ID] },
+      { addWatchers: [NEW_WATCHER_ID] },
+      expect.anything(),
+    );
+    expect(patchCaseMutateMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ watchList: expect.anything() }),
+      expect.anything(),
+    );
+  });
+
+  it("PATCHes only the removed user", () => {
+    openWatchers();
+    fireEvent.click(screen.getByRole("button", { name: /stub remove watcher/i }));
+
+    expect(patchCaseMutateMock).toHaveBeenCalledWith(
+      { removeWatchers: [WATCHER_ID] },
       expect.anything(),
     );
   });
