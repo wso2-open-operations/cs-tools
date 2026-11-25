@@ -239,12 +239,48 @@ export function pickerInstant(date: Date | null, time: Date | null, timeZone: st
   return utcMsToZonedInputValue(Date.parse(iso), timeZone) === local ? iso : SKIPPED_WALL_TIME;
 }
 
+/**
+ * A fixed day the time picker's value sits on. {@link pickerInstant} reads only its
+ * hours and minutes; on the rule's own day the browser's zone could skip that wall
+ * time (its own daylight-saving change) and move it, so it sits on a day no zone
+ * changes its clocks at this hour.
+ */
+const TIME_CARRIER_DAY = { year: 2000, monthIndex: 0, day: 15 };
+
 /** The inverse of {@link pickerInstant}: picker values showing `iso`'s wall clock in `timeZone`. */
 export function pickerValuesInZone(iso: string, timeZone: string): { date: Date; time: Date } {
   const [d, t] = utcMsToZonedInputValue(Date.parse(iso), timeZone).split("T");
   const [y, mo, day] = d.split("-").map(Number);
   const [h, mi] = t.split(":").map(Number);
-  return { date: new Date(y, mo - 1, day), time: new Date(y, mo - 1, day, h, mi) };
+  const c = TIME_CARRIER_DAY;
+  return { date: new Date(y, mo - 1, day), time: new Date(c.year, c.monthIndex, c.day, h, mi) };
+}
+
+/**
+ * {@link pickerInstant}, except that pickers still showing `stored`'s own wall clock
+ * in the same zone give `stored` back unchanged. In the hour clocks repeat when
+ * daylight saving ends, one wall time is two instants and {@link pickerInstant}
+ * picks the earlier, so re-reading an untouched field could move a saved rule an hour.
+ */
+export function pickerInstantKeeping(
+  stored: { iso: string; timeZone: string } | undefined,
+  date: Date | null,
+  time: Date | null,
+  timeZone: string,
+): string {
+  if (stored && stored.timeZone === timeZone && date && time) {
+    const shown = pickerValuesInZone(stored.iso, timeZone);
+    if (
+      shown.date.getFullYear() === date.getFullYear() &&
+      shown.date.getMonth() === date.getMonth() &&
+      shown.date.getDate() === date.getDate() &&
+      shown.time.getHours() === time.getHours() &&
+      shown.time.getMinutes() === time.getMinutes()
+    ) {
+      return stored.iso;
+    }
+  }
+  return pickerInstant(date, time, timeZone);
 }
 
 /** "(UTC+05:30) Asia/Colombo", as CloudWatch lists zones. */

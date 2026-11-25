@@ -50,7 +50,7 @@ import {
   REQUIRED_ALERT_MUTE_RULE_FIELDS,
   alertMuteRuleState,
   formatDuration,
-  pickerInstant,
+  pickerInstantKeeping,
   pickerValuesInZone,
   timeZoneLabel,
   useNow,
@@ -111,16 +111,23 @@ function formFromRule(rule: AlertMuteRule): FormState {
   };
 }
 
-/** The form as the API takes it; a quick length starts at `now`. */
-function toInput(form: FormState, now: number): AlertMuteRuleInput {
-  const instant = (date: Date | null, time: Date | null): string => pickerInstant(date, time, form.timeZone);
+/**
+ * The form as the API takes it; a quick length starts at `now`. Editing, a start or end
+ * whose pickers still show the saved rule's value keeps the saved instant (see
+ * {@link pickerInstantKeeping}).
+ */
+function toInput(form: FormState, now: number, saved?: AlertMuteRule): AlertMuteRuleInput {
+  const instant = (date: Date | null, time: Date | null, iso?: string): string =>
+    pickerInstantKeeping(saved && iso ? { iso, timeZone: saved.timeZone } : undefined, date, time, form.timeZone);
   const quick = form.duration !== "custom";
   return {
     name: form.name.trim(),
     description: form.description.trim(),
     timeZone: form.timeZone,
-    startOn: quick ? new Date(now).toISOString() : instant(form.startDate, form.startTime),
-    endOn: quick ? new Date(now + (form.duration as number) * 60_000).toISOString() : instant(form.endDate, form.endTime),
+    startOn: quick ? new Date(now).toISOString() : instant(form.startDate, form.startTime, saved?.startOn),
+    endOn: quick
+      ? new Date(now + (form.duration as number) * 60_000).toISOString()
+      : instant(form.endDate, form.endTime, saved?.endOn),
     conditions: form.conditions.map((c) => ({ field: c.field, value: c.value.trim() })),
   };
 }
@@ -180,7 +187,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
 
   const save = (): void => {
     const at = Date.now();
-    const input = toInput(form, at);
+    const input = toInput(form, at, existing.data);
     const found = validateAlertMuteRule(input, at, !isEdit);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
@@ -236,7 +243,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
     );
   }
 
-  const preview = toInput(form, now);
+  const preview = toInput(form, now, existing.data);
   const start = Date.parse(preview.startOn);
   const end = Date.parse(preview.endOn);
   const today = utcMsToZonedInputValue(now, form.timeZone).slice(0, 10).replaceAll("-", "/");

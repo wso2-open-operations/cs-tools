@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AlertMuteRuleInput } from "@features/csm-operations/types/alertMuteRules";
 import {
   alertMuteRuleActions,
@@ -24,6 +24,7 @@ import {
   matchesStateFilter,
   conditionsSummary,
   pickerInstant,
+  pickerInstantKeeping,
   pickerValuesInZone,
   timeZoneLabel,
   validateAlertMuteRule,
@@ -175,5 +176,30 @@ describe("picker conversion", () => {
   it("round-trips through pickerValuesInZone", () => {
     const { date, time } = pickerValuesInZone("2026-11-03T17:00:00.000Z", "Asia/Colombo");
     expect(pickerInstant(date, time, "Asia/Colombo")).toBe("2026-11-03T17:00:00.000Z");
+  });
+
+  it("keeps a wall time the browser's own zone skips", () => {
+    // 02:30 on 2027-03-14 does not exist in America/New_York (clocks go forward), but does in UTC.
+    vi.stubEnv("TZ", "America/New_York");
+    try {
+      const { date, time } = pickerValuesInZone("2027-03-14T02:30:00.000Z", "UTC");
+      expect([time.getHours(), time.getMinutes()]).toEqual([2, 30]);
+      expect(pickerInstant(date, time, "UTC")).toBe("2027-03-14T02:30:00.000Z");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("keeps a saved instant in the repeated hour while its pickers are untouched", () => {
+    // 01:30 on 2026-11-01 happens twice in America/New_York; the second one is 06:30Z.
+    const stored = { iso: "2026-11-01T06:30:00.000Z", timeZone: "America/New_York" };
+    const { date, time } = pickerValuesInZone(stored.iso, stored.timeZone);
+    expect(pickerInstant(date, time, stored.timeZone)).toBe("2026-11-01T05:30:00.000Z"); // the earlier one
+    expect(pickerInstantKeeping(stored, date, time, stored.timeZone)).toBe(stored.iso);
+    // A changed time, or another zone, is read afresh.
+    const later = new Date(time);
+    later.setMinutes(45);
+    expect(pickerInstantKeeping(stored, date, later, stored.timeZone)).toBe(pickerInstant(date, later, stored.timeZone));
+    expect(pickerInstantKeeping(stored, date, time, "UTC")).toBe(pickerInstant(date, time, "UTC"));
   });
 });
