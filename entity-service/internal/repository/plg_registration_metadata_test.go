@@ -140,6 +140,9 @@ func TestRegistrationMetadataIsStoredKeptAndReported(t *testing.T) {
 	if count(got.UTMSources, "google") != 1 || count(got.UTMSources, "NOT_RECORDED") < 1 {
 		t.Errorf("utm sources = %+v", got.UTMSources)
 	}
+	if count(got.UTMSources, "linkedin") != 0 || count(got.UTMSources, "x") != 0 {
+		t.Errorf("utm sources count a non-entry registration: %+v", got.UTMSources)
+	}
 	if count(got.QualificationOverview, "ELIGIBLE") != 1 || count(got.QualificationOverview, "NOT_ASSESSED") < 1 {
 		t.Errorf("qualification = %+v", got.QualificationOverview)
 	}
@@ -154,6 +157,12 @@ func TestRegistrationMetadataIsStoredKeptAndReported(t *testing.T) {
 	}
 	if google == nil || google.Eligible != 1 || google.Total != 1 || google.NotAssessed != 0 {
 		t.Errorf("qualified by utm = %+v", got.QualifiedByUTM)
+	}
+	// Later registrations of the same organisation (linkedin, x) are not entry registrations.
+	for _, q := range got.QualifiedByUTM {
+		if q.Label == "linkedin" || q.Label == "x" {
+			t.Errorf("qualified by utm counts a non-entry registration: %+v", q)
+		}
 	}
 	if len(got.QualifiedByUTM) > maxUTMSources {
 		t.Errorf("qualified by utm has %d rows, cap is %d", len(got.QualifiedByUTM), maxUTMSources)

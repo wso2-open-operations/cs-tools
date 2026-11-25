@@ -1229,13 +1229,13 @@ type DashboardAnalytics struct {
 	RegistrationsOverTime         TimeSeries       `json:"registrationsOverTime"`
 	// RegistrationsByEntryProduct counts each organisation once, under its earliest registration's product.
 	RegistrationsByEntryProduct []CountByLabel `json:"registrationsByEntryProduct"`
-	// UTMSources counts registrations by utm_source; NOT_RECORDED when none.
+	// UTMSources counts entry registrations by utm_source; NOT_RECORDED when none.
 	UTMSources []CountByLabel `json:"utmSources"`
-	// EmailClassification counts registrations by email class; NOT_CLASSIFIED until set.
+	// EmailClassification counts entry registrations by email class; NOT_CLASSIFIED until set.
 	EmailClassification []CountByLabel `json:"emailClassification"`
-	// QualificationOverview counts registrations by eligibility outcome; NOT_ASSESSED until set.
+	// QualificationOverview counts entry registrations by eligibility outcome; NOT_ASSESSED until set.
 	QualificationOverview []CountByLabel `json:"qualificationOverview"`
-	// QualifiedByUTM breaks the outcomes down by utm_source, busiest first.
+	// QualifiedByUTM breaks the outcomes down by utm_source, entry registrations only, busiest first.
 	QualifiedByUTM []UTMQualification `json:"qualifiedByUtm"`
 }
 

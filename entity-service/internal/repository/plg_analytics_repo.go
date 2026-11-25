@@ -135,6 +135,7 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		FROM   plg_org_platform op
 		LEFT   JOIN plg_registration_metadata m ON m.org_platform_id = op.id
 		WHERE  op.registered_on BETWEEN $1 AND $2
+		  `+entryRegistrationOnly+`
 		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to); err != nil {
 		return nil, err
 	}
@@ -144,6 +145,7 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		FROM   plg_org_platform op
 		`+registrationTaskValue+`
 		WHERE  op.registered_on BETWEEN $1 AND $2
+		  `+entryRegistrationOnly+`
 		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to, domain.TaskCodeEmailClassification); err != nil {
 		return nil, err
 	}
@@ -153,6 +155,7 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		FROM   plg_org_platform op
 		`+registrationTaskValue+`
 		WHERE  op.registered_on BETWEEN $1 AND $2
+		  `+entryRegistrationOnly+`
 		GROUP  BY 1 ORDER BY 2 DESC, 1`, from, to, domain.TaskCodeEligibilityOutcome); err != nil {
 		return nil, err
 	}
@@ -163,6 +166,13 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 
 	return out, nil
 }
+
+// entryRegistrationOnly keeps an organisation's earliest registration (its entry
+// registration, as in the entry-product chart) so one organisation counts once
+// across its products. It needs the pairing aliased as op.
+const entryRegistrationOnly = `AND  op.id IN (SELECT DISTINCT ON (e.organization_id) e.id
+		                 FROM   plg_org_platform e
+		                 ORDER  BY e.organization_id, e.registered_on, e.id)`
 
 // registrationTaskValue joins, as x, the value of the pairing's registration task
 // with code $3; NULL when there is no run or no answer.
@@ -180,7 +190,8 @@ const registrationTaskValue = `LEFT JOIN LATERAL (
 // maxUTMSources bounds the qualified-stats chart; the rest is not shown.
 const maxUTMSources = 10
 
-// qualifiedByUTM counts eligibility outcomes per utm_source.
+// qualifiedByUTM counts eligibility outcomes per utm_source, over each
+// organisation's entry registration only (its earliest, as in the entry-product chart).
 func (r *analyticsRepository) qualifiedByUTM(ctx context.Context, from, to time.Time) ([]domain.UTMQualification, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT COALESCE(m.utm_source, 'NOT_RECORDED'),
@@ -194,6 +205,7 @@ func (r *analyticsRepository) qualifiedByUTM(ctx context.Context, from, to time.
 		LEFT   JOIN plg_registration_metadata m ON m.org_platform_id = op.id
 		`+registrationTaskValue+`
 		WHERE  op.registered_on BETWEEN $1 AND $2
+		  `+entryRegistrationOnly+`
 		GROUP  BY 1 ORDER BY 6 DESC, 1
 		LIMIT  $4`, from, to, domain.TaskCodeEligibilityOutcome, maxUTMSources)
 	if err != nil {

@@ -1251,13 +1251,13 @@ type DashboardAnalytics struct {
 	RegistrationsOverTime         TimeSeries       `json:"registrationsOverTime"`
 	// RegistrationsByEntryProduct counts each organisation once, under its earliest registration's product.
 	RegistrationsByEntryProduct []CountByLabel `json:"registrationsByEntryProduct"`
-	// UTMSources counts registrations by the utm_source of the landing URL.
+	// UTMSources counts entry registrations by the utm_source of the landing URL.
 	UTMSources []CountByLabel `json:"utmSources"`
-	// EmailClassification counts registrations by the owner's email classification.
+	// EmailClassification counts entry registrations by the owner's email classification.
 	EmailClassification []CountByLabel `json:"emailClassification"`
-	// QualificationOverview counts registrations by eligibility outcome.
+	// QualificationOverview counts entry registrations by eligibility outcome.
 	QualificationOverview []CountByLabel `json:"qualificationOverview"`
-	// QualifiedByUTM breaks the outcomes down by utm_source.
+	// QualifiedByUTM breaks the outcomes down by utm_source, entry registrations only.
 	QualifiedByUTM []UTMQualification `json:"qualifiedByUtm"`
 }
 
