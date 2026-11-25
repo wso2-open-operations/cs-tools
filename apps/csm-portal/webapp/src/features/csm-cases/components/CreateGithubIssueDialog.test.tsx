@@ -70,7 +70,7 @@ function fillSubjectAndDescription(): void {
 
 const JUSTIFICATION = "Customer go-live is blocked on Friday";
 
-/** Types the P0/P1 justification and ticks Approved by CS Leadership. */
+/** Types the P0/P1 justification and ticks Reviewed by CS Leadership. */
 function justifyAndApprove(): void {
   fireEvent.change(screen.getByRole("textbox", { name: /priority justification/i }), {
     target: { value: JUSTIFICATION },
@@ -78,9 +78,16 @@ function justifyAndApprove(): void {
   fireEvent.click(approvalBox());
 }
 
-/** The Approved by CS Leadership tick box. */
+/** Types the justification only (P2 has no review tick). */
+function justify(): void {
+  fireEvent.change(screen.getByRole("textbox", { name: /priority justification/i }), {
+    target: { value: JUSTIFICATION },
+  });
+}
+
+/** The Reviewed by CS Leadership tick box. */
 function approvalBox(): HTMLElement {
-  return screen.getByRole("checkbox", { name: /approved by cs leadership/i });
+  return screen.getByRole("checkbox", { name: /reviewed by cs leadership/i });
 }
 
 /** Fills Subject, Description, Priority P1, its justification and the leadership approval. */
@@ -147,7 +154,7 @@ describe("CreateGithubIssueDialog — fields", () => {
       ["Reproducing Steps", screen.getByRole("textbox", { name: /^reproducing steps/i })],
       ["Priority", screen.getByRole("combobox", { name: /^priority$/i })],
       ["Priority Justification", screen.getByRole("textbox", { name: /^priority justification/i })],
-      ["Approved by CS Leadership", screen.getByRole("checkbox", { name: /^approved by cs leadership/i })],
+      ["Reviewed by CS Leadership", screen.getByRole("checkbox", { name: /^reviewed by cs leadership/i })],
       ["Update Level", screen.getByRole("textbox", { name: /^update level/i })],
       [
         "Public Git Issue",
@@ -223,13 +230,12 @@ describe("CreateGithubIssueDialog — priorities (Internal Issue Handling Policy
     ]);
   });
 
-  it("shows the chosen priority's SLA under the field", () => {
+  it("shows no SLA text under the field", () => {
     renderDialog();
-    expect(screen.queryByText(/SLA:/)).not.toBeInTheDocument();
-    pick(/^priority$/i, /P0 – Immediate Attention/);
-    expect(screen.getByText(/SLA: 1-hour response, 24x7/)).toBeInTheDocument();
-    pick(/^priority$/i, /P3 – Low Priority/);
-    expect(screen.getByText(/1-day acknowledgement and 5-day resolution, 12x5 IST/)).toBeInTheDocument();
+    for (const option of [/P0 – Immediate Attention/, /P1 – High Priority/, /P2 – Medium Priority/, /P3 – Low Priority/]) {
+      pick(/^priority$/i, option);
+      expect(screen.queryByText(/SLA:/)).not.toBeInTheDocument();
+    }
   });
 
   it("files each priority with the policy's GitHub label", () => {
@@ -244,6 +250,7 @@ describe("CreateGithubIssueDialog — priorities (Internal Issue Handling Policy
       fillSubjectAndDescription();
       pick(/^priority$/i, option);
       if (label.endsWith("(P0)") || label.endsWith("(P1)")) justifyAndApprove();
+      if (label.endsWith("(P2)")) justify();
       submit();
       expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ priorityLevel: label }));
       unmount();
@@ -251,18 +258,41 @@ describe("CreateGithubIssueDialog — priorities (Internal Issue Handling Policy
   });
 });
 
-describe("CreateGithubIssueDialog — P0/P1 justification and CS leadership approval", () => {
-  it("are hidden for P2 and P3 and until a priority is chosen", () => {
+describe("CreateGithubIssueDialog — priority justification and CS leadership review", () => {
+  it("are hidden for P3 and until a priority is chosen", () => {
     renderDialog();
     const absent = () => {
       expect(screen.queryByRole("textbox", { name: /priority justification/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("checkbox", { name: /approved by cs leadership/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("checkbox", { name: /reviewed by cs leadership/i })).not.toBeInTheDocument();
     };
-    absent();
-    pick(/^priority$/i, /P2 – Medium Priority/);
     absent();
     pick(/^priority$/i, /P3 – Low Priority/);
     absent();
+  });
+
+  it("for P2, needs a justification but no review tick", () => {
+    renderDialog();
+    fillSubjectAndDescription();
+    pick(/^priority$/i, /P2 – Medium Priority/);
+    const justification = screen.getByRole("textbox", { name: /priority justification/i });
+    expect(justification).toBeRequired();
+    expect(screen.queryByRole("checkbox", { name: /reviewed by cs leadership/i })).not.toBeInTheDocument();
+    expect(createButton()).toBeDisabled();
+    fireEvent.change(justification, { target: { value: JUSTIFICATION } });
+    expect(createButton()).toBeEnabled();
+  });
+
+  it.each([
+    [/P0 – Immediate Attention/, "P0"],
+    [/P1 – High Priority/, "P1"],
+    [/P2 – Medium Priority/, "P2"],
+  ])("for %s, the justification asks about that priority only", (option, level) => {
+    renderDialog();
+    pick(/^priority$/i, option);
+    expect(screen.getByRole("textbox", { name: /priority justification/i })).toHaveAttribute(
+      "placeholder",
+      `Why does this need ${level} attention from the product team?`,
+    );
   });
 
   it.each([[/P0 – Immediate Attention/], [/P1 – High Priority/]])(
@@ -289,12 +319,13 @@ describe("CreateGithubIssueDialog — P0/P1 justification and CS leadership appr
     },
   );
 
-  it("says the approval is required by CS leadership review", () => {
+  it("gives the review requirement as the tick box's tooltip and description", async () => {
     renderDialog();
     pick(/^priority$/i, /P0 – Immediate Attention/);
-    expect(approvalBox()).toHaveAccessibleDescription(
-      "CS leadership review is required before raising a P0 or P1 internal issue.",
-    );
+    const hint = "CS leadership review is required before raising a P0 or P1 internal issue.";
+    expect(approvalBox()).toHaveAccessibleDescription(hint);
+    fireEvent.mouseOver(screen.getByText("Reviewed by CS Leadership"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(hint);
   });
 
   it("clears the approval when the priority changes, but keeps the justification text", () => {
@@ -309,11 +340,11 @@ describe("CreateGithubIssueDialog — P0/P1 justification and CS leadership appr
     expect(createButton()).toBeEnabled();
   });
 
-  it("does not send the justification or the approval once the priority is P2 or P3", () => {
+  it("does not send the justification or the approval once the priority is P3", () => {
     const onSubmit = vi.fn();
     renderDialog({ onSubmit });
     fillRequiredFields();
-    pick(/^priority$/i, /P2 – Medium Priority/);
+    pick(/^priority$/i, /P3 – Low Priority/);
     submit();
     const payload = onSubmit.mock.calls[0][0];
     expect(payload).not.toHaveProperty("priorityJustification");

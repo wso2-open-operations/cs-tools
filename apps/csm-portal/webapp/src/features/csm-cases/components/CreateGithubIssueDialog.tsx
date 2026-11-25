@@ -27,13 +27,13 @@ import {
   Divider,
   FormControl,
   FormControlLabel,
-  FormHelperText,
   InputLabel,
   Link,
   MenuItem,
   Select,
   Switch,
   TextField,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { CheckCircle, GitHub } from "@wso2/oxygen-ui-icons-react";
@@ -73,36 +73,33 @@ const PRIORITY_P1 = "Priority/High(P1)";
 const PRIORITY_P2 = "Priority/Medium(P2)";
 const PRIORITY_P3 = "Priority/Low(P3)";
 
-/** The policy's priorities, each with the summary shown under the field once chosen. */
-const PRIORITY_OPTIONS: Array<{ value: string; label: string; summary: string }> = [
-  {
-    value: PRIORITY_P0,
-    label: "P0 – Immediate Attention",
-    summary:
-      "Product team intervention is needed now to make time-sensitive decisions or unblock progress. SLA: 1-hour response, 24x7.",
-  },
-  {
-    value: PRIORITY_P1,
-    label: "P1 – High Priority",
-    summary:
-      "Prioritized resolution for critical impact, escalations or significant customer dissatisfaction. SLA: 8-hour acknowledgement and 24-hour resolution, 24x7.",
-  },
-  {
-    value: PRIORITY_P2,
-    label: "P2 – Medium Priority",
-    summary:
-      "General product-level issue. SLA: 12-hour acknowledgement and 2-day resolution, 12x5 IST.",
-  },
-  {
-    value: PRIORITY_P3,
-    label: "P3 – Low Priority",
-    summary:
-      "General product-level issue or query. SLA: 1-day acknowledgement and 5-day resolution, 12x5 IST.",
-  },
+/** The policy's priorities; `short` is the level named in the justification prompt. */
+const PRIORITY_OPTIONS: Array<{ value: string; label: string; short: string }> = [
+  { value: PRIORITY_P0, label: "P0 – Immediate Attention", short: "P0" },
+  { value: PRIORITY_P1, label: "P1 – High Priority", short: "P1" },
+  { value: PRIORITY_P2, label: "P2 – Medium Priority", short: "P2" },
+  { value: PRIORITY_P3, label: "P3 – Low Priority", short: "P3" },
 ];
 
-/** P0 and P1 need a justification and CS leadership's approval before they are raised. */
+/** P0, P1 and P2 carry a Priority Justification. */
+const PRIORITIES_NEEDING_JUSTIFICATION = new Set([PRIORITY_P0, PRIORITY_P1, PRIORITY_P2]);
+
+/** P0 and P1 also need CS leadership's review before they are raised. */
 const PRIORITIES_NEEDING_APPROVAL = new Set([PRIORITY_P0, PRIORITY_P1]);
+
+/** Why the Reviewed by CS Leadership tick box is there, shown as its tooltip. */
+const LEADERSHIP_REVIEW_HINT =
+  "CS leadership review is required before raising a P0 or P1 internal issue.";
+
+/** Hides an element visually while keeping it for screen readers. */
+const visuallyHidden = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+} as const;
 
 // The hotfix-reason options live in githubIssueOptions.json. The backend
 // refuses any other value, and its copy of the list (case_github_issue.go) is
@@ -172,8 +169,8 @@ export interface CreateGithubIssueDialogProps {
  *
  * Discussion fields, in order: Subject*, Description*, Reproducing Steps,
  * Priority* (P0 to P3, per the Internal Issue Handling Policy), Priority
- * Justification* (free text) and Approved by CS Leadership* (P0/P1 only; the
- * tick only gates Create and is not sent), Update Level, Public Git Issue (both hidden on cloud cases, never required),
+ * Justification* (free text, P0 to P2) and Reviewed by CS Leadership* (P0/P1
+ * only, its reason in a tooltip; the tick only gates Create and is not sent), Update Level, Public Git Issue (both hidden on cloud cases, never required),
  * Related Internal Issue(s), Hotfix Required, Hotfix Reason* (only while
  * Hotfix Required is on), Regression and Migration (on by default for a
  * migration engagement). Subject and Description start empty.
@@ -242,9 +239,10 @@ export function CreateGithubIssueDialog({
   const isDiscussion = issueType === GITHUB_DISCUSSION_ISSUE_TYPE;
   const isFeature = issueType === GITHUB_FEATURE_ISSUE_TYPE;
 
-  // Only P0 and P1 carry a justification and need CS leadership's approval.
+  // P0 to P2 carry a justification; only P0 and P1 also need CS leadership's review.
+  const needsJustification = PRIORITIES_NEEDING_JUSTIFICATION.has(priorityLevel);
   const needsApproval = PRIORITIES_NEEDING_APPROVAL.has(priorityLevel);
-  const prioritySummary = PRIORITY_OPTIONS.find((o) => o.value === priorityLevel)?.summary;
+  const priorityShort = PRIORITY_OPTIONS.find((o) => o.value === priorityLevel)?.short;
   // Update Level / Public Git Issue apply to non-cloud projects only.
   const showUpdateLevelAndIssueUrl = !showRepoField;
 
@@ -288,7 +286,8 @@ export function CreateGithubIssueDialog({
 
   const typeFieldsValid = isDiscussion
     ? !!priorityLevel &&
-      (!needsApproval || (priorityJustification.trim().length > 0 && leadershipApproved)) &&
+      (!needsJustification || priorityJustification.trim().length > 0) &&
+      (!needsApproval || leadershipApproved) &&
       (!hotFix || !!hotFixReason)
     : isFeature;
 
@@ -340,7 +339,7 @@ export function CreateGithubIssueDialog({
       },
     };
     if (reproducingSteps.trim()) payload.reproducingSteps = reproducingSteps.trim();
-    if (needsApproval) payload.priorityJustification = priorityJustification.trim();
+    if (needsJustification) payload.priorityJustification = priorityJustification.trim();
     // Sent even when hidden on a cloud case: the prefilled update level still
     // belongs in the issue footer.
     if (updateLevel.trim()) payload.updateLevel = updateLevel.trim();
@@ -361,17 +360,14 @@ export function CreateGithubIssueDialog({
     setConfirmPayload(payload);
   };
 
-  /**
-   * Renders a dropdown that starts on the "-- Select --" placeholder. A
-   * `helper` is shown under it and read out as the field's description.
-   */
+  /** Renders a dropdown that starts on the "-- Select --" placeholder. */
   const renderSelect = <V extends string>(
     id: string,
     label: string,
     value: V,
     onChange: (v: V) => void,
     options: Array<{ value: V; label: string }>,
-    opts: { required?: boolean; helper?: string } = {},
+    opts: { required?: boolean } = {},
   ): JSX.Element => (
     <FormControl fullWidth size="small" disabled={submitting} required={opts.required}>
       <InputLabel id={`${id}-label`} shrink>
@@ -384,7 +380,6 @@ export function CreateGithubIssueDialog({
         displayEmpty
         notched
         onChange={(e) => onChange(e.target.value as V)}
-        inputProps={opts.helper ? { "aria-describedby": `${id}-helper` } : undefined}
       >
         <MenuItem value={UNSET}>
           <Typography component="span" color="text.secondary">
@@ -397,7 +392,6 @@ export function CreateGithubIssueDialog({
           </MenuItem>
         ))}
       </Select>
-      {opts.helper && <FormHelperText id={`${id}-helper`}>{opts.helper}</FormHelperText>}
     </FormControl>
   );
 
@@ -525,19 +519,18 @@ export function CreateGithubIssueDialog({
           <>
             {renderSelect("ghi-priority", "Priority", priorityLevel, handlePriorityChange, PRIORITY_OPTIONS, {
               required: true,
-              helper: prioritySummary,
             })}
-            {needsApproval && (
-              // P0 and P1 only: the justification and the approval tick are one
-              // sign-off step, so they sit together in their own panel.
+            {needsJustification && (
+              // P0 to P2: the justification, plus for P0 and P1 the review tick,
+              // are one sign-off step, so they sit together in their own panel.
               <Box
                 sx={{
                   display: "flex",
                   flexDirection: "column",
                   gap: 2,
                   p: 2,
-                  // The checkbox's own 9px padding makes up the rest of the 16px.
-                  pb: 1,
+                  // With the tick box, its own 9px padding makes up the rest of the 16px.
+                  pb: needsApproval ? 1 : 2,
                   borderRadius: 1,
                   // An outline, not a fill: the theme's inputs are filled, and
                   // a tinted panel would wash them out in the light scheme.
@@ -545,17 +538,21 @@ export function CreateGithubIssueDialog({
                   borderColor: "divider",
                 }}
               >
-                <Typography id="ghi-leadership-approval-help" variant="body2" color="text.secondary">
-                  CS leadership review is required before raising a P0 or P1 internal issue.
-                </Typography>
                 <TextField
                   {...fieldProps}
                   label="Priority Justification"
                   value={priorityJustification}
                   onChange={(e) => setPriorityJustification(e.target.value)}
                   required
-                  placeholder="Why does this need P0/P1 attention from the Product team?"
+                  placeholder={`Why does this need ${priorityShort} attention from the product team?`}
                 />
+                {needsApproval && (
+                <>
+                {/* The tooltip shows only on hover or focus; this copy keeps it as the tick box's description for screen readers. */}
+                <Box component="span" id="ghi-leadership-approval-help" sx={visuallyHidden}>
+                  {LEADERSHIP_REVIEW_HINT}
+                </Box>
+                <Tooltip describeChild title={LEADERSHIP_REVIEW_HINT} placement="bottom-start">
                 <FormControlLabel
                   sx={(theme) => ({
                     alignSelf: "flex-start",
@@ -573,9 +570,12 @@ export function CreateGithubIssueDialog({
                       slotProps={{ input: { "aria-describedby": "ghi-leadership-approval-help" } }}
                     />
                   }
-                  label="Approved by CS Leadership"
+                  label="Reviewed by CS Leadership"
                   required
                 />
+                </Tooltip>
+                </>
+                )}
               </Box>
             )}
           </>,

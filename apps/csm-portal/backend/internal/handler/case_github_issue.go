@@ -72,10 +72,11 @@ const (
 )
 
 // gitHubPrioritiesWithJustification are the priorities that carry a Priority
-// Justification: P0 and P1, which the policy has CS leadership review first.
+// Justification: P0 to P2 (P0 and P1 also need CS leadership's review first).
 var gitHubPrioritiesWithJustification = map[string]bool{
 	priorityImmediateLabel: true,
 	priorityHighLabel:      true,
+	priorityMediumLabel:    true,
 }
 
 // gitHubHotfixReasons are the reasons the dialog offers when a hotfix is required.
@@ -139,7 +140,7 @@ type caseGitHubIssueRequest struct {
 }
 
 // priorityJustification is the request's free-text justification when its
-// priority is P0 or P1, "" otherwise: a P2, a P3 or an unknown priority carries
+// priority is P0, P1 or P2, "" otherwise: a P3 or an unknown priority carries
 // none, so one sent with it is not written. The dialog's field is one line, so
 // any line breaks are collapsed and the body keeps it on its own line.
 func (req caseGitHubIssueRequest) priorityJustification() string {
@@ -448,7 +449,7 @@ var gitHubIssueBodyOnlyFields = []string{"reproducingSteps", "priorityJustificat
 // entityGitHubIssueRequest prepares the request for the entity service, the
 // path used when no engineering client is configured. The fields the entity
 // service does not know are written into the description as the same sections
-// the engineering path writes, and removed from the request, so a P0/P1 or
+// the engineering path writes, and removed from the request, so a P0 to P2 or
 // hotfix filing keeps its details instead of being refused. A request without
 // any of them is forwarded byte for byte. The second result is a message for a
 // 400 when the request cannot be used.

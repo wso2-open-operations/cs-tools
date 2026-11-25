@@ -238,8 +238,17 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		}
 	})
 
-	t.Run("a justification sent with a P2 or P3, or a hotfix reason without a hotfix, is not written", func(t *testing.T) {
-		for _, priority := range []string{"Priority/Medium(P2)", "Priority/Low(P3)"} {
+	t.Run("a P2 carries its justification", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Medium(P2)","priorityJustification":"Blocks a customer upgrade"}`)
+		assertStatus(t, w, http.StatusCreated)
+		if want := "It fails.\n\nPriority Justification : Blocks a customer upgrade"; !strings.HasPrefix(eng.calls[0].body, want) {
+			t.Errorf("body = %q, want it to start with %q", eng.calls[0].body, want)
+		}
+	})
+
+	t.Run("a justification sent with a P3, or a hotfix reason without a hotfix, is not written", func(t *testing.T) {
+		for _, priority := range []string{"Priority/Low(P3)"} {
 			eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
 			w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"`+priority+`","priorityJustification":"anything","hotFixReason":"anything"}`)
 			assertStatus(t, w, http.StatusCreated)
