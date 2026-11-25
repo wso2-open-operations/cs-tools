@@ -357,12 +357,14 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	var closers []func(context.Context) error
 
 	if cfg.HasAlertServiceBus() {
-		client, err := servicebus.NewClient(servicebus.Config{
-			Namespace:    cfg.AlertServiceBusNamespace,
-			TenantID:     cfg.AlertServiceBusTenantID,
-			ClientID:     cfg.AlertServiceBusClientID,
-			ClientSecret: cfg.AlertServiceBusClientSecret,
-		})
+		sbConfig := servicebus.Config{
+			ConnectionString: cfg.AlertServiceBusConnectionString,
+			Namespace:        cfg.AlertServiceBusNamespace,
+			TenantID:         cfg.AlertServiceBusTenantID,
+			ClientID:         cfg.AlertServiceBusClientID,
+			ClientSecret:     cfg.AlertServiceBusClientSecret,
+		}
+		client, err := servicebus.NewClient(sbConfig)
 		if err != nil {
 			log.Fatalf("alert consumer: %v", err)
 		}
@@ -380,7 +382,7 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		addServiceBus(cfg.AlertServiceBusPriorityQueues, &priorityQueues)
 		addServiceBus(cfg.AlertServiceBusStandardQueues, &standardQueues)
 		closers = append(closers, client.Close)
-		log.Printf("alert consumer: Azure Service Bus priority %v and standard %v on %s", cfg.AlertServiceBusPriorityQueues, cfg.AlertServiceBusStandardQueues, servicebus.FullyQualifiedNamespace(cfg.AlertServiceBusNamespace))
+		log.Printf("alert consumer: Azure Service Bus priority %v and standard %v on %s", cfg.AlertServiceBusPriorityQueues, cfg.AlertServiceBusStandardQueues, sbConfig.Host())
 	}
 
 	if cfg.HasAlertSQS() {

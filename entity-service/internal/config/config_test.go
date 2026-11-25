@@ -1753,6 +1753,8 @@ func TestLoad_AuditLogEnabled(t *testing.T) {
 	}
 }
 
+const testServiceBusConnectionString = "Endpoint=sb://sbns-example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=a2V5"
+
 func alertConsumerConfig() Config {
 	c := baseValidConfig()
 	c.DBPoolMaxConns = 20
@@ -1781,6 +1783,15 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "no tenant", change: func(c *Config) { c.AlertServiceBusTenantID = "" }, wantErr: true},
 		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
 		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
+		{name: "connection string alone", change: func(c *Config) {
+			c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "", "", "", ""
+			c.AlertServiceBusConnectionString = testServiceBusConnectionString
+		}},
+		{name: "connection string with the Entra ID application", change: func(c *Config) { c.AlertServiceBusConnectionString = testServiceBusConnectionString }, wantErr: true},
+		{name: "connection string with only a namespace", change: func(c *Config) {
+			c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "", "", ""
+			c.AlertServiceBusConnectionString = testServiceBusConnectionString
+		}, wantErr: true},
 		{name: "same queue twice", change: func(c *Config) { c.AlertServiceBusStandardQueues = c.AlertServiceBusPriorityQueues }, wantErr: true},
 		{name: "same queue in another case", change: func(c *Config) { c.AlertServiceBusStandardQueues = []string{"standard-queue", "Priority-Queue"} }, wantErr: true},
 		{name: "several queues per tier", change: func(c *Config) {
@@ -1871,6 +1882,7 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 			c.AlertSQSDeadLetterQueueURL = "https://us-east-1.queue.amazonaws.com/123456789012/priority-queue/"
 		}, wantErr: true},
 		{name: "partial Azure next to complete AWS", change: func(c *Config) { c.AlertServiceBusNamespace = "sbns-example" }, wantErr: true},
+		{name: "Azure connection string next to AWS", change: func(c *Config) { c.AlertServiceBusConnectionString = testServiceBusConnectionString }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

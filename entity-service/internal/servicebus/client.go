@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package servicebus connects to Azure Service Bus over AMQP on WebSockets, signing in with an Entra ID application.
+// Package servicebus connects to Azure Service Bus over AMQP on WebSockets, signing in with an Entra ID application or a shared access connection string.
 package servicebus
 
 import (
@@ -30,12 +30,13 @@ import (
 	"github.com/coder/websocket"
 )
 
-// Config holds what is needed to reach one Service Bus namespace; shared keys are off, so it signs in with an Entra ID application.
+// Config holds what is needed to reach one Service Bus namespace: a shared access connection string, or the namespace and an Entra ID application.
 type Config struct {
-	Namespace    string
-	TenantID     string
-	ClientID     string
-	ClientSecret string
+	ConnectionString string
+	Namespace        string
+	TenantID         string
+	ClientID         string
+	ClientSecret     string
 }
 
 // amqpSubprotocol is the WebSocket subprotocol Service Bus expects for AMQP.
@@ -46,25 +47,51 @@ const namespaceSuffix = ".servicebus.windows.net"
 
 // NewClient returns a Service Bus client whose AMQP connection runs over WebSockets on port 443.
 func NewClient(cfg Config) (*azservicebus.Client, error) {
-	if cfg.Namespace == "" || cfg.TenantID == "" || cfg.ClientID == "" || cfg.ClientSecret == "" {
-		return nil, errors.New("service bus namespace, tenant id, client id and client secret are all required")
-	}
-	credential, err := azidentity.NewClientSecretCredential(cfg.TenantID, cfg.ClientID, cfg.ClientSecret, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus credential: %w", err)
-	}
-	client, err := azservicebus.NewClient(FullyQualifiedNamespace(cfg.Namespace), credential, &azservicebus.ClientOptions{
+	options := &azservicebus.ClientOptions{
 		NewWebSocketConn: dialWebSocket,
 		RetryOptions: azservicebus.RetryOptions{
 			MaxRetries:    5,
 			RetryDelay:    time.Second,
 			MaxRetryDelay: 30 * time.Second,
 		},
-	})
+	}
+	if cfg.ConnectionString != "" {
+		if cfg.Namespace != "" || cfg.TenantID != "" || cfg.ClientID != "" || cfg.ClientSecret != "" {
+			return nil, errors.New("service bus takes a connection string or an Entra ID application, not both")
+		}
+		client, err := azservicebus.NewClientFromConnectionString(cfg.ConnectionString, options)
+		if err != nil {
+			// The SDK error can quote the string, so the key is kept out of the log.
+			return nil, errors.New("service bus client: the connection string is not a valid Service Bus connection string")
+		}
+		return client, nil
+	}
+	if cfg.Namespace == "" || cfg.TenantID == "" || cfg.ClientID == "" || cfg.ClientSecret == "" {
+		return nil, errors.New("service bus needs a connection string, or the namespace, tenant id, client id and client secret together")
+	}
+	credential, err := azidentity.NewClientSecretCredential(cfg.TenantID, cfg.ClientID, cfg.ClientSecret, nil)
+	if err != nil {
+		return nil, fmt.Errorf("service bus credential: %w", err)
+	}
+	client, err := azservicebus.NewClient(FullyQualifiedNamespace(cfg.Namespace), credential, options)
 	if err != nil {
 		return nil, fmt.Errorf("service bus client: %w", err)
 	}
 	return client, nil
+}
+
+// Host returns the namespace host the client connects to, read from the connection string's Endpoint when one is set, for logging without the key.
+func (c Config) Host() string {
+	if c.ConnectionString == "" {
+		return FullyQualifiedNamespace(c.Namespace)
+	}
+	for _, part := range strings.Split(c.ConnectionString, ";") {
+		key, value, found := strings.Cut(part, "=")
+		if found && strings.EqualFold(strings.TrimSpace(key), "Endpoint") {
+			return FullyQualifiedNamespace(value)
+		}
+	}
+	return ""
 }
 
 // FullyQualifiedNamespace accepts a bare namespace name or its host and returns the host.

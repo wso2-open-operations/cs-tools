@@ -16,7 +16,11 @@
 
 package servicebus
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestFullyQualifiedNamespace(t *testing.T) {
 	for in, want := range map[string]string{
@@ -41,6 +45,45 @@ func TestNewClient_RequiresEveryCredential(t *testing.T) {
 	} {
 		if _, err := NewClient(cfg); err == nil {
 			t.Errorf("%s: NewClient succeeded, want an error", name)
+		}
+	}
+}
+
+const testConnectionString = "Endpoint=sb://sbns-example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=a2V5"
+
+func TestNewClient_ConnectionString(t *testing.T) {
+	client, err := NewClient(Config{ConnectionString: testConnectionString})
+	if err != nil {
+		t.Fatalf("NewClient with a connection string: %v", err)
+	}
+	_ = client.Close(context.Background())
+}
+
+func TestNewClient_RejectsBadConnectionString(t *testing.T) {
+	for name, cfg := range map[string]Config{
+		"not a connection string": {ConnectionString: "not-a-connection-string"},
+		"with an application":     {ConnectionString: testConnectionString, Namespace: "sbns-example", TenantID: "tenant", ClientID: "client", ClientSecret: "secret"},
+	} {
+		_, err := NewClient(cfg)
+		if err == nil {
+			t.Errorf("%s: NewClient succeeded, want an error", name)
+		} else if strings.Contains(err.Error(), "a2V5") {
+			t.Errorf("%s: error %q leaks the shared access key", name, err)
+		}
+	}
+}
+
+func TestConfigHost(t *testing.T) {
+	for name, tt := range map[string]struct {
+		cfg  Config
+		want string
+	}{
+		"namespace":         {Config{Namespace: "sbns-example"}, "sbns-example.servicebus.windows.net"},
+		"connection string": {Config{ConnectionString: testConnectionString}, "sbns-example.servicebus.windows.net"},
+		"no endpoint":       {Config{ConnectionString: "SharedAccessKeyName=x;SharedAccessKey=y"}, ""},
+	} {
+		if got := tt.cfg.Host(); got != tt.want {
+			t.Errorf("%s: Host() = %q, want %q", name, got, tt.want)
 		}
 	}
 }
