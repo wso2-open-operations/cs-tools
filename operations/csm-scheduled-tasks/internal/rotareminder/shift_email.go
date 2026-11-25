@@ -319,15 +319,6 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 	return email, true
 }
 
-// shortName is a rotation's name up to its bracket: "SRE Night (TZ3)" ->
-// "SRE Night".
-func shortName(name string) string {
-	if i := strings.Index(name, " ("); i > 0 {
-		return name[:i]
-	}
-	return name
-}
-
 // dayRows is one day's table: a row per window (a shift and its on-call
 // variant), in rota order, named for the shift and told in its hours on its
 // own clock; an on-call person reads "Jay (on-call)". A turn on
@@ -380,7 +371,9 @@ func dayRows(cfg Config, d time.Time, rostered, support []teamschedule.Assignmen
 		if a.Tier != "" {
 			name += " (" + a.Tier + ")"
 		}
-		day.Rows[best].Support = addToGroup(day.Rows[best].Support, shortName(cfg.Support.Rotations[a.ShiftCode]), hoursOn(a, cfg.Zone), name)
+		// No rotation name: the column already says it is the SRE team, and the
+		// hours and each person's tier (L1 / L2) say which turn it is.
+		day.Rows[best].Support = addToGroup(day.Rows[best].Support, "", hoursOn(a, cfg.Zone), name)
 	}
 	return day
 }

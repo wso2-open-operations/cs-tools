@@ -355,8 +355,8 @@ type RotationDefinition struct {
 	RoleNote string
 }
 
-// WeekendRotaGroup is one support rotation inside a row: its name, its hours
-// and its people.
+// WeekendRotaGroup is one support rotation inside a row: its name (empty to
+// show only the hours), its hours and its people.
 type WeekendRotaGroup struct {
 	Rotation, Hours string
 	People          []string
@@ -473,10 +473,13 @@ func writeWeekendDay(b *strings.Builder, d WeekendRotaDay, teamTitle, supportTit
 		if withSupport {
 			var groups []string
 			for _, g := range r.Support {
-				label := g.Rotation
-				if g.Hours != "" {
-					label += ", " + g.Hours
+				var parts []string
+				for _, p := range []string{g.Rotation, g.Hours} {
+					if p != "" {
+						parts = append(parts, p)
+					}
 				}
+				label := strings.Join(parts, ", ")
 				groups = append(groups, names(g.People)+fmt.Sprintf(small, escapeHTML(label)))
 			}
 			fmt.Fprintf(b, cell, orDash(strings.Join(groups, "<br/><br/>")))
