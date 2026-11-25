@@ -10717,6 +10717,48 @@ type NewAlert struct {
 	ReceivedOn  time.Time
 }
 
+// Alert statuses (alert.status, migration 0309). NEW waits for the alert processor; ERROR is a message that could not
+// be normalised, which the processor never takes; the rest are the processor's final outcomes.
+const (
+	AlertStatusNew       = "NEW"
+	AlertStatusError     = "ERROR"
+	AlertStatusProcessed = "PROCESSED"
+	AlertStatusMuted     = "MUTED"
+	AlertStatusShadowed  = "SHADOWED"
+	AlertStatusFailed    = "FAILED"
+)
+
+// ClaimedAlert is one alert the alert processor claimed: a NEW alert row it must decide on.
+type ClaimedAlert struct {
+	ID          string
+	Source      string
+	Alert       json.RawMessage
+	Fingerprint string
+	Tier        AlertTier
+	ReceivedOn  time.Time
+	Attempts    int
+}
+
+// AlertProcessorOutcome is what the alert processor recorded for one alert.
+type AlertProcessorOutcome struct {
+	Status string
+	// IncidentID is the incident the alert was linked to (PROCESSED), empty when none.
+	IncidentID string
+	// MuteRuleID is the rule that held a MUTED alert back.
+	MuteRuleID string
+	// ShadowDecision and ShadowIncidentID are set in hybrid mode only (Status SHADOWED).
+	ShadowDecision   string
+	ShadowIncidentID string
+}
+
+// Shadow decisions: what the alert processor would have done in v2.
+const (
+	AlertShadowWouldCreate = "WOULD_CREATE"
+	AlertShadowWouldAttach = "WOULD_ATTACH"
+	AlertShadowWouldMute   = "WOULD_MUTE"
+	AlertShadowWouldIgnore = "WOULD_IGNORE"
+)
+
 // AlertQueueMessage is one message received from an alert queue, on Azure Service Bus or AWS SQS alike.
 type AlertQueueMessage struct {
 	// ID is the cloud's message id, stable across redeliveries of the same message.

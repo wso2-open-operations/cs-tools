@@ -715,7 +715,8 @@ type Config struct {
 	// ports, it runs wherever the data is.
 	IncidentReportPollInterval time.Duration
 
-	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, hybrid v1 plus the queue consumer storing alerts only, and v2, refused until the alert processor creates incidents.
+	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only; hybrid also runs
+	// the queue consumer and the alert processor in shadow (it records what it would do, raises nothing); v2 the consumer and the processor live.
 	AlertingVersion AlertingVersion
 	// AlertServiceBusConnectionString is a shared access policy's connection string for the namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_CONNECTION_STRING); empty leaves Azure out.
 	AlertServiceBusConnectionString string
@@ -734,6 +735,14 @@ type Config struct {
 	// AlertSQSAccessKeyID and AlertSQSSecretAccessKey sign in to SQS; empty uses the default AWS credential chain.
 	AlertSQSAccessKeyID     string
 	AlertSQSSecretAccessKey string
+	// AlertProcessorCallerID is the user an alert's incident is raised by (ALERT_PROCESSOR_CALLER_ID, a "user" UUID), as alert-core's CALLER_ID; required for v2.
+	AlertProcessorCallerID string
+	// AlertProcessorConcurrency is how many alerts the alert processor works on at once (ALERT_PROCESSOR_CONCURRENCY, default 4).
+	AlertProcessorConcurrency int
+	// AlertProcessorPollInterval is how long the alert processor waits before looking again when no alert is waiting (ALERT_PROCESSOR_POLL_INTERVAL, default 1s).
+	AlertProcessorPollInterval time.Duration
+	// AlertProcessorMaxIncidentAge is how old an open incident may be and still take a new alert of its fingerprint (ALERT_PROCESSOR_MAX_INCIDENT_AGE, default 24h, 0 = no limit).
+	AlertProcessorMaxIncidentAge time.Duration
 
 	AuthIssuer             string
 	AuthJWKSURL            string
@@ -1091,6 +1100,10 @@ func Load() *Config {
 		AlertServiceBusStandardQueues:                 queueList("ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
 		AlertConsumerPriorityWeight:                   envIntInRange("ALERT_CONSUMER_PRIORITY_WEIGHT", 0, 0, maxAlertConsumerPriorityWeight),
+		AlertProcessorCallerID:                        strings.TrimSpace(os.Getenv("ALERT_PROCESSOR_CALLER_ID")),
+		AlertProcessorConcurrency:                     envIntInRange("ALERT_PROCESSOR_CONCURRENCY", 4, 1, maxAlertProcessorConcurrency),
+		AlertProcessorPollInterval:                    envDuration("ALERT_PROCESSOR_POLL_INTERVAL", time.Second),
+		AlertProcessorMaxIncidentAge:                  envDurationOrOff("ALERT_PROCESSOR_MAX_INCIDENT_AGE", 24*time.Hour),
 		AlertSQSPriorityQueueURLs:                     queueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
 		AlertSQSStandardQueueURLs:                     queueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),
 		AlertSQSDeadLetterQueueURL:                    strings.TrimSpace(os.Getenv("ALERT_SQS_DEAD_LETTER_QUEUE_URL")),
@@ -1962,6 +1975,18 @@ const (
 // maxAlertConsumerPriorityWeight caps ALERT_CONSUMER_PRIORITY_WEIGHT; a larger value is strict priority in all but name.
 const maxAlertConsumerPriorityWeight = 1000
 
+// maxAlertProcessorConcurrency bounds ALERT_PROCESSOR_CONCURRENCY; each worker can hold up to two pool connections.
+const maxAlertProcessorConcurrency = 16
+
+// AlertProcessorConnectionsPerWorker is how many pool connections one alert processor worker can hold at once:
+// the fingerprint lock's transaction and the incident create it runs.
+const AlertProcessorConnectionsPerWorker = 2
+
+// AlertProcessorLive reports whether the alert processor raises incidents (v2); in hybrid it only records what it would do.
+func (c *Config) AlertProcessorLive() bool {
+	return c.AlertingVersion == AlertingVersionV2
+}
+
 // AlertConsumerEnabled reports whether the queue consumer runs, which it does in v2 and hybrid.
 func (c *Config) AlertConsumerEnabled() bool {
 	return c.AlertingVersion == AlertingVersionV2 || c.AlertingVersion == AlertingVersionHybrid
@@ -2014,10 +2039,7 @@ func (c *Config) validateAlertConsumer() error {
 	switch c.AlertingVersion {
 	case "", AlertingVersionV1:
 		return nil
-	case AlertingVersionV2:
-		// Nothing turns a stored alert into an incident yet, so v2 with the sources on the gateways would page nobody.
-		return fmt.Errorf("ALERTING_VERSION v2 is not available until the alert processor creates incidents from the alert table; use hybrid to store alerts alongside v1")
-	case AlertingVersionHybrid:
+	case AlertingVersionV2, AlertingVersionHybrid:
 	default:
 		return fmt.Errorf("ALERTING_VERSION must be v1, v2 or hybrid, got %q", c.AlertingVersion)
 	}
@@ -2026,6 +2048,9 @@ func (c *Config) validateAlertConsumer() error {
 	}
 	if !c.HasDatabase() {
 		return fmt.Errorf("ALERTING_VERSION %s needs DB_USER, DB_PASSWORD and DB_NAME, because alerts are stored in the database", c.AlertingVersion)
+	}
+	if c.IncidentDefaultServiceID == "" {
+		return fmt.Errorf("ALERTING_VERSION %s needs INCIDENT_DEFAULT_SERVICE_ID, the service an alert's incident gets when its source names none", c.AlertingVersion)
 	}
 	if !c.HasAlertServiceBus() && !c.HasAlertSQS() {
 		return fmt.Errorf("ALERTING_VERSION %s needs Azure Service Bus (ALERT_SERVICEBUS_*), AWS SQS (ALERT_SQS_*), or both", c.AlertingVersion)
@@ -2042,6 +2067,19 @@ func (c *Config) validateAlertConsumer() error {
 	}
 	if c.AlertConsumerConcurrency > maxAlertConsumerConcurrency || int32(c.AlertConsumerConcurrency) >= c.DBPoolMaxConns { // #nosec G115 -- capped at 64 just before
 		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY must be at most %d and below DB_POOL_MAX_CONNS (%d), got %d", maxAlertConsumerConcurrency, c.DBPoolMaxConns, c.AlertConsumerConcurrency)
+	}
+	// The consumer and the processor share the pool with API traffic, so together they must leave room for it.
+	used := c.AlertConsumerConcurrency + AlertProcessorConnectionsPerWorker*c.AlertProcessorConcurrency
+	if int64(used) >= int64(c.DBPoolMaxConns) {
+		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY (%d) plus %d connections per ALERT_PROCESSOR_CONCURRENCY worker (%d) must stay below DB_POOL_MAX_CONNS (%d)",
+			c.AlertConsumerConcurrency, AlertProcessorConnectionsPerWorker, c.AlertProcessorConcurrency, c.DBPoolMaxConns)
+	}
+	// v2 raises real incidents, so it needs the user they are raised by; hybrid only records what it would do.
+	if c.AlertingVersion == AlertingVersionV2 && c.AlertProcessorCallerID == "" {
+		return fmt.Errorf("ALERTING_VERSION v2 needs ALERT_PROCESSOR_CALLER_ID, the user its incidents are raised by")
+	}
+	if v := c.AlertProcessorCallerID; v != "" && !validate.IsUUID(v) {
+		return fmt.Errorf("ALERT_PROCESSOR_CALLER_ID %q is not a valid UUID", v)
 	}
 	return nil
 }

@@ -1713,6 +1713,9 @@ func alertConsumerConfig() Config {
 	c.AlertServiceBusStandardQueues = []string{"standard-queue"}
 	c.AlertConsumerConcurrency = 8
 	c.AlertConsumerPriorityWeight = 0
+	c.AlertProcessorConcurrency = 4
+	c.AlertProcessorCallerID = "00000000-0000-4000-8000-000000000002"
+	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
 	return c
 }
 
@@ -1735,6 +1738,12 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "a tier with no queue", change: func(c *Config) { c.AlertServiceBusStandardQueues = nil }, wantErr: true},
 		{name: "concurrency takes the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 20 }, wantErr: true},
 		{name: "concurrency above the cap", change: func(c *Config) { c.DBPoolMaxConns = 200; c.AlertConsumerConcurrency = 65 }, wantErr: true},
+		{name: "no default service", change: func(c *Config) { c.IncidentDefaultServiceID = "" }, wantErr: true},
+		{name: "consumer and processor together take the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 12 }, wantErr: true},
+		{name: "consumer and processor leave room in the pool", change: func(c *Config) { c.AlertConsumerConcurrency = 11 }},
+		{name: "v2 without a caller", change: func(c *Config) { c.AlertingVersion = AlertingVersionV2; c.AlertProcessorCallerID = "" }, wantErr: true},
+		{name: "hybrid without a caller", change: func(c *Config) { c.AlertProcessorCallerID = "" }},
+		{name: "caller that is not a UUID", change: func(c *Config) { c.AlertProcessorCallerID = "alert-core" }, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1749,7 +1758,8 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 }
 
 func TestLoad_AlertConsumerDefaults(t *testing.T) {
-	for _, key := range []string{"ALERTING_VERSION", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT"} {
+	for _, key := range []string{"ALERTING_VERSION", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT",
+		"ALERT_PROCESSOR_CONCURRENCY", "ALERT_PROCESSOR_POLL_INTERVAL", "ALERT_PROCESSOR_MAX_INCIDENT_AGE"} {
 		t.Setenv(key, "")
 	}
 	c := Load()
@@ -1761,6 +1771,31 @@ func TestLoad_AlertConsumerDefaults(t *testing.T) {
 	}
 	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 0 {
 		t.Errorf("concurrency %d and weight %d, want 8 and 0 (strict priority)", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
+	}
+	if c.AlertProcessorConcurrency != 4 || c.AlertProcessorPollInterval != time.Second || c.AlertProcessorMaxIncidentAge != 24*time.Hour {
+		t.Errorf("processor concurrency %d, poll %s, max incident age %s; want 4, 1s and 24h",
+			c.AlertProcessorConcurrency, c.AlertProcessorPollInterval, c.AlertProcessorMaxIncidentAge)
+	}
+}
+
+func TestLoad_AlertProcessorSettings(t *testing.T) {
+	t.Setenv("ALERT_PROCESSOR_MAX_INCIDENT_AGE", "0")
+	t.Setenv("ALERT_PROCESSOR_CONCURRENCY", "99")
+	c := Load()
+	if c.AlertProcessorMaxIncidentAge != 0 {
+		t.Errorf("max incident age = %s, want 0 (no limit)", c.AlertProcessorMaxIncidentAge)
+	}
+	if c.AlertProcessorConcurrency != 4 {
+		t.Errorf("concurrency = %d, want the default 4 for a value above the cap", c.AlertProcessorConcurrency)
+	}
+}
+
+func TestConfig_AlertProcessorLive(t *testing.T) {
+	for v, want := range map[AlertingVersion]bool{AlertingVersionV1: false, AlertingVersionHybrid: false, AlertingVersionV2: true} {
+		c := Config{AlertingVersion: v}
+		if got := c.AlertProcessorLive(); got != want {
+			t.Errorf("AlertProcessorLive() for %s = %v, want %v", v, got, want)
+		}
 	}
 }
 
@@ -1903,8 +1938,7 @@ func TestConfig_AlertingVersion(t *testing.T) {
 		wantErr    bool
 	}{
 		{version: AlertingVersionV1, consumerOn: false},
-		// v2 is refused until the alert processor creates incidents, so alerts are never stored with nobody paged.
-		{version: AlertingVersionV2, consumerOn: true, wantErr: true},
+		{version: AlertingVersionV2, consumerOn: true},
 		{version: AlertingVersionHybrid, consumerOn: true},
 		{version: "v3", wantErr: true},
 	}

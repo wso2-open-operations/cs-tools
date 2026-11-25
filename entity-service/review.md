@@ -134,3 +134,7 @@ failure class turns up during review that isn't on this list, add it here in the
       anything writes to it; a write to a nil map panics, and in a background consumer one bad payload stops the service.
 - [ ] A Service Bus peek-lock consumer renews each message's lock from pickup through settlement; time spent in a
       local buffer or a slow database counts against the lock just like processing does.
+- [ ] A mode or flag that turns on a producer (a consumer storing rows, an outbox) is refused, or does nothing, until
+      whatever acts on its output exists; `ALERTING_VERSION=v2` once stored alerts that nothing turned into incidents.
+- [ ] A SQL parameter whose only uses are in `CASE` branches or next to `NULL` has an explicit cast (`$4::timestamptz`);
+      Postgres infers `text` and the statement fails at runtime, which a unit test with a fake repository never shows.

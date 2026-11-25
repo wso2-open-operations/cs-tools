@@ -42,8 +42,11 @@ const (
 
 const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1, $1)`
 
-const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
-SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
+// An error row is stored as ERROR, so the alert processor's NEW never counts a message it will not take.
+const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on, status)
+SELECT a.*, CASE WHEN a.error_reason IS NULL THEN 'NEW' ELSE 'ERROR' END
+FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
+    AS a(id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
 ON CONFLICT (message_id, message_index) DO NOTHING`
 
 type alertRepository struct {
