@@ -281,6 +281,16 @@ func MoreSevere(a, b string) bool {
 	return IsResolving(nb) || na < nb
 }
 
+// MoreSevereThanNumeric is MoreSevere against a stored numeric severity, for an
+// incident that has no severity label (one stored before labels were).
+func MoreSevereThanNumeric(a string, severityNum int) bool {
+	na, ok := numericSeverity[strings.ToLower(strings.TrimSpace(a))]
+	if !ok || IsResolving(na) {
+		return false
+	}
+	return IsResolving(severityNum) || na < severityNum
+}
+
 // IsResolving reports whether severityNum is a recovery signal (OK=5 or Clear=0).
 func IsResolving(severityNum int) bool {
 	return severityNum == 5 || severityNum == 0

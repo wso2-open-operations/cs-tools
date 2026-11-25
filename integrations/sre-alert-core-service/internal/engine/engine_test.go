@@ -713,6 +713,25 @@ func TestDeliverDue_CSMConfirmingInsideGracePeriodNeverUsesChat(t *testing.T) {
 	}
 }
 
+// TestFoldKeepsTheSeverityOfAnIncidentWithNoLabel: an incident stored before severity
+// labels has none; a less severe duplicate must not replace its numeric severity.
+func TestFoldKeepsTheSeverityOfAnIncidentWithNoLabel(t *testing.T) {
+	e, incidents := newTestEngine(&fakeNotifier{}, testConfig())
+	handle(t, e, item("c1", 0, "critical"))
+	inc := incidents.byFingerprint(fpOf(item("c1", 0, "critical")))[0]
+	_ = incidents.update(inc.ID, func(i *model.Incident) { i.SeverityLabel = "" }) // as the schema upgrade left it
+
+	handle(t, e, item("c2", time.Second, "warning"))
+	inc = incidents.byFingerprint(fpOf(item("c1", 0, "critical")))[0]
+	if inc.Severity != 1 || inc.Impact != "HIGH" || inc.SeverityLabel != "" || inc.AlertCount != 2 {
+		t.Fatalf("incident = %+v, want it still critical (1, HIGH) with no label, and 2 alerts", inc)
+	}
+	handle(t, e, item("c3", 2*time.Second, "critical"))
+	if inc = incidents.byFingerprint(fpOf(item("c1", 0, "critical")))[0]; inc.Severity != 1 || inc.SeverityLabel != "" {
+		t.Fatalf("an equally severe duplicate changed it: %+v", inc)
+	}
+}
+
 func TestFoldRaisesSeverityLabelToTheWorstSeen(t *testing.T) {
 	e, incidents := newTestEngine(&fakeNotifier{}, testConfig())
 	// In one batch: warning, then a critical duplicate.

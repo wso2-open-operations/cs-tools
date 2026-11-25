@@ -91,3 +91,21 @@ func TestMoreSevere(t *testing.T) {
 		}
 	}
 }
+
+func TestMoreSevereThanNumeric(t *testing.T) {
+	for _, c := range []struct {
+		a    string
+		n    int
+		want bool
+	}{
+		{"warning", 1, false}, // a legacy critical incident is not downgraded
+		{"critical", 4, true},
+		{"major", 2, false},
+		{"ok", 4, false},
+		{"bogus", 4, false},
+	} {
+		if got := MoreSevereThanNumeric(c.a, c.n); got != c.want {
+			t.Errorf("MoreSevereThanNumeric(%q, %d) = %v, want %v", c.a, c.n, got, c.want)
+		}
+	}
+}

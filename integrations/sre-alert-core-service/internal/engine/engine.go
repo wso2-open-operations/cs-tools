@@ -194,7 +194,13 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 			if p.Current.SeverityLabel != "" {
 				worst = p.Current.SeverityLabel
 			}
-			if model.MoreSevere(it.Alert.Severity, worst) {
+			more := model.MoreSevere(it.Alert.Severity, worst)
+			if worst == "" {
+				// An incident from before severity labels were stored has none: compare
+				// with its numeric severity, or a warning would replace a critical.
+				more = model.MoreSevereThanNumeric(it.Alert.Severity, current.Severity)
+			}
+			if more {
 				p.Current.SeverityLabel = it.Alert.Severity
 				p.Current.Severity, _ = model.SeverityToNumeric(it.Alert.Severity)
 				p.Current.Impact, p.Current.Urgency = model.ImpactUrgency(p.Current.Severity)
