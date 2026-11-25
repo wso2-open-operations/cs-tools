@@ -532,6 +532,12 @@ export function CreateGithubIssueDialog({
               // are one sign-off step, so they sit together in their own panel.
               <Box
                 sx={{
+                  // Anchors the visually hidden tick-box description below.
+                  // Without a positioned ancestor inside the scrolling content
+                  // it is placed against the dialog paper, at its offset in
+                  // the full form, and makes the whole dialog scroll past its
+                  // buttons.
+                  position: "relative",
                   display: "flex",
                   flexDirection: "column",
                   gap: 2,
