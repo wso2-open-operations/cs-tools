@@ -58,3 +58,26 @@ func TestFoldRemainderKeepsARealOtherSourceApart(t *testing.T) {
 		t.Errorf("the input was changed: %+v", rows)
 	}
 }
+
+func TestFoldQualificationRemainderAddsOutcomesAndKeepsTheTotal(t *testing.T) {
+	q := func(label string, e, m, x, n int) domain.UTMQualification {
+		return domain.UTMQualification{Label: label, Eligible: e, Monitor: m, Excluded: x, NotAssessed: n, Total: e + m + x + n}
+	}
+	rows := []domain.UTMQualification{q("a", 3, 2, 0, 1), q("other", 1, 1, 0, 0), q("c", 1, 2, 1, 0), q("d", 0, 1, 0, 2)}
+
+	if got := foldQualificationRemainder(rows, 4); !reflect.DeepEqual(got, rows) {
+		t.Errorf("at the cap nothing folds, got %+v", got)
+	}
+	got := foldQualificationRemainder(rows, 2)
+	want := []domain.UTMQualification{q("a", 3, 2, 0, 1), q(realOtherLabel, 1, 1, 0, 0), q(otherLabel, 1, 3, 1, 2)}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	total := 0
+	for _, r := range got {
+		total += r.Total
+	}
+	if total != 6+2+4+3 {
+		t.Errorf("total = %d, want the whole cohort (%d)", total, 6+2+4+3)
+	}
+}
