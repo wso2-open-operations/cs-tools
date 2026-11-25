@@ -194,7 +194,8 @@ describe("CreateGithubIssueDialog — required fields gate submission", () => {
   const pickP3 = () => pick(/^priority$/i, /P3 – Low Priority/);
 
   it.each([
-    ["Type", [fillSubject, fillDescription, pickP3], null],
+    // Priority is not on the form until a type is chosen.
+    ["Type", [fillSubject, fillDescription], null],
     ["Subject", [fillDescription, pickP3], "Discussion"],
     ["Description", [fillSubject, pickP3], "Discussion"],
     ["Priority", [fillSubject, fillDescription], "Discussion"],
@@ -486,7 +487,6 @@ describe("CreateGithubIssueDialog — Type", () => {
   it("offers Discussion then Feature Request, and keeps Raise issue disabled until one is chosen", () => {
     renderDialog({}, null);
     fillSubjectAndDescription();
-    pick(/^priority$/i, /P3 – Low Priority/);
     expect(createButton()).toBeDisabled();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type$/i }));
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
@@ -495,7 +495,19 @@ describe("CreateGithubIssueDialog — Type", () => {
       "Feature Request",
     ]);
     fireEvent.click(screen.getByRole("option", { name: "Discussion" }));
+    pick(/^priority$/i, /P3 – Low Priority/);
     expect(createButton()).toBeEnabled();
+  });
+
+  it("shows only Type, Subject and Description until a type is chosen", () => {
+    renderDialog({}, null);
+    expect(screen.getAllByRole("combobox").map((c) => c.getAttribute("aria-labelledby"))).toHaveLength(1);
+    expect(screen.getAllByRole("textbox")).toHaveLength(2);
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /urgency|references|flags/i })).not.toBeInTheDocument();
+    chooseType("Discussion");
+    expect(screen.getByRole("combobox", { name: /^priority/i })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /migration/i })).toBeInTheDocument();
   });
 
   it("does not show the Feature Request fields for a Discussion or an unset Type", () => {
@@ -514,6 +526,8 @@ describe("CreateGithubIssueDialog — Feature Request", () => {
     title: "Token issuance is slow",
     description: "Latency spiked after the last deploy.",
     issueTypeLabel: "Type/Feature",
+    // Never the case's update level: a feature request is filed with "-".
+    updateLevel: "-",
     repoOverride: { owner: "example-org", repo: "example-repo" },
   };
 
@@ -618,7 +632,6 @@ describe("CreateGithubIssueDialog — Feature Request", () => {
       "priorityLevel",
       "priorityJustification",
       "reproducingSteps",
-      "updateLevel",
       "publicIssueUrl",
       "hotFixRequired",
       "hotFixReason",
@@ -1027,5 +1040,34 @@ describe("CreateGithubIssueDialog — success view", () => {
     fillRequiredFields();
     fireEvent.click(screen.getByRole("button", { name: /^raise issue…$/i }));
     expect(screen.getByText("Filed, awaiting SN sync.")).toBeInTheDocument();
+  });
+
+  it("closes the whole dialog when the raised view is dismissed with Escape", () => {
+    const onClose = vi.fn();
+    render(
+      <CreateGithubIssueDialog
+        open
+        productName="Alpha"
+        submitting={false}
+        error={null}
+        createdIssue={{ message: "Issue created." }}
+        onClose={onClose}
+        onSubmit={() => {}}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /^raise issue…$/i }));
+    fireEvent.keyDown(screen.getByText("Issue created."), { key: "Escape", code: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes back to the form when the confirm step is dismissed with Escape", () => {
+    const onClose = vi.fn();
+    renderDialog({ onClose });
+    fillRequiredFields();
+    fireEvent.click(createButton());
+    fireEvent.keyDown(screen.getByText(/raise this git issue\?/i), { key: "Escape", code: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/subject/i)).toHaveValue("Token issuance is slow");
   });
 });

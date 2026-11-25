@@ -61,6 +61,9 @@ const GITHUB_DISCUSSION_ISSUE_TYPE = "Type/Discussion";
 /** A Feature Request: a short form with a business use case and no urgency fields. */
 const GITHUB_FEATURE_ISSUE_TYPE = "Type/Feature";
 
+/** The update level a Feature Request is filed with, whatever the case holds. */
+const FEATURE_UPDATE_LEVEL = "-";
+
 const ISSUE_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: GITHUB_DISCUSSION_ISSUE_TYPE, label: "Discussion" },
   { value: GITHUB_FEATURE_ISSUE_TYPE, label: "Feature Request" },
@@ -161,7 +164,8 @@ export interface CreateGithubIssueDialogProps {
 
 /**
  * Form for filing an internal GitHub issue from a case (ISSU-020). Type* comes
- * first and starts unset; Raise stays disabled until one is chosen.
+ * first and starts unset; until one is chosen only Type, Subject and
+ * Description show, and Raise stays disabled.
  *
  * Feature Request shows only Subject*, Description*, Business Use Case,
  * Related Git Issue(s) and Migration. Values typed under the other type are
@@ -314,6 +318,9 @@ export function CreateGithubIssueDialog({
         title: title.trim(),
         description: description.trim(),
         issueTypeLabel: GITHUB_FEATURE_ISSUE_TYPE,
+        // A feature request is not tied to an update level: the footer reads
+        // "Update level : -" instead of "undefined".
+        updateLevel: FEATURE_UPDATE_LEVEL,
         repoOverride: {
           owner: selectedRepoOption.owner,
           repo: selectedRepoOption.repo,
@@ -498,7 +505,7 @@ export function CreateGithubIssueDialog({
                 placeholder="Why the customer needs it and what it enables"
               />
             )}
-            {!isFeature && (
+            {isDiscussion && (
               <TextField
                 {...fieldProps}
                 label="Reproducing Steps"
@@ -513,7 +520,7 @@ export function CreateGithubIssueDialog({
           true,
         )}
 
-        {!isFeature &&
+        {isDiscussion &&
           section(
           "Urgency",
           <>
@@ -581,7 +588,7 @@ export function CreateGithubIssueDialog({
           </>,
         )}
 
-        {!isFeature &&
+        {isDiscussion &&
           section(
           showUpdateLevelAndIssueUrl ? "Version and references" : "References",
           <>
@@ -634,12 +641,14 @@ export function CreateGithubIssueDialog({
             />,
           )}
 
-        {section(
+        {/* Until a type is chosen only Type, Subject and Description show. */}
+        {(isDiscussion || isFeature) &&
+          section(
           "Flags",
           // The switches carry their own vertical padding; the set is pulled up
           // so it keeps the same 16px rhythm under the heading.
           <Box sx={{ display: "flex", flexDirection: "column", mt: -0.75 }}>
-            {!isFeature && (
+            {isDiscussion && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
@@ -652,7 +661,7 @@ export function CreateGithubIssueDialog({
               label="Hotfix Required"
             />
             )}
-            {!isFeature && hotFix && (
+            {isDiscussion && hotFix && (
               // Indented to the switch labels so it reads as part of Hotfix Required.
               <Box sx={{ pl: `${FLAG_LABEL_INSET}px`, pt: 0.5, pb: 1.5 }}>
                 {renderSelect(
@@ -665,7 +674,7 @@ export function CreateGithubIssueDialog({
                 )}
               </Box>
             )}
-            {!isFeature && (
+            {isDiscussion && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
@@ -712,7 +721,10 @@ export function CreateGithubIssueDialog({
           with a clickable link instead of closing itself. */}
       <Dialog
         open={!!confirmPayload}
-        onClose={() => setConfirmPayload(null)}
+        // Before the issue is raised, Escape or an outside click goes back to
+        // the form. Once it is raised they act as Done: going back would leave
+        // a filled form whose next "Raise issue…" shows this result again.
+        onClose={() => (createdIssue ? resetAndClose() : setConfirmPayload(null))}
         maxWidth="xs"
         fullWidth
       >

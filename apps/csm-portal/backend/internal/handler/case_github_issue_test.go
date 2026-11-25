@@ -969,3 +969,51 @@ func TestEntityGitHubIssueRequest_FeatureRequestFields(t *testing.T) {
 		t.Errorf("description = %q, want both sections", description)
 	}
 }
+
+// A field of the other issue type reaches neither the body nor the labels.
+func TestCaseGitHubIssueRequest_ScopedToIssueType(t *testing.T) {
+	all := caseGitHubIssueRequest{
+		Description:           "What it is.",
+		PriorityLevel:         "Priority/High(P1)",
+		PriorityJustification: "Production is down.",
+		ReproducingSteps:      "1. Log in",
+		HotFixRequired:        true,
+		HotFixReason:          "Customer-Requested Hotfix",
+		Regression:            true,
+		RelatedInternalIssues: "example/internal#12",
+		BusinessUseCase:       "Needed for onboarding.",
+		RelatedGitIssues:      "example/public#7",
+		Reason:                "migration",
+	}
+
+	feature := all
+	feature.IssueTypeLabel = "Type/Feature"
+	feature = feature.scopedToIssueType()
+	if got, want := buildGitHubIssueLabels("product/is", feature), []string{"Origin/CS", "product/is", "Type/Feature", "Affected/Migration"}; !slices.Equal(got, want) {
+		t.Errorf("feature labels = %v, want %v", got, want)
+	}
+	if got, want := gitHubIssueSections(feature), []string{"Business Use Case :\nNeeded for onboarding.", "Related Git Issue(s) :\nexample/public#7"}; !slices.Equal(got, want) {
+		t.Errorf("feature sections = %q, want %q", got, want)
+	}
+
+	discussion := all
+	discussion.IssueTypeLabel = "Type/Discussion"
+	discussion = discussion.scopedToIssueType()
+	for _, s := range gitHubIssueSections(discussion) {
+		if strings.HasPrefix(s, "Business Use Case") || strings.HasPrefix(s, "Related Git Issue(s)") {
+			t.Errorf("unexpected section on a Discussion: %q", s)
+		}
+	}
+	if len(gitHubIssueSections(discussion)) != 4 {
+		t.Errorf("discussion sections = %q, want its own four", gitHubIssueSections(discussion))
+	}
+
+	// The legacy Patch type and a request with no type are left as sent.
+	for _, typ := range []string{"Type/Patch", ""} {
+		other := all
+		other.IssueTypeLabel = typ
+		if got := other.scopedToIssueType(); got != other {
+			t.Errorf("type %q: request changed: %+v", typ, got)
+		}
+	}
+}

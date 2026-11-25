@@ -158,6 +158,29 @@ func (req caseGitHubIssueRequest) hotFixReason() string {
 	return strings.TrimSpace(req.HotFixReason)
 }
 
+// scopedToIssueType is the request with the fields of the other issue type
+// cleared, so they reach neither the body nor the labels: a Feature Request
+// carries no priority, justification, reproducing steps, hotfix, regression or
+// related internal issues, and a Discussion no business use case or related
+// Git issues. The dialog never sends them; this covers any other caller. Any
+// other type (the legacy Type/Patch, or none) is left as sent.
+func (req caseGitHubIssueRequest) scopedToIssueType() caseGitHubIssueRequest {
+	switch strings.TrimSpace(req.IssueTypeLabel) {
+	case featureIssueTypeLabel:
+		req.PriorityLevel = ""
+		req.PriorityJustification = ""
+		req.ReproducingSteps = ""
+		req.HotFixRequired = false
+		req.HotFixReason = ""
+		req.Regression = false
+		req.RelatedInternalIssues = ""
+	case discussionIssueTypeLabel:
+		req.BusinessUseCase = ""
+		req.RelatedGitIssues = ""
+	}
+	return req
+}
+
 // validateGitHubIssueChoices checks that the hotfix reason, when it will be
 // written, is one of the dialog's own options. It is not required here: the
 // dialog requires it, and refusing a request without one would break a webapp
@@ -357,9 +380,9 @@ func idKey(id string) string {
 const issueInfoBlankValue = "undefined"
 
 // buildGitHubIssueBody is the caller's own description, then the optional
-// sections the engineer filled in (Reproducing Steps, Priority Justification,
-// the Hotfix Required line with its Hotfix Reason, Related Internal Issue(s),
-// and for a Feature Request Business Use Case and Related Git Issue(s)),
+// sections the engineer filled in, in gitHubIssueSections' order (Reproducing
+// Steps, Business Use Case, Priority Justification, the Hotfix Required line
+// with its Hotfix Reason, Related Internal Issue(s), Related Git Issue(s)),
 // then the info block as the footer: always the same
 // seven lines (Product, Update level, WSO2 case id, Case number, Public Git
 // Issue, ABT Team, Opened by), in this order and spelling, as the issues filed
@@ -472,6 +495,10 @@ func entityGitHubIssueRequest(body []byte) ([]byte, string) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, ErrMsgBadRequest
 	}
+	// Only the sections written into the description are scoped here: the
+	// fields the entity service knows (priorityLevel, hotFixRequired,
+	// regression) are forwarded as sent.
+	req = req.scopedToIssueType()
 	if msg := validateGitHubIssueChoices(req); msg != "" {
 		return nil, msg
 	}
@@ -600,6 +627,7 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+	req = req.scopedToIssueType()
 
 	title := strings.TrimSpace(req.Title)
 	if title == "" || utf8.RuneCountInString(title) > maxGitHubIssueTitleChars {

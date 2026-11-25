@@ -2428,7 +2428,7 @@ export interface BeCreateCaseGithubIssuePayload {
   issueTypeLabel?: string;
   /** Priority label for Discussion: Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). */
   priorityLevel?: string;
-  /** Why the issue is P0 or P1 (free text). Written to the issue body. */
+  /** Why the issue is P0, P1 or P2 (free text). Written to the issue body. */
   priorityJustification?: string;
   /** Steps to reproduce, written to the issue body. */
   reproducingSteps?: string;
