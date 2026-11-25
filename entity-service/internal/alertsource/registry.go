@@ -42,11 +42,11 @@ type Registry struct {
 	transforms map[string]Transform
 }
 
-// New builds every source's transform with its built-in defaults, as alert-ingestion runs with no <SOURCE>_ALERT_CONFIG set; budgetTags may be nil.
-func New(budgetTags aws.BudgetTagFetcher) *Registry {
+// New builds every source's transform with its built-in defaults, as alert-ingestion runs with no <SOURCE>_ALERT_CONFIG set.
+func New() *Registry {
 	return &Registry{transforms: map[string]Transform{
 		"aws": func(raw []byte) ([]model.Alert, error) {
-			a, err := aws.Transform(raw, aws.Config{}, budgetTags)
+			a, err := aws.Transform(raw, aws.Config{})
 			return one(err, a)
 		},
 		"azure": func(raw []byte) ([]model.Alert, error) {

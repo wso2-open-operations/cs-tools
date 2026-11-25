@@ -352,7 +352,7 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		return func() {}
 	}
 	// Stored as alert-ingestion stores it, so fingerprints match v1; a missing service is filled when the incident is created.
-	transforms := alertsource.New(nil)
+	transforms := alertsource.New()
 	var priorityQueues, standardQueues []service.AlertQueue
 	var closers []func(context.Context) error
 

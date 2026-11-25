@@ -206,7 +206,7 @@ func (r *fakeAlertRepo) rowCount() int {
 
 func mustRegistry(t *testing.T) *alertsource.Registry {
 	t.Helper()
-	return alertsource.New(nil)
+	return alertsource.New()
 }
 
 func alertMessage(id, source, body string) *domain.AlertQueueMessage {

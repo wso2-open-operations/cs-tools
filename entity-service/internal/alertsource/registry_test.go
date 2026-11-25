@@ -25,7 +25,7 @@ import (
 
 // A field the source left out takes the source's own built-in default, as in alert-ingestion, so the fingerprint matches v1.
 func TestRegistry_FillsGapsWithAlertIngestionDefaults(t *testing.T) {
-	r := New(nil)
+	r := New()
 	cases := map[string]struct {
 		route, body, service, metricName, severity string
 	}{
@@ -49,7 +49,7 @@ func TestRegistry_FillsGapsWithAlertIngestionDefaults(t *testing.T) {
 }
 
 func TestRegistry_KeepsWhatTheSourceSent(t *testing.T) {
-	r := New(nil)
+	r := New()
 	transform, _ := r.Lookup("servicenow")
 	alerts, err := transform([]byte(`{"service":"checkout","metric_name":"cpu","severity":"major","source":"Test"}`))
 	if err != nil {
@@ -62,7 +62,7 @@ func TestRegistry_KeepsWhatTheSourceSent(t *testing.T) {
 
 // With no SITE24X7_ALERT_CONFIG, alert-ingestion rejects a Site24x7 alert without STATUS, and so does the consumer.
 func TestRegistry_RejectsASite24x7AlertWithoutStatus(t *testing.T) {
-	transform, _ := New(nil).Lookup("site24x7")
+	transform, _ := New().Lookup("site24x7")
 	if _, err := transform([]byte(`{"MONITOR_ID":"1"}`)); !errors.Is(err, site24x7.ErrMissingStatus) {
 		t.Fatalf("err = %v, want ErrMissingStatus", err)
 	}
