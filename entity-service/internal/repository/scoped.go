@@ -318,13 +318,17 @@ func (s *Scoped) Exec(ctx context.Context, sql string, args ...any) (pgconn.Comm
 	batch.Queue(sql, args...)
 
 	br := s.pool.SendBatch(ctx, batch)
-	defer func() { _ = br.Close() }()
 	if err := drainIdentity(br); err != nil {
 		return pgconn.CommandTag{}, err
 	}
 	ct, err := br.Exec()
+	// The batch's implicit transaction is only finished by Close, so a commit failure surfaces there and must fail the Exec.
+	closeErr := br.Close()
 	if err != nil {
 		return pgconn.CommandTag{}, fmt.Errorf("scoped exec: %w", err)
+	}
+	if closeErr != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("scoped exec: close batch: %w", closeErr)
 	}
 	return ct, nil
 }

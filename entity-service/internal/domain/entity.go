@@ -10868,3 +10868,50 @@ type ACPReopenCheckResponse struct {
 	NextCursor       string   `json:"nextCursor"`
 	More             bool     `json:"more"`
 }
+
+// AlertTier is the kind of queue (priority or standard) an SRE alert arrived on, which decides how soon it is processed.
+type AlertTier string
+
+// Alert tiers, matching the tier the alerting gateway stamps on every message.
+const (
+	AlertTierHigh    AlertTier = "high"
+	AlertTierDefault AlertTier = "default"
+)
+
+// NewAlert is one row the alert consumer stores in the alert table: a normalised alert, or the error for a message that could not be normalised.
+type NewAlert struct {
+	ID string
+	// Source is empty only on an error row whose message named no source, and is stored as NULL.
+	Source string
+	// Alert and Fingerprint are empty on an error row.
+	Alert        json.RawMessage
+	Fingerprint  string
+	Tier         AlertTier
+	MessageID    string
+	MessageIndex int
+	// RawBody and ContentType are the message's body and content type, set on its first row (MessageIndex 0) only.
+	RawBody     []byte
+	ContentType string
+	// ErrorReason and Error say why the message could not be normalised; both are empty on an alert row.
+	ErrorReason string
+	Error       string
+	ReceivedOn  time.Time
+}
+
+// AlertQueueMessage is one message received from an alert queue, on Azure Service Bus or AWS SQS alike.
+type AlertQueueMessage struct {
+	// ID is the cloud's message id, stable across redeliveries of the same message.
+	ID string
+	// Body is the monitoring source's request body, unchanged by the gateway.
+	Body []byte
+	// Properties are the gateway's message properties, such as source and received_at.
+	Properties map[string]string
+	// ContentType is the Content-Type the source sent the body with, when the gateway passed one on.
+	ContentType string
+	// EnqueuedOn is when the queue stored the message, when the cloud reports it.
+	EnqueuedOn *time.Time
+	// LockedUntil is when the message becomes visible to other receivers again unless it is settled or renewed.
+	LockedUntil *time.Time
+	// Handle is the cloud's own message, which only the queue that received it uses to settle it.
+	Handle any
+}
