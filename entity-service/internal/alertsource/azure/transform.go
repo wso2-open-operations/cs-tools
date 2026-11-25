@@ -30,10 +30,13 @@ import (
 // source identifies alerts produced by this adapter.
 const source = "Azure"
 
-// defaults fill the category and environment a payload leaves out; the registry fills the service, metric name and severity.
+// defaults mirror "edge.api.azure.alert.config" so its JSON can be pasted into AZURE_ALERT_CONFIG unchanged.
 var defaults = map[string]string{
+	"metric_name": "AzureCloudAlert",
+	"service":     "Managed Services",
 	"category":    "Service Interruption",
 	"environment": "Unknown",
+	"severity":    "Critical",
 }
 
 // severityMap maps Azure Monitor's Sev0-Sev4 severity to the canonical severity labels.
@@ -51,10 +54,10 @@ var ErrMissingBody = errors.New("missing or invalid request body")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds per-field overrides keyed like defaults, which the registry leaves empty; any field left empty falls back to the default.
+// Config holds operator overrides, keyed the same way as defaults; any field left empty falls back to the default.
 type Config map[string]string
 
-// Transform parses a raw inbound Azure Monitor Common Alert Schema webhook and produces the canonical Alert, cfg supplying any overrides.
+// Transform parses a raw inbound Azure Monitor Common Alert Schema webhook and produces the canonical Alert, cfg supplying operator overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody

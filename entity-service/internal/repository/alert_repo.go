@@ -26,11 +26,11 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// AlertRepository stores the SRE alerts the Service Bus consumer receives.
+// AlertRepository stores the SRE alert messages the alert consumer receives.
 type AlertRepository interface {
 	// ReserveAlertIDs returns n new alert ids, in ascending order.
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	// InsertAlerts stores alerts in one statement and returns how many were new; a row whose message was already stored is skipped.
+	// InsertAlerts stores alert and error rows in one statement and returns how many were new; a row whose message was already stored is skipped.
 	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
 }
 
@@ -42,8 +42,8 @@ const (
 
 const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1, $1)`
 
-const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, received_on)
-SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::timestamptz[])
+const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
+SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
 ON CONFLICT (message_id, message_index) DO NOTHING`
 
 type alertRepository struct {
@@ -87,24 +87,36 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 		return 0, nil
 	}
 	ids := make([]string, len(alerts))
-	sources := make([]string, len(alerts))
-	bodies := make([]string, len(alerts))
-	fingerprints := make([]string, len(alerts))
+	sources := make([]*string, len(alerts))
+	bodies := make([]*string, len(alerts))
+	fingerprints := make([]*string, len(alerts))
 	tiers := make([]string, len(alerts))
 	messageIDs := make([]string, len(alerts))
 	indexes := make([]int32, len(alerts))
+	rawBodies := make([][]byte, len(alerts))
+	contentTypes := make([]*string, len(alerts))
+	errorReasons := make([]*string, len(alerts))
+	errorTexts := make([]*string, len(alerts))
 	receivedOn := make([]time.Time, len(alerts))
 	for i, a := range alerts {
 		ids[i] = a.ID
-		sources[i] = a.Source
-		bodies[i] = string(a.Alert)
-		fingerprints[i] = a.Fingerprint
+		sources[i] = nullIfEmpty(a.Source)
+		bodies[i] = nullIfEmpty(string(a.Alert))
+		fingerprints[i] = nullIfEmpty(a.Fingerprint)
 		tiers[i] = string(a.Tier)
 		messageIDs[i] = a.MessageID
 		indexes[i] = int32(a.MessageIndex) // #nosec G115 -- the consumer caps alerts per message far below MaxInt32
+		rawBodies[i] = a.RawBody
+		if a.MessageIndex == 0 && rawBodies[i] == nil {
+			// An empty body is still the first row's body, so it is stored as empty rather than NULL.
+			rawBodies[i] = []byte{}
+		}
+		contentTypes[i] = nullIfEmpty(a.ContentType)
+		errorReasons[i] = nullIfEmpty(a.ErrorReason)
+		errorTexts[i] = nullIfEmpty(a.Error)
 		receivedOn[i] = a.ReceivedOn
 	}
-	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, receivedOn)
+	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, rawBodies, contentTypes, errorReasons, errorTexts, receivedOn)
 	if err != nil {
 		return 0, fmt.Errorf("insert alerts: %w", err)
 	}

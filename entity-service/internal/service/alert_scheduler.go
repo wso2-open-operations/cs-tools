@@ -23,7 +23,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// scheduler gives each free worker a waiting high item first, but after weight high items in a row a waiting standard item, so standard gets at least 1 in weight+1 picks.
+// scheduler gives each free worker a waiting high item first. With weight 0 (strict priority) a standard item goes only when no high item waits; with weight n, after n high items in a row a waiting standard item goes next, so standard gets at least 1 in n+1 picks.
 type scheduler[T any] struct {
 	mu       sync.Mutex
 	high     <-chan T
@@ -33,8 +33,8 @@ type scheduler[T any] struct {
 }
 
 func newScheduler[T any](high, standard <-chan T, weight int) *scheduler[T] {
-	if weight < 1 {
-		weight = 1
+	if weight < 0 {
+		weight = 0
 	}
 	return &scheduler[T]{high: high, standard: standard, weight: weight}
 }
@@ -49,7 +49,7 @@ func (s *scheduler[T]) next(ctx context.Context) (T, domain.AlertTier, bool) {
 		var zero T
 		return zero, "", false
 	}
-	if s.streak >= s.weight {
+	if s.weight > 0 && s.streak >= s.weight {
 		select {
 		case item := <-s.standard:
 			return s.picked(item, domain.AlertTierDefault)

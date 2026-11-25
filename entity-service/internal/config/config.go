@@ -745,7 +745,7 @@ type Config struct {
 	// ports, it runs wherever the data is.
 	IncidentReportPollInterval time.Duration
 
-	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, v2 the queue consumer, hybrid both.
+	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, hybrid v1 plus the queue consumer storing alerts only, and v2, refused until the alert processor creates incidents.
 	AlertingVersion AlertingVersion
 	// AlertServiceBusNamespace is the Azure Service Bus namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_NAMESPACE); empty leaves Azure out.
 	AlertServiceBusNamespace string
@@ -758,7 +758,7 @@ type Config struct {
 	AlertServiceBusStandardQueues []string
 	// AlertConsumerConcurrency is how many alert messages are processed at once (ALERT_CONSUMER_CONCURRENCY, default 8).
 	AlertConsumerConcurrency int
-	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT, default 4).
+	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT); 0, the default, is strict priority: standard alerts run only when no priority alert waits.
 	AlertConsumerPriorityWeight int
 	// AlertSQSPriorityQueueURLs and AlertSQSStandardQueueURLs are the SQS standard queue URLs of each tier (ALERT_SQS_PRIORITY_QUEUE_URLS, ALERT_SQS_STANDARD_QUEUE_URLS, comma separated); none leaves AWS out.
 	AlertSQSPriorityQueueURLs []string
@@ -1143,7 +1143,7 @@ func Load() *Config {
 		AlertServiceBusPriorityQueues:                 queueList("ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
 		AlertServiceBusStandardQueues:                 queueList("ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
-		AlertConsumerPriorityWeight:                   envPositiveInt("ALERT_CONSUMER_PRIORITY_WEIGHT", 4),
+		AlertConsumerPriorityWeight:                   envIntInRange("ALERT_CONSUMER_PRIORITY_WEIGHT", 0, 0, maxAlertConsumerPriorityWeight),
 		AlertSQSPriorityQueueURLs:                     queueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
 		AlertSQSStandardQueueURLs:                     queueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),
 		AlertSQSDeadLetterQueueURL:                    strings.TrimSpace(os.Getenv("ALERT_SQS_DEAD_LETTER_QUEUE_URL")),
@@ -2024,6 +2024,9 @@ const (
 	AlertingVersionHybrid AlertingVersion = "hybrid"
 )
 
+// maxAlertConsumerPriorityWeight caps ALERT_CONSUMER_PRIORITY_WEIGHT; a larger value is strict priority in all but name.
+const maxAlertConsumerPriorityWeight = 1000
+
 // AlertConsumerEnabled reports whether the queue consumer runs, which it does in v2 and hybrid.
 func (c *Config) AlertConsumerEnabled() bool {
 	return c.AlertingVersion == AlertingVersionV2 || c.AlertingVersion == AlertingVersionHybrid
@@ -2069,7 +2072,10 @@ func (c *Config) validateAlertConsumer() error {
 	switch c.AlertingVersion {
 	case "", AlertingVersionV1:
 		return nil
-	case AlertingVersionV2, AlertingVersionHybrid:
+	case AlertingVersionV2:
+		// Nothing turns a stored alert into an incident yet, so v2 with the sources on the gateways would page nobody.
+		return fmt.Errorf("ALERTING_VERSION v2 is not available until the alert processor creates incidents from the alert table; use hybrid to store alerts alongside v1")
+	case AlertingVersionHybrid:
 	default:
 		return fmt.Errorf("ALERTING_VERSION must be v1, v2 or hybrid, got %q", c.AlertingVersion)
 	}
@@ -2078,9 +2084,6 @@ func (c *Config) validateAlertConsumer() error {
 	}
 	if !c.HasDatabase() {
 		return fmt.Errorf("ALERTING_VERSION %s needs DB_USER, DB_PASSWORD and DB_NAME, because alerts are stored in the database", c.AlertingVersion)
-	}
-	if c.IncidentDefaultServiceID == "" {
-		return fmt.Errorf("ALERTING_VERSION %s needs INCIDENT_DEFAULT_SERVICE_ID, the service an alert gets when its source names none", c.AlertingVersion)
 	}
 	if !c.HasAlertServiceBus() && !c.HasAlertSQS() {
 		return fmt.Errorf("ALERTING_VERSION %s needs Azure Service Bus (ALERT_SERVICEBUS_*), AWS SQS (ALERT_SQS_*), or both", c.AlertingVersion)

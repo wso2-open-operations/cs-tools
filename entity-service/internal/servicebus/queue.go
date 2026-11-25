@@ -129,9 +129,11 @@ func toAlertQueueMessage(m *azservicebus.ReceivedMessage) *domain.AlertQueueMess
 		}
 	}
 	return &domain.AlertQueueMessage{
-		ID:          m.MessageID,
-		Body:        m.Body,
-		Properties:  properties,
+		ID:         m.MessageID,
+		Body:       m.Body,
+		Properties: properties,
+		// The gateway sets the broker's content type to the Content-Type the source sent.
+		ContentType: strings.TrimSpace(derefString(m.ContentType)),
 		EnqueuedOn:  copyTime(m.EnqueuedTime),
 		LockedUntil: copyTime(m.LockedUntil),
 		Handle:      m,
@@ -152,4 +154,11 @@ func copyTime(t *time.Time) *time.Time {
 	}
 	c := *t
 	return &c
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

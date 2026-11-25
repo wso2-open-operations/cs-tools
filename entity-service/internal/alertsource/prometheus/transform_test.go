@@ -18,13 +18,20 @@ package prometheus
 
 import "testing"
 
-func TestTransform_GrafanaReceiverUsesTitle(t *testing.T) {
-	body := []byte(`{"receiver":"grafana-default-email","status":"firing","alerts":[{"labels":{"alertname":"HighLatency"},"annotations":{"title":"Checkout latency"}}]}`)
-	alerts, err := Transform(body, Config{})
-	if err != nil {
-		t.Fatalf("Transform: %v", err)
-	}
-	if len(alerts) != 1 || alerts[0].MetricName != "Grafana Alert: Checkout latency" {
-		t.Fatalf("alerts = %+v, want one alert named after the Grafana title", alerts)
+// A Grafana alert found by its receiver alone keeps alertname as its metric name, as alert-ingestion does, so the fingerprint matches; only grafana_folder switches to the title.
+func TestTransform_GrafanaMetricNameMatchesAlertIngestion(t *testing.T) {
+	for name, tc := range map[string]struct{ body, want string }{
+		"receiver only":  {`{"receiver":"grafana-default-email","status":"firing","alerts":[{"labels":{"alertname":"HighLatency"},"annotations":{"title":"Checkout latency"}}]}`, "HighLatency"},
+		"grafana_folder": {`{"receiver":"other","status":"firing","alerts":[{"labels":{"alertname":"HighLatency","grafana_folder":"apps"},"annotations":{"title":"Checkout latency"}}]}`, "Grafana Alert: Checkout latency"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			alerts, err := Transform([]byte(tc.body), Config{})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if len(alerts) != 1 || alerts[0].MetricName != tc.want || alerts[0].Source != "Grafana" {
+				t.Fatalf("alerts = %+v, want one Grafana alert named %q", alerts, tc.want)
+			}
+		})
 	}
 }

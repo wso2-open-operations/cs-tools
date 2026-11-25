@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package alertsource maps each gateway route to its transform and fills the fields a source left empty with shared defaults.
+// Package alertsource maps each gateway route to its transform, whose output matches alert-ingestion's so fingerprints agree.
 package alertsource
 
 import (
@@ -24,7 +24,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/azure"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/datadog"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/elasticsearch"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/fieldvalue"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/gcp"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/icinga"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
@@ -35,27 +34,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/site24x7"
 )
 
-// DefaultSeverity is the severity of an alert whose source sent none, the most severe level.
-const DefaultSeverity = "1"
-
-// metricNameSuffix completes a source's name into the metric name of an alert that has none, such as "Azure Alert".
-const metricNameSuffix = " Alert"
-
-// routeNames names each route's source for an alert that does not name its own.
-var routeNames = map[string]string{
-	"aws":           "AWS",
-	"azure":         "Azure",
-	"datadog":       "Datadog",
-	"elasticsearch": "ElasticSearch",
-	"gcp":           "GCP",
-	"icinga":        "Icinga",
-	"openobserve":   "OpenObserve",
-	"opensearch":    "OpenSearch",
-	"prometheus":    "Prometheus",
-	"servicenow":    "ServiceNow",
-	"site24x7":      "Site24x7",
-}
-
 // Transform turns one webhook body into canonical alerts; an error means the payload can never be stored.
 type Transform func(raw []byte) ([]model.Alert, error)
 
@@ -64,9 +42,9 @@ type Registry struct {
 	transforms map[string]Transform
 }
 
-// New builds every source's transform; defaultServiceID fills a missing service, and budgetTags may be nil.
-func New(defaultServiceID string, budgetTags aws.BudgetTagFetcher) *Registry {
-	parsers := map[string]Transform{
+// New builds every source's transform with its built-in defaults, as alert-ingestion runs with no <SOURCE>_ALERT_CONFIG set; budgetTags may be nil.
+func New(budgetTags aws.BudgetTagFetcher) *Registry {
+	return &Registry{transforms: map[string]Transform{
 		"aws": func(raw []byte) ([]model.Alert, error) {
 			a, err := aws.Transform(raw, aws.Config{}, budgetTags)
 			return one(err, a)
@@ -104,33 +82,10 @@ func New(defaultServiceID string, budgetTags aws.BudgetTagFetcher) *Registry {
 		},
 		"servicenow": servicenow.Transform,
 		"site24x7": func(raw []byte) ([]model.Alert, error) {
-			a, err := site24x7.Transform(raw, site24x7.Config{TagList: site24x7.DefaultTagList})
+			a, err := site24x7.Transform(raw, site24x7.Config{})
 			return one(err, a)
 		},
-	}
-
-	transforms := make(map[string]Transform, len(parsers))
-	for route, parse := range parsers {
-		transforms[route] = withDefaults(parse, routeNames[route], defaultServiceID)
-	}
-	return &Registry{transforms: transforms}
-}
-
-// withDefaults fills what a source left empty: the default service, "<source> Alert" as the metric name, and severity 1.
-func withDefaults(parse Transform, routeName, defaultServiceID string) Transform {
-	return func(raw []byte) ([]model.Alert, error) {
-		alerts, err := parse(raw)
-		if err != nil {
-			return nil, err
-		}
-		for i := range alerts {
-			a := &alerts[i]
-			a.Service = fieldvalue.FirstNonEmpty(a.Service, defaultServiceID)
-			a.MetricName = fieldvalue.FirstNonEmpty(a.MetricName, fieldvalue.FirstNonEmpty(a.Source, routeName)+metricNameSuffix)
-			a.Severity = fieldvalue.FirstNonEmpty(a.Severity, DefaultSeverity)
-		}
-		return alerts, nil
-	}
+	}}
 }
 
 // Lookup returns the transform for a route name.

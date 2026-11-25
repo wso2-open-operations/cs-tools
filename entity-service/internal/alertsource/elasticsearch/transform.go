@@ -38,8 +38,11 @@ const (
 
 // defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
 var defaults = map[string]string{
+	"METRIC_NAME": "ElasticSearchAlert",
+	"SERVICE":     "managed_services",
 	"CATEGORY":    "service_interruption",
 	"ENVIRONMENT": "production",
+	"SEVERITY":    "1",
 }
 
 // numericSeverityMap maps Elasticsearch/Watcher numeric severities to the canonical severity labels.
@@ -57,10 +60,10 @@ var ErrInvalidStructure = errors.New("invalid elasticsearch alert payload struct
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds per-field overrides, which the registry leaves empty; any field left empty falls back to the default.
+// Config holds operator overrides mirroring "edge.api.elasticsearch.alert.config"; any field left empty falls back to the default.
 type Config map[string]string
 
-// Transform parses a raw inbound Elasticsearch alert and produces the canonical Alert, cfg supplying any overrides.
+// Transform parses a raw inbound Elasticsearch alert and produces the canonical Alert, cfg supplying operator overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {

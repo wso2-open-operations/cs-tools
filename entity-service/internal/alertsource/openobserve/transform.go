@@ -33,6 +33,7 @@ var defaults = map[string]string{
 	"IMPACT":      "3",
 	"CALLER_ID":   "openobserve",
 	"CATEGORY":    "service_interruption",
+	"SERVICE":     "managed_services",
 	"ENVIRONMENT": "production",
 }
 
@@ -63,10 +64,10 @@ type Alert struct {
 	CallerID         string `json:"caller_id"`
 }
 
-// Config holds per-field overrides, which the registry leaves empty; any field left empty falls back to the default.
+// Config holds operator overrides mirroring "edge.api.openobserve.alert.config"; any field left empty falls back to the default.
 type Config map[string]string
 
-// Transform parses a raw inbound OpenObserve webhook and produces the canonical Alert, cfg supplying any overrides.
+// Transform parses a raw inbound OpenObserve webhook and produces the canonical Alert, cfg supplying operator overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {

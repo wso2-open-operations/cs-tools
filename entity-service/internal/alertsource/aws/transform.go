@@ -27,11 +27,14 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
-// defaults fill the source, category and environment a notification leaves out; the registry fills the service, metric name and severity.
+// defaults mirror "edge.api.aws.alert.config" so its JSON can be pasted into AWS_ALERT_CONFIG unchanged.
 var defaults = map[string]string{
 	"source":      "AWS",
 	"environment": "Unknown",
+	"service":     "",
 	"category":    "service_interruption",
+	"severity":    "critical",
+	"metric_name": "Unknown Metric",
 }
 
 // ErrMissingBody is returned when the webhook is called with no body, or a body that isn't valid JSON at all.
@@ -43,10 +46,10 @@ var ErrUnsupportedType = errors.New("unsupported SNS message type")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds per-field overrides keyed lowercase, which the registry leaves empty; empty fields fall back to defaults.
+// Config holds operator overrides, keyed lowercase like the ServiceNow "edge.api.aws.alert.config" property; empty fields fall back to defaults.
 type Config map[string]string
 
-// Transform parses a raw inbound SNS notification and produces the canonical Alert, cfg supplying any overrides and tagger (optional) the tags of a budget alert's budget.
+// Transform parses a raw inbound SNS notification and produces the canonical Alert, cfg supplying operator overrides and tagger (optional) the tags of a budget alert's budget.
 func Transform(raw []byte, cfg Config, tagger BudgetTagFetcher) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody

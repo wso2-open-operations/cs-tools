@@ -41,8 +41,11 @@ const grafanaAlertPrefix = "Grafana Alert: "
 
 // defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
 var defaults = map[string]string{
+	"METRIC_NAME": "PrometheusAlert",
+	"SERVICE":     "Managed Services",
 	"CATEGORY":    "Software",
 	"ENVIRONMENT": "Production",
+	"SEVERITY":    "Critical",
 }
 
 // severityMap maps Prometheus/Grafana's lowercase severity label to the canonical severity labels; an unmapped value passes through as-is.
@@ -60,7 +63,7 @@ var ErrInvalidStructure = errors.New("invalid prometheus alert payload structure
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds per-field overrides, which the registry leaves empty; unlike other fields, "severity" and "source" are looked up lowercase.
+// Config holds operator overrides mirroring "edge.api.prometheus.alert.config"; unlike other fields, "severity" and "source" are looked up lowercase.
 type Config map[string]string
 
 // Transform parses a raw inbound Alertmanager-shaped webhook and produces one canonical Alert per entry in its "alerts" array.
@@ -132,8 +135,9 @@ func transformOne(alert map[string]any, cfg Config, receiver, batchStatus string
 }
 
 // buildMetricName mirrors the reference script: a Grafana alert with an annotations.title uses that, prefixed; otherwise labels.alertname.
-func buildMetricName(isGrafana bool, labels, annotations map[string]any) string {
-	if isGrafana {
+// It checks grafana_folder rather than isGrafana, exactly as alert-ingestion does, because the metric name is part of the fingerprint.
+func buildMetricName(_ bool, labels, annotations map[string]any) string {
+	if fieldvalue.Str(labels, "grafana_folder") != "" {
 		if title := fieldvalue.Str(annotations, "title"); title != "" {
 			return grafanaAlertPrefix + title
 		}

@@ -62,6 +62,9 @@ const (
 	attributeSourceMessageID = "source_message_id"
 )
 
+// attributeContentType is the Content-Type the source sent, which the AWS gateway passes on.
+const attributeContentType = "content_type"
+
 // errForeignMessage means a message was settled on a queue that did not receive it.
 var errForeignMessage = errors.New("message was not received from an SQS queue")
 
@@ -232,7 +235,9 @@ func toAlertQueueMessage(m *types.Message, receivedAt time.Time) *domain.AlertQu
 		ID:         aws.ToString(m.MessageId),
 		Body:       []byte(aws.ToString(m.Body)),
 		Properties: properties,
-		Handle:     m,
+		// The AWS gateway passes the source's Content-Type on as the content_type attribute.
+		ContentType: properties[attributeContentType],
+		Handle:      m,
 	}
 	if sent, err := strconv.ParseInt(m.Attributes[string(types.MessageSystemAttributeNameSentTimestamp)], 10, 64); err == nil {
 		enqueuedOn := time.UnixMilli(sent).UTC()

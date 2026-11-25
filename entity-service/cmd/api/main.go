@@ -351,8 +351,8 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	if !cfg.AlertConsumerEnabled() || pool == nil {
 		return func() {}
 	}
-	// An alert whose source names no service gets the same default service an incident does.
-	transforms := alertsource.New(cfg.IncidentDefaultServiceID, nil)
+	// Stored as alert-ingestion stores it, so fingerprints match v1; a missing service is filled when the incident is created.
+	transforms := alertsource.New(nil)
 	var priorityQueues, standardQueues []service.AlertQueue
 	var closers []func(context.Context) error
 

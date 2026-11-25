@@ -87,13 +87,13 @@ func TestTransform_BudgetForecastSharesTheIncident(t *testing.T) {
 	}
 }
 
-// Without the Budget Name line the budget comes from the Subject and the account from the topic.
+// Without the Budget Name line the budget comes from the Subject, and the identifier has no account, as alert-ingestion writes it.
 func TestTransform_BudgetNameFromSubject(t *testing.T) {
 	a, err := Transform(budgetEnvelope("AWS Budgets: team-ec2 is forecasted to exceed your alert threshold", "Your budget is forecasted to exceed."), Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.MetricName != "AWS Budgets: team-ec2" || a.UniqueIdentifier != "999988887777/team-ec2" || a.SourceAccount != "999988887777" || a.Description != "Your budget is forecasted to exceed." {
+	if a.MetricName != "AWS Budgets: team-ec2" || a.UniqueIdentifier != "team-ec2" || a.SourceAccount != "999988887777" || a.Description != "Your budget is forecasted to exceed." {
 		t.Errorf("alert = %+v", a)
 	}
 }

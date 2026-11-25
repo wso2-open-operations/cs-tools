@@ -108,10 +108,22 @@ func TestScheduler_StopsWhenContextIsDone(t *testing.T) {
 	}
 }
 
-func TestScheduler_WeightBelowOneActsAsOne(t *testing.T) {
-	s := newScheduler(filled(4, "h"), filled(4, "s"), 0)
+// Weight 0 is strict priority: standard waits until no high item is left.
+func TestScheduler_WeightZeroIsStrictPriority(t *testing.T) {
+	s := newScheduler(filled(6, "h"), filled(2, "s"), 0)
+	got := drainPicks(t, s, 8)
+	want := []domain.AlertTier{"high", "high", "high", "high", "high", "high", "default", "default"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("pick order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestScheduler_NegativeWeightIsStrictPriority(t *testing.T) {
+	s := newScheduler(filled(3, "h"), filled(1, "s"), -2)
 	got := drainPicks(t, s, 4)
-	want := []domain.AlertTier{"high", "default", "high", "default"}
+	want := []domain.AlertTier{"high", "high", "high", "default"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("pick order = %v, want %v", got, want)

@@ -19,6 +19,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Runs against a database with migrations 0292 and 100029 applied, and only when ENTITY_TEST_DATABASE_URL is set.
+// Runs against a database with migrations 0306 and 100029 applied, and only when ENTITY_TEST_DATABASE_URL is set.
 func newAlertIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
@@ -129,5 +130,77 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 	}
 	if rows != 0 {
 		t.Fatalf("a non-internal caller saw %d alert rows, want 0", rows)
+	}
+}
+
+func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	repo := NewAlertRepository(NewScoped(pool))
+	ctx := WithSystemIdentity(context.Background())
+	ids, err := repo.ReserveAlertIDs(ctx, 3)
+	if err != nil {
+		t.Fatalf("ReserveAlertIDs: %v", err)
+	}
+
+	// A batch keeps the body once, on its first row.
+	first := integrationAlert(ids[0], "it-alert-3", 0)
+	first.RawBody, first.ContentType = []byte(`[{"a":1},{"a":2}]`), "application/json"
+	if n, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, integrationAlert(ids[1], "it-alert-3", 1)}); err != nil || n != 2 {
+		t.Fatalf("insert batch stored %d (%v), want 2", n, err)
+	}
+	// A message with no source that could not be normalised, whose body holds a NUL byte jsonb could not.
+	errorRow := domain.NewAlert{
+		ID: ids[2], Tier: domain.AlertTierDefault, MessageID: "it-alert-4", MessageIndex: 0,
+		RawBody: []byte("bad\x00body"), ContentType: "text/plain",
+		ErrorReason: "MissingSource", Error: "the message has no source property",
+		ReceivedOn: time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC),
+	}
+	if n, err := repo.InsertAlerts(ctx, []domain.NewAlert{errorRow}); err != nil || n != 1 {
+		t.Fatalf("insert error row stored %d (%v), want 1", n, err)
+	}
+
+	type stored struct {
+		raw                         []byte
+		contentType, source, reason *string
+		hasAlert                    bool
+	}
+	read := func(messageID string, index int) stored {
+		var s stored
+		if err := NewScoped(pool).QueryRow(ctx, `SELECT raw_body, content_type, source, error_reason, alert IS NOT NULL FROM alert WHERE message_id = $1 AND message_index = $2`, messageID, index).
+			Scan(&s.raw, &s.contentType, &s.source, &s.reason, &s.hasAlert); err != nil {
+			t.Fatalf("read %s/%d: %v", messageID, index, err)
+		}
+		return s
+	}
+	if s := read("it-alert-3", 0); string(s.raw) != `[{"a":1},{"a":2}]` || s.contentType == nil || *s.contentType != "application/json" || s.reason != nil || !s.hasAlert {
+		t.Fatalf("first row = %+v, want the body, content type and alert", s)
+	}
+	if s := read("it-alert-3", 1); s.raw != nil || s.contentType != nil {
+		t.Fatalf("second row = %+v, want no body", s)
+	}
+	if s := read("it-alert-4", 0); string(s.raw) != "bad\x00body" || s.source != nil || s.reason == nil || *s.reason != "MissingSource" || s.hasAlert {
+		t.Fatalf("error row = %+v, want the raw body, no source, the reason and no alert", s)
+	}
+}
+
+func TestAlertRepositoryIntegration_RefusesWhatCanNeverBeStored(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	repo := NewAlertRepository(NewScoped(pool))
+	ctx := WithSystemIdentity(context.Background())
+	ids, err := repo.ReserveAlertIDs(ctx, 2)
+	if err != nil {
+		t.Fatalf("ReserveAlertIDs: %v", err)
+	}
+	nul := integrationAlert(ids[0], "it-alert-5", 0)
+	nul.Alert = json.RawMessage(`{"description":"bad \u0000 byte"}`)
+	// An error row that also carries an alert breaks the row-kind check.
+	mixed := integrationAlert(ids[1], "it-alert-6", 0)
+	mixed.ErrorReason, mixed.Error = "TransformFailed", "boom"
+	for name, row := range map[string]domain.NewAlert{"NUL in jsonb": nul, "error row with an alert": mixed} {
+		_, err := repo.InsertAlerts(ctx, []domain.NewAlert{row})
+		var sqlErr interface{ SQLState() string }
+		if !errors.As(err, &sqlErr) || (sqlErr.SQLState()[:2] != "22" && sqlErr.SQLState()[:2] != "23") {
+			t.Fatalf("%s: err = %v, want a class 22 or 23 error the consumer treats as permanent", name, err)
+		}
 	}
 }

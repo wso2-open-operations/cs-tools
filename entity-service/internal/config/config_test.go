@@ -1756,7 +1756,7 @@ func TestLoad_AuditLogEnabled(t *testing.T) {
 func alertConsumerConfig() Config {
 	c := baseValidConfig()
 	c.DBPoolMaxConns = 20
-	c.AlertingVersion = AlertingVersionV2
+	c.AlertingVersion = AlertingVersionHybrid
 	c.AlertServiceBusNamespace = "sbns-example"
 	c.AlertServiceBusTenantID = "tenant"
 	c.AlertServiceBusClientID = "client"
@@ -1764,8 +1764,7 @@ func alertConsumerConfig() Config {
 	c.AlertServiceBusPriorityQueues = []string{"priority-queue"}
 	c.AlertServiceBusStandardQueues = []string{"standard-queue"}
 	c.AlertConsumerConcurrency = 8
-	c.AlertConsumerPriorityWeight = 4
-	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
+	c.AlertConsumerPriorityWeight = 0
 	return c
 }
 
@@ -1782,7 +1781,6 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "no tenant", change: func(c *Config) { c.AlertServiceBusTenantID = "" }, wantErr: true},
 		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
 		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
-		{name: "no default service", change: func(c *Config) { c.IncidentDefaultServiceID = "" }, wantErr: true},
 		{name: "same queue twice", change: func(c *Config) { c.AlertServiceBusStandardQueues = c.AlertServiceBusPriorityQueues }, wantErr: true},
 		{name: "same queue in another case", change: func(c *Config) { c.AlertServiceBusStandardQueues = []string{"standard-queue", "Priority-Queue"} }, wantErr: true},
 		{name: "several queues per tier", change: func(c *Config) {
@@ -1816,8 +1814,8 @@ func TestLoad_AlertConsumerDefaults(t *testing.T) {
 	if !slices.Equal(c.AlertServiceBusPriorityQueues, []string{"priority-queue"}) || !slices.Equal(c.AlertServiceBusStandardQueues, []string{"standard-queue"}) {
 		t.Errorf("queues = %q and %q, want the gateway's priority-queue and standard-queue", c.AlertServiceBusPriorityQueues, c.AlertServiceBusStandardQueues)
 	}
-	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 4 {
-		t.Errorf("concurrency %d and weight %d, want 8 and 4", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
+	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 0 {
+		t.Errorf("concurrency %d and weight %d, want 8 and 0 (strict priority)", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
 	}
 }
 
@@ -1912,9 +1910,8 @@ func TestLoad_AQueueListThatNamesNoQueue(t *testing.T) {
 	t.Setenv("ALERT_SQS_PRIORITY_QUEUE_URLS", ",,,")
 	t.Setenv("ALERT_SQS_STANDARD_QUEUE_URLS", " , ")
 	c := Load()
-	c.AlertingVersion = AlertingVersionV2
+	c.AlertingVersion = AlertingVersionHybrid
 	c.DBUser, c.DBPassword, c.DBName = "u", "p", "db"
-	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
 	c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "sbns-example", "tenant", "client", "secret"
 	if err := c.validateAlertConsumer(); err == nil || !strings.Contains(err.Error(), "names no queue") {
 		t.Fatalf("validateAlertConsumer() = %v, want an error for a list of only commas", err)
@@ -1959,7 +1956,8 @@ func TestConfig_AlertingVersion(t *testing.T) {
 		wantErr    bool
 	}{
 		{version: AlertingVersionV1, consumerOn: false},
-		{version: AlertingVersionV2, consumerOn: true},
+		// v2 is refused until the alert processor creates incidents, so alerts are never stored with nobody paged.
+		{version: AlertingVersionV2, consumerOn: true, wantErr: true},
 		{version: AlertingVersionHybrid, consumerOn: true},
 		{version: "v3", wantErr: true},
 	}
@@ -1990,5 +1988,16 @@ func TestConfig_AlertingVersionV1IgnoresIncompleteQueueSettings(t *testing.T) {
 	c.AlertSQSPriorityQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"}
 	if err := c.validateAlertConsumer(); err != nil {
 		t.Fatalf("validateAlertConsumer() = %v, want v1 to leave queue settings alone", err)
+	}
+}
+
+func TestLoad_AlertConsumerPriorityWeight(t *testing.T) {
+	for value, want := range map[string]int{"": 0, "0": 0, "3": 3, "-1": 0, "1001": 0, "many": 0} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("ALERT_CONSUMER_PRIORITY_WEIGHT", value)
+			if got := Load().AlertConsumerPriorityWeight; got != want {
+				t.Errorf("weight for %q = %d, want %d (0 is strict priority)", value, got, want)
+			}
+		})
 	}
 }

@@ -32,6 +32,8 @@ const source = "Icinga"
 
 // defaults are used when a field is absent from both the payload and the operator config; SEVERITY is absent since it comes from the state maps below.
 var defaults = map[string]string{
+	"METRIC_NAME": "IcingaAlert",
+	"SERVICE":     "managed_services",
 	"CATEGORY":    "service_interruption",
 	"ENVIRONMENT": "development",
 }
@@ -57,10 +59,10 @@ var ErrInvalidStructure = errors.New("invalid icinga alert payload structure")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds per-field overrides, which the registry leaves empty; any field left empty falls back to the default.
+// Config holds operator overrides mirroring "edge.api.icinga.alert.config"; any field left empty falls back to the default.
 type Config map[string]string
 
-// Transform parses a raw inbound Icinga notification and produces the canonical Alert, cfg supplying any overrides.
+// Transform parses a raw inbound Icinga notification and produces the canonical Alert, cfg supplying operator overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {

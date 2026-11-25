@@ -91,8 +91,9 @@ func sqsMessage(id string) types.Message {
 		Body:          aws.String(`{"alert":true}`),
 		Attributes:    map[string]string{"SentTimestamp": "1794560400000"},
 		MessageAttributes: map[string]types.MessageAttributeValue{
-			"source":      {DataType: aws.String("String"), StringValue: aws.String(" azure ")},
-			"received_at": {DataType: aws.String("String"), StringValue: aws.String("2026-11-13T10:00:00Z")},
+			"source":       {DataType: aws.String("String"), StringValue: aws.String(" azure ")},
+			"received_at":  {DataType: aws.String("String"), StringValue: aws.String("2026-11-13T10:00:00Z")},
+			"content_type": {DataType: aws.String("String"), StringValue: aws.String("application/json")},
 		},
 	}
 }
@@ -118,6 +119,9 @@ func TestQueue_ReceiveKeepsPollingUntilAMessageArrives(t *testing.T) {
 	}
 	if m.ID != "m-1" || string(m.Body) != `{"alert":true}` || m.Properties["source"] != "azure" || m.Properties["received_at"] != "2026-11-13T10:00:00Z" {
 		t.Fatalf("message = %+v, want the id, body and trimmed attributes", m)
+	}
+	if m.ContentType != "application/json" {
+		t.Fatalf("content type = %q, want the content_type attribute", m.ContentType)
 	}
 	if m.EnqueuedOn == nil || !m.EnqueuedOn.Equal(time.UnixMilli(1794560400000)) {
 		t.Fatalf("enqueued on = %v, want the SentTimestamp", m.EnqueuedOn)

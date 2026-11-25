@@ -63,7 +63,7 @@ type AlertTransforms interface {
 type AlertConsumerConfig struct {
 	// Concurrency is how many messages are processed at once across every queue.
 	Concurrency int
-	// PriorityWeight is how many priority alerts may be processed in a row while a standard alert waits.
+	// PriorityWeight is how many priority alerts may be processed in a row while a standard alert waits; 0 is strict priority.
 	PriorityWeight int
 }
 
@@ -73,17 +73,20 @@ const (
 	alertPropertyReceivedAt = "received_at"
 )
 
-// Dead-letter reasons, shown on the dead-letter card so a person can tell why an alert was not stored.
+// Reasons a message could not be normalised, stored as the error row's error_reason, and the dead-letter reason when even that row cannot be stored.
 const (
-	alertDeadLetterMissingSource   = "MissingSource"
-	alertDeadLetterUnknownSource   = "UnknownSource"
-	alertDeadLetterTransformFailed = "TransformFailed"
-	alertDeadLetterTooManyAlerts   = "TooManyAlerts"
-	alertDeadLetterUnstorable      = "UnstorableAlert"
+	alertErrorMissingSource   = "MissingSource"
+	alertErrorUnknownSource   = "UnknownSource"
+	alertErrorTransformFailed = "TransformFailed"
+	alertErrorTooManyAlerts   = "TooManyAlerts"
+	alertErrorUnstorable      = "UnstorableAlert"
 )
 
-// errUnstorableAlert marks an alert PostgreSQL refuses on every attempt, so it is dead-lettered instead of retried.
+// errUnstorableAlert marks an alert PostgreSQL refuses on every attempt, so it is stored as an error row instead of retried.
 var errUnstorableAlert = errors.New("the alert holds a NUL character, which PostgreSQL jsonb cannot store")
+
+// maxAlertErrorText bounds the error text kept on an error row.
+const maxAlertErrorText = 4096
 
 // maxAlertsPerMessage bounds one message's alerts, far above any real batch but low enough for one insert.
 const maxAlertsPerMessage = 1000
@@ -370,22 +373,22 @@ func (c *AlertConsumer) keepLock(ctx context.Context, queue AlertQueue, message 
 	}
 }
 
-// process stores one message's alerts and decides how to settle it; bad payloads are dead-lettered, store failures retried.
+// process stores a message's alerts, or one error row when it cannot be normalised, and decides how to settle it.
 func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage) alertDecision {
 	source := strings.ToLower(strings.TrimSpace(message.Properties[alertPropertySource]))
 	if source == "" {
-		return alertDeadLetterDecision(alertDeadLetterMissingSource, "the message has no source property")
+		return c.storeError(ctx, tier, queueName, message, "", alertErrorMissingSource, "the message has no source property")
 	}
 	transform, ok := c.transforms.Lookup(source)
 	if !ok {
-		return alertDeadLetterDecision(alertDeadLetterUnknownSource, fmt.Sprintf("no transform for source %q", source))
+		return c.storeError(ctx, tier, queueName, message, source, alertErrorUnknownSource, fmt.Sprintf("no transform for source %q", source))
 	}
 	alerts, err := safeTransform(transform, message.Body)
 	if err != nil {
-		return alertDeadLetterDecision(alertDeadLetterTransformFailed, err.Error())
+		return c.storeError(ctx, tier, queueName, message, source, alertErrorTransformFailed, err.Error())
 	}
 	if len(alerts) > maxAlertsPerMessage {
-		return alertDeadLetterDecision(alertDeadLetterTooManyAlerts, fmt.Sprintf("%d alerts in one message, at most %d are accepted", len(alerts), maxAlertsPerMessage))
+		return c.storeError(ctx, tier, queueName, message, source, alertErrorTooManyAlerts, fmt.Sprintf("%d alerts in one message, at most %d are accepted", len(alerts), maxAlertsPerMessage))
 	}
 	if len(alerts) == 0 {
 		return alertDecision{settlement: alertComplete}
@@ -402,20 +405,75 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 
 	rows, err := c.buildRows(source, tier, queueName, message, alerts, ids)
 	if errors.Is(err, errUnstorableAlert) {
-		return alertDeadLetterDecision(alertDeadLetterUnstorable, err.Error())
+		return c.storeError(ctx, tier, queueName, message, source, alertErrorUnstorable, err.Error())
 	}
 	if err != nil {
-		return alertDeadLetterDecision(alertDeadLetterTransformFailed, err.Error())
+		return c.storeError(ctx, tier, queueName, message, source, alertErrorTransformFailed, err.Error())
 	}
 	var stored int64
 	if err := c.withStoreRetry(ctx, func() (err error) {
 		stored, err = c.repo.InsertAlerts(ctx, rows)
 		return err
 	}); err != nil {
+		if isPermanentStoreError(err) {
+			return c.storeError(ctx, tier, queueName, message, source, alertErrorUnstorable, err.Error())
+		}
 		slog.ErrorContext(ctx, "alert consumer: could not store alerts, the message will be redelivered", "messageId", message.ID, "err", err)
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 	return alertDecision{settlement: alertComplete, stored: stored, alerts: len(alerts)}
+}
+
+// storeError stores one error row holding the raw body and why it could not be normalised, so the alert is visible in the database; only a row the database refuses outright is dead-lettered.
+func (c *AlertConsumer) storeError(ctx context.Context, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, source, reason, description string) alertDecision {
+	var ids []string
+	if err := c.withStoreRetry(ctx, func() (err error) {
+		ids, err = c.repo.ReserveAlertIDs(ctx, 1)
+		return err
+	}); err != nil {
+		slog.ErrorContext(ctx, "alert consumer: could not reserve an alert id, the message will be redelivered", "messageId", message.ID, "err", err)
+		return alertDecision{settlement: alertAbandon, alerts: 1}
+	}
+	row := domain.NewAlert{
+		ID:           ids[0],
+		Source:       storableText(source),
+		Tier:         tier,
+		MessageID:    alertMessageKey(queueName, message.ID),
+		MessageIndex: 0,
+		RawBody:      message.Body,
+		ContentType:  storableText(message.ContentType),
+		ErrorReason:  reason,
+		Error:        storableText(truncateRunes(description, maxAlertErrorText)),
+		ReceivedOn:   c.receivedOn(message),
+	}
+	var stored int64
+	if err := c.withStoreRetry(ctx, func() (err error) {
+		stored, err = c.repo.InsertAlerts(ctx, []domain.NewAlert{row})
+		return err
+	}); err != nil {
+		if isPermanentStoreError(err) {
+			return alertDeadLetterDecision(reason, description)
+		}
+		slog.ErrorContext(ctx, "alert consumer: could not store an error row, the message will be redelivered", "messageId", message.ID, "err", err)
+		return alertDecision{settlement: alertAbandon, alerts: 1}
+	}
+	slog.WarnContext(ctx, "alert consumer: stored a message that could not be normalised", "messageId", message.ID, "queue", queueName, "reason", reason)
+	return alertDecision{settlement: alertComplete, stored: stored, alerts: 1}
+}
+
+// storableText drops what a PostgreSQL text column refuses: NUL characters and invalid UTF-8.
+func storableText(s string) string {
+	return strings.ReplaceAll(strings.ToValidUTF8(s, "\uFFFD"), "\x00", "")
+}
+
+// isPermanentStoreError reports a PostgreSQL data exception (class 22) or constraint violation (class 23), which fails the same way on every attempt.
+func isPermanentStoreError(err error) bool {
+	var sqlErr interface{ SQLState() string }
+	if !errors.As(err, &sqlErr) {
+		return false
+	}
+	state := sqlErr.SQLState()
+	return strings.HasPrefix(state, "22") || strings.HasPrefix(state, "23")
 }
 
 // safeTransform turns a panic in a transform into an error, so one malformed payload is dead-lettered instead of stopping the service.
@@ -455,6 +513,9 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueNam
 			ReceivedOn:   receivedOn,
 		}
 	}
+	// The message's body travels on its first row only, so a batch does not repeat it once per alert.
+	rows[0].RawBody = message.Body
+	rows[0].ContentType = storableText(message.ContentType)
 	return rows, nil
 }
 
@@ -490,11 +551,11 @@ func (c *AlertConsumer) receivedOn(message *domain.AlertQueueMessage) time.Time 
 	return c.now().UTC()
 }
 
-// withStoreRetry runs fn, retrying a failed attempt after each delay in alertStoreRetryDelays.
+// withStoreRetry runs fn, retrying a failed attempt after each delay in alertStoreRetryDelays; an error that fails the same way every time is not retried.
 func (c *AlertConsumer) withStoreRetry(ctx context.Context, fn func() error) error {
 	err := fn()
 	for _, delay := range alertStoreRetryDelays {
-		if err == nil || !c.sleep(ctx, delay) {
+		if err == nil || isPermanentStoreError(err) || !c.sleep(ctx, delay) {
 			return err
 		}
 		err = fn()

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -71,6 +72,7 @@ func TestQueue_ConvertsAndSettlesMessages(t *testing.T) {
 		MessageID:             "m-1",
 		Body:                  []byte("{}"),
 		ApplicationProperties: map[string]any{"source": " azure ", "count": 3, "empty": nil},
+		ContentType:           to.Ptr(" application/json "),
 		EnqueuedTime:          &enqueued,
 		LockedUntil:           &locked,
 	}}}
@@ -84,6 +86,9 @@ func TestQueue_ConvertsAndSettlesMessages(t *testing.T) {
 	m := messages[0]
 	if m.ID != "m-1" || m.Properties["source"] != "azure" || m.Properties["count"] != "3" || !m.EnqueuedOn.Equal(enqueued) || !m.LockedUntil.Equal(locked) {
 		t.Fatalf("message = %+v, want the id, text properties and times", m)
+	}
+	if m.ContentType != "application/json" {
+		t.Fatalf("content type = %q, want the broker's content type", m.ContentType)
 	}
 	if _, present := m.Properties["empty"]; present {
 		t.Fatal("a nil property was kept")

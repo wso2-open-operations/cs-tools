@@ -1,4 +1,4 @@
-// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
 //
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
@@ -16,20 +16,22 @@
 
 package alertsource
 
-import "testing"
+import (
+	"errors"
+	"testing"
 
-const testDefaultServiceID = "00000000-0000-4000-8000-000000000001"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/site24x7"
+)
 
-func TestRegistry_FillsWhatTheSourceLeftEmpty(t *testing.T) {
-	r := New(testDefaultServiceID, nil)
+// A field the source left out takes the source's own built-in default, as in alert-ingestion, so the fingerprint matches v1.
+func TestRegistry_FillsGapsWithAlertIngestionDefaults(t *testing.T) {
+	r := New(nil)
 	cases := map[string]struct {
-		route, body, metricName string
+		route, body, service, metricName, severity string
 	}{
-		"azure":                       {"azure", `{"data":{"essentials":{"alertId":"a1","monitorCondition":"Fired"}}}`, "Azure Alert"},
-		"gcp":                         {"gcp", `{"incident":{"incident_id":"i1","state":"open"}}`, "GCP Alert"},
-		"aws":                         {"aws", `{"Type":"Notification","TopicArn":"arn:aws:sns:us-east-1:1:t","Message":"{\"AlarmArn\":\"arn:a\",\"NewStateValue\":\"ALARM\"}"}`, "AWS Alert"},
-		"site24x7 without a status":   {"site24x7", `{"MONITOR_ID":"1"}`, "Site24x7 Alert"},
-		"servicenow without a source": {"servicenow", `{"description":"disk full"}`, "ServiceNow Alert"},
+		"azure":      {"azure", `{"data":{"essentials":{"alertId":"a1","monitorCondition":"Fired"}}}`, "Managed Services", "AzureCloudAlert", "Critical"},
+		"aws":        {"aws", `{"Type":"Notification","TopicArn":"arn:aws:sns:us-east-1:1:t","Message":"{\"AlarmArn\":\"arn:a\",\"NewStateValue\":\"ALARM\"}"}`, "", "Unknown Metric", "critical"},
+		"servicenow": {"servicenow", `{"description":"disk full"}`, "", "", ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -39,15 +41,15 @@ func TestRegistry_FillsWhatTheSourceLeftEmpty(t *testing.T) {
 				t.Fatalf("transform = %v, %v", alerts, err)
 			}
 			a := alerts[0]
-			if a.Service != testDefaultServiceID || a.MetricName != tc.metricName || a.Severity != DefaultSeverity {
-				t.Fatalf("service %q, metric name %q, severity %q; want %q, %q and %q", a.Service, a.MetricName, a.Severity, testDefaultServiceID, tc.metricName, DefaultSeverity)
+			if a.Service != tc.service || a.MetricName != tc.metricName || a.Severity != tc.severity {
+				t.Fatalf("service %q, metric name %q, severity %q; want %q, %q and %q", a.Service, a.MetricName, a.Severity, tc.service, tc.metricName, tc.severity)
 			}
 		})
 	}
 }
 
 func TestRegistry_KeepsWhatTheSourceSent(t *testing.T) {
-	r := New(testDefaultServiceID, nil)
+	r := New(nil)
 	transform, _ := r.Lookup("servicenow")
 	alerts, err := transform([]byte(`{"service":"checkout","metric_name":"cpu","severity":"major","source":"Test"}`))
 	if err != nil {
@@ -58,14 +60,10 @@ func TestRegistry_KeepsWhatTheSourceSent(t *testing.T) {
 	}
 }
 
-func TestRegistry_ReadsSite24x7TagsWithoutConfiguration(t *testing.T) {
-	r := New(testDefaultServiceID, nil)
-	transform, _ := r.Lookup("site24x7")
-	alerts, err := transform([]byte(`{"STATUS":"DOWN","MONITORNAME":"api","MONITOR_ID":"1","TAGS":["Service:checkout","Environment:prod"]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a := alerts[0]; a.Service != "checkout" || a.Environment != "prod" {
-		t.Fatalf("alert = %+v, want the service and environment read from the tags", a)
+// With no SITE24X7_ALERT_CONFIG, alert-ingestion rejects a Site24x7 alert without STATUS, and so does the consumer.
+func TestRegistry_RejectsASite24x7AlertWithoutStatus(t *testing.T) {
+	transform, _ := New(nil).Lookup("site24x7")
+	if _, err := transform([]byte(`{"MONITOR_ID":"1"}`)); !errors.Is(err, site24x7.ErrMissingStatus) {
+		t.Fatalf("err = %v, want ErrMissingStatus", err)
 	}
 }

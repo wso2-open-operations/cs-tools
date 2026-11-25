@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- alert is internal only: the Service Bus consumer writes it as the system identity, and no customer may read it.
+-- alert is internal only: the alert consumer writes it as the system identity, and no customer may read it.
 ALTER TABLE alert ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alert FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS alert_internal_only ON alert;
