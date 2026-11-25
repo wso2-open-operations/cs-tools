@@ -4778,6 +4778,12 @@ changed.
   source refuses them (its API only replaces the list; emulating a delta would bring the race back),
   and a dual-write mirror sends the persisted (non-`Locked`) list after the change. Both portals use
   these for add/remove; `watchList` stays for create-time and bulk replace.
+  **Incidents have the same fields** on `PATCH /incidents/{id}` (`UpdateIncidentRequest.AddWatchers` /
+  `RemoveWatchers`, `changeIncidentWatchers`): there they are record fields of the update's own
+  transaction, so they combine with the other fields and with each other but not with `watchList`.
+  The add side checks every id is a user (400 otherwise) and inserts with `ON CONFLICT DO NOTHING`;
+  the remove side is a `DELETE ... user_id = ANY(...)`. The ServiceNow data source refuses them, and a
+  dual-write mirror sends the resulting persisted list as `watchList`, since ServiceNow only replaces.
 - **Case watch list** (`work_item_watcher`, migration 0042):
   `UpdateCase`'s `WatchList` field, previously rejected outright on this
   data source, now has its own branch (`updateCaseWatchList`) — split out

@@ -36372,7 +36372,29 @@ components:
             format: uuid
           description: |
             The full set of user identifiers to set as the incident watch list, replacing
-            whatever is there. An empty array clears the watch list.
+            whatever is there. An empty array clears the watch list. A caller working from
+            a stale copy overwrites watchers added since; use `addWatchers` / `removeWatchers`
+            to change the list without that risk.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user UUIDs to add to the incident watch list, applied in the update's own
+            transaction against the list stored at that moment, so a watcher someone else added
+            after the caller loaded the incident is kept. Already watching is a no-op; an unknown
+            user is a 400. May be combined with `removeWatchers` and the other fields, not with
+            `watchList`. Postgres data source only (400 elsewhere).
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user UUIDs to remove from the incident watch list, applied as `addWatchers`
+            is. Not watching is a no-op, and the last watcher may be removed. A user named in both
+            lists is a 400.
         environment:
           type: string
           nullable: true

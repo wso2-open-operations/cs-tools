@@ -7262,6 +7262,17 @@ type UpdateIncidentRequest struct {
 	AdditionalComments  *string                 `json:"additionalComments,omitempty"`
 	WorkNotes           *string                 `json:"workNotes,omitempty"`
 	WatchList           *[]string               `json:"watchList,omitempty"`
+	// AddWatchers and RemoveWatchers change the watch list by delta (platform
+	// user UUIDs) instead of replacing it: they are applied in the update's own
+	// transaction against the list stored at that moment, so a caller working
+	// from a stale copy cannot drop a watcher someone else added since it
+	// loaded the incident (WatchList can, as it replaces the whole list).
+	// Adding someone already watching and removing someone not watching are
+	// no-ops, and removing the last watcher is allowed. They may be sent
+	// together, and with the record's other fields, but not with WatchList,
+	// and a user may not be in both. PostgreSQL data source only.
+	AddWatchers    []string `json:"addWatchers,omitempty"`
+	RemoveWatchers []string `json:"removeWatchers,omitempty"`
 	// Environment: see CreateIncidentRequest.Environment doc comment. Double
 	// pointer distinguishes "omitted" (nil) from an explicit `null` clear
 	// (non-nil outer, nil inner) from a new value (non-nil, non-nil) -- a
