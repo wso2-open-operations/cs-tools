@@ -29,11 +29,32 @@ import {
 import { useState, type JSX } from "react";
 import type { AlertMuteRule } from "@features/csm-operations/types/alertMuteRules";
 import { formatDuration, latestAllowedEnd, MAX_ALERT_MUTE_RULE_HOURS } from "@features/csm-operations/utils/alertMuteRules";
-import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import {
+  formatBackendTimestampForDisplay,
+  formatDateTimeLocal,
+  parseDateTimeLocal,
+  utcMsToZonedInputValue,
+  zonedInputToUtcIso,
+} from "@utils/dateTime";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
 
 const QUICK_EXTENSIONS_MIN = [30, 60, 120];
+
+/**
+ * The picker shows and reads wall-clock time in the user's display zone, the zone the
+ * "Currently ends" text is in, not the browser's: an instant as the picker's value...
+ */
+function pickerValue(ms: number): Date | null {
+  return parseDateTimeLocal(utcMsToZonedInputValue(ms));
+}
+
+/** ...and the picker's value as the instant it means in that zone (null if unreadable). */
+function pickedInstant(value: Date): number | null {
+  if (Number.isNaN(value.getTime())) return null;
+  const iso = zonedInputToUtcIso(formatDateTimeLocal(value));
+  return iso ? Date.parse(iso) : null;
+}
 
 interface ExtendAlertMuteRuleDialogProps {
   rule: AlertMuteRule;
@@ -58,9 +79,8 @@ export default function ExtendAlertMuteRuleDialog({
 }: ExtendAlertMuteRuleDialogProps): JSX.Element {
   const currentEnd = Date.parse(rule.endOn);
   const latest = latestAllowedEnd(rule);
-  const [end, setEnd] = useState<Date | null>(null);
-
-  const endMs = end && !Number.isNaN(end.getTime()) ? end.getTime() : null;
+  // The chosen end, as an instant: the quick buttons set it directly, the picker through the display zone.
+  const [endMs, setEndMs] = useState<number | null>(null);
   const invalid =
     endMs === null
       ? null
@@ -92,7 +112,7 @@ export default function ExtendAlertMuteRuleDialog({
                   variant={endMs === target ? "contained" : "outlined"}
                   size="small"
                   disabled={isSubmitting || target > latest}
-                  onClick={() => setEnd(new Date(target))}
+                  onClick={() => setEndMs(target)}
                 >
                   {`+${formatDuration(min * 60_000)}`}
                 </Button>
@@ -102,11 +122,11 @@ export default function ExtendAlertMuteRuleDialog({
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <DateTimePicker
               label="New end"
-              value={end}
+              value={endMs === null ? null : pickerValue(endMs)}
               disabled={isSubmitting}
-              minDateTime={new Date(currentEnd)}
-              maxDateTime={new Date(latest)}
-              onChange={(next: unknown) => setEnd(next instanceof Date ? next : null)}
+              minDateTime={pickerValue(currentEnd) ?? undefined}
+              maxDateTime={pickerValue(latest) ?? undefined}
+              onChange={(next: unknown) => setEndMs(next instanceof Date ? pickedInstant(next) : null)}
               slotProps={{
                 textField: { size: "small", fullWidth: true, required: true, error: !!invalid, helperText: invalid ?? undefined },
               }}
