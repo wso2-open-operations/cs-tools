@@ -219,7 +219,7 @@ Migration `0295_audit_log_foundation.sql` adds the field-level audit log: `csm_a
 
 ### What is logged
 
-- **Updates and deletes only.** Every audit trigger is `AFTER UPDATE OR DELETE`, `audit_config` included. An update logs each changed field (old and new value); a delete logs every non-NULL column.
+- **Updates and deletes only.** Every audit trigger is `AFTER UPDATE OR DELETE`, `audit_config` included. An update logs each changed field (old and new value). A delete logs one row per record (migration `0307`): `field_name` is `__row__` and `old_value` holds the whole old row as a JSON object, so the record can still be read after it is gone. NULL, excluded and `updated_on` / `updated_by` columns are left out of it, a masked column reads `[hidden]`, and a value over 8192 bytes reads `[value too large]`, each column on its own so one large field does not hide the rest.
 - **`updated_on` and `updated_by` are never logged**, on any table. `audit_log_row_change` always leaves them out: each log row already has the actor and the time, and jobs that rewrite them on every run (the Salesforce ingest) would only add noise. An update that changes only those two logs nothing.
 - **Who added or changed a row is the row's own columns** (`created_by`, `created_on`, `updated_by`, `updated_on`), not the log. An audited table must carry them or an equivalent: `work_item`'s cover the 14 type tables that share its id, `case_attachment` has `uploaded_by`, `plg_note_revision` has `edited_by` / `edited_on`.
 - **Adding the columns to a table that lacks them** goes in a migration of its own, as `0304` did: nullable, `created_on DEFAULT now()`, `created_by DEFAULT audit_actor()`, and a `BEFORE UPDATE` trigger `csm_stamp_update` (`audit_stamp_update()`) that sets `updated_on` / `updated_by`. It is an ordinary trigger, so it does not fire under `session_replication_role = replica`; the audit trigger does.
@@ -280,7 +280,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
   SELECT member::regrole FROM pg_auth_members WHERE roleid = 'csm_audit_reader'::regrole;
   ```
 
-- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), apply `0306` (the fail-open trigger, which `make migrate` does for a database that is behind), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
+- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), apply `0306` (the fail-open trigger) and then `0307` (a delete as one row), in the schema that holds the audit log (`make migrate` runs both for a database that is behind and skips one already recorded in `csm_migration_applied_migration`; a database that ran the dist script by hand may not have them recorded), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
 
   ```sql
   DO $$
@@ -327,6 +327,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
 - `exclude_from_audit` on a registered table also drops its trigger, as `unregister_audit` does.
 - Every partition carries its own `csm_audit_log_no_truncate` guard, because a statement trigger on the parent does not reach them. `audit_create_partitions` adds it to each new month.
 - Everything lives in the schema the migration runs in (`current_schema()`), so the audit log works in `public` or in a `DB_SCHEMA`. The `SECURITY DEFINER` functions are installed through `DO` blocks that fill the schema into their search path and table names (`__SCHEMA__` / `__SCHEMA_LIT__`). A new function that touches the audit tables must be added the same way, never with `public` written in. Inside `format()` pass the schema as an argument (`%I`), never inside the format string. Their search path ends with `pg_temp`, so a caller's temp table cannot stand in for `audit_config`.
+- A migration that replaces an audit function (`0306`, `0307`) must run in the schema that holds the audit log: from a session whose `search_path` points elsewhere (`public` when the log is in `DB_SCHEMA`) it would install a second, unused copy, or fail with "permission denied for schema public". `0307` checks first and stops with a message naming the schema; run `SET search_path TO <schema>;` before it.
 - The new-table warning (an event trigger, needs superuser) watches that schema only.
 
 ### Tests
