@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -88,7 +89,12 @@ func (c Config) Host() string {
 	for _, part := range strings.Split(c.ConnectionString, ";") {
 		key, value, found := strings.Cut(part, "=")
 		if found && strings.EqualFold(strings.TrimSpace(key), "Endpoint") {
-			return FullyQualifiedNamespace(value)
+			// Only the parsed host is returned, so user information in the URL never reaches the log.
+			endpoint, err := url.Parse(strings.TrimSpace(value))
+			if err != nil {
+				return ""
+			}
+			return endpoint.Hostname()
 		}
 	}
 	return ""

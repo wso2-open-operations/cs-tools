@@ -81,6 +81,8 @@ func TestConfigHost(t *testing.T) {
 		"namespace":         {Config{Namespace: "sbns-example"}, "sbns-example.servicebus.windows.net"},
 		"connection string": {Config{ConnectionString: testConnectionString}, "sbns-example.servicebus.windows.net"},
 		"no endpoint":       {Config{ConnectionString: "SharedAccessKeyName=x;SharedAccessKey=y"}, ""},
+		"user information":  {Config{ConnectionString: "Endpoint=sb://user:hunter2@sbns-example.servicebus.windows.net:443/;SharedAccessKeyName=x;SharedAccessKey=y"}, "sbns-example.servicebus.windows.net"},
+		"unparsable":        {Config{ConnectionString: "Endpoint=sb://%zz/;SharedAccessKey=y"}, ""},
 	} {
 		if got := tt.cfg.Host(); got != tt.want {
 			t.Errorf("%s: Host() = %q, want %q", name, got, tt.want)
