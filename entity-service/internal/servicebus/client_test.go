@@ -16,31 +16,54 @@
 
 package servicebus
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
-func TestFullyQualifiedNamespace(t *testing.T) {
-	for in, want := range map[string]string{
-		"sbns-example":                                "sbns-example.servicebus.windows.net",
-		"sbns-example.servicebus.windows.net":         "sbns-example.servicebus.windows.net",
-		" sb://sbns-example.servicebus.windows.net/ ": "sbns-example.servicebus.windows.net",
-		"sbns-example.servicebus.usgovcloudapi.net":   "sbns-example.servicebus.usgovcloudapi.net",
+func TestNewClient_RequiresConnectionString(t *testing.T) {
+	if _, err := NewClient(Config{}); err == nil {
+		t.Error("NewClient with no connection string succeeded, want an error")
+	}
+}
+
+const testConnectionString = "Endpoint=sb://sbns-example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=a2V5"
+
+func TestNewClient_ConnectionString(t *testing.T) {
+	client, err := NewClient(Config{ConnectionString: testConnectionString})
+	if err != nil {
+		t.Fatalf("NewClient with a connection string: %v", err)
+	}
+	_ = client.Close(context.Background())
+}
+
+func TestNewClient_RejectsBadConnectionString(t *testing.T) {
+	for name, cfg := range map[string]Config{
+		"not a connection string": {ConnectionString: "not-a-connection-string"},
+		"no key":                  {ConnectionString: "Endpoint=sb://sbns-example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey"},
 	} {
-		if got := FullyQualifiedNamespace(in); got != want {
-			t.Errorf("FullyQualifiedNamespace(%q) = %q, want %q", in, got, want)
+		_, err := NewClient(cfg)
+		if err == nil {
+			t.Errorf("%s: NewClient succeeded, want an error", name)
+		} else if strings.Contains(err.Error(), "a2V5") {
+			t.Errorf("%s: error %q leaks the shared access key", name, err)
 		}
 	}
 }
 
-func TestNewClient_RequiresEveryCredential(t *testing.T) {
-	full := Config{Namespace: "sbns-example", TenantID: "tenant", ClientID: "client", ClientSecret: "secret"}
-	for name, cfg := range map[string]Config{
-		"no namespace": {TenantID: full.TenantID, ClientID: full.ClientID, ClientSecret: full.ClientSecret},
-		"no tenant":    {Namespace: full.Namespace, ClientID: full.ClientID, ClientSecret: full.ClientSecret},
-		"no client":    {Namespace: full.Namespace, TenantID: full.TenantID, ClientSecret: full.ClientSecret},
-		"no secret":    {Namespace: full.Namespace, TenantID: full.TenantID, ClientID: full.ClientID},
+func TestConfigHost(t *testing.T) {
+	for name, tt := range map[string]struct {
+		cfg  Config
+		want string
+	}{
+		"connection string": {Config{ConnectionString: testConnectionString}, "sbns-example.servicebus.windows.net"},
+		"no endpoint":       {Config{ConnectionString: "SharedAccessKeyName=x;SharedAccessKey=y"}, ""},
+		"user information":  {Config{ConnectionString: "Endpoint=sb://user:hunter2@sbns-example.servicebus.windows.net:443/;SharedAccessKeyName=x;SharedAccessKey=y"}, "sbns-example.servicebus.windows.net"},
+		"unparsable":        {Config{ConnectionString: "Endpoint=sb://%zz/;SharedAccessKey=y"}, ""},
 	} {
-		if _, err := NewClient(cfg); err == nil {
-			t.Errorf("%s: NewClient succeeded, want an error", name)
+		if got := tt.cfg.Host(); got != tt.want {
+			t.Errorf("%s: Host() = %q, want %q", name, got, tt.want)
 		}
 	}
 }

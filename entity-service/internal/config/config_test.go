@@ -1753,14 +1753,13 @@ func TestLoad_AuditLogEnabled(t *testing.T) {
 	}
 }
 
+const testServiceBusConnectionString = "Endpoint=sb://sbns-example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=a2V5"
+
 func alertConsumerConfig() Config {
 	c := baseValidConfig()
 	c.DBPoolMaxConns = 20
 	c.AlertingVersion = AlertingVersionHybrid
-	c.AlertServiceBusNamespace = "sbns-example"
-	c.AlertServiceBusTenantID = "tenant"
-	c.AlertServiceBusClientID = "client"
-	c.AlertServiceBusClientSecret = "secret"
+	c.AlertServiceBusConnectionString = testServiceBusConnectionString
 	c.AlertServiceBusPriorityQueues = []string{"priority-queue"}
 	c.AlertServiceBusStandardQueues = []string{"standard-queue"}
 	c.AlertConsumerConcurrency = 8
@@ -1777,10 +1776,7 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "complete", change: func(*Config) {}},
 		{name: "disabled ignores everything else", change: func(c *Config) { *c = baseValidConfig() }},
 		{name: "no database", change: func(c *Config) { c.DBUser, c.DBPassword, c.DBName = "", "", ""; c.DataSource = DataSourceServiceNow }, wantErr: true},
-		{name: "no namespace", change: func(c *Config) { c.AlertServiceBusNamespace = "" }, wantErr: true},
-		{name: "no tenant", change: func(c *Config) { c.AlertServiceBusTenantID = "" }, wantErr: true},
-		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
-		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
+		{name: "no connection string", change: func(c *Config) { c.AlertServiceBusConnectionString = "" }, wantErr: true},
 		{name: "same queue twice", change: func(c *Config) { c.AlertServiceBusStandardQueues = c.AlertServiceBusPriorityQueues }, wantErr: true},
 		{name: "same queue in another case", change: func(c *Config) { c.AlertServiceBusStandardQueues = []string{"standard-queue", "Priority-Queue"} }, wantErr: true},
 		{name: "several queues per tier", change: func(c *Config) {
@@ -1821,7 +1817,7 @@ func TestLoad_AlertConsumerDefaults(t *testing.T) {
 
 func sqsOnlyConfig() Config {
 	c := alertConsumerConfig()
-	c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "", "", "", ""
+	c.AlertServiceBusConnectionString = ""
 	c.AlertSQSPriorityQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"}
 	c.AlertSQSStandardQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/standard-queue"}
 	return c
@@ -1839,8 +1835,7 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 			c.AlertSQSDeadLetterQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/alerts-dead-letter"
 		}},
 		{name: "both clouds", change: func(c *Config) {
-			a := alertConsumerConfig()
-			c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = a.AlertServiceBusNamespace, a.AlertServiceBusTenantID, a.AlertServiceBusClientID, a.AlertServiceBusClientSecret
+			c.AlertServiceBusConnectionString = testServiceBusConnectionString
 		}},
 		{name: "no cloud at all", change: func(c *Config) { c.AlertSQSPriorityQueueURLs, c.AlertSQSStandardQueueURLs = nil, nil }, wantErr: true},
 		{name: "only one SQS queue", change: func(c *Config) { c.AlertSQSStandardQueueURLs = nil }, wantErr: true},
@@ -1870,7 +1865,10 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 		{name: "dead-letter queue is the priority input queue in the other hostname form", change: func(c *Config) {
 			c.AlertSQSDeadLetterQueueURL = "https://us-east-1.queue.amazonaws.com/123456789012/priority-queue/"
 		}, wantErr: true},
-		{name: "partial Azure next to complete AWS", change: func(c *Config) { c.AlertServiceBusNamespace = "sbns-example" }, wantErr: true},
+		{name: "Azure without queues next to complete AWS", change: func(c *Config) {
+			c.AlertServiceBusConnectionString = testServiceBusConnectionString
+			c.AlertServiceBusStandardQueues = nil
+		}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1912,7 +1910,7 @@ func TestLoad_AQueueListThatNamesNoQueue(t *testing.T) {
 	c := Load()
 	c.AlertingVersion = AlertingVersionHybrid
 	c.DBUser, c.DBPassword, c.DBName = "u", "p", "db"
-	c.AlertServiceBusNamespace, c.AlertServiceBusTenantID, c.AlertServiceBusClientID, c.AlertServiceBusClientSecret = "sbns-example", "tenant", "client", "secret"
+	c.AlertServiceBusConnectionString = testServiceBusConnectionString
 	if err := c.validateAlertConsumer(); err == nil || !strings.Contains(err.Error(), "names no queue") {
 		t.Fatalf("validateAlertConsumer() = %v, want an error for a list of only commas", err)
 	}
