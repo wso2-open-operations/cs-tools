@@ -26,6 +26,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -51,8 +53,8 @@ FOR UPDATE OF o SKIP LOCKED`
 
 const markAlertOutboxQuery = `UPDATE alert_outbox SET published_on = NOW() WHERE alert_id = ANY($1::text[])`
 
-// Drain implements alertprocessor.Outbox.
-func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]alertprocessor.Event) []string) (int, error) {
+// Drain implements relay.Outbox.
+func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]event.Event) []string) (int, error) {
 	marked := 0
 	err := o.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, drainAlertOutboxQuery, limit)
@@ -76,16 +78,16 @@ func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]alert
 	return marked, err
 }
 
-func scanAlertEvent(row pgx.CollectableRow) (alertprocessor.Event, error) {
-	var e alertprocessor.Event
+func scanAlertEvent(row pgx.CollectableRow) (event.Event, error) {
+	var e event.Event
 	var tier string
 	var body []byte
 	if err := row.Scan(&e.AlertID, &tier, &e.ReceivedOn, &body); err != nil {
-		return alertprocessor.Event{}, err
+		return event.Event{}, err
 	}
 	e.Tier = domain.AlertTier(tier)
 	if err := json.Unmarshal(body, &e.Alert); err != nil {
-		return alertprocessor.Event{}, fmt.Errorf("decode alert %s: %w", e.AlertID, err)
+		return event.Event{}, fmt.Errorf("decode alert %s: %w", e.AlertID, err)
 	}
 	return e, nil
 }
@@ -115,8 +117,8 @@ type groupTx struct {
 	fingerprint string
 }
 
-func (t groupTx) Group(ctx context.Context) (*alertprocessor.Group, error) {
-	g := alertprocessor.Group{Fingerprint: t.fingerprint}
+func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
+	g := strategy.Group{Fingerprint: t.fingerprint}
 	var incidentID *string
 	err := t.tx.QueryRow(ctx,
 		`SELECT incident_id::text, first_seen_on, last_seen_on, alert_count FROM alert_group WHERE fingerprint = $1`, t.fingerprint,
@@ -133,7 +135,7 @@ func (t groupTx) Group(ctx context.Context) (*alertprocessor.Group, error) {
 	return &g, nil
 }
 
-func (t groupTx) SaveGroup(ctx context.Context, g alertprocessor.Group) error {
+func (t groupTx) SaveGroup(ctx context.Context, g strategy.Group) error {
 	_, err := t.tx.Exec(ctx, `INSERT INTO alert_group (fingerprint, incident_id, first_seen_on, last_seen_on, alert_count, updated_on)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (fingerprint) DO UPDATE SET incident_id = EXCLUDED.incident_id, first_seen_on = EXCLUDED.first_seen_on,

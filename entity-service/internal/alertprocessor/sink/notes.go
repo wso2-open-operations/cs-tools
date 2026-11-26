@@ -14,18 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+package sink
 
 import (
 	"fmt"
 	"html"
 	"strings"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 )
 
 // Work notes are HTML, the format incident work notes are rendered in, and every value is escaped.
 
 // creationNote is the first work note on an incident an alert opened: the alert's fields as a table.
-func creationNote(e Event) string {
+func creationNote(e event.Event) string {
 	a := e.Alert
 	rows := [][2]string{
 		{"service", a.Service},
@@ -47,9 +50,9 @@ func creationNote(e Event) string {
 }
 
 // foldNote is the work note for an alert added to an open incident.
-func foldNote(outcome Outcome, e Event) string {
+func foldNote(outcome strategy.Outcome, e event.Event) string {
 	kind := "Duplicate"
-	if outcome == OutcomeResolve {
+	if outcome == strategy.Resolve {
 		kind = "OK"
 	}
 	return fmt.Sprintf("%s alert received.<br>Alert: %s<br>Metric: %s<br>Source: %s",

@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+package sink
 
 import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -57,6 +60,13 @@ func (f *fakeIncidents) SearchIncidents(context.Context, domain.SearchIncidentsR
 	return domain.SearchIncidentsResponse{Incidents: []domain.SearchIncidentView{{ID: &f.existing}}}, nil
 }
 
+func alert(id, severity string) event.Event {
+	return event.Event{AlertID: id, ReceivedOn: time.Now(), Alert: model.Alert{
+		Service: "client-prod-alert-integration", MetricName: "TEST", Severity: severity,
+		Category: "service_interruption", Environment: "prod", Source: "elasticsearch", UniqueIdentifier: "r2",
+	}}
+}
+
 type fakeServices map[string]string
 
 func (f fakeServices) SearchITServices(_ context.Context, query string, _, _ int) ([]domain.ITService, int, error) {
@@ -69,8 +79,8 @@ func (f fakeServices) SearchITServices(_ context.Context, query string, _, _ int
 	return out, len(out), nil
 }
 
-func sink(incidents *fakeIncidents) IncidentSink {
-	return IncidentSink{
+func newSink(incidents *fakeIncidents) Incident {
+	return Incident{
 		Incidents: incidents, CallerID: "caller", DefaultServiceID: "svc-default",
 		Services: fakeServices{"Client-Prod-Alert-Integration": "svc-1", "client-prod-alert-integration-eu": "svc-2"},
 	}
@@ -78,9 +88,9 @@ func sink(incidents *fakeIncidents) IncidentSink {
 
 func TestIncidentSinkOpen(t *testing.T) {
 	incidents := &fakeIncidents{}
-	e := withID(event("major", 0), "A1")
+	e := alert("A1", "major")
 	e.Alert.Source = "Azure Monitor"
-	id, err := sink(incidents).Open(context.Background(), e)
+	id, err := newSink(incidents).Open(context.Background(), e)
 	if err != nil || id != "inc-new" {
 		t.Fatalf("Open = %q, %v", id, err)
 	}
@@ -98,7 +108,7 @@ func TestIncidentSinkOpen(t *testing.T) {
 
 func TestIncidentSinkOpenReusesTheIncidentAlreadyCreated(t *testing.T) {
 	incidents := &fakeIncidents{existing: "inc-old"}
-	id, err := sink(incidents).Open(context.Background(), withID(event("critical", 0), "A1"))
+	id, err := newSink(incidents).Open(context.Background(), alert("A1", "critical"))
 	if err != nil || id != "inc-old" || len(incidents.created) != 0 {
 		t.Fatalf("Open = %q, %v, created %d; want the incident found by correlation id", id, err, len(incidents.created))
 	}
@@ -106,9 +116,9 @@ func TestIncidentSinkOpenReusesTheIncidentAlreadyCreated(t *testing.T) {
 
 func TestIncidentSinkFallsBackToTheDefaultService(t *testing.T) {
 	incidents := &fakeIncidents{}
-	e := withID(event("critical", 0), "A1")
+	e := alert("A1", "critical")
 	e.Alert.Service = "unknown-service"
-	if _, err := sink(incidents).Open(context.Background(), e); err != nil {
+	if _, err := newSink(incidents).Open(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
 	if incidents.created[0].ServiceID != "svc-default" {
@@ -129,7 +139,7 @@ func TestIncidentSinkIsOpen(t *testing.T) {
 		"deleted":   {&fakeIncidents{missing: true}, false},
 	}
 	for name, tt := range tests {
-		got, err := sink(tt.incidents).IsOpen(context.Background(), "inc-1")
+		got, err := newSink(tt.incidents).IsOpen(context.Background(), "inc-1")
 		if err != nil || got != tt.want {
 			t.Errorf("%s: IsOpen = %v, %v; want %v", name, got, err, tt.want)
 		}

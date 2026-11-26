@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+// Package severity reads alert severity labels the way alert-core did, and maps them to incident priority, category and contact type.
+package severity
 
 import (
 	"strings"
@@ -32,23 +33,23 @@ var severityRank = map[string]int{
 	"clear":    0,
 }
 
-// rank is a label's severity, with an unknown label treated as critical so a typo never pages less.
-func rank(label string) int {
+// Rank is a label's severity, with an unknown label treated as critical so a typo never pages less.
+func Rank(label string) int {
 	if n, ok := severityRank[strings.ToLower(strings.TrimSpace(label))]; ok {
 		return n
 	}
 	return 1
 }
 
-// isResolving reports whether a severity label says the problem is over.
-func isResolving(label string) bool {
-	n := rank(label)
+// IsResolving reports whether a severity label says the problem is over.
+func IsResolving(label string) bool {
+	n := Rank(label)
 	return n == 5 || n == 0
 }
 
-// impactUrgency is the incident priority a severity label asks for.
-func impactUrgency(label string) (domain.IncidentImpact, domain.IncidentUrgency) {
-	switch rank(label) {
+// ImpactUrgency is the incident priority a severity label asks for.
+func ImpactUrgency(label string) (domain.IncidentImpact, domain.IncidentUrgency) {
+	switch Rank(label) {
 	case 2:
 		return domain.IncidentImpactMedium, domain.IncidentUrgencyHigh
 	case 3:
@@ -60,8 +61,8 @@ func impactUrgency(label string) (domain.IncidentImpact, domain.IncidentUrgency)
 	}
 }
 
-// incidentCategory maps an alert category to an incident category, defaulting to a service interruption.
-func incidentCategory(category string) domain.IncidentCategory {
+// IncidentCategory maps an alert category to an incident category, defaulting to a service interruption.
+func IncidentCategory(category string) domain.IncidentCategory {
 	switch strings.ToLower(strings.TrimSpace(category)) {
 	case "security":
 		return domain.IncidentCategorySecurity
@@ -72,8 +73,8 @@ func incidentCategory(category string) domain.IncidentCategory {
 	}
 }
 
-// contactType is the incident contact type for sources CSM has one for, or nil.
-func contactType(source string) *domain.IncidentContactType {
+// ContactType is the incident contact type for sources CSM has one for, or nil.
+func ContactType(source string) *domain.IncidentContactType {
 	var ct domain.IncidentContactType
 	switch strings.Map(keepAlphanumeric, strings.ToLower(source)) {
 	case "azure", "azuremonitor":

@@ -23,17 +23,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // fakeStore is an in-memory Store: one map of groups and one of alert links.
 type fakeStore struct {
-	groups map[string]Group
+	groups map[string]strategy.Group
 	links  map[string]string
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{groups: map[string]Group{}, links: map[string]string{}}
+	return &fakeStore{groups: map[string]strategy.Group{}, links: map[string]string{}}
 }
 
 func (s *fakeStore) InGroup(_ context.Context, fingerprint string, fn func(GroupTx) error) error {
@@ -45,13 +48,13 @@ type fakeTx struct {
 	fingerprint string
 }
 
-func (t fakeTx) Group(context.Context) (*Group, error) {
+func (t fakeTx) Group(context.Context) (*strategy.Group, error) {
 	if g, ok := t.s.groups[t.fingerprint]; ok {
 		return &g, nil
 	}
 	return nil, nil
 }
-func (t fakeTx) SaveGroup(_ context.Context, g Group) error {
+func (t fakeTx) SaveGroup(_ context.Context, g strategy.Group) error {
 	t.s.groups[t.fingerprint] = g
 	return nil
 }
@@ -72,7 +75,7 @@ type fakeSink struct {
 	openErr error
 }
 
-func (s *fakeSink) Open(_ context.Context, e Event) (string, error) {
+func (s *fakeSink) Open(_ context.Context, e event.Event) (string, error) {
 	if s.openErr != nil {
 		return "", s.openErr
 	}
@@ -80,20 +83,24 @@ func (s *fakeSink) Open(_ context.Context, e Event) (string, error) {
 	return "inc-" + e.AlertID, nil
 }
 func (s *fakeSink) IsOpen(_ context.Context, id string) (bool, error) { return !s.closed[id], nil }
-func (s *fakeSink) Note(_ context.Context, id, html string) error {
-	s.notes = append(s.notes, id+": "+html)
+func (s *fakeSink) Fold(_ context.Context, id string, outcome strategy.Outcome, e event.Event) error {
+	s.notes = append(s.notes, id+": "+string(outcome)+" "+e.AlertID)
 	return nil
 }
 
 func noRules(context.Context, time.Time) ([]domain.AlertMuteRule, error) { return nil, nil }
 
 func newProcessor(store *fakeStore, sink *fakeSink, apply bool) *Processor {
-	return &Processor{Store: store, Sink: sink, MuteRules: noRules, Chain: CoreChain(5 * time.Minute), Apply: apply}
+	return &Processor{Store: store, Sink: sink, MuteRules: noRules, Chain: strategy.Core(5 * time.Minute), Apply: apply}
 }
 
-func withID(e Event, id string) Event {
-	e.AlertID = id
-	return e
+var firstSeen = time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+
+func alert(id, severity string, after time.Duration) event.Event {
+	return event.Event{AlertID: id, ReceivedOn: firstSeen.Add(after), Alert: model.Alert{
+		Service: "client-prod-alert-integration", MetricName: "TEST", Severity: severity,
+		Category: "service_interruption", Environment: "prod", Source: "elasticsearch", UniqueIdentifier: "r2",
+	}}
 }
 
 func TestProcessorFoldsAFingerprint(t *testing.T) {
@@ -101,7 +108,7 @@ func TestProcessorFoldsAFingerprint(t *testing.T) {
 	p := newProcessor(store, sink, true)
 	ctx := context.Background()
 
-	steps := []Event{withID(event("critical", 0), "A1"), withID(event("critical", time.Minute), "A2"), withID(event("ok", 2*time.Minute), "A3")}
+	steps := []event.Event{alert("A1", "critical", 0), alert("A2", "critical", time.Minute), alert("A3", "ok", 2*time.Minute)}
 	for _, e := range steps {
 		if err := p.Handle(ctx, e); err != nil {
 			t.Fatalf("Handle(%s): %v", e.AlertID, err)
@@ -110,7 +117,7 @@ func TestProcessorFoldsAFingerprint(t *testing.T) {
 	if len(sink.opened) != 1 || sink.opened[0] != "A1" {
 		t.Fatalf("opened %v, want one incident from A1", sink.opened)
 	}
-	if len(sink.notes) != 2 || !strings.Contains(sink.notes[0], "Duplicate alert received") || !strings.Contains(sink.notes[1], "OK alert received") {
+	if len(sink.notes) != 2 || !strings.Contains(sink.notes[0], "duplicate A2") || !strings.Contains(sink.notes[1], "resolve A3") {
 		t.Fatalf("notes %v, want a Duplicate then an OK note", sink.notes)
 	}
 	for _, id := range []string{"A1", "A2", "A3"} {
@@ -127,9 +134,9 @@ func TestProcessorOpensAgainOnceTheIncidentIsClosed(t *testing.T) {
 	store, sink := newFakeStore(), &fakeSink{closed: map[string]bool{}}
 	p := newProcessor(store, sink, true)
 	ctx := context.Background()
-	_ = p.Handle(ctx, withID(event("critical", 0), "A1"))
+	_ = p.Handle(ctx, alert("A1", "critical", 0))
 	sink.closed["inc-A1"] = true
-	if err := p.Handle(ctx, withID(event("critical", time.Minute), "A2")); err != nil {
+	if err := p.Handle(ctx, alert("A2", "critical", time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if len(sink.opened) != 2 || store.links["A2"] != "inc-A2" {
@@ -140,7 +147,7 @@ func TestProcessorOpensAgainOnceTheIncidentIsClosed(t *testing.T) {
 func TestProcessorRedeliveryIsANoOp(t *testing.T) {
 	store, sink := newFakeStore(), &fakeSink{closed: map[string]bool{}}
 	p := newProcessor(store, sink, true)
-	e := withID(event("critical", 0), "A1")
+	e := alert("A1", "critical", 0)
 	for range 2 {
 		if err := p.Handle(context.Background(), e); err != nil {
 			t.Fatal(err)
@@ -153,7 +160,7 @@ func TestProcessorRedeliveryIsANoOp(t *testing.T) {
 
 func TestProcessorWithoutApplyOnlyDecides(t *testing.T) {
 	store, sink := newFakeStore(), &fakeSink{closed: map[string]bool{}}
-	if err := newProcessor(store, sink, false).Handle(context.Background(), withID(event("critical", 0), "A1")); err != nil {
+	if err := newProcessor(store, sink, false).Handle(context.Background(), alert("A1", "critical", 0)); err != nil {
 		t.Fatal(err)
 	}
 	if len(sink.opened) != 0 || len(store.groups) != 0 || len(store.links) != 0 {
@@ -164,7 +171,7 @@ func TestProcessorWithoutApplyOnlyDecides(t *testing.T) {
 func TestProcessorFailedOpenIsRetried(t *testing.T) {
 	store, sink := newFakeStore(), &fakeSink{closed: map[string]bool{}, openErr: errors.New("db down")}
 	p := newProcessor(store, sink, true)
-	if err := p.Handle(context.Background(), withID(event("critical", 0), "A1")); err == nil {
+	if err := p.Handle(context.Background(), alert("A1", "critical", 0)); err == nil {
 		t.Fatal("Handle succeeded, want the error so the event is retried")
 	}
 	if len(store.links) != 0 || len(store.groups) != 0 {
@@ -178,7 +185,7 @@ func TestProcessorMuteRulesFailOpen(t *testing.T) {
 	p.MuteRules = func(context.Context, time.Time) ([]domain.AlertMuteRule, error) {
 		return nil, errors.New("unavailable")
 	}
-	if err := p.Handle(context.Background(), withID(event("critical", 0), "A1")); err != nil {
+	if err := p.Handle(context.Background(), alert("A1", "critical", 0)); err != nil {
 		t.Fatal(err)
 	}
 	if len(sink.opened) != 1 {

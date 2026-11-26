@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -30,7 +32,7 @@ import (
 func drainIDs(t *testing.T, outbox *AlertOutbox) []string {
 	t.Helper()
 	var ids []string
-	_, err := outbox.Drain(context.Background(), 100, func(batch []alertprocessor.Event) []string {
+	_, err := outbox.Drain(context.Background(), 100, func(batch []event.Event) []string {
 		for _, e := range batch {
 			ids = append(ids, e.AlertID)
 		}
@@ -101,7 +103,7 @@ func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
 		if linked, err := tx.AlertLinked(ctx, ids[0]); err != nil || linked {
 			t.Fatalf("AlertLinked = %v, %v; want false", linked, err)
 		}
-		if err := tx.SaveGroup(ctx, alertprocessor.Group{IncidentID: incidentID, FirstSeenOn: seen, LastSeenOn: seen, AlertCount: 1}); err != nil {
+		if err := tx.SaveGroup(ctx, strategy.Group{IncidentID: incidentID, FirstSeenOn: seen, LastSeenOn: seen, AlertCount: 1}); err != nil {
 			return err
 		}
 		return tx.LinkAlert(ctx, ids[0], incidentID)

@@ -14,58 +14,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), sink (incidents), relay (outbox to event hub) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
 package alertprocessor
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 )
-
-// Store keeps each fingerprint's group and each alert's incident.
-type Store interface {
-	// InGroup runs fn in one transaction that holds the fingerprint's lock, so one fingerprint is decided by one worker at a time.
-	InGroup(ctx context.Context, fingerprint string, fn func(GroupTx) error) error
-}
-
-// GroupTx is the transaction InGroup hands to its function.
-type GroupTx interface {
-	// Group is the fingerprint's group, or nil when it has none.
-	Group(ctx context.Context) (*Group, error)
-	SaveGroup(ctx context.Context, g Group) error
-	// AlertLinked reports whether the alert already belongs to an incident, which makes a redelivered event a no-op.
-	AlertLinked(ctx context.Context, alertID string) (bool, error)
-	LinkAlert(ctx context.Context, alertID, incidentID string) error
-}
-
-// Sink is where incidents live.
-type Sink interface {
-	// Open creates the alert's incident and returns its id; it returns the same incident when called again for the same alert.
-	Open(ctx context.Context, e Event) (string, error)
-	// IsOpen reports whether the incident is still open.
-	IsOpen(ctx context.Context, incidentID string) (bool, error)
-	// Note adds an HTML work note to the incident.
-	Note(ctx context.Context, incidentID, html string) error
-}
-
-// MuteRules returns the mute rules active at now.
-type MuteRules func(ctx context.Context, now time.Time) ([]domain.AlertMuteRule, error)
 
 // Processor decides each alert.created event with its strategy chain and, when Apply is set, carries the decision out.
 type Processor struct {
 	Store     Store
 	Sink      Sink
 	MuteRules MuteRules
-	Chain     []Strategy
+	Chain     strategy.Chain
 	// Apply writes incidents and notes; off, decisions are only logged (ALERTING_VERSION hybrid).
 	Apply bool
 }
 
 // Handle processes one event; an error leaves the event to be retried, and a retry never opens a second incident.
-func (p *Processor) Handle(ctx context.Context, e Event) error {
+func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 	fingerprint := e.Fingerprint()
 	return p.Store.InGroup(ctx, fingerprint, func(tx GroupTx) error {
 		linked, err := tx.AlertLinked(ctx, e.AlertID)
@@ -76,26 +48,27 @@ func (p *Processor) Handle(ctx context.Context, e Event) error {
 		if err != nil {
 			return err
 		}
-		d := Decide(p.Chain, in)
+		d := p.Chain.Decide(in)
 		slog.InfoContext(ctx, "alert processor: decided", "alertId", e.AlertID, "fingerprint", fingerprint,
 			"outcome", d.Outcome, "strategy", d.Strategy, "reason", d.Reason, "apply", p.Apply)
 		if !p.Apply {
 			return nil
 		}
-		return p.carryOut(ctx, tx, in, d)
+		return p.carryOut(ctx, tx, in, d.Outcome)
 	})
 }
 
-func (p *Processor) input(ctx context.Context, tx GroupTx, e Event) (Input, error) {
-	in := Input{Event: e}
+// input gathers what the strategies look at: the group, whether its incident is open, and the active mute rules.
+func (p *Processor) input(ctx context.Context, tx GroupTx, e event.Event) (strategy.Input, error) {
+	in := strategy.Input{Event: e}
 	group, err := tx.Group(ctx)
 	if err != nil {
-		return Input{}, err
+		return strategy.Input{}, err
 	}
 	if group != nil && group.IncidentID != "" {
 		in.Group = group
 		if in.IncidentOpen, err = p.Sink.IsOpen(ctx, group.IncidentID); err != nil {
-			return Input{}, err
+			return strategy.Input{}, err
 		}
 	}
 	// Muting fails open: without the rules, an alert still pages rather than being silenced by mistake.
@@ -105,33 +78,40 @@ func (p *Processor) input(ctx context.Context, tx GroupTx, e Event) (Input, erro
 	return in, nil
 }
 
-func (p *Processor) carryOut(ctx context.Context, tx GroupTx, in Input, d Decision) error {
-	e := in.Event
-	switch d.Outcome {
-	case OutcomeOpen:
-		incidentID, err := p.Sink.Open(ctx, e)
-		if err != nil {
-			return fmt.Errorf("open incident for %s: %w", e.AlertID, err)
-		}
-		group := Group{Fingerprint: e.Fingerprint(), IncidentID: incidentID, FirstSeenOn: e.ReceivedOn, LastSeenOn: e.ReceivedOn, AlertCount: 1}
-		if err := tx.SaveGroup(ctx, group); err != nil {
-			return err
-		}
-		return tx.LinkAlert(ctx, e.AlertID, incidentID)
-	case OutcomeDuplicate, OutcomeResolve:
-		group := *in.Group
-		if err := p.Sink.Note(ctx, group.IncidentID, foldNote(d.Outcome, e)); err != nil {
-			return fmt.Errorf("note %s on incident %s: %w", e.AlertID, group.IncidentID, err)
-		}
-		group.AlertCount++
-		if e.ReceivedOn.After(group.LastSeenOn) {
-			group.LastSeenOn = e.ReceivedOn
-		}
-		if err := tx.SaveGroup(ctx, group); err != nil {
-			return err
-		}
-		return tx.LinkAlert(ctx, e.AlertID, group.IncidentID)
+func (p *Processor) carryOut(ctx context.Context, tx GroupTx, in strategy.Input, outcome strategy.Outcome) error {
+	switch {
+	case outcome == strategy.Open:
+		return p.open(ctx, tx, in.Event)
+	case outcome.Folds():
+		return p.fold(ctx, tx, *in.Group, outcome, in.Event)
 	default:
 		return nil
 	}
+}
+
+func (p *Processor) open(ctx context.Context, tx GroupTx, e event.Event) error {
+	incidentID, err := p.Sink.Open(ctx, e)
+	if err != nil {
+		return fmt.Errorf("open incident for %s: %w", e.AlertID, err)
+	}
+	group := strategy.Group{Fingerprint: e.Fingerprint(), IncidentID: incidentID, FirstSeenOn: e.ReceivedOn, LastSeenOn: e.ReceivedOn, AlertCount: 1}
+	return p.save(ctx, tx, group, e.AlertID)
+}
+
+func (p *Processor) fold(ctx context.Context, tx GroupTx, group strategy.Group, outcome strategy.Outcome, e event.Event) error {
+	if err := p.Sink.Fold(ctx, group.IncidentID, outcome, e); err != nil {
+		return fmt.Errorf("fold %s into incident %s: %w", e.AlertID, group.IncidentID, err)
+	}
+	group.AlertCount++
+	if e.ReceivedOn.After(group.LastSeenOn) {
+		group.LastSeenOn = e.ReceivedOn
+	}
+	return p.save(ctx, tx, group, e.AlertID)
+}
+
+func (p *Processor) save(ctx context.Context, tx GroupTx, group strategy.Group, alertID string) error {
+	if err := tx.SaveGroup(ctx, group); err != nil {
+		return err
+	}
+	return tx.LinkAlert(ctx, alertID, group.IncidentID)
 }

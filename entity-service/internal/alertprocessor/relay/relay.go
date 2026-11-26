@@ -14,18 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+// Package relay publishes every stored alert as alert.created: it drains the outbox the consumer writes in the same statement as the alert.
+package relay
 
 import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 )
 
 // Outbox holds the stored alerts not yet published.
 type Outbox interface {
 	// Drain hands up to limit unpublished events, oldest first, to publish inside one transaction, and marks published the ones publish returns; it returns how many it marked.
-	Drain(ctx context.Context, limit int, publish func([]Event) []string) (int, error)
+	Drain(ctx context.Context, limit int, publish func([]event.Event) []string) (int, error)
 }
 
 // Publisher sends one record to the event hub.
@@ -46,7 +49,7 @@ type Relay struct {
 // Run drains the outbox until ctx ends, going straight on while it is busy.
 func (r *Relay) Run(ctx context.Context) {
 	for {
-		marked, err := r.Outbox.Drain(ctx, r.Batch, func(batch []Event) []string { return r.publish(ctx, batch) })
+		marked, err := r.Outbox.Drain(ctx, r.Batch, func(batch []event.Event) []string { return r.publish(ctx, batch) })
 		if err != nil {
 			slog.ErrorContext(ctx, "alert relay: drain failed", "retryIn", r.Interval, "err", err)
 		}
@@ -62,10 +65,10 @@ func (r *Relay) Run(ctx context.Context) {
 }
 
 // publish sends the batch in order and stops at the first failure, so the rest stay queued and nothing is published out of order.
-func (r *Relay) publish(ctx context.Context, batch []Event) []string {
+func (r *Relay) publish(ctx context.Context, batch []event.Event) []string {
 	published := make([]string, 0, len(batch))
 	for _, e := range batch {
-		key, value, err := Encode(e)
+		key, value, err := event.Encode(e)
 		if err == nil {
 			err = r.Publisher.Publish(ctx, key, value)
 		}

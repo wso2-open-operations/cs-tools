@@ -14,46 +14,25 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+package event
 
 import (
-	"context"
-	"errors"
-	"slices"
 	"testing"
+	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-type fakePublisher struct {
-	keys   []string
-	failAt int
-}
-
-func (p *fakePublisher) Publish(_ context.Context, key, _ []byte) error {
-	if len(p.keys) == p.failAt {
-		return errors.New("event hub down")
-	}
-	p.keys = append(p.keys, string(key))
-	return nil
-}
-
-func TestRelayStopsAtTheFirstFailure(t *testing.T) {
-	pub := &fakePublisher{failAt: 2}
-	r := &Relay{Publisher: pub}
-	batch := []Event{withID(event("critical", 0), "A1"), withID(event("critical", 0), "A2"), withID(event("critical", 0), "A3")}
-	got := r.publish(context.Background(), batch)
-	if !slices.Equal(got, []string{"A1", "A2"}) {
-		t.Fatalf("published %v, want A1 and A2 only so A3 stays queued in order", got)
-	}
-	if pub.keys[0] != batch[0].Fingerprint() {
-		t.Fatalf("key = %q, want the fingerprint so one fingerprint stays on one partition", pub.keys[0])
-	}
-}
-
-func TestEventRoundTrip(t *testing.T) {
-	e := withID(event("critical", 0), "A1")
-	_, value, err := Encode(e)
+func TestRoundTrip(t *testing.T) {
+	e := Event{AlertID: "A1", Tier: domain.AlertTierPriority, ReceivedOn: time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC),
+		Alert: model.Alert{Source: "azure", Service: "svc", MetricName: "cpu", Severity: "critical"}}
+	key, value, err := Encode(e)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if string(key) != e.Fingerprint() {
+		t.Fatalf("key = %q, want the fingerprint so one fingerprint stays on one partition", key)
 	}
 	got, ok, err := Decode(value)
 	if err != nil || !ok || got.AlertID != "A1" || got.Alert != e.Alert || !got.ReceivedOn.Equal(e.ReceivedOn) || got.Tier != e.Tier {
@@ -62,11 +41,13 @@ func TestEventRoundTrip(t *testing.T) {
 }
 
 func TestDecodeSkipsOtherEventTypes(t *testing.T) {
-	_, ok, err := Decode([]byte(`{"type":"incident.created","entityId":"x","payload":{}}`))
-	if ok || err != nil {
+	if _, ok, err := Decode([]byte(`{"type":"incident.created","entityId":"x","payload":{}}`)); ok || err != nil {
 		t.Fatalf("ok=%v err=%v, want another event type skipped without an error", ok, err)
 	}
 	if _, _, err := Decode([]byte(`not json`)); err == nil {
 		t.Fatal("Decode accepted a malformed record")
+	}
+	if _, _, err := Decode([]byte(`{"type":"alert.created","payload":{}}`)); err == nil {
+		t.Fatal("Decode accepted an alert.created with no alert id")
 	}
 }

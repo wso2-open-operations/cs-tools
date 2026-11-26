@@ -14,20 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+package strategy
 
 import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 var firstSeen = time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
 
-func event(severity string, after time.Duration) Event {
-	return Event{
+func alert(severity string, after time.Duration) event.Event {
+	return event.Event{
 		AlertID:    "ALT000000001",
 		Tier:       domain.AlertTierPriority,
 		ReceivedOn: firstSeen.Add(after),
@@ -46,32 +47,32 @@ func rule(field, value string) domain.AlertMuteRule {
 	return domain.AlertMuteRule{Number: "AMR0000001", Conditions: []domain.AlertMuteRuleCondition{{Field: field, Value: value}}}
 }
 
-func TestCoreChain(t *testing.T) {
-	chain := CoreChain(5 * time.Minute)
+func TestCore(t *testing.T) {
+	chain := Core(5 * time.Minute)
 	tests := map[string]struct {
 		in   Input
 		want Outcome
 	}{
-		"new fingerprint opens":              {Input{Event: event("critical", 0)}, OutcomeOpen},
-		"same fingerprint inside the window": {Input{Event: event("critical", time.Minute), Group: openGroup(), IncidentOpen: true}, OutcomeDuplicate},
-		"window passed opens a new incident": {Input{Event: event("critical", 5*time.Minute), Group: openGroup(), IncidentOpen: true}, OutcomeOpen},
-		"closed incident opens a new one":    {Input{Event: event("critical", time.Minute), Group: openGroup(), IncidentOpen: false}, OutcomeOpen},
-		"resolving alert on open incident":   {Input{Event: event("OK", time.Hour), Group: openGroup(), IncidentOpen: true}, OutcomeResolve},
-		"resolving alert with no incident":   {Input{Event: event("clear", 0)}, OutcomeIgnore},
-		"mute rule stops a new incident":     {Input{Event: event("critical", 0), MuteRules: []domain.AlertMuteRule{rule("environment", "production")}}, OutcomeMute},
-		"mute rule never hides a duplicate": {Input{Event: event("critical", time.Minute), Group: openGroup(), IncidentOpen: true,
-			MuteRules: []domain.AlertMuteRule{rule("service", "client-prod-alert-integration")}}, OutcomeDuplicate},
-		"non-matching mute rule": {Input{Event: event("critical", 0), MuteRules: []domain.AlertMuteRule{rule("service", "other")}}, OutcomeOpen},
+		"new fingerprint opens":              {Input{Event: alert("critical", 0)}, Open},
+		"same fingerprint inside the window": {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: true}, Duplicate},
+		"window passed opens a new incident": {Input{Event: alert("critical", 5*time.Minute), Group: openGroup(), IncidentOpen: true}, Open},
+		"closed incident opens a new one":    {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: false}, Open},
+		"resolving alert on open incident":   {Input{Event: alert("OK", time.Hour), Group: openGroup(), IncidentOpen: true}, Resolve},
+		"resolving alert with no incident":   {Input{Event: alert("clear", 0)}, Ignore},
+		"mute rule stops a new incident":     {Input{Event: alert("critical", 0), MuteRules: []domain.AlertMuteRule{rule("environment", "production")}}, Mute},
+		"mute rule never hides a duplicate": {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: true,
+			MuteRules: []domain.AlertMuteRule{rule("service", "client-prod-alert-integration")}}, Duplicate},
+		"non-matching mute rule": {Input{Event: alert("critical", 0), MuteRules: []domain.AlertMuteRule{rule("service", "other")}}, Open},
 	}
 	for name, tt := range tests {
-		if got := Decide(chain, tt.in).Outcome; got != tt.want {
+		if got := chain.Decide(tt.in).Outcome; got != tt.want {
 			t.Errorf("%s: outcome = %s, want %s", name, got, tt.want)
 		}
 	}
 }
 
-func TestMuteRuleMatches(t *testing.T) {
-	e := event("Warning", 0)
+func TestRuleMatches(t *testing.T) {
+	e := alert("Warning", 0)
 	tests := map[string]struct {
 		rule domain.AlertMuteRule
 		want bool
@@ -84,35 +85,28 @@ func TestMuteRuleMatches(t *testing.T) {
 			{Field: "source", Value: "elasticsearch"}, {Field: "service", Value: "other"}}}, false},
 	}
 	for name, tt := range tests {
-		if got := muteRuleMatches(tt.rule, e); got != tt.want {
+		if got := RuleMatches(tt.rule, e); got != tt.want {
 			t.Errorf("%s: matches = %v, want %v", name, got, tt.want)
 		}
 	}
 }
 
-// A strategy placed first wins, which is how a new way of grouping joins the chain.
+// always decides every alert, standing in for a plugged-in strategy such as RIA.
 type always struct{ outcome Outcome }
 
 func (always) Name() string                    { return "always" }
 func (a always) Decide(Input) (Decision, bool) { return Decision{Outcome: a.outcome}, true }
 
-func TestDecideFirstStrategyWins(t *testing.T) {
-	chain := append([]Strategy{always{OutcomeMute}}, CoreChain(time.Minute)...)
-	d := Decide(chain, Input{Event: event("critical", 0)})
-	if d.Outcome != OutcomeMute || d.Strategy != "always" {
-		t.Fatalf("decision = %+v, want the first strategy's mute", d)
+func TestChainBeforeAndAfter(t *testing.T) {
+	in := Input{Event: alert("critical", 0)}
+	core := Core(time.Minute)
+	if d := core.Before(always{Mute}).Decide(in); d.Outcome != Mute || d.Strategy != "always" {
+		t.Fatalf("Before: decision = %+v, want the plugged-in strategy first", d)
 	}
-}
-
-func TestImpactUrgency(t *testing.T) {
-	tests := map[string][2]string{
-		"critical": {"HIGH", "HIGH"}, "major": {"MEDIUM", "HIGH"}, "minor": {"MEDIUM", "MEDIUM"},
-		"warning": {"MEDIUM", "LOW"}, "typo": {"HIGH", "HIGH"},
+	if d := core.After(always{Mute}).Decide(in); d.Outcome != Mute || d.Strategy != "always" {
+		t.Fatalf("After: decision = %+v, want the plugged-in strategy once core passed", d)
 	}
-	for label, want := range tests {
-		impact, urgency := impactUrgency(label)
-		if string(impact) != want[0] || string(urgency) != want[1] {
-			t.Errorf("%s: %s/%s, want %s/%s", label, impact, urgency, want[0], want[1])
-		}
+	if d := core.Decide(in); d.Outcome != Open || len(core) != 3 {
+		t.Fatalf("core changed by Before/After: %+v, %d strategies", d, len(core))
 	}
 }

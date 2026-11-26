@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package alertprocessor turns stored alerts into incidents: a relay publishes each stored alert as alert.created, and the processor folds those events into incidents through a chain of strategies.
-package alertprocessor
+// Package event is the alert.created record: the wire shape the relay publishes and the subscriber reads.
+package event
 
 import (
 	"encoding/json"
@@ -27,8 +27,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 )
 
-// EventType is the type of the event published for every stored alert.
-const EventType events.Type = "alert.created"
+// Type is the type of the record published for every stored alert.
+const Type events.Type = "alert.created"
 
 // Event is one stored alert, as the processor needs it.
 type Event struct {
@@ -47,11 +47,11 @@ func (e Event) Fingerprint() string {
 func Encode(e Event) (key, value []byte, err error) {
 	payload, err := json.Marshal(e)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode %s: %w", EventType, err)
+		return nil, nil, fmt.Errorf("encode %s: %w", Type, err)
 	}
-	value, err = json.Marshal(events.Envelope{Type: EventType, EntityID: e.AlertID, Payload: payload})
+	value, err = json.Marshal(events.Envelope{Type: Type, EntityID: e.AlertID, Payload: payload})
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode %s envelope: %w", EventType, err)
+		return nil, nil, fmt.Errorf("encode %s envelope: %w", Type, err)
 	}
 	return []byte(e.Fingerprint()), value, nil
 }
@@ -62,14 +62,14 @@ func Decode(value []byte) (e Event, ok bool, err error) {
 	if err := json.Unmarshal(value, &env); err != nil {
 		return Event{}, false, fmt.Errorf("decode envelope: %w", err)
 	}
-	if env.Type != EventType {
+	if env.Type != Type {
 		return Event{}, false, nil
 	}
 	if err := json.Unmarshal(env.Payload, &e); err != nil {
-		return Event{}, false, fmt.Errorf("decode %s: %w", EventType, err)
+		return Event{}, false, fmt.Errorf("decode %s: %w", Type, err)
 	}
 	if e.AlertID == "" {
-		return Event{}, false, fmt.Errorf("decode %s: no alert id", EventType)
+		return Event{}, false, fmt.Errorf("decode %s: no alert id", Type)
 	}
 	return e, true, nil
 }

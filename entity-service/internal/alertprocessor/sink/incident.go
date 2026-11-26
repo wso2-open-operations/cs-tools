@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package alertprocessor
+// Package sink carries the processor's decisions into CSM incidents, through the incident service in-process.
+package sink
 
 import (
 	"context"
@@ -22,6 +23,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/severity"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -39,8 +43,8 @@ type Services interface {
 	SearchITServices(ctx context.Context, searchQuery string, limit, offset int) ([]domain.ITService, int, error)
 }
 
-// IncidentSink creates and updates CSM incidents through the incident service.
-type IncidentSink struct {
+// Incident creates and updates CSM incidents through the incident service; it implements alertprocessor.Sink.
+type Incident struct {
 	Incidents Incidents
 	Services  Services
 	// CallerID is the user every alert incident is raised by.
@@ -53,7 +57,7 @@ type IncidentSink struct {
 const serviceSearchLimit = 50
 
 // Open creates the alert's incident; the alert id is the incident's correlation id, so a retry finds the incident it already created.
-func (s IncidentSink) Open(ctx context.Context, e Event) (string, error) {
+func (s Incident) Open(ctx context.Context, e event.Event) (string, error) {
 	correlationID := "alert:" + e.AlertID
 	if id, err := s.byCorrelationID(ctx, correlationID); err != nil || id != "" {
 		return id, err
@@ -62,13 +66,13 @@ func (s IncidentSink) Open(ctx context.Context, e Event) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	impact, urgency := impactUrgency(e.Alert.Severity)
+	impact, urgency := severity.ImpactUrgency(e.Alert.Severity)
 	note := creationNote(e)
 	req := domain.CreateIncidentRequest{
 		CallerID:      s.CallerID,
-		Category:      incidentCategory(e.Alert.Category),
+		Category:      severity.IncidentCategory(e.Alert.Category),
 		ServiceID:     serviceID,
-		ContactType:   contactType(e.Alert.Source),
+		ContactType:   severity.ContactType(e.Alert.Source),
 		Impact:        impact,
 		Urgency:       urgency,
 		Subject:       subject(e),
@@ -89,7 +93,7 @@ func (s IncidentSink) Open(ctx context.Context, e Event) (string, error) {
 }
 
 // IsOpen is false once the incident is resolved, closed or cancelled, so the next alert opens a new one.
-func (s IncidentSink) IsOpen(ctx context.Context, incidentID string) (bool, error) {
+func (s Incident) IsOpen(ctx context.Context, incidentID string) (bool, error) {
 	view, err := s.Incidents.GetIncidentByID(ctx, incidentID)
 	if err != nil {
 		var notFound *apierror.NotFoundError
@@ -108,13 +112,14 @@ func (s IncidentSink) IsOpen(ctx context.Context, incidentID string) (bool, erro
 	return true, nil
 }
 
-// Note adds a work note to the incident.
-func (s IncidentSink) Note(ctx context.Context, incidentID, html string) error {
-	_, err := s.Incidents.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &html})
+// Fold adds the alert to the incident as a Duplicate or OK work note.
+func (s Incident) Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error {
+	note := foldNote(outcome, e)
+	_, err := s.Incidents.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
 	return err
 }
 
-func (s IncidentSink) byCorrelationID(ctx context.Context, correlationID string) (string, error) {
+func (s Incident) byCorrelationID(ctx context.Context, correlationID string) (string, error) {
 	resp, err := s.Incidents.SearchIncidents(ctx, domain.SearchIncidentsRequest{
 		Filters:    domain.SearchIncidentsFilters{CorrelationID: &correlationID},
 		Pagination: domain.Pagination{Limit: 1},
@@ -130,7 +135,7 @@ func (s IncidentSink) byCorrelationID(ctx context.Context, correlationID string)
 }
 
 // serviceID is the service named exactly by the label, or the default service when there is no label or no match.
-func (s IncidentSink) serviceID(ctx context.Context, label string) (string, error) {
+func (s Incident) serviceID(ctx context.Context, label string) (string, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return s.DefaultServiceID, nil
@@ -148,7 +153,7 @@ func (s IncidentSink) serviceID(ctx context.Context, label string) (string, erro
 }
 
 // subject is the metric name, or the service when the alert has none.
-func subject(e Event) string {
+func subject(e event.Event) string {
 	if m := strings.TrimSpace(e.Alert.MetricName); m != "" {
 		return m
 	}
