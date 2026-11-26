@@ -25,17 +25,19 @@ vi.mock("@features/csm-cases/api/useRequestCaseUpdate", () => ({
   useGetCaseUpdateRequestTemplates: vi.fn(),
 }));
 // The Lexical editor has its own tests; stub it down to a textarea that takes
-// and emits HTML.
+// and emits HTML, and is named the way the editor names its editable area.
 vi.mock("@components/rich-text-editor/Editor", () => ({
   default: ({
     value,
     onChange,
+    ariaLabelledBy,
   }: {
     value: string;
     onChange: (v: string) => void;
+    ariaLabelledBy?: string;
   }) => (
     <textarea
-      aria-label="Custom message editor"
+      aria-labelledby={ariaLabelledBy}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -74,7 +76,7 @@ function selectStage(label: RegExp): void {
 
 function typeCustomMessage(html: string): void {
   fireEvent.change(
-    screen.getByRole("textbox", { name: /custom message editor/i }),
+    screen.getByRole("textbox", { name: /^custom message$/i }),
     { target: { value: html } },
   );
 }
@@ -154,10 +156,7 @@ describe("RequestUpdateDialog", () => {
     selectStage(/custom message/i);
     expect(screen.queryByTestId("request-update-preview")).not.toBeInTheDocument();
     expect(
-      within(screen.getByRole("group", { name: /^custom message$/i })).getByRole(
-        "textbox",
-        { name: /custom message editor/i },
-      ),
+      screen.getByRole("textbox", { name: /^custom message$/i }),
     ).toBeInTheDocument();
   });
 

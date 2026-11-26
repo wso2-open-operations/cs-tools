@@ -150,23 +150,18 @@ export default function RequestUpdateDialog({
               >
                 Custom message
               </Typography>
-              <Box
-                role="group"
-                aria-labelledby="request-update-custom-message-label"
-              >
-                {/* No `onImageUpload`, so image insertion is off: this route
-                    posts the comment in one request, with no step that
-                    uploads images first. */}
-                <Editor
-                  value={customMessage}
-                  onChange={setCustomMessage}
-                  placeholder="Write the message to post on this case…"
-                  minHeight={120}
-                  maxHeight={320}
-                  toolbarVariant="full"
-                  disabled={isSaving}
-                />
-              </Box>
+              {/* No `onImageUpload`: this route posts the comment in one
+                  request, with no step that uploads images first. */}
+              <Editor
+                value={customMessage}
+                onChange={setCustomMessage}
+                ariaLabelledBy="request-update-custom-message-label"
+                placeholder="Write the message to post on this case…"
+                minHeight={120}
+                maxHeight={320}
+                toolbarVariant="full"
+                disabled={isSaving}
+              />
             </Box>
           ) : isLoading ? (
             <Skeleton variant="rounded" width="100%" height={100} />
