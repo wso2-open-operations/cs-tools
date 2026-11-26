@@ -81,8 +81,8 @@ notifications independently until they're actually delivered.
   and number in `mute_rule_id`/`mute_rule_number`) and nothing goes to CSM or Chat. Its
   alerts still fold into it as usual, and it is re-checked every
   `mute_rule_refresh_interval`. Once no active rule matches (the window ended, or the
-  rule was ended early), a muted incident that is still firing (its last alert is not
-  an OK/Clear) is unmuted and delivered to CSM with all its notes, and the Chat fallback
+  rule was ended early), a muted incident that is still firing (its last alert, by
+  arrival time rather than fold order, is not an OK/Clear) is unmuted and delivered to CSM with all its notes, and the Chat fallback
   grace period counts from that moment. One whose last alert resolved it, or that a
   newer incident of the same fingerprint replaced, is closed quietly (`status = closed`,
   nothing owed) without ever creating a CSM incident. Rules never affect an incident

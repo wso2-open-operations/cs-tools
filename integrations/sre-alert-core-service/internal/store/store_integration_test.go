@@ -489,3 +489,69 @@ func TestIncidentRepo_ConcurrentFoldsSerializePerFingerprint(t *testing.T) {
 		t.Fatalf("incidents = %d alert_count = %d, want 1 incident absorbing all 20 concurrent folds", incidents, count)
 	}
 }
+
+// MuteOutcome must read the incident's latest alert by event time, not by fold order: an older OK folded after a
+// newer firing alert (another replica, a retry) does not resolve the incident.
+func TestIncidentRepo_MuteOutcomeUsesEventTime(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	t0 := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Hour)
+	const fp = "fp-event-order"
+
+	alertAt := func(id string, at time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO alerts (id, source, alert, fingerprint, created_at) VALUES ($1, 'test', '{}', $2, $3)`,
+			id, fp, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fold := func(id, kind string, at time.Time) {
+		t.Helper()
+		alertAt(id, at)
+		if _, err := repo.Fold(ctx, fp, []string{id}, func(cur *model.Incident, _ map[string]bool) FoldPlan {
+			if cur == nil {
+				return FoldPlan{New: []NewIncident{{
+					Incident: model.Incident{Fingerprint: fp, IncidentNumber: "PENDING", Severity: 1, Impact: "HIGH", Urgency: "HIGH",
+						Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, SeverityLabel: "Critical"},
+					Notes: []model.Note{{AlertID: id, Kind: kind, Text: kind}},
+				}}}
+			}
+			return FoldPlan{Current: &CurrentFold{ID: cur.ID, Added: 1, LastSeen: at,
+				Notes: []model.Note{{AlertID: id, Kind: kind, Text: kind}}}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outcome := func() bool {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM incidents_processed WHERE fingerprint = $1`, fp).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inc, _, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, _, err := repo.MuteOutcome(ctx, inc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolved
+	}
+
+	fold("E1", model.NoteCreated, t0)
+	fold("E3", model.NoteDuplicate, t0.Add(2*time.Minute))
+	fold("E2", model.NoteOK, t0.Add(time.Minute)) // older OK, folded last
+	if outcome() {
+		t.Fatal("an older OK folded after a newer firing alert counted as resolved")
+	}
+	fold("E4", model.NoteOK, t0.Add(3*time.Minute))
+	if !outcome() {
+		t.Fatal("the latest alert by event time is an OK, want resolved")
+	}
+	fold("E5", model.NoteDuplicate, t0.Add(3*time.Minute)) // same event time: fold order decides
+	if outcome() {
+		t.Fatal("on equal event times the later fold should win, want still firing")
+	}
+}

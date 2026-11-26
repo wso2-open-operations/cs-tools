@@ -361,10 +361,16 @@ func (r *IncidentRepo) Unmute(ctx context.Context, inc model.Incident) (unmuted,
 
 // MuteOutcome reports, for a muted incident no rule matches any more, whether its last alert was a resolving one
 // and whether a newer incident of the same fingerprint has replaced it.
+//
+// "Last" is by event time (the alert's alerts.created_at, which plan sorts and dedup windows measure on), not by
+// note id: id is fold order, and folds of one fingerprint across replicas or retries need not run in event order, so
+// an older OK folded after a newer firing alert must not read as resolved. Equal event times fall back to fold order;
+// a note whose alert row retention already purged sorts last, so it never outranks one whose time is known.
 func (r *IncidentRepo) MuteOutcome(ctx context.Context, inc model.Incident) (resolved, superseded bool, err error) {
 	var lastKind string
 	err = r.pool.QueryRow(ctx, `SELECT
-		coalesce((SELECT kind FROM incident_notes WHERE incident = $1 ORDER BY id DESC LIMIT 1), ''),
+		coalesce((SELECT n.kind FROM incident_notes n LEFT JOIN alerts a ON a.id = n.alert_id
+			WHERE n.incident = $1 ORDER BY a.created_at DESC NULLS LAST, n.id DESC LIMIT 1), ''),
 		EXISTS (SELECT 1 FROM incidents_processed WHERE fingerprint = $2 AND first_seen > $3)`,
 		inc.ID, inc.Fingerprint, inc.FirstSeen).Scan(&lastKind, &superseded)
 	if err != nil {
