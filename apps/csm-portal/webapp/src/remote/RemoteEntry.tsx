@@ -39,22 +39,24 @@ let configLoaded: Promise<void> | undefined;
  * a host that object is the host's. config.js assigns `window.config` outright,
  * so the host's object is put back on top of the portal's keys afterwards: the
  * host keeps everything it had and the portal's keys are added alongside.
+ *
+ * The file is brought in with `import()`, the same way the host brought in this
+ * portal's code and from the same deployment, so the page gets no script
+ * element of the portal's making. A plain `window.config = {...}` file runs
+ * unchanged as a module.
  */
 function loadPortalConfig(): Promise<void> {
-  configLoaded ??= new Promise<void>((resolve, reject) => {
+  configLoaded ??= (async () => {
     const hostConfig = window.config;
-    const script = document.createElement("script");
-    script.src = new URL("config.js", remoteBase).href;
-    script.onload = () => {
+    const url = new URL("config.js", remoteBase).href;
+    try {
+      await import(/* @vite-ignore */ url);
       window.config = { ...window.config, ...hostConfig };
-      resolve();
-    };
-    script.onerror = () => {
+    } catch {
       window.config = hostConfig;
-      reject(new Error(`Could not load ${script.src}`));
-    };
-    document.head.appendChild(script);
-  });
+      throw new Error(`Could not load ${url}`);
+    }
+  })();
   return configLoaded;
 }
 
