@@ -221,6 +221,8 @@ type updateIncidentRequest struct {
 	CausedByID          string   `json:"causedById"`
 	ResolvedByID        string   `json:"resolvedById"`
 	WatchList           []string `json:"watchList"`
+	AddWatchers         []string `json:"addWatchers"`
+	RemoveWatchers      []string `json:"removeWatchers"`
 }
 
 // validateUpdateIncidentBody rejects an empty JSON object (matching the documented
@@ -298,9 +300,11 @@ func validateUpdateIncidentBody(body []byte) bool {
 	if req.ResolvedByID != "" && !uuidRe.MatchString(req.ResolvedByID) {
 		return false
 	}
-	for _, w := range req.WatchList {
-		if !uuidRe.MatchString(w) {
-			return false
+	for _, list := range [][]string{req.WatchList, req.AddWatchers, req.RemoveWatchers} {
+		for _, w := range list {
+			if !uuidRe.MatchString(w) {
+				return false
+			}
 		}
 	}
 	return true

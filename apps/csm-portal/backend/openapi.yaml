@@ -21986,7 +21986,9 @@ components:
         `acknowledge`, `type`, `subject`, `description`, `deploymentId`, `deployedProductId`,
         `relatedCaseId`, `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or
         `worstCaseFixEta` must be provided. `watchList`, `assigneeEmail`, and `parentId` are
-        supported only for the ServiceNow data source.
+        supported only for the ServiceNow data source. `addWatchers` / `removeWatchers` (one
+        exclusive field, sent alone or together) change the watch list by delta and are
+        supported only for the PostgreSQL data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
         `type` transfers the case to another type, ServiceNow only. Its companion fields carry
@@ -22000,6 +22002,9 @@ components:
         - required: [severity]
         - required: [workState]
         - required: [watchList]
+        - anyOf:
+            - required: [addWatchers]
+            - required: [removeWatchers]
         - required: [assigneeEmail]
         - required: [parentId]
         - required: [acknowledge]
@@ -22068,7 +22073,27 @@ components:
           items:
             type: string
             format: email
-          description: List of email addresses to set as the case watch list (ServiceNow only).
+          description: |
+            List of email addresses to set as the case watch list (ServiceNow only). Replaces the
+            whole list, so a caller with a stale copy drops watchers added since; to add or remove
+            people use `addWatchers` / `removeWatchers`.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to add to the watch list. Applied against the list stored at that
+            moment, so watchers others added meanwhile are kept; already watching is a no-op.
+            PostgreSQL data source only. Cannot be combined with another field.
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to remove from the watch list (not watching is a no-op). A user in
+            both `addWatchers` and `removeWatchers` is a 400.
         assigneeEmail:
           type: string
           format: email
@@ -29721,6 +29746,24 @@ components:
           items:
             type: string
             format: uuid
+          description: |
+            The full watch list, replacing whatever is stored (so a stale caller overwrites watchers
+            added since). Prefer `addWatchers` / `removeWatchers`.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to add to the watch list, applied against the list stored at that
+            moment so concurrent changes are kept. PostgreSQL data source only. May be combined with
+            `removeWatchers` and other fields, not with `watchList`.
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Platform user ids to remove from the watch list (not watching is a no-op).
 
     UpdateIncidentResponse:
       type: object

@@ -66,3 +66,45 @@ export function isEligibleWatcher(
     !contact.isSecurityContact;
   return isRegistered && hasEligibleRole;
 }
+
+/** The watchers a user added and removed while editing, as emails. */
+export interface WatchListChange {
+  /** In the edited list but not in the one the edit started from. */
+  addWatchers: string[];
+  /** In the list the edit started from but not in the edited one. */
+  removeWatchers: string[];
+}
+
+/**
+ * What the user actually changed between the watch list an edit started from
+ * and the one they ended with.
+ *
+ * The case's watch list is saved as this change, never as the edited list: the
+ * backend applies a change against the list stored at that moment, so a watcher
+ * a colleague added while this page was open stays on the case. Sending the
+ * whole edited list instead replaces whatever is stored and drops them.
+ *
+ * Emails are compared trimmed and case-insensitively; the first spelling seen
+ * is the one returned. Someone left alone appears in neither list.
+ *
+ * @param {string[]} baseline - The watch list the edit started from.
+ * @param {string[]} edited - The watch list as the user left it.
+ * @returns {WatchListChange} The additions and removals.
+ */
+export function diffWatchList(baseline: string[], edited: string[]): WatchListChange {
+  const key = (email: string): string => email.trim().toLowerCase();
+  const unique = (emails: string[]): Map<string, string> => {
+    const byKey = new Map<string, string>();
+    for (const email of emails) {
+      const k = key(email);
+      if (k && !byKey.has(k)) byKey.set(k, email.trim());
+    }
+    return byKey;
+  };
+  const before = unique(baseline);
+  const after = unique(edited);
+  return {
+    addWatchers: [...after].filter(([k]) => !before.has(k)).map(([, email]) => email),
+    removeWatchers: [...before].filter(([k]) => !after.has(k)).map(([, email]) => email),
+  };
+}

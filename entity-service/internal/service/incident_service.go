@@ -198,6 +198,27 @@ func incidentRecordUpdateFromRequest(req domain.UpdateIncidentRequest, u *reposi
 			return false, err
 		}
 	}
+	hasWatchDelta := len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0
+	if hasWatchDelta {
+		if req.WatchList != nil {
+			return false, &apierror.ValidationError{Msg: "watchList cannot be combined with addWatchers or removeWatchers"}
+		}
+		if err := validateUUIDs("addWatchers", req.AddWatchers); err != nil {
+			return false, err
+		}
+		if err := validateUUIDs("removeWatchers", req.RemoveWatchers); err != nil {
+			return false, err
+		}
+		removing := make(map[string]struct{}, len(req.RemoveWatchers))
+		for _, id := range req.RemoveWatchers {
+			removing[strings.ToLower(id)] = struct{}{}
+		}
+		for _, id := range req.AddWatchers {
+			if _, both := removing[strings.ToLower(id)]; both {
+				return false, &apierror.ValidationError{Msg: "addWatchers and removeWatchers must not name the same user: " + id}
+			}
+		}
+	}
 
 	label := func(v string) *string { return &v }
 	u.Subject = req.Subject
@@ -213,6 +234,8 @@ func incidentRecordUpdateFromRequest(req domain.UpdateIncidentRequest, u *reposi
 	u.IncidentReport = req.IncidentReport
 	u.Environment = req.Environment
 	u.WatchList = req.WatchList
+	u.AddWatchers = req.AddWatchers
+	u.RemoveWatchers = req.RemoveWatchers
 	if req.Category != nil {
 		u.Category = label(string(*req.Category))
 	}
@@ -240,7 +263,7 @@ func incidentRecordUpdateFromRequest(req domain.UpdateIncidentRequest, u *reposi
 		req.ServiceID != nil || req.ServiceOfferingID != nil || req.ConfigurationItemID != nil ||
 		req.ChangeRequestID != nil || req.ProblemID != nil || req.CausedByID != nil ||
 		req.ParentIncidentID != nil || req.IncidentReport != nil || req.Environment != nil ||
-		req.WatchList != nil
+		req.WatchList != nil || hasWatchDelta
 	return ok, nil
 }
 
@@ -1244,6 +1267,18 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 		return domain.UpdateIncidentResponse{Message: "Incident updated successfully", Incident: view}, nil
 	}
 	mirrorReq := req
+	if len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0 {
+		// ServiceNow's update only replaces its watch list, so the mirror sends
+		// the list Postgres now holds instead of the delta.
+		ids := make([]string, 0, len(view.WatchList))
+		for _, w := range view.WatchList {
+			if w.ID != "" {
+				ids = append(ids, w.ID)
+			}
+		}
+		mirrorReq.AddWatchers, mirrorReq.RemoveWatchers = nil, nil
+		mirrorReq.WatchList = &ids
+	}
 	if problemID != "" {
 		// ServiceNow's incident gets the same problem link as Postgres's.
 		mirrorReq.ProblemID = &problemID

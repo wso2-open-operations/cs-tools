@@ -877,6 +877,16 @@ description, watchList, resolutionCode, cause, closeNotes), and
 every excluded field zero/nil — so even if a client sends `{"workState": "ongoing"}`, it's silently
 dropped (the portal struct has no such field) rather than forwarded.
 
+**`PATCH /cases/{id}` edits the watch list by delta (`addWatchers` / `removeWatchers`, emails), not by replacing it.**
+`watchList` replaces the whole stored list, so a page loaded before a colleague added a watcher
+overwrote it on save, and it can never be empty (so the last watcher could not be removed).
+`PatchCase` resolves each delta list's emails to user ids the same way as `watchList`
+(`resolveWatchListUserIDs`), forwards only the resolved delta, and entity-service applies it against
+the list stored at that moment. One of the three primary fields (`stateKey`, `watchList`, the delta
+pair) per request; a delta whose emails all fail to resolve is a 400, a remove-only request is valid,
+and unresolved emails are dropped with a count in the log, never the address. The webapp sends only
+what the user changed (`diffWatchList`). Postgres data source only upstream.
+
 **`PATCH /cases/{id}`'s `stateKey` carries no transition-legality check in this backend, on
 purpose.** An earlier version of this handler carried its own copy of the legacy ServiceNow
 scoped-app's `ALLOWED_STATE_TRANSITIONS` table (which from→to state moves a customer may make), the

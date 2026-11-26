@@ -479,12 +479,21 @@ export type CaseClassificationRequest = SharedEnvContext & {
 };
 
 // Request type for patching a case.
-// The backend requires exactly one of stateKey/watchList per request — there
-// is no comment field here at all; a comment goes through the separate
+// The backend requires exactly one of stateKey, watchList, or
+// addWatchers/removeWatchers (alone or together) per request — there is no
+// comment field here at all; a comment goes through the separate
 // POST /cases/:id/comments endpoint (see usePostComment).
+//
+// Edit the watch list with addWatchers/removeWatchers (emails): the backend
+// applies them against the list stored at that moment, so a watcher a colleague
+// added since this page loaded is kept. watchList replaces the whole stored list
+// and cannot be empty, so it can neither be stale-safe nor remove the last
+// watcher.
 export type PatchCaseRequest = {
   stateKey?: number;
   watchList?: string[];
+  addWatchers?: string[];
+  removeWatchers?: string[];
 };
 
 // Request type for creating a support case.

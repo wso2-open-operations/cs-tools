@@ -358,10 +358,14 @@ test.describe("incident list — bulk actions", () => {
         changeRequestId: CHANGE_REQUESTS[0].id,
       });
     }
-    const aliceId = (second.body.watchList as string[])[0];
-    // INC-E2E-1 keeps its existing watcher; INC-E2E-2 had none.
-    expect(first.body.watchList).toEqual(["00000000-0000-4000-8000-00000000d001", aliceId]);
-    expect(second.body.watchList).toEqual([aliceId]);
+    // Each incident is sent only the person added, never its whole list: the
+    // backend adds them to what each incident has, so INC-E2E-1 keeps its
+    // existing watcher and nobody's concurrent change is lost.
+    const aliceId = (second.body.addWatchers as string[])[0];
+    expect(first.body.addWatchers).toEqual([aliceId]);
+    expect(second.body.addWatchers).toEqual([aliceId]);
+    expect(first.body).not.toHaveProperty("watchList");
+    expect(second.body).not.toHaveProperty("watchList");
   });
 
   test("Assign to me assigns every selected incident", async ({ page }) => {

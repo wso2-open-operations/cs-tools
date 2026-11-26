@@ -515,15 +515,8 @@ describe("IncidentsTab — bulk runs follow the incident as it is now", { timeou
 
 // These drive the whole edit dialog, which takes a while to render under a loaded suite.
 describe("IncidentsTab — bulk watch list", { timeout: 20_000 }, () => {
-  it("adds a person to each selected incident's own watch list, reading each list first", async () => {
+  it("adds a person to each selected incident by naming only that person, reading no list first", async () => {
     access.canWrite = true;
-    apiMock.get.mockImplementation((path: string) =>
-      Promise.resolve(
-        path.endsWith("inc-1")
-          ? { id: "inc-1", watchList: [{ id: "user-3", name: "Caller Person", email: "c@example.test" }] }
-          : { id: "inc-2", watchList: [] },
-      ),
-    );
     apiMock.patch.mockResolvedValue({ id: "x" });
     showRows([INCIDENT, INCIDENT_NEW]);
     render(<IncidentsTab />);
@@ -538,31 +531,12 @@ describe("IncidentsTab — bulk watch list", { timeout: 20_000 }, () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 incidents" }));
 
     await waitFor(() => expect(screen.getByText("Updated 2 of 2 incidents.")).toBeInTheDocument());
-    expect(apiMock.get).toHaveBeenCalledWith("/incidents/inc-1");
-    expect(apiMock.patch).toHaveBeenCalledWith("/incidents/inc-1", { watchList: ["user-3", "user-7"] });
-    expect(apiMock.patch).toHaveBeenCalledWith("/incidents/inc-2", { watchList: ["user-7"] });
-  });
-
-  it("reads each watch list afresh, never from a cached detail: what it sends replaces the list", async () => {
-    access.canWrite = true;
-    apiMock.get.mockResolvedValue({ id: "inc-1", watchList: [{ id: "user-9", name: "Dave", email: "d@example.test" }] });
-    apiMock.patch.mockResolvedValue({ id: "x" });
-    showRows([INCIDENT]);
-    render(<IncidentsTab />);
-    // A detail opened moments ago, before Dave was added: still fresh by its own staleTime.
-    queryClient.setQueryData(["incident-details", "inc-1"], { id: "inc-1", watchList: [] });
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select all incidents on this page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit (1)" }));
-    const dialog = screen.getByRole("dialog", { name: "Edit 1 incident" });
-    const watchInput = within(dialog).getByRole("combobox", { name: "Watch list" });
-    watchInput.focus();
-    fireEvent.keyDown(watchInput, { key: "ArrowDown" });
-    fireEvent.click(await screen.findByRole("option", { name: /wanda@example.test/ }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 1 incident" }));
-
-    await waitFor(() => expect(screen.getByText("Updated 1 of 1 incidents.")).toBeInTheDocument());
-    expect(apiMock.patch).toHaveBeenCalledWith("/incidents/inc-1", { watchList: ["user-9", "user-7"] });
+    // Only the person added is sent, so each incident keeps whoever is on its list by the time the
+    // edit lands (a watcher added since this page loaded is never overwritten), and nothing is read.
+    expect(apiMock.patch).toHaveBeenCalledWith("/incidents/inc-1", { addWatchers: ["user-7"] });
+    expect(apiMock.patch).toHaveBeenCalledWith("/incidents/inc-2", { addWatchers: ["user-7"] });
+    expect(apiMock.get).not.toHaveBeenCalledWith("/incidents/inc-1");
+    expect(apiMock.get).not.toHaveBeenCalledWith("/incidents/inc-2");
   });
 });
 

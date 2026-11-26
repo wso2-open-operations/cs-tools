@@ -466,19 +466,17 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   );
 
   /**
-   * Persist a new watch list. There is no add-one/remove-one endpoint:
-   * `PATCH /incidents/{id}` takes the whole `watchList` as user UUIDs and
-   * replaces what is stored, so `WatchersWidget` computes the full
-   * replacement list (for a removal as much as an addition) and this only
-   * forwards it. An explicitly empty list is meaningful here — it clears the
-   * watch list — which is why the widget allows removing an incident's last
-   * watcher.
+   * Persist one watcher added or removed. Sent as `addWatchers` /
+   * `removeWatchers`, which the backend applies against the list stored at that
+   * moment: sending the whole `watchList` instead would overwrite a watcher
+   * another engineer added after this page loaded. An incident's last watcher
+   * can be removed.
    */
-  const onReplaceWatchers = useCallback(
-    (nextWatcherIds: string[]) => {
+  const onChangeWatchers = useCallback(
+    ({ userId, action }: { userId: string; action: "add" | "remove" }) => {
       if (!id) return;
       patchIncident.mutate(
-        { id, patch: { watchList: nextWatcherIds } },
+        { id, patch: action === "add" ? { addWatchers: [userId] } : { removeWatchers: [userId] } },
         {
           onError: (err) => {
             // The watch-list 400s name the offending value (an unknown or
@@ -1223,7 +1221,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <WatchersWidget
           entityKind="incident"
           watchers={watchList}
-          onReplace={onReplaceWatchers}
+          onChange={onChangeWatchers}
           isSaving={patchIncident.isPending}
           currentUserId={currentUser?.id}
           // No `autoWatchingReason`: the incident read model's `assignedTo`

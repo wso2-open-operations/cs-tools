@@ -4798,6 +4798,24 @@ changed.
   LOW/S4 severity also flips the case's time cards non-billable, inside the
   same transaction as the attach — see "Event Hub publishing" above
   (`recomputeTimeCardsBillable`) for the full design and the race it fixes.
+- **Watch list by delta** (`AddWatchers` / `RemoveWatchers` on `PATCH /cases/{id}`,
+  `updateCaseWatchDelta`, `CaseRepository.ChangeCaseWatchers`): `WatchList` replaces the
+  whole list (`SetCaseWatchList` deletes every row, then inserts), so a caller holding a stale
+  copy silently drops a watcher added meanwhile. The delta fields run in one transaction against
+  what is stored then: `DELETE ... user_id = ANY(...)`, then `INSERT ... ON CONFLICT DO NOTHING`
+  (re-adding and removing a non-watcher are no-ops). One exclusive field, so not combinable with
+  `watchList` or anything else; the same user in both lists, or a non-UUID, is a 400. Only
+  newly added users get the project-contact check, as in the replace branch. The ServiceNow data
+  source refuses them (its API only replaces the list; emulating a delta would bring the race back),
+  and a dual-write mirror sends every stored watcher id (`CaseWatcherUserIDs`, read when the write runs, so
+  concurrent changes cannot land out of order; not the response list, which hides some stored rows). Both portals use
+  these for add/remove; `watchList` stays for create-time and bulk replace.
+  **Incidents have the same fields** on `PATCH /incidents/{id}` (`UpdateIncidentRequest.AddWatchers` /
+  `RemoveWatchers`, `changeIncidentWatchers`): there they are record fields of the update's own
+  transaction, so they combine with the other fields and with each other but not with `watchList`.
+  The add side checks every id is a user (400 otherwise) and inserts with `ON CONFLICT DO NOTHING`;
+  the remove side is a `DELETE ... user_id = ANY(...)`. The ServiceNow data source refuses them, and a
+  dual-write mirror sends the resulting persisted list as `watchList`, since ServiceNow only replaces.
 - **Case watch list** (`work_item_watcher`, migration 0042):
   `UpdateCase`'s `WatchList` field, previously rejected outright on this
   data source, now has its own branch (`updateCaseWatchList`) — split out

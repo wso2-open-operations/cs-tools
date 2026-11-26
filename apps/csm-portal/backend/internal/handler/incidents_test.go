@@ -345,6 +345,47 @@ func TestGetIncident(t *testing.T) {
 	})
 }
 
+// addWatchers / removeWatchers are checked for UUIDs like watchList, and a valid
+// body reaches entity-service verbatim (never turned into a whole watchList).
+func TestPatchIncidentWatchDelta(t *testing.T) {
+	const incidentID = "11111111-1111-1111-1111-111111111111"
+	const watcher = "22222222-2222-2222-2222-222222222222"
+
+	t.Run("forwards a valid delta verbatim", func(t *testing.T) {
+		const reqBody = `{"addWatchers":["` + watcher + `"],"removeWatchers":["33333333-3333-3333-3333-333333333333"]}`
+		var captured []byte
+		client := &mockEntityIncidentClient{
+			patchIncidentFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+				captured = body
+				return []byte(`{"message":"Incident updated successfully"}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(reqBody)))
+		r.SetPathValue("id", incidentID)
+		w := httptest.NewRecorder()
+		h.PatchIncident(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if string(captured) != reqBody {
+			t.Errorf("upstream received %s, want %s", captured, reqBody)
+		}
+	})
+
+	for name, body := range map[string]string{
+		"rejects a non-UUID in addWatchers":    `{"addWatchers":["not-a-uuid"]}`,
+		"rejects a non-UUID in removeWatchers": `{"removeWatchers":["jane@example.com"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewIncidentHandler(&mockEntityIncidentClient{})
+			r := withUser(httptest.NewRequest(http.MethodPatch, "/incidents/"+incidentID, strings.NewReader(body)))
+			r.SetPathValue("id", incidentID)
+			w := httptest.NewRecorder()
+			h.PatchIncident(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+		})
+	}
+}
+
 func TestPatchIncident(t *testing.T) {
 	const incidentID = "11111111-1111-1111-1111-111111111111"
 

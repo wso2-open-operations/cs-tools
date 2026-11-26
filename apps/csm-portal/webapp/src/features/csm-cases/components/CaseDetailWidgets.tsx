@@ -658,11 +658,20 @@ export type WatchedEntityKind = keyof typeof WATCH_LIST_RULES;
 /**
  * Watch list for a case or an incident, with add/remove.
  *
- * Neither backend has an add-one/remove-one endpoint: both take the **whole**
- * watch list as user UUIDs and replace what is stored. Sending only the user
- * that changed silently wipes everyone else. So this widget — not its callers
- * — computes the replacement list in {@link addWatcher}/{@link removeWatcher}
- * and hands the finished array to `onReplace`; a page can only forward it.
+ * Two write modes, chosen by which callback the page passes:
+ *
+ * - `onChange` (the case page): one user added or removed. The backend applies
+ *   it against the list stored at that moment, so a watcher another engineer
+ *   added after this page loaded is never dropped.
+ * - `onReplace` (the incident page, whose API only replaces): the **whole**
+ *   watch list as user UUIDs replaces what is stored. Sending only the user
+ *   that changed silently wipes everyone else, so this widget — not its
+ *   callers — computes the replacement list in
+ *   {@link addWatcher}/{@link removeWatcher} and hands the finished array over;
+ *   a page can only forward it. (It is also built from the list this page last
+ *   loaded, so a stale page can still overwrite a concurrent change.)
+ *
+ * `onChange` wins when both are given.
  *
  * `entityKind` selects the rules in {@link WATCH_LIST_RULES}; nothing else
  * about this component varies by record type.
@@ -671,6 +680,7 @@ export function WatchersWidget({
   entityKind,
   watchers,
   onReplace,
+  onChange,
   isSaving,
   onRefresh,
   isRefreshing,
@@ -686,6 +696,12 @@ export function WatchersWidget({
    * the full replacement list, never a delta. Omit to render read-only.
    */
   onReplace?: (nextWatcherIds: string[], action: "add" | "remove") => void;
+  /**
+   * Persist one user's addition to or removal from the watch list as a delta.
+   * Omit (and pass `onReplace`, or neither for read-only) when the record's
+   * API can only replace the whole list.
+   */
+  onChange?: (change: { userId: string; action: "add" | "remove" }) => void;
   /** True while a watch-list write is in flight; blocks add and remove so a
    * double-click can't fire two conflicting replacements. */
   isSaving?: boolean;
@@ -711,6 +727,10 @@ export function WatchersWidget({
   autoWatchingReason?: string;
 }): JSX.Element {
   const rules = WATCH_LIST_RULES[entityKind];
+  const canEdit = !!(onChange || onReplace);
+  // The one-watcher floor exists only because a replace with an empty list is
+  // not expressible for a case; a delta can remove the last watcher.
+  const minWatchers = onChange ? 0 : rules.minWatchers;
   const reasonId = useId();
   const followReasonId = useId();
   const watcherIds = useMemo(() => watchers.map((w) => w.id), [watchers]);
@@ -722,30 +742,45 @@ export function WatchersWidget({
   // Below the floor the record type allows, removal isn't expressible at all
   // (see WATCH_LIST_RULES), so the control is blocked with the reason rather
   // than firing a request that is known to be rejected.
-  const belowFloorAfterRemoval = watchers.length <= rules.minWatchers;
+  const belowFloorAfterRemoval = watchers.length <= minWatchers;
   const removalBlockedReason = belowFloorAfterRemoval ? rules.minWatchersReason : "";
   const unfollowBlockedReason = autoWatchingReason || removalBlockedReason;
 
+  // The single write path for add and remove: a delta when the page gave
+  // `onChange`, else the full replacement list built from the loaded one.
+  const writeChange = useCallback(
+    (userId: string, action: "add" | "remove") => {
+      if (onChange) {
+        onChange({ userId, action });
+        return;
+      }
+      onReplace?.(
+        action === "add"
+          ? [...watcherIds, userId]
+          : watcherIds.filter((id) => id !== userId),
+        action,
+      );
+    },
+    [onChange, onReplace, watcherIds],
+  );
+
   const addWatcher = useCallback(
     (userId: string) => {
-      if (!onReplace || !userId || isSaving) return;
+      if (!canEdit || !userId || isSaving) return;
       // Already watching: nothing to write, and resending the same list would
       // burn a request for no change.
       if (watcherIds.includes(userId)) return;
-      onReplace([...watcherIds, userId], "add");
+      writeChange(userId, "add");
     },
-    [onReplace, isSaving, watcherIds],
+    [canEdit, isSaving, watcherIds, writeChange],
   );
 
   const removeWatcher = useCallback(
     (watcher: WatchListMember) => {
-      if (!onReplace || isSaving || belowFloorAfterRemoval) return;
-      onReplace(
-        watcherIds.filter((id) => id !== watcher.id),
-        "remove",
-      );
+      if (!canEdit || isSaving || belowFloorAfterRemoval) return;
+      writeChange(watcher.id, "remove");
     },
-    [onReplace, isSaving, belowFloorAfterRemoval, watcherIds],
+    [canEdit, isSaving, belowFloorAfterRemoval, writeChange],
   );
 
   // Self-subscribe: the same add/remove path as the per-watcher controls
@@ -756,12 +791,9 @@ export function WatchersWidget({
   }, [addWatcher, currentUserId]);
   const onUnfollowClick = useCallback(() => {
     if (!currentUserId || unfollowBlockedReason) return;
-    if (!onReplace || isSaving) return;
-    onReplace(
-      watcherIds.filter((id) => id !== currentUserId),
-      "remove",
-    );
-  }, [currentUserId, unfollowBlockedReason, onReplace, isSaving, watcherIds]);
+    if (!canEdit || isSaving) return;
+    writeChange(currentUserId, "remove");
+  }, [currentUserId, unfollowBlockedReason, canEdit, isSaving, writeChange]);
 
   return (
     <WidgetCard
@@ -778,7 +810,7 @@ export function WatchersWidget({
         )
       }
     >
-      {onReplace && currentUserId && (
+      {canEdit && currentUserId && (
         <Box sx={{ mb: 1.5 }}>
           {isFollowing ? (
             <Tooltip title={unfollowBlockedReason}>
@@ -868,7 +900,7 @@ export function WatchersWidget({
                     userId={w.user?.id}
                   />
                 </Typography>
-                {onReplace && (
+                {canEdit && (
                   <Tooltip title={removalBlockedReason}>
                     {/* aria-disabled, not disabled: a disabled button drops out
                         of the tab order, taking the reason for its own
@@ -895,7 +927,7 @@ export function WatchersWidget({
           })}
         </Box>
       )}
-      {onReplace && (
+      {canEdit && (
         <Box sx={{ mt: 1.5 }}>
           <AsyncEntitySelect<BeUser>
             id={`${entityKind}-watchers-add`}
@@ -916,7 +948,7 @@ export function WatchersWidget({
           />
         </Box>
       )}
-      {belowFloorAfterRemoval && onReplace && watchers.length > 0 && (
+      {belowFloorAfterRemoval && canEdit && watchers.length > 0 && (
         <Box
           component="span"
           id={reasonId}

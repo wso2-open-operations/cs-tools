@@ -16,7 +16,11 @@
 
 
 import { describe, expect, it } from "vitest";
-import { isEligibleWatcher, isRegisteredContact } from "@features/support/utils/watchList";
+import {
+  diffWatchList,
+  isEligibleWatcher,
+  isRegisteredContact,
+} from "@features/support/utils/watchList";
 
 const base = {
   isCsAdmin: false,
@@ -91,4 +95,38 @@ describe("isRegisteredContact", () => {
       ).toBe(false);
     },
   );
+});
+
+describe("diffWatchList", () => {
+  it("returns only what was added and what was removed", () => {
+    expect(diffWatchList(["a@x.com", "b@x.com"], ["b@x.com", "c@x.com"])).toEqual({
+      addWatchers: ["c@x.com"],
+      removeWatchers: ["a@x.com"],
+    });
+  });
+
+  it("is empty when nothing changed, so nothing needs to be sent", () => {
+    expect(diffWatchList(["a@x.com"], ["a@x.com"])).toEqual({ addWatchers: [], removeWatchers: [] });
+  });
+
+  it("never names someone who was left alone, so a watcher a colleague added meanwhile is untouched", () => {
+    const { addWatchers, removeWatchers } = diffWatchList(["a@x.com"], ["a@x.com", "new@x.com"]);
+    expect(addWatchers).toEqual(["new@x.com"]);
+    expect(removeWatchers).toEqual([]);
+  });
+
+  it("compares emails ignoring case and surrounding spaces", () => {
+    expect(diffWatchList(["Alice@X.com"], [" alice@x.com "])).toEqual({
+      addWatchers: [],
+      removeWatchers: [],
+    });
+  });
+
+  it("can remove the last watcher", () => {
+    expect(diffWatchList(["a@x.com"], [])).toEqual({ addWatchers: [], removeWatchers: ["a@x.com"] });
+  });
+
+  it("does not repeat an email listed twice", () => {
+    expect(diffWatchList([], ["a@x.com", "A@x.com"]).addWatchers).toEqual(["a@x.com"]);
+  });
 });

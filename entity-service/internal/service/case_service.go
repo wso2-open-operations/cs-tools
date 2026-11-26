@@ -2029,6 +2029,9 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.WatchList != nil {
 		exclusiveCount++
 	}
+	if len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0 {
+		exclusiveCount++
+	}
 	if len(req.AssigneeEmail) > 0 {
 		exclusiveCount++
 	}
@@ -2079,7 +2082,7 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of " + fieldList + " must be provided"}
 	}
 	if exclusiveCount > 1 || (exclusiveCount == 1 && combinableCount > 0) {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state, severity, workState, watchList, assigneeEmail, parentId, acknowledge, and markFixIssued cannot be combined with each other or with any other field in the same request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state, severity, workState, watchList, addWatchers/removeWatchers, assigneeEmail, parentId, acknowledge, and markFixIssued cannot be combined with each other or with any other field in the same request"}
 	}
 	// resolutionCode/cause/closeNotes ride along with a state change only --
 	// same restriction sn_case_service.go's own UpdateCase enforces
@@ -2119,6 +2122,9 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	}
 	if req.WatchList != nil {
 		return s.updateCaseWatchList(ctx, req)
+	}
+	if len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0 {
+		return s.updateCaseWatchDelta(ctx, req)
 	}
 	if len(req.AssigneeEmail) > 0 {
 		return s.updateCaseAssignee(ctx, req)
@@ -2938,6 +2944,84 @@ func (s *caseService) updateCaseWatchList(ctx context.Context, req domain.Update
 				map[string]any{"id": req.ID, "watchList": mirrorUserIDs},
 				func(writeCtx context.Context) error {
 					_, err := patcher.patchCaseWatchList(writeCtx, req.ID, mirrorUserIDs)
+					return err
+				},
+			)
+		}
+	}
+
+	return domain.UpdateCaseResponse{
+		Message: "Case updated successfully",
+		Case: domain.UpdatedCase{
+			ID:        req.ID,
+			UpdatedOn: updatedOn,
+			WatchList: watchers,
+		},
+	}, nil
+}
+
+// updateCaseWatchDelta implements UpdateCase's AddWatchers/RemoveWatchers
+// branch: it adds and removes the named users against whatever watch list is
+// stored when the transaction runs (CaseRepository.ChangeCaseWatchers), so a
+// caller holding a stale copy of the list cannot drop a watcher another user
+// added meanwhile -- the failure UpdateCase's WatchList (a wholesale replace)
+// has. Only newly added users are checked for project membership, like the
+// replace branch. The response carries the resulting full watch list.
+func (s *caseService) updateCaseWatchDelta(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error) {
+	if err := validateUUIDs("addWatchers", req.AddWatchers); err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	if err := validateUUIDs("removeWatchers", req.RemoveWatchers); err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	removed := make(map[string]struct{}, len(req.RemoveWatchers))
+	for _, id := range req.RemoveWatchers {
+		removed[strings.ToLower(id)] = struct{}{}
+	}
+	for _, id := range req.AddWatchers {
+		if _, both := removed[strings.ToLower(id)]; both {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "addWatchers and removeWatchers must not name the same user: " + id}
+		}
+	}
+
+	cv, err := s.GetCaseByID(ctx, req.ID)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	if err := s.validateWatchListProjectMembership(ctx, cv, newlyAddedWatcherIDs(cv.WatchList, req.AddWatchers)); err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+
+	actor, err := s.resolveActor(ctx)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+
+	watchers, updatedOn, err := s.repo.ChangeCaseWatchers(ctx, req.ID, req.AddWatchers, req.RemoveWatchers, actor.Email)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+
+	// Best-effort ServiceNow mirror (dual-write only), same as the replace
+	// branch. The mirror is a whole-list PATCH, so the list is read from the
+	// stored watchers when the write runs, not taken from this request: two
+	// changes to one case can commit in one order and be dispatched in
+	// another, and a list captured here would let the earlier commit's list
+	// overwrite the later one. It is the stored rows, not the response list,
+	// because the response hides stored watchers the portal does not show (an
+	// external user who is no longer a project contact), which a replace would
+	// then drop in ServiceNow. The account's default stakeholders are resolved,
+	// never stored, so they are not in it.
+	if s.snWriteback != nil {
+		if patcher, ok := s.snMirror.(snWatchListPatcher); ok {
+			s.snWriteback.Dispatch(ctx, "case", req.ID, "update",
+				map[string]any{"id": req.ID, "addWatchers": req.AddWatchers, "removeWatchers": req.RemoveWatchers},
+				func(writeCtx context.Context) error {
+					storedIDs, err := s.repo.CaseWatcherUserIDs(writeCtx, req.ID)
+					if err != nil {
+						return err
+					}
+					_, err = patcher.patchCaseWatchList(writeCtx, req.ID, storedIDs)
 					return err
 				},
 			)

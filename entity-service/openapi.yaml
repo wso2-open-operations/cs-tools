@@ -26045,7 +26045,8 @@ components:
       description: |
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`,
         `acknowledge`, `type`, or the combinable group (`bestCaseFixEta`, `mostLikelyFixEta`,
-        `worstCaseFixEta`, `workaroundProvided`) must be provided. The single exception is
+        `worstCaseFixEta`, `workaroundProvided`) must be provided; `addWatchers` and
+        `removeWatchers` (sent alone or together) count as one exclusive field. The single exception is
         `severity`, which may accompany `type` and is required when `type` is `case`.
         The combinable group has no cross-field side effects, so any non-empty subset of its
         four fields may be sent together in one request (e.g. all three fix-ETA estimates plus
@@ -26080,6 +26081,9 @@ components:
         - required: [severity]
         - required: [workState]
         - required: [watchList]
+        - anyOf:
+            - required: [addWatchers]
+            - required: [removeWatchers]
         - required: [assigneeEmail]
         - required: [acknowledge]
         - required: [type]
@@ -26154,7 +26158,29 @@ components:
             The full set of watchers to set on the case, replacing whatever is there.
             Each item is a watcher email (Customer Portal) or a platform user UUID
             (CSM); the list must be all emails or all UUIDs. An empty array clears the
-            watch list, and counts as providing the field.
+            watch list, and counts as providing the field. A caller working from a
+            stale copy overwrites watchers added since; use `addWatchers` /
+            `removeWatchers` to change the list without that risk.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user UUIDs to add to the case's watch list. Applied against the list
+            stored at that moment, in one transaction, so a watcher someone else added after
+            the caller loaded the case is kept. Already watching is a no-op. A newly added
+            user must be an eligible contact of the case's project (same rule as `watchList`).
+            Postgres data source only (400 elsewhere). Not combinable with `watchList` or any
+            other field.
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user UUIDs to remove from the case's watch list, applied as `addWatchers`
+            is. Not watching is a no-op. A user named in both lists is a 400.
         assigneeEmail:
           type: string
           format: email
@@ -36536,7 +36562,29 @@ components:
             format: uuid
           description: |
             The full set of user identifiers to set as the incident watch list, replacing
-            whatever is there. An empty array clears the watch list.
+            whatever is there. An empty array clears the watch list. A caller working from
+            a stale copy overwrites watchers added since; use `addWatchers` / `removeWatchers`
+            to change the list without that risk.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user UUIDs to add to the incident watch list, applied in the update's own
+            transaction against the list stored at that moment, so a watcher someone else added
+            after the caller loaded the incident is kept. Already watching is a no-op; an unknown
+            user is a 400. May be combined with `removeWatchers` and the other fields, not with
+            `watchList`. Postgres data source only (400 elsewhere).
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user UUIDs to remove from the incident watch list, applied as `addWatchers`
+            is. Not watching is a no-op, and the last watcher may be removed. A user named in both
+            lists is a 400.
         environment:
           type: string
           nullable: true
