@@ -28,7 +28,11 @@ import (
 // dashboards: the share picker offers every internal user and a team share
 // reaches every member, so a share must open for a view-only role too (its
 // widgets still query with the viewer's own permissions). Generating, saving,
-// deleting and sharing stay PermWrite (CS engineers and admins).
+// deleting and sharing stay PermWrite (CS engineers and admins), and so do the
+// saved advanced dashboards and their sharing (/dashboards/code*); reading or
+// opening an advanced dashboard shared with you (/dashboards/shared/code*) is
+// PermView, as for the others, and so is POST /dashboards/resolved-filters,
+// which a shared advanced dashboard calls while it runs.
 func TestCustomDashboardRoutePermissions(t *testing.T) {
 	src, err := os.ReadFile("main.go")
 	if err != nil {
@@ -48,9 +52,11 @@ func TestCustomDashboardRoutePermissions(t *testing.T) {
 		name := method + " " + path
 		var want string
 		switch {
-		case path == "/dashboards/shared" || strings.HasPrefix(path, "/dashboards/shared/"):
+		case path == "/dashboards/shared" || strings.HasPrefix(path, "/dashboards/shared/"),
+			path == "/dashboards/resolved-filters":
 			want = "handler.PermView"
 		case path == "/dashboards/custom" || strings.HasPrefix(path, "/dashboards/custom/"),
+			path == "/dashboards/code" || strings.HasPrefix(path, "/dashboards/code/"),
 			strings.HasPrefix(path, "/dashboards/generate"):
 			want = "handler.PermWrite"
 		default:
@@ -68,6 +74,12 @@ func TestCustomDashboardRoutePermissions(t *testing.T) {
 		"PUT /dashboards/custom/{id}/shares/{userId}", "POST /dashboards/generate",
 		"GET /dashboards/custom/{id}/link", "PUT /dashboards/custom/{id}/link",
 		"DELETE /dashboards/custom/{id}/link", "POST /dashboards/shared/link",
+		"GET /dashboards/code", "GET /dashboards/code/{id}", "PUT /dashboards/code/{id}",
+		"DELETE /dashboards/code/{id}",
+		"GET /dashboards/code/{id}/shares", "PUT /dashboards/code/{id}/team-shares/{teamKey}",
+		"DELETE /dashboards/code/{id}/link", "GET /dashboards/shared/code",
+		"GET /dashboards/shared/code/{id}", "POST /dashboards/shared/code/link",
+		"POST /dashboards/resolved-filters",
 	} {
 		if !seen[name] {
 			t.Errorf("route %q is no longer registered with route(...) in main.go; update this test if it moved", name)

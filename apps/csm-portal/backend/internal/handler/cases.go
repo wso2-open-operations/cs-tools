@@ -83,6 +83,7 @@ type entityCaseClient interface {
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	AggregateCases(ctx context.Context, body []byte) ([]byte, error)
 	VolumeTrend(ctx context.Context, body []byte) ([]byte, error)
+	CaseResolutionTime(ctx context.Context, body []byte) ([]byte, error)
 	SearchFeedback(ctx context.Context, body []byte) ([]byte, error)
 	AggregateFeedback(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
@@ -951,6 +952,44 @@ func (h *CaseHandler) VolumeTrend(w http.ResponseWriter, r *http.Request) {
 	if !windowEchoed(body, result) {
 		slog.ErrorContext(r.Context(), "entity VolumeTrend ignored the fixed window (entity service older than startDate/endDate/bucket?)", "userID", user.UserID)
 		writeError(w, http.StatusBadGateway, "Failed to load case volume trend.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CaseResolutionTime handles POST /cases/resolution-time: how many cases
+// were resolved in a window and their mean business time to resolve (MTTR),
+// overall and per group, for an advanced dashboard. A plain forward of the
+// entity service's own POST /cases/resolution-time, which validates the
+// window and groupBy and scopes the cases to the caller.
+func (h *CaseHandler) CaseResolutionTime(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.CaseResolutionTime(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CaseResolutionTime failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to load case resolution time.")
 		return
 	}
 
