@@ -111,6 +111,14 @@ const serviceIDByNameQuery = `SELECT id::text FROM service WHERE LOWER(name) = L
 // maxAlertErrorLength keeps a stored error short; the full one is in the log.
 const maxAlertErrorLength = 1000
 
+// truncateAlertError keeps at most maxAlertErrorLength runes of an error, never splitting a multi-byte character.
+func truncateAlertError(s string) string {
+	if r := []rune(s); len(r) > maxAlertErrorLength {
+		return string(r[:maxAlertErrorLength])
+	}
+	return s
+}
+
 type alertProcessorRepository struct {
 	db *Scoped
 }
@@ -166,7 +174,7 @@ func (r *alertProcessorRepository) WithFingerprintLock(ctx context.Context, fing
 }
 
 func (r *alertProcessorRepository) RecordFailure(ctx context.Context, alertID, owner, lastError string, nextAttempt time.Time, failed bool) error {
-	tag, err := r.db.Exec(ctx, recordAlertFailureQuery, alertID, owner, truncateRunes(lastError, maxAlertErrorLength), nextAttempt, failed)
+	tag, err := r.db.Exec(ctx, recordAlertFailureQuery, alertID, owner, truncateAlertError(lastError), nextAttempt, failed)
 	if err != nil {
 		return fmt.Errorf("record alert failure: %w", err)
 	}
