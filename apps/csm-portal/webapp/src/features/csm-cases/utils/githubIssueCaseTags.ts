@@ -29,7 +29,7 @@ import type { BeCreateCaseGithubIssuePayload } from "@api/backend/types";
 // them.
 
 /** The issue type a Patch issue carries (`issueTypeLabel`). The dialog files
- * Discussions and Feature Requests; kept for older payloads. */
+ * Patches, Discussions and Feature Requests. */
 export const GITHUB_PATCH_ISSUE_TYPE = "Type/Patch";
 
 /** Applied to a case a Patch Git issue is filed from. */

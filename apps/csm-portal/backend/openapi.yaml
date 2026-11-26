@@ -28338,9 +28338,11 @@ components:
           description: >
             GitHub label for the issue type: Type/Discussion (filed with Type/Incident and the
             priority label), Type/Feature (filed with Type/Feature, no priority label) or
-            Type/Patch (legacy). Fields of the other type are ignored: a Feature Request's
-            priority, justification, reproducing steps, hotfix, regression and related internal
-            issues, and a Discussion's business use case and related Git issues. The dialog
+            Type/Patch (filed with Type/Patch and patch, no priority label). Fields of the other
+            types are ignored: a Feature Request's priority, justification, reproducing steps,
+            hotfix, regression and related internal issues; a Patch's priority, justification,
+            related internal issues, business use case and related Git issues; and a
+            Discussion's business use case and related Git issues. The dialog
             sends updateLevel "-" with a Feature Request.
         priorityLevel:
           type: string

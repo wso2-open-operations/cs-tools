@@ -47,13 +47,17 @@ import githubIssueOptions from "@features/csm-cases/utils/githubIssueOptions.jso
 
 // ---------------------------------------------------------------------------
 // Option lists. Every select starts unset ("" → "-- Select --"). An issue is
-// filed as a Discussion (Type/Discussion → Type/Incident on GitHub) or a
+// filed as a Patch (Type/Patch → Type/Patch + patch labels on GitHub, no
+// priority), a Discussion (Type/Discussion → Type/Incident on GitHub) or a
 // Feature Request (Type/Feature); the Type select decides which fields show.
-// Priority is sent as the GitHub priority label.
+// For a Discussion, priority is sent as the GitHub priority label.
 // ---------------------------------------------------------------------------
 
 const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
+
+/** A Patch: a fix request with reproducing steps, hotfix and regression flags and no priority. */
+const GITHUB_PATCH_ISSUE_TYPE = "Type/Patch";
 
 /** A Discussion: a problem on the case, with priority, hotfix and regression details. */
 const GITHUB_DISCUSSION_ISSUE_TYPE = "Type/Discussion";
@@ -65,6 +69,7 @@ const GITHUB_FEATURE_ISSUE_TYPE = "Type/Feature";
 const FEATURE_UPDATE_LEVEL = "-";
 
 const ISSUE_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: GITHUB_PATCH_ISSUE_TYPE, label: "Patch" },
   { value: GITHUB_DISCUSSION_ISSUE_TYPE, label: "Discussion" },
   { value: GITHUB_FEATURE_ISSUE_TYPE, label: "Feature Request" },
 ];
@@ -168,16 +173,25 @@ export interface CreateGithubIssueDialogProps {
  * Description show, and Raise stays disabled.
  *
  * Feature Request shows only Subject*, Description*, Business Use Case,
- * Related Git Issue(s) and Migration. Values typed under the other type are
+ * Related Git Issue(s) and Migration. Values typed under another type are
  * kept in state but never sent.
  *
- * Discussion fields, in order: Subject*, Description*, Reproducing Steps,
- * Priority* (P0 to P3, per the Internal Issue Handling Policy), Priority
- * Justification* (free text, P0 to P2) and Reviewed by CS Leadership* (P0/P1
- * only, its reason in a tooltip; the tick only gates Create and is not sent), Update Level, Public Git Issue (both hidden on cloud cases, never required),
- * Related Internal Issue(s), Hotfix Required, Hotfix Reason* (only while
- * Hotfix Required is on), Regression and Migration (on by default for a
- * migration engagement). Subject and Description start empty.
+ * Patch: Subject*, Description*, Reproducing Steps, Update Level* (required on
+ * a non-cloud case) and Public Git Issue (both hidden on cloud cases, where
+ * the Version and references section is dropped), Hotfix Required, Hotfix
+ * Reason* (only while Hotfix Required is on), Regression and Migration. No
+ * priority.
+ *
+ * Discussion: Subject*, Description*, Reproducing Steps, Priority* (P0 to P3,
+ * per the Internal Issue Handling Policy), Priority Justification* (free text,
+ * P0 to P2) and Reviewed by CS Leadership* (P0/P1 only, its reason in a
+ * tooltip; the tick only gates Create and is not sent), Update Level, Public
+ * Git Issue (both hidden on cloud cases, never required), Related Internal
+ * Issue(s), Hotfix Required, Hotfix Reason* (only while Hotfix Required is
+ * on), Regression and Migration. Migration is on by default for a migration
+ * engagement.
+ *
+ * Subject and Description start empty.
  * Migration sends reason "migration"; otherwise reason is "default".
  * The repository comes from GET /products/github-repo for the case product.
  * Submit stays disabled until that lookup returns a mapping.
@@ -240,6 +254,7 @@ export function CreateGithubIssueDialog({
       }
     : undefined;
 
+  const isPatch = issueType === GITHUB_PATCH_ISSUE_TYPE;
   const isDiscussion = issueType === GITHUB_DISCUSSION_ISSUE_TYPE;
   const isFeature = issueType === GITHUB_FEATURE_ISSUE_TYPE;
 
@@ -249,6 +264,8 @@ export function CreateGithubIssueDialog({
   const priorityShort = PRIORITY_OPTIONS.find((o) => o.value === priorityLevel)?.short;
   // Update Level / Public Git Issue apply to non-cloud projects only.
   const showUpdateLevelAndIssueUrl = !showRepoField;
+  // A Patch must say which update level it is for, unless the case is cloud.
+  const requireUpdateLevel = isPatch && showUpdateLevelAndIssueUrl;
 
   /**
    * Sets the priority. The approval tick is cleared, since it was given for the
@@ -293,7 +310,9 @@ export function CreateGithubIssueDialog({
       (!needsJustification || priorityJustification.trim().length > 0) &&
       (!needsApproval || leadershipApproved) &&
       (!hotFix || !!hotFixReason)
-    : isFeature;
+    : isPatch
+      ? (!requireUpdateLevel || updateLevel.trim().length > 0) && (!hotFix || !!hotFixReason)
+      : isFeature;
 
   const canSubmit =
     title.trim().length > 0 &&
@@ -331,6 +350,35 @@ export function CreateGithubIssueDialog({
       if (onboardingInProgress) featurePayload.onboardingInProgress = true;
       onOpenConfirm?.();
       setConfirmPayload(featurePayload);
+      return;
+    }
+
+    if (isPatch) {
+      const patchPayload: BeCreateCaseGithubIssuePayload = {
+        reason: migration ? "migration" : "default",
+        title: title.trim(),
+        description: description.trim(),
+        issueTypeLabel: GITHUB_PATCH_ISSUE_TYPE,
+        repoOverride: {
+          owner: selectedRepoOption.owner,
+          repo: selectedRepoOption.repo,
+        },
+      };
+      if (reproducingSteps.trim()) patchPayload.reproducingSteps = reproducingSteps.trim();
+      // Sent even when hidden on a cloud case: the prefilled update level still
+      // belongs in the issue footer.
+      if (updateLevel.trim()) patchPayload.updateLevel = updateLevel.trim();
+      if (showUpdateLevelAndIssueUrl && publicIssueUrl.trim()) {
+        patchPayload.publicIssueUrl = publicIssueUrl.trim();
+      }
+      if (onboardingInProgress) patchPayload.onboardingInProgress = true;
+      if (hotFix) {
+        patchPayload.hotFixRequired = true;
+        patchPayload.hotFixReason = hotFixReason;
+      }
+      if (regression) patchPayload.regression = true;
+      onOpenConfirm?.();
+      setConfirmPayload(patchPayload);
       return;
     }
 
@@ -505,7 +553,7 @@ export function CreateGithubIssueDialog({
                 placeholder="Why the customer needs it and what it enables"
               />
             )}
-            {isDiscussion && (
+            {(isPatch || isDiscussion) && (
               <TextField
                 {...fieldProps}
                 label="Reproducing Steps"
@@ -594,7 +642,7 @@ export function CreateGithubIssueDialog({
           </>,
         )}
 
-        {isDiscussion &&
+        {(isDiscussion || (isPatch && showUpdateLevelAndIssueUrl)) &&
           section(
           showUpdateLevelAndIssueUrl ? "Version and references" : "References",
           <>
@@ -611,25 +659,28 @@ export function CreateGithubIssueDialog({
                   label="Update Level"
                   value={updateLevel}
                   onChange={(e) => setUpdateLevel(e.target.value)}
+                  required={requireUpdateLevel}
                 />
                 <TextField
                   {...fieldProps}
-                  label="Public Git Issue or Security Internal JIRA"
+                  label={isPatch ? "Public Git Issue or Security Internal" : "Public Git Issue or Security Internal JIRA"}
                   value={publicIssueUrl}
                   onChange={(e) => setPublicIssueUrl(e.target.value)}
-                  placeholder="https://github.com/… or JIRA link"
+                  placeholder={isPatch ? "https://github.com/…" : "https://github.com/… or JIRA link"}
                 />
               </Box>
             )}
-            <TextField
-              {...fieldProps}
-              label="Related Internal Issue(s)"
-              multiline
-              minRows={2}
-              value={relatedInternalIssues}
-              onChange={(e) => setRelatedInternalIssues(e.target.value)}
-              placeholder="Links or numbers of related internal issues"
-            />
+            {isDiscussion && (
+              <TextField
+                {...fieldProps}
+                label="Related Internal Issue(s)"
+                multiline
+                minRows={2}
+                value={relatedInternalIssues}
+                onChange={(e) => setRelatedInternalIssues(e.target.value)}
+                placeholder="Links or numbers of related internal issues"
+              />
+            )}
           </>,
         )}
 
@@ -648,13 +699,13 @@ export function CreateGithubIssueDialog({
           )}
 
         {/* Until a type is chosen only Type, Subject and Description show. */}
-        {(isDiscussion || isFeature) &&
+        {(isPatch || isDiscussion || isFeature) &&
           section(
           "Flags",
           // The switches carry their own vertical padding; the set is pulled up
           // so it keeps the same 16px rhythm under the heading.
           <Box sx={{ display: "flex", flexDirection: "column", mt: -0.75 }}>
-            {isDiscussion && (
+            {(isPatch || isDiscussion) && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
@@ -667,7 +718,7 @@ export function CreateGithubIssueDialog({
               label="Hotfix Required"
             />
             )}
-            {isDiscussion && hotFix && (
+            {(isPatch || isDiscussion) && hotFix && (
               // Indented to the switch labels so it reads as part of Hotfix Required.
               <Box sx={{ pl: `${FLAG_LABEL_INSET}px`, pt: 0.5, pb: 1.5 }}>
                 {renderSelect(
@@ -680,7 +731,7 @@ export function CreateGithubIssueDialog({
                 )}
               </Box>
             )}
-            {isDiscussion && (
+            {(isPatch || isDiscussion) && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={

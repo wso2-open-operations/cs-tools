@@ -2435,7 +2435,7 @@ export interface BeCreateCaseGithubIssuePayload {
   regression?: boolean;
   /** When true: appends "Hotfix Required : Yes" to the issue body. */
   hotFixRequired?: boolean;
-  /** Issue-type label to apply on GitHub: "Type/Discussion" or "Type/Feature" (legacy "Type/Patch"). */
+  /** Issue-type label to apply on GitHub: "Type/Patch", "Type/Discussion" or "Type/Feature". */
   issueTypeLabel?: string;
   /** Priority label for Discussion: Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). */
   priorityLevel?: string;

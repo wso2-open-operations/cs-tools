@@ -53,8 +53,10 @@ function pick(comboboxName: RegExp, option: RegExp | string): void {
   fireEvent.click(screen.getByRole("option", { name: option }));
 }
 
-/** Chooses the issue Type ("Discussion" or "Feature Request"). */
-function chooseType(option: "Discussion" | "Feature Request"): void {
+type IssueTypeName = "Patch" | "Discussion" | "Feature Request";
+
+/** Chooses the issue Type ("Patch", "Discussion" or "Feature Request"). */
+function chooseType(option: IssueTypeName): void {
   pick(/^type$/i, option);
 }
 
@@ -105,7 +107,7 @@ function fillRequiredFields(): void {
  */
 function renderDialog(
   props: Partial<React.ComponentProps<typeof CreateGithubIssueDialog>> = {},
-  type: "Discussion" | "Feature Request" | null = "Discussion",
+  type: IssueTypeName | null = "Discussion",
 ) {
   const result = render(
     <CreateGithubIssueDialog
@@ -484,13 +486,14 @@ describe("CreateGithubIssueDialog — payload", () => {
 });
 
 describe("CreateGithubIssueDialog — Type", () => {
-  it("offers Discussion then Feature Request, and keeps Raise issue disabled until one is chosen", () => {
+  it("offers Patch, Discussion and Feature Request, and keeps Raise issue disabled until one is chosen", () => {
     renderDialog({}, null);
     fillSubjectAndDescription();
     expect(createButton()).toBeDisabled();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type$/i }));
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
       "-- Select --",
+      "Patch",
       "Discussion",
       "Feature Request",
     ]);
@@ -516,6 +519,168 @@ describe("CreateGithubIssueDialog — Type", () => {
       expect(screen.queryByRole("textbox", { name: /business use case/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("textbox", { name: /related git issue\(s\)/i })).not.toBeInTheDocument();
       unmount();
+    }
+  });
+});
+
+describe("CreateGithubIssueDialog — Patch", () => {
+  const PATCH_PAYLOAD = {
+    reason: "default",
+    title: "Token issuance is slow",
+    description: "Latency spiked after the last deploy.",
+    issueTypeLabel: "Type/Patch",
+    updateLevel: "7.1.0.42",
+    repoOverride: { owner: "example-org", repo: "example-repo" },
+  };
+
+  const fillUpdateLevel = () =>
+    fireEvent.change(screen.getByLabelText(/update level/i), { target: { value: "7.1.0.42" } });
+
+  it("shows exactly Type, Subject, Description, Reproducing Steps, Update Level, Public Git Issue, Hotfix Required, Regression and Migration, in order", () => {
+    renderDialog({}, "Patch");
+    const controls: [string, HTMLElement][] = [
+      ["Type", screen.getByRole("combobox", { name: /^type/i })],
+      ["Subject", screen.getByRole("textbox", { name: /^subject/i })],
+      ["Description", screen.getByRole("textbox", { name: /^description/i })],
+      ["Reproducing Steps", screen.getByRole("textbox", { name: /^reproducing steps/i })],
+      ["Update Level", screen.getByRole("textbox", { name: /^update level/i })],
+      [
+        "Public Git Issue",
+        screen.getByRole("textbox", { name: /^public git issue or security internal$/i }),
+      ],
+      ["Hotfix Required", screen.getByRole("switch", { name: /^hotfix required/i })],
+      ["Regression", screen.getByRole("switch", { name: /^regression/i })],
+      ["Migration", screen.getByRole("switch", { name: /^migration/i })],
+    ];
+    controls.slice(1).forEach(([name, control], i) => {
+      const [previousName, previous] = controls[i];
+      expect(
+        previous.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `${name} comes after ${previousName}`,
+      ).toBeTruthy();
+    });
+    expect(screen.getByRole("heading", { name: /version and references/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/reproducing steps/i)).not.toBeRequired();
+    expect(screen.getByLabelText(/public git issue/i)).not.toBeRequired();
+    expect(screen.queryByRole("combobox", { name: /^priority/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /priority justification/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /related internal issue/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /business use case/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /related git issue/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /^subject/i })).toHaveAttribute(
+      "placeholder",
+      "Short summary of the problem",
+    );
+    expect(screen.getByRole("textbox", { name: /^description/i })).toHaveAttribute(
+      "placeholder",
+      "What needs to be fixed?",
+    );
+  });
+
+  it("requires Update Level on a non-cloud case", () => {
+    renderDialog({}, "Patch");
+    fillSubjectAndDescription();
+    expect(screen.getByLabelText(/update level/i)).toBeRequired();
+    expect(createButton()).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/update level/i), { target: { value: "   " } });
+    expect(createButton()).toBeDisabled();
+    fillUpdateLevel();
+    expect(createButton()).toBeEnabled();
+  });
+
+  it("does not require Update Level when it is prefilled", () => {
+    renderDialog({ defaultUpdateLevel: "7.1.0.42" }, "Patch");
+    fillSubjectAndDescription();
+    expect(createButton()).toBeEnabled();
+  });
+
+  it("hides Update Level, Public Git Issue and their section on a cloud case, and does not require them", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ showRepoField: true, defaultUpdateLevel: "7.1.0.42", onSubmit }, "Patch");
+    expect(screen.queryByLabelText(/update level/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/public git issue/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /version and references|references/i })).not.toBeInTheDocument();
+    fillSubjectAndDescription();
+    expect(createButton()).toBeEnabled();
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ updateLevel: "7.1.0.42" }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("publicIssueUrl");
+  });
+
+  it("requires Subject and Description", () => {
+    renderDialog({ defaultUpdateLevel: "7.1.0.42" }, "Patch");
+    expect(createButton()).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/subject/i), { target: { value: "A patch" } });
+    expect(createButton()).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/^description/i), { target: { value: "Fix it" } });
+    expect(createButton()).toBeEnabled();
+  });
+
+  it("sends exactly the Patch payload with every field set, through the confirm step", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit, onboardingInProgress: true }, "Patch");
+    fillSubjectAndDescription();
+    fireEvent.change(screen.getByLabelText(/reproducing steps/i), {
+      target: { value: "  1. Log in\n2. Request a token  " },
+    });
+    fillUpdateLevel();
+    fireEvent.change(screen.getByLabelText(/public git issue/i), {
+      target: { value: "https://github.com/example/example/issues/1" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
+    pick(/hotfix reason/i, "Unable to Upgrade to Latest U2");
+    fireEvent.click(screen.getByRole("switch", { name: /regression/i }));
+    fireEvent.click(createButton());
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^raise issue$/i }));
+    expect(onSubmit).toHaveBeenCalledWith({
+      ...PATCH_PAYLOAD,
+      reproducingSteps: "1. Log in\n2. Request a token",
+      publicIssueUrl: "https://github.com/example/example/issues/1",
+      onboardingInProgress: true,
+      hotFixRequired: true,
+      hotFixReason: "Unable to Upgrade to Latest U2",
+      regression: true,
+    });
+    const payload = onSubmit.mock.calls[0][0];
+    for (const key of ["priorityLevel", "priorityJustification", "relatedInternalIssues"]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+  });
+
+  it("omits the optional fields when they are left empty", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit }, "Patch");
+    fillSubjectAndDescription();
+    fillUpdateLevel();
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith(PATCH_PAYLOAD);
+  });
+
+  it("sends reason migration when Migration is on", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit, defaultMigration: true }, "Patch");
+    expect(screen.getByRole("switch", { name: /migration/i })).toBeChecked();
+    fillSubjectAndDescription();
+    fillUpdateLevel();
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith({ ...PATCH_PAYLOAD, reason: "migration" });
+  });
+
+  it("sends none of the Discussion-only fields after switching from a filled-in Discussion", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit, defaultUpdateLevel: "7.1.0.42" });
+    fillRequiredFields();
+    fireEvent.change(screen.getByLabelText(/related internal issue/i), {
+      target: { value: "example/internal#12" },
+    });
+    chooseType("Patch");
+    expect(createButton()).toBeEnabled();
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith(PATCH_PAYLOAD);
+    const payload = onSubmit.mock.calls[0][0];
+    for (const key of ["priorityLevel", "priorityJustification", "relatedInternalIssues"]) {
+      expect(payload).not.toHaveProperty(key);
     }
   });
 });
