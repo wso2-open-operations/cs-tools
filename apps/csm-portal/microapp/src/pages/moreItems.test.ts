@@ -21,9 +21,7 @@ import { SETTINGS_MORE_PATH, isMoreItemVisible } from "./moreItems";
 describe("isMoreItemVisible", () => {
   it("hides Settings from a viewer and from a catalogue manager", () => {
     expect(isMoreItemVisible(SETTINGS_MORE_PATH, getPortalAccess(["viewer"]))).toBe(false);
-    expect(
-      isMoreItemVisible(SETTINGS_MORE_PATH, getPortalAccess(["viewer", "product_catalog_manager"])),
-    ).toBe(false);
+    expect(isMoreItemVisible(SETTINGS_MORE_PATH, getPortalAccess(["viewer", "product_catalog_manager"]))).toBe(false);
   });
 
   it("shows Settings to a CS engineer and leaves other More links alone", () => {
