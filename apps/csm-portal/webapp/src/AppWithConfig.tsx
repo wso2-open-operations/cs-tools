@@ -14,43 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX, lazy, Suspense } from "react";
-import { BrowserRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import App from "./App";
-import AppErrorBoundary from "@components/error/AppErrorBoundary";
+import { type JSX } from "react";
 import { AsgardeoProvider } from "@asgardeo/react";
-import { loggerConfig } from "@config/loggerConfig";
-import LoggerProvider from "@context/logger/LoggerProvider";
-import { ThemePreferenceProvider } from "@context/theme/ThemePreferenceContext";
-import { CaseTabsBehaviorProvider } from "@context/case-tabs/CaseTabsBehaviorContext";
-import { NewCaseDraftProvider } from "@context/new-case-draft/NewCaseDraftContext";
-import { NewServiceRequestDraftProvider } from "@context/new-service-request-draft/NewServiceRequestDraftContext";
 import { authConfig } from "@config/authConfig";
-
-// React-Query devtools ship from a devDependency and must not enter the
-// production bundle. Dynamic import + DEV check accomplishes both.
-const ReactQueryDevtools = import.meta.env.DEV
-  ? lazy(() =>
-      import("@tanstack/react-query-devtools").then((m) => ({
-        default: m.ReactQueryDevtools,
-      })),
-    )
-  : null;
-
-/**
- * Custom retry function for React Query queries.
- * Only retries on 502 (Bad Gateway) and 503 (Service Unavailable) errors.
- */
-function shouldRetryQuery(failureCount: number, error: Error): boolean {
-  if (failureCount >= 2) return false;
-  const errorWithStatus = error as Error & {
-    response?: { status?: number };
-    status?: number;
-  };
-  const statusCode = errorWithStatus.response?.status || errorWithStatus.status;
-  return statusCode === 502 || statusCode === 503;
-}
+import { AUTH_SCOPES } from "@config/tokenExchangeConfig";
+import AppTree from "./AppTree";
 
 // `signInSilently()` (from `@asgardeo/react`) recovers an expired access
 // token by loading the IdP's authorize URL, with prompt=none, inside a
@@ -72,23 +40,6 @@ function shouldRetryQuery(failureCount: number, error: Error): boolean {
 const isInsideHiddenAuthIframe =
   typeof window !== "undefined" && window.self !== window.top;
 
-const queryClient: QueryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: shouldRetryQuery,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: false,
-      refetchOnMount: true,
-    },
-    // Mutations default to no retry. Non-idempotent operations (PATCH/PUT/POST
-    // with side effects) should opt in per-mutation when retries are safe.
-    mutations: {
-      retry: false,
-    },
-  },
-});
-
 export default function AppWithConfig(): JSX.Element {
   return (
     <AsgardeoProvider
@@ -96,10 +47,7 @@ export default function AppWithConfig(): JSX.Element {
       clientId={authConfig.clientId}
       afterSignInUrl={authConfig.signInRedirectURL}
       afterSignOutUrl={authConfig.signOutRedirectURL}
-      // `roles` is what makes the IdP put the user's roles claim in the token; the
-      // backend authorises every request from it (see the backend README's
-      // "Access control"), so without this scope a user holds no portal role.
-      scopes={["openid", "email", "groups", "profile", "roles"]}
+      scopes={[...AUTH_SCOPES]}
       preferences={{
         theme: {
           inheritFromBranding: false,
@@ -110,30 +58,7 @@ export default function AppWithConfig(): JSX.Element {
         },
       }}
     >
-      {isInsideHiddenAuthIframe ? null : (
-        <BrowserRouter>
-          <LoggerProvider config={loggerConfig}>
-            <ThemePreferenceProvider>
-              <CaseTabsBehaviorProvider>
-                <QueryClientProvider client={queryClient}>
-                  <AppErrorBoundary>
-                    <NewCaseDraftProvider>
-                      <NewServiceRequestDraftProvider>
-                        <App />
-                      </NewServiceRequestDraftProvider>
-                    </NewCaseDraftProvider>
-                  </AppErrorBoundary>
-                  {ReactQueryDevtools && (
-                    <Suspense fallback={null}>
-                      <ReactQueryDevtools initialIsOpen={false} />
-                    </Suspense>
-                  )}
-                </QueryClientProvider>
-              </CaseTabsBehaviorProvider>
-            </ThemePreferenceProvider>
-          </LoggerProvider>
-        </BrowserRouter>
-      )}
+      {isInsideHiddenAuthIframe ? null : <AppTree />}
     </AsgardeoProvider>
   );
 }

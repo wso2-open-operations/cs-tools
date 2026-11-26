@@ -16,6 +16,7 @@
 
 import { type JSX } from "react";
 import { Box, Header as HeaderUI } from "@wso2/oxygen-ui";
+import BackToHost from "@components/header/BackToHost";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
 import PinnedTabs from "@features/csm-recent/components/PinnedTabs";
@@ -37,6 +38,7 @@ export default function Header({
       {!hideProjectControls && (
         <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
       )}
+      <BackToHost />
       <Brand />
       {!hideProjectControls && <QuickNav />}
       {!hideProjectControls && <PinnedTabs />}
