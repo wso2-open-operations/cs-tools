@@ -143,24 +143,29 @@ describe("CreateGithubIssueDialog — fields", () => {
     expect(screen.getByLabelText(/^description/i)).toHaveValue("");
   });
 
-  it("shows the Discussion fields in the agreed order", () => {
+  it("shows the fields in the agreed order", () => {
     renderDialog();
     pick(/^priority$/i, /P1 – High Priority/);
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
     // Each control by its role and exact name, so two labels that share a
     // word (Priority, Priority Justification) can never stand in for each other.
     const controls: [string, HTMLElement][] = [
       ["Type", screen.getByRole("combobox", { name: /^type/i })],
       ["Subject", screen.getByRole("textbox", { name: /^subject/i })],
       ["Description", screen.getByRole("textbox", { name: /^description/i })],
+      ["Reproducing Steps", screen.getByRole("textbox", { name: /^reproducing steps/i })],
       ["Priority", screen.getByRole("combobox", { name: /^priority$/i })],
       ["Priority Justification", screen.getByRole("textbox", { name: /^priority justification/i })],
       ["Reviewed by CS Leadership", screen.getByRole("checkbox", { name: /^reviewed by cs leadership/i })],
       ["Update Level", screen.getByRole("textbox", { name: /^update level/i })],
       [
         "Public Git Issue",
-        screen.getByRole("textbox", { name: /^public git issue or security internal$/i }),
+        screen.getByRole("textbox", { name: /^public git issue or security internal jira/i }),
       ],
       ["Related Internal Issue(s)", screen.getByRole("textbox", { name: /^related internal issue\(s\)/i })],
+      ["Hotfix Required", screen.getByRole("switch", { name: /^hotfix required/i })],
+      ["Hotfix Reason", screen.getByRole("combobox", { name: /^hotfix reason/i })],
+      ["Regression", screen.getByRole("switch", { name: /^regression/i })],
       ["Migration", screen.getByRole("switch", { name: /^migration/i })],
     ];
     controls.slice(1).forEach(([name, control], i) => {
@@ -172,20 +177,12 @@ describe("CreateGithubIssueDialog — fields", () => {
     });
   });
 
-  it("leaves Update Level, Public Git Issue and Related Internal Issue(s) optional", () => {
+  it("leaves Reproducing Steps, Update Level and Related Internal Issue(s) optional", () => {
     renderDialog();
+    expect(screen.getByLabelText(/reproducing steps/i)).not.toBeRequired();
     expect(screen.getByLabelText(/update level/i)).not.toBeRequired();
     expect(screen.getByLabelText(/public git issue/i)).not.toBeRequired();
     expect(screen.getByLabelText(/related internal issue/i)).not.toBeRequired();
-  });
-
-  it("has no Reproducing Steps, Hotfix Required, Hotfix Reason or Regression on a Discussion", () => {
-    renderDialog();
-    expect(screen.queryByRole("textbox", { name: /reproducing steps/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: /hotfix required/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: /hotfix reason/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: /regression/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: /migration/i })).toBeInTheDocument();
   });
 });
 
@@ -373,16 +370,13 @@ describe("CreateGithubIssueDialog — priority justification and CS leadership r
   });
 });
 
-describe("CreateGithubIssueDialog — Hotfix Reason (Patch)", () => {
+describe("CreateGithubIssueDialog — Hotfix Reason", () => {
   it("is shown and required only while Hotfix Required is on", () => {
-    renderDialog({}, "Patch");
-    fillSubjectAndDescription();
-    fireEvent.change(screen.getByLabelText(/update level/i), { target: { value: "7.1.0.42" } });
-    expect(createButton()).toBeEnabled();
+    renderDialog();
+    fillRequiredFields();
     expect(screen.queryByRole("combobox", { name: /hotfix reason/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
     expect(createButton()).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: /hotfix reason/i })).toBeRequired();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /hotfix reason/i }));
     for (const o of [
       "Customer-Requested Hotfix",
@@ -398,13 +392,11 @@ describe("CreateGithubIssueDialog — Hotfix Reason (Patch)", () => {
 
   it("drops the reason when Hotfix Required is switched off again", () => {
     const onSubmit = vi.fn();
-    renderDialog({ onSubmit }, "Patch");
-    fillSubjectAndDescription();
-    fireEvent.change(screen.getByLabelText(/update level/i), { target: { value: "7.1.0.42" } });
+    renderDialog({ onSubmit });
+    fillRequiredFields();
     fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
     pick(/hotfix reason/i, "Customer-Requested Hotfix");
     fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
-    expect(screen.queryByRole("combobox", { name: /hotfix reason/i })).not.toBeInTheDocument();
     submit();
     const payload = onSubmit.mock.calls[0][0];
     expect(payload).not.toHaveProperty("hotFixRequired");
@@ -433,10 +425,16 @@ describe("CreateGithubIssueDialog — payload", () => {
     const onSubmit = vi.fn();
     renderDialog({ onSubmit, onboardingInProgress: true });
     fillRequiredFields();
+    fireEvent.change(screen.getByLabelText(/reproducing steps/i), {
+      target: { value: "1. Log in\n2. Request a token" },
+    });
     fireEvent.change(screen.getByLabelText(/update level/i), { target: { value: "7.1.0.42" } });
     fireEvent.change(screen.getByLabelText(/public git issue/i), {
       target: { value: "https://github.com/example/example/issues/1" },
     });
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
+    pick(/hotfix reason/i, "Unable to Upgrade to Latest U2");
+    fireEvent.click(screen.getByRole("switch", { name: /regression/i }));
     fireEvent.change(screen.getByLabelText(/related internal issue/i), {
       target: { value: "example/internal#12" },
     });
@@ -448,23 +446,16 @@ describe("CreateGithubIssueDialog — payload", () => {
       issueTypeLabel: "Type/Discussion",
       priorityLevel: "Priority/High(P1)",
       priorityJustification: JUSTIFICATION,
+      reproducingSteps: "1. Log in\n2. Request a token",
       updateLevel: "7.1.0.42",
       publicIssueUrl: "https://github.com/example/example/issues/1",
       onboardingInProgress: true,
+      hotFixRequired: true,
+      hotFixReason: "Unable to Upgrade to Latest U2",
+      regression: true,
       relatedInternalIssues: "example/internal#12",
       repoOverride: { owner: "example-org", repo: "example-repo" },
     });
-  });
-
-  it("sends none of the Patch-only fields for a Discussion", () => {
-    const onSubmit = vi.fn();
-    renderDialog({ onSubmit });
-    fillRequiredFields();
-    submit();
-    const payload = onSubmit.mock.calls[0][0];
-    for (const key of ["hotFixRequired", "hotFixReason", "regression", "reproducingSteps"]) {
-      expect(payload).not.toHaveProperty(key);
-    }
   });
 
   it("omits the optional fields when they are left empty", () => {
@@ -783,10 +774,10 @@ describe("CreateGithubIssueDialog — Feature Request", () => {
     expect(onSubmit).toHaveBeenCalledWith(FEATURE_PAYLOAD);
   });
 
-  it("sends none of the Patch or Discussion fields after switching from a filled-in form", () => {
+  it("sends none of the Discussion fields after switching from a filled-in Discussion", () => {
     const onSubmit = vi.fn();
-    renderDialog({ onSubmit, defaultUpdateLevel: "7.1.0.42" }, "Patch");
-    fillSubjectAndDescription();
+    renderDialog({ onSubmit, defaultUpdateLevel: "7.1.0.42" });
+    fillRequiredFields();
     fireEvent.change(screen.getByLabelText(/reproducing steps/i), { target: { value: "1. Log in" } });
     fireEvent.change(screen.getByLabelText(/public git issue/i), {
       target: { value: "https://github.com/example/example/issues/1" },
@@ -794,9 +785,6 @@ describe("CreateGithubIssueDialog — Feature Request", () => {
     fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
     pick(/hotfix reason/i, "Unable to Upgrade to Latest U2");
     fireEvent.click(screen.getByRole("switch", { name: /regression/i }));
-    chooseType("Discussion");
-    pick(/^priority$/i, /P1 – High Priority/);
-    justifyAndApprove();
     fireEvent.change(screen.getByLabelText(/related internal issue/i), {
       target: { value: "example/internal#12" },
     });

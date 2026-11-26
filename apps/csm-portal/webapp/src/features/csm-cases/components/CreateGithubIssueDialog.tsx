@@ -59,7 +59,7 @@ const SELECT_PLACEHOLDER = "-- Select --";
 /** A Patch: a fix request with reproducing steps, hotfix and regression flags and no priority. */
 const GITHUB_PATCH_ISSUE_TYPE = "Type/Patch";
 
-/** A Discussion: a problem on the case, with priority and its justification. */
+/** A Discussion: a problem on the case, with priority, hotfix and regression details. */
 const GITHUB_DISCUSSION_ISSUE_TYPE = "Type/Discussion";
 
 /** A Feature Request: a short form with a business use case and no urgency fields. */
@@ -182,12 +182,14 @@ export interface CreateGithubIssueDialogProps {
  * Reason* (only while Hotfix Required is on), Regression and Migration. No
  * priority.
  *
- * Discussion: Subject*, Description*, Priority* (P0 to P3, per the Internal
- * Issue Handling Policy), Priority Justification* (free text, P0 to P2) and
- * Reviewed by CS Leadership* (P0/P1 only, its reason in a tooltip; the tick
- * only gates Create and is not sent), Update Level, Public Git Issue (both
- * hidden on cloud cases, never required), Related Internal Issue(s) and
- * Migration. Migration is on by default for a migration engagement.
+ * Discussion: Subject*, Description*, Reproducing Steps, Priority* (P0 to P3,
+ * per the Internal Issue Handling Policy), Priority Justification* (free text,
+ * P0 to P2) and Reviewed by CS Leadership* (P0/P1 only, its reason in a
+ * tooltip; the tick only gates Create and is not sent), Update Level, Public
+ * Git Issue (both hidden on cloud cases, never required), Related Internal
+ * Issue(s), Hotfix Required, Hotfix Reason* (only while Hotfix Required is
+ * on), Regression and Migration. Migration is on by default for a migration
+ * engagement.
  *
  * Subject and Description start empty.
  * Migration sends reason "migration"; otherwise reason is "default".
@@ -306,7 +308,8 @@ export function CreateGithubIssueDialog({
   const typeFieldsValid = isDiscussion
     ? !!priorityLevel &&
       (!needsJustification || priorityJustification.trim().length > 0) &&
-      (!needsApproval || leadershipApproved)
+      (!needsApproval || leadershipApproved) &&
+      (!hotFix || !!hotFixReason)
     : isPatch
       ? (!requireUpdateLevel || updateLevel.trim().length > 0) && (!hotFix || !!hotFixReason)
       : isFeature;
@@ -390,6 +393,7 @@ export function CreateGithubIssueDialog({
         repo: selectedRepoOption.repo,
       },
     };
+    if (reproducingSteps.trim()) payload.reproducingSteps = reproducingSteps.trim();
     if (needsJustification) payload.priorityJustification = priorityJustification.trim();
     // Sent even when hidden on a cloud case: the prefilled update level still
     // belongs in the issue footer.
@@ -398,6 +402,11 @@ export function CreateGithubIssueDialog({
       payload.publicIssueUrl = publicIssueUrl.trim();
     }
     if (onboardingInProgress) payload.onboardingInProgress = true;
+    if (hotFix) {
+      payload.hotFixRequired = true;
+      payload.hotFixReason = hotFixReason;
+    }
+    if (regression) payload.regression = true;
     if (relatedInternalIssues.trim()) {
       payload.relatedInternalIssues = relatedInternalIssues.trim();
     }
@@ -544,7 +553,7 @@ export function CreateGithubIssueDialog({
                 placeholder="Why the customer needs it and what it enables"
               />
             )}
-            {isPatch && (
+            {(isPatch || isDiscussion) && (
               <TextField
                 {...fieldProps}
                 label="Reproducing Steps"
@@ -654,10 +663,10 @@ export function CreateGithubIssueDialog({
                 />
                 <TextField
                   {...fieldProps}
-                  label="Public Git Issue or Security Internal"
+                  label={isPatch ? "Public Git Issue or Security Internal" : "Public Git Issue or Security Internal JIRA"}
                   value={publicIssueUrl}
                   onChange={(e) => setPublicIssueUrl(e.target.value)}
-                  placeholder="https://github.com/…"
+                  placeholder={isPatch ? "https://github.com/…" : "https://github.com/… or JIRA link"}
                 />
               </Box>
             )}
@@ -696,7 +705,7 @@ export function CreateGithubIssueDialog({
           // The switches carry their own vertical padding; the set is pulled up
           // so it keeps the same 16px rhythm under the heading.
           <Box sx={{ display: "flex", flexDirection: "column", mt: -0.75 }}>
-            {isPatch && (
+            {(isPatch || isDiscussion) && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={
@@ -709,7 +718,7 @@ export function CreateGithubIssueDialog({
               label="Hotfix Required"
             />
             )}
-            {isPatch && hotFix && (
+            {(isPatch || isDiscussion) && hotFix && (
               // Indented to the switch labels so it reads as part of Hotfix Required.
               <Box sx={{ pl: `${FLAG_LABEL_INSET}px`, pt: 0.5, pb: 1.5 }}>
                 {renderSelect(
@@ -722,7 +731,7 @@ export function CreateGithubIssueDialog({
                 )}
               </Box>
             )}
-            {isPatch && (
+            {(isPatch || isDiscussion) && (
             <FormControlLabel
               sx={{ alignSelf: "flex-start" }}
               control={

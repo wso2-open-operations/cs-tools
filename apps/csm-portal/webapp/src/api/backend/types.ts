@@ -2431,9 +2431,9 @@ export interface BeCreateCaseGithubIssuePayload {
   updateLevel?: string;
   /** Link to a related public-facing GitHub issue, appended to the issue body. */
   publicIssueUrl?: string;
-  /** Patch: when true, adds a `regression` label and tags the case as a regression. */
+  /** When true: adds a `regression` label and tags the case as a regression. */
   regression?: boolean;
-  /** Patch: when true, appends "Hotfix Required : Yes" to the issue body. */
+  /** When true: appends "Hotfix Required : Yes" to the issue body. */
   hotFixRequired?: boolean;
   /** Issue-type label to apply on GitHub: "Type/Patch", "Type/Discussion" or "Type/Feature". */
   issueTypeLabel?: string;
@@ -2441,11 +2441,11 @@ export interface BeCreateCaseGithubIssuePayload {
   priorityLevel?: string;
   /** Why the issue is P0, P1 or P2 (free text). Written to the issue body. */
   priorityJustification?: string;
-  /** Patch: steps to reproduce, written to the issue body. */
+  /** Steps to reproduce, written to the issue body. */
   reproducingSteps?: string;
   /** Why a hotfix is required (one of the dialog's fixed options). Sent only with hotFixRequired. */
   hotFixReason?: string;
-  /** Discussion: related internal issue links or numbers, written to the issue body. */
+  /** Related internal issue links or numbers, written to the issue body. */
   relatedInternalIssues?: string;
   /** Project onboarding status is In-Progress. Adds Onboarding/affected. */
   onboardingInProgress?: boolean;
