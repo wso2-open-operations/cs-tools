@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/severity"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 )
 
@@ -55,6 +56,12 @@ func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 		if todo.incidentID, err = p.Incidents.Open(ctx, e); err != nil {
 			return fmt.Errorf("open incident for %s: %w", e.AlertID, err)
 		}
+		return p.Store.InGroup(ctx, e.Fingerprint(), func(tx GroupTx) error {
+			if err := tx.LinkAlert(ctx, e.AlertID, todo.incidentID); err != nil {
+				return err
+			}
+			return p.foldWaitingClears(ctx, tx, e, todo.incidentID)
+		})
 	case todo.outcome.Folds():
 		if err := p.Incidents.Fold(ctx, todo.incidentID, todo.outcome, e); err != nil {
 			return fmt.Errorf("fold %s into incident %s: %w", e.AlertID, todo.incidentID, err)
@@ -103,15 +110,35 @@ func (p *Processor) linkUnrecorded(ctx context.Context, tx GroupTx, e event.Even
 	if err != nil {
 		return err
 	}
-	for _, alertID := range earlier {
-		incidentID, err := p.Incidents.Find(ctx, alertID)
+	for _, alert := range earlier {
+		incidentID, err := p.Incidents.Find(ctx, alert.AlertID)
 		if err != nil {
 			return err
 		}
 		if incidentID == "" {
 			continue
 		}
-		if err := tx.LinkAlert(ctx, alertID, incidentID); err != nil {
+		if err := tx.LinkAlert(ctx, alert.AlertID, incidentID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// foldWaitingClears adds to a newly opened incident the resolving alerts of its fingerprint received after the opening alert but processed before it, which found no incident and were ignored; without this, a clear that overtook its firing alert would leave the incident open.
+func (p *Processor) foldWaitingClears(ctx context.Context, tx GroupTx, opener event.Event, incidentID string) error {
+	later, err := tx.Unlinked(ctx, opener.ReceivedOn, opener.ReceivedOn.Add(p.Lookback), opener.AlertID)
+	if err != nil {
+		return err
+	}
+	for _, alert := range later {
+		if !severity.IsResolving(alert.Alert.Severity) || !alert.ReceivedOn.After(opener.ReceivedOn) {
+			continue
+		}
+		if err := p.Incidents.Fold(ctx, incidentID, strategy.Resolve, alert); err != nil {
+			return fmt.Errorf("fold waiting clear %s into incident %s: %w", alert.AlertID, incidentID, err)
+		}
+		if err := tx.LinkAlert(ctx, alert.AlertID, incidentID); err != nil {
 			return err
 		}
 	}

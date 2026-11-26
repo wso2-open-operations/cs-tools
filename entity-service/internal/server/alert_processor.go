@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,8 +31,10 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/subscriber"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
 // The adapters below must satisfy the processor's ports.
@@ -72,14 +75,20 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents inciden
 		Lookback: cfg.AlertDedupWindow,
 		Apply:    apply,
 	}
-	consumer := eventbus.NewConsumer(bus, cfg.AlertProcessorConsumerGroup, alertProcessorRetry)
+	consumer := eventbus.NewConsumer(subscriberBus(bus, apply), consumerGroup(cfg.AlertProcessorConsumerGroup, apply), alertProcessorRetry)
 	listener := subscriber.New(consumer, processor.Handle, subscriber.Log(), subscriber.Recover())
+	failures := service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(db))
 	listener.OnExhausted = func(ctx context.Context, e event.Event, cause error) error {
 		sent, err := republisher.Republish(ctx, e)
-		if err == nil && !sent {
-			slog.ErrorContext(ctx, "alert processor: gave up on an alert after its attempts; it has no incident", "alertId", e.AlertID, "attempts", publisher.MaxAttempts, "err", cause)
+		if err == nil && sent {
+			return nil
 		}
-		return err
+		// Not republished: record the event before its offset is committed, so it can be replayed from event_publish_failures.
+		reason := fmt.Sprintf("gave up after %d attempts: %v", publisher.MaxAttempts, cause)
+		if err != nil {
+			reason = fmt.Sprintf("could not publish again: %v (processing failed: %v)", err, cause)
+		}
+		return recordAlertFailure(ctx, failures, e, reason)
 	}
 
 	// The system identity, because alerts and incidents created from them are internal and there is no caller.
@@ -98,4 +107,36 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents inciden
 		<-done
 		producer.Close()
 	}
+}
+
+// recordAlertFailure keeps an event the processor could not hand back to the event hub in event_publish_failures, the durable list operators replay from.
+func recordAlertFailure(ctx context.Context, failures service.EventPublishFailureService, e event.Event, reason string) error {
+	_, value, err := event.Encode(e)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if _, err := failures.CreateEventPublishFailure(ctx, domain.CreateEventPublishFailureRequest{
+		EventType: string(event.Type), EntityID: e.AlertID, Payload: value, Error: reason,
+	}); err != nil {
+		slog.ErrorContext(ctx, "alert processor: could not record an alert it gave up on; it has no incident", "alertId", e.AlertID, "reason", reason, "err", err)
+		return err
+	}
+	slog.ErrorContext(ctx, "alert processor: gave up on an alert; recorded in event_publish_failures for replay", "alertId", e.AlertID, "reason", reason)
+	return nil
+}
+
+// consumerGroup keeps hybrid and v2 replicas in separate groups: a hybrid replica only logs, so if it shared v2's group it would commit offsets for alerts v2 never processed. During a rolling switch each mode reads every event.
+func consumerGroup(group string, apply bool) string {
+	if apply {
+		return group
+	}
+	return group + "-hybrid"
+}
+
+// subscriberBus starts the v2 group at the newest event the first time it runs, so the switch to v2 does not replay the alerts v1 already handled during hybrid.
+func subscriberBus(bus eventbus.Config, apply bool) eventbus.Config {
+	bus.StartAtLatest = apply
+	return bus
 }

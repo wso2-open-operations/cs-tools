@@ -31,6 +31,7 @@ import (
 
 // storedAlert is one row of the fake alert table.
 type storedAlert struct {
+	event       event.Event
 	fingerprint string
 	receivedOn  time.Time
 	incidentID  string
@@ -47,7 +48,7 @@ func newFakeStore() *fakeStore { return &fakeStore{alerts: map[string]storedAler
 
 // add stores an alert the way the consumer does, before its event is handled.
 func (s *fakeStore) add(e event.Event) event.Event {
-	s.alerts[e.AlertID] = storedAlert{fingerprint: e.Fingerprint(), receivedOn: e.ReceivedOn}
+	s.alerts[e.AlertID] = storedAlert{event: e, fingerprint: e.Fingerprint(), receivedOn: e.ReceivedOn}
 	return e
 }
 
@@ -92,14 +93,14 @@ func (t fakeTx) Group(context.Context) (*strategy.Group, error) {
 	return g, nil
 }
 
-func (t fakeTx) Unlinked(_ context.Context, since, until time.Time, except string) ([]string, error) {
-	var ids []string
+func (t fakeTx) Unlinked(_ context.Context, since, until time.Time, except string) ([]event.Event, error) {
+	var found []event.Event
 	for id, a := range t.s.alerts {
 		if id != except && a.fingerprint == t.fingerprint && a.incidentID == "" && !a.receivedOn.Before(since) && !a.receivedOn.After(until) {
-			ids = append(ids, id)
+			found = append(found, a.event)
 		}
 	}
-	return ids, nil
+	return found, nil
 }
 
 func (t fakeTx) AlertLinked(_ context.Context, id string) (bool, error) {
@@ -278,5 +279,38 @@ func TestProcessorLaterAlertOpensWhenTheEarlierOpenCreatedNothing(t *testing.T) 
 	}
 	if len(writer.opened) != 1 || writer.opened[0] != "A2" || store.linkOf("A2") != "inc-A2" {
 		t.Fatalf("opened %v, A2 linked to %q; want A2 to open the incident", writer.opened, store.linkOf("A2"))
+	}
+}
+
+func TestProcessorAClearThatOvertookItsFiringAlertResolvesTheIncident(t *testing.T) {
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
+	ctx := context.Background()
+	// The clear is processed first: no incident yet, so it is ignored and left unlinked.
+	if err := p.Handle(ctx, store.add(alert("A2", "OK", time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Handle(ctx, store.add(alert("A1", "critical", 0))); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.opened) != 1 || store.linkOf("A1") != "inc-A1" || store.linkOf("A2") != "inc-A1" {
+		t.Fatalf("opened %v, A1→%q A2→%q; want A1's incident with the earlier clear folded in", writer.opened, store.linkOf("A1"), store.linkOf("A2"))
+	}
+	if len(writer.notes) != 1 || !strings.Contains(writer.notes[0], "resolve A2") {
+		t.Fatalf("notes %v, want one OK note for A2", writer.notes)
+	}
+}
+
+func TestProcessorLateAlertDoesNotReopenAClosedFingerprint(t *testing.T) {
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
+	ctx := context.Background()
+	_ = p.Handle(ctx, store.add(alert("A2", "critical", time.Minute)))
+	writer.closed["inc-A2"] = true
+	if err := p.Handle(ctx, store.add(alert("A1", "critical", 0))); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.opened) != 1 || store.linkOf("A1") != "" {
+		t.Fatalf("opened %v, A1 linked to %q; want the late alert dropped, not a replacement incident", writer.opened, store.linkOf("A1"))
 	}
 }

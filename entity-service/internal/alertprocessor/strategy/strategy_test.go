@@ -49,12 +49,15 @@ func TestDefault(t *testing.T) {
 		in   Input
 		want Outcome
 	}{
-		"new fingerprint opens":              {Input{Event: alert("critical", 0)}, Open},
-		"same fingerprint inside the window": {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: true}, Duplicate},
-		"window passed opens a new incident": {Input{Event: alert("critical", 5*time.Minute), Group: openGroup(), IncidentOpen: true}, Open},
-		"closed incident opens a new one":    {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: false}, Open},
-		"resolving alert on open incident":   {Input{Event: alert("OK", time.Hour), Group: openGroup(), IncidentOpen: true}, Resolve},
-		"resolving alert with no incident":   {Input{Event: alert("clear", 0)}, Ignore},
+		"new fingerprint opens":                             {Input{Event: alert("critical", 0)}, Open},
+		"same fingerprint inside the window":                {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: true}, Duplicate},
+		"window passed opens a new incident":                {Input{Event: alert("critical", 5*time.Minute), Group: openGroup(), IncidentOpen: true}, Open},
+		"closed incident opens a new one":                   {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: false}, Open},
+		"late alert before a closed incident's last alert":  {Input{Event: alert("critical", -time.Minute), Group: openGroup(), IncidentOpen: false}, Ignore},
+		"alert well before the open incident's first alert": {Input{Event: alert("critical", -10*time.Minute), Group: openGroup(), IncidentOpen: true}, Open},
+		"alert just before the open incident's first alert": {Input{Event: alert("critical", -time.Minute), Group: openGroup(), IncidentOpen: true}, Duplicate},
+		"resolving alert on open incident":                  {Input{Event: alert("OK", time.Hour), Group: openGroup(), IncidentOpen: true}, Resolve},
+		"resolving alert with no incident":                  {Input{Event: alert("clear", 0)}, Ignore},
 	}
 	for name, tt := range tests {
 		if got := chain.Decide(tt.in).Outcome; got != tt.want {
@@ -78,7 +81,7 @@ func TestChainBeforeAndAfter(t *testing.T) {
 	if d := core.After(always{Ignore}).Decide(in); d.Outcome != Ignore || d.Strategy != "always" {
 		t.Fatalf("After: decision = %+v, want the plugged-in strategy once core passed", d)
 	}
-	if d := core.Decide(in); d.Outcome != Open || len(core) != 2 {
+	if d := core.Decide(in); d.Outcome != Open || len(core) != 3 {
 		t.Fatalf("core changed by Before/After: %+v, %d strategies", d, len(core))
 	}
 }

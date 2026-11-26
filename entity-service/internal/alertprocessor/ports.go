@@ -37,7 +37,7 @@ type GroupTx interface {
 	// Group is the fingerprint's current incident, from the latest of its alerts linked to one, or nil when none is.
 	Group(ctx context.Context) (*strategy.Group, error)
 	// Unlinked lists the fingerprint's other alerts received in [since, until] that belong to no incident, oldest first.
-	Unlinked(ctx context.Context, since, until time.Time, except string) ([]string, error)
+	Unlinked(ctx context.Context, since, until time.Time, except string) ([]event.Event, error)
 	// AlertLinked reports whether the alert already belongs to an incident, which makes a redelivered event a no-op.
 	AlertLinked(ctx context.Context, alertID string) (bool, error)
 	LinkAlert(ctx context.Context, alertID, incidentID string) error

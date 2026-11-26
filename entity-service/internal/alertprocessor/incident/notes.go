@@ -49,17 +49,27 @@ func creationNote(e event.Event) string {
 	return b.String()
 }
 
-// noteMarker is the text every work note about an alert carries, by which a retry finds it.
-func noteMarker(alertID string) string { return "Alert: " + alertID }
+// foldNoteKinds are the kinds of work note an alert can add to an incident it folds into.
+var foldNoteKinds = map[strategy.Outcome]string{strategy.Duplicate: "Duplicate", strategy.Resolve: "OK"}
+
+// foldNotePrefix is how the alert's fold note begins; it holds the alert id, so a note starting with it belongs to that alert and no other.
+func foldNotePrefix(kind, alertID string) string {
+	return fmt.Sprintf("%s alert received.<br>Alert: %s<br>", kind, html.EscapeString(alertID))
+}
+
+// foldNotePrefixes lists every way the alert's fold note can begin, so a retry finds it whichever kind it was.
+func foldNotePrefixes(alertID string) []string {
+	return []string{foldNotePrefix("Duplicate", alertID), foldNotePrefix("OK", alertID)}
+}
 
 // foldNote is the work note for an alert added to an open incident.
 func foldNote(outcome strategy.Outcome, e event.Event) string {
-	kind := "Duplicate"
-	if outcome == strategy.Resolve {
-		kind = "OK"
+	kind, ok := foldNoteKinds[outcome]
+	if !ok {
+		kind = "Duplicate"
 	}
-	return fmt.Sprintf("%s alert received.<br>%s<br>Metric: %s<br>Source: %s",
-		kind, html.EscapeString(noteMarker(e.AlertID)), html.EscapeString(orNA(e.Alert.MetricName)), html.EscapeString(orNA(e.Alert.Source)))
+	return foldNotePrefix(kind, e.AlertID) + fmt.Sprintf("Metric: %s<br>Source: %s",
+		html.EscapeString(orNA(e.Alert.MetricName)), html.EscapeString(orNA(e.Alert.Source)))
 }
 
 func orNA(v string) string {

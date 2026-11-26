@@ -18,7 +18,7 @@ package strategy
 
 import "time"
 
-// DedupStrategy folds an alert into its fingerprint's open incident while that incident is younger than Window.
+// DedupStrategy folds an alert into its fingerprint's open incident when it was received within Window of that incident's first alert, before or after it.
 type DedupStrategy struct {
 	Window time.Duration
 }
@@ -28,7 +28,11 @@ func (DedupStrategy) Name() string { return "dedup" }
 
 // Decide implements Strategy.
 func (d DedupStrategy) Decide(in Input) (Decision, bool) {
-	if !in.HasOpenIncident() || in.Event.ReceivedOn.Sub(in.Group.FirstSeenOn) >= d.Window {
+	if !in.HasOpenIncident() {
+		return Decision{}, false
+	}
+	// Both sides: an alert received well before the incident's first alert, such as a retried event, is not part of it.
+	if elapsed := in.Event.ReceivedOn.Sub(in.Group.FirstSeenOn); elapsed >= d.Window || elapsed <= -d.Window {
 		return Decision{}, false
 	}
 	return Decision{Outcome: Duplicate, Reason: "same fingerprint inside the dedup window"}, true

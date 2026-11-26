@@ -30,13 +30,15 @@ import (
 )
 
 type fakeIncidents struct {
-	created  []domain.CreateIncidentRequest
-	existing string
-	state    *string
-	missing  bool
+	created      []domain.CreateIncidentRequest
+	createCtxErr error
+	existing     string
+	state        *string
+	missing      bool
 }
 
-func (f *fakeIncidents) CreateIncident(_ context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
+func (f *fakeIncidents) CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
+	f.createCtxErr = ctx.Err()
 	f.created = append(f.created, req)
 	var resp domain.CreateIncidentResponse
 	resp.Incident.ID = "inc-new"
@@ -68,9 +70,19 @@ func alert(id, severity string) event.Event {
 	}}
 }
 
-type fakeNotes struct{ has bool }
+// fakeNotes holds an incident's work notes and matches prefixes as the repository does.
+type fakeNotes struct{ notes []string }
 
-func (f fakeNotes) HasNote(context.Context, string, string) (bool, error) { return f.has, nil }
+func (f fakeNotes) HasWorkNote(_ context.Context, _ string, prefixes []string) (bool, error) {
+	for _, n := range f.notes {
+		for _, p := range prefixes {
+			if strings.HasPrefix(n, p) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
 
 type fakeServices map[string]string
 
@@ -163,17 +175,38 @@ func (r *recordingIncidents) UpdateIncident(context.Context, domain.UpdateIncide
 }
 
 func TestWriterFoldIsIdempotent(t *testing.T) {
-	for name, tt := range map[string]struct {
-		already bool
-		want    int
-	}{"first time": {false, 1}, "retry after the note was added": {true, 0}} {
+	own := foldNote(strategy.Duplicate, alert("A2", "critical"))
+	// The opening alert's description names A2, and only text at the start of a note may count.
+	opener := alert("A1", "critical")
+	opener.Alert.Description = "See Alert: A2<br> for context"
+	tests := map[string]struct {
+		notes []string
+		want  int
+	}{
+		"first time":                      {nil, 1},
+		"retry after the note was added":  {[]string{own}, 0},
+		"another note mentions the alert": {[]string{creationNote(opener)}, 1},
+	}
+	for name, tt := range tests {
 		incidents := &recordingIncidents{}
-		s := Writer{Service: incidents, Notes: fakeNotes{has: tt.already}}
-		if err := s.Fold(context.Background(), "inc-1", strategy.Duplicate, alert("A2", "critical")); err != nil {
+		w := Writer{Service: incidents, Notes: fakeNotes{notes: tt.notes}}
+		if err := w.Fold(context.Background(), "inc-1", strategy.Duplicate, alert("A2", "critical")); err != nil {
 			t.Fatal(err)
 		}
 		if incidents.notes != tt.want {
 			t.Errorf("%s: %d notes added, want %d", name, incidents.notes, tt.want)
 		}
+	}
+}
+
+func TestWriterOpenRunsThroughACancelledCaller(t *testing.T) {
+	incidents := &fakeIncidents{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := newWriter(incidents).Open(ctx, alert("A1", "critical")); err != nil {
+		t.Fatal(err)
+	}
+	if incidents.createCtxErr != nil {
+		t.Fatalf("CreateIncident saw %v, want a context shutdown cannot cancel, so incident.created is published after the commit", incidents.createCtxErr)
 	}
 }

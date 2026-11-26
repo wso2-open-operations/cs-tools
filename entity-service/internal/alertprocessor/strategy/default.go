@@ -18,7 +18,7 @@ package strategy
 
 import "time"
 
-// Default is the standard chain: resolve, then fold duplicates into the open incident, then open.
+// Default is the standard chain: drop stale alerts, resolve, then fold duplicates into the open incident, then open.
 func Default(dedupWindow time.Duration) Chain {
-	return Chain{ResolveStrategy{}, DedupStrategy{Window: dedupWindow}}
+	return Chain{StaleStrategy{}, ResolveStrategy{}, DedupStrategy{Window: dedupWindow}}
 }

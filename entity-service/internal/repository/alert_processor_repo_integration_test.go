@@ -19,7 +19,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
 	"time"
 
@@ -86,8 +85,8 @@ func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
 			t.Fatalf("Group = %+v, %v; want the incident with its two alerts", g, err)
 		}
 		unlinked, err := tx.Unlinked(ctx, seen, seen.Add(time.Hour), ids[0])
-		if err != nil || !slices.Equal(unlinked, ids[2:]) {
-			t.Fatalf("Unlinked = %v, %v; want only the third alert", unlinked, err)
+		if err != nil || len(unlinked) != 1 || unlinked[0].AlertID != ids[2] || unlinked[0].Alert.MetricName != "cpu" {
+			t.Fatalf("Unlinked = %+v, %v; want only the third alert, with its alert", unlinked, err)
 		}
 		linked, err := tx.AlertLinked(ctx, ids[0])
 		if err != nil || !linked {

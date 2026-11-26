@@ -18,6 +18,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -25,7 +26,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // The alert processor keeps its state in alert: incident_id marks an alert done, and a fingerprint's group is read from its alerts. Every query runs as the system identity, because alert is internal only.
@@ -79,14 +82,26 @@ func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
 	return &g, nil
 }
 
-func (t groupTx) Unlinked(ctx context.Context, since, until time.Time, except string) ([]string, error) {
-	rows, err := t.tx.Query(ctx, `SELECT id FROM alert
+func (t groupTx) Unlinked(ctx context.Context, since, until time.Time, except string) ([]event.Event, error) {
+	rows, err := t.tx.Query(ctx, `SELECT id, tier, received_on, alert FROM alert
 WHERE fingerprint = $1 AND incident_id IS NULL AND received_on BETWEEN $2 AND $3 AND id <> $4
 ORDER BY received_on, id`, t.fingerprint, since, until, except)
 	if err != nil {
 		return nil, fmt.Errorf("read unlinked alerts: %w", err)
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (event.Event, error) {
+		var e event.Event
+		var tier string
+		var body []byte
+		if err := row.Scan(&e.AlertID, &tier, &e.ReceivedOn, &body); err != nil {
+			return event.Event{}, err
+		}
+		e.Tier = domain.AlertTier(tier)
+		if err := json.Unmarshal(body, &e.Alert); err != nil {
+			return event.Event{}, fmt.Errorf("decode alert %s: %w", e.AlertID, err)
+		}
+		return e, nil
+	})
 }
 
 func (t groupTx) AlertLinked(ctx context.Context, alertID string) (bool, error) {
@@ -114,11 +129,13 @@ func NewIncidentNotes(db *Scoped) *IncidentNotes {
 	return &IncidentNotes{db: db}
 }
 
-// HasNote reports whether the incident has a comment containing marker; marker is matched literally.
-func (n *IncidentNotes) HasNote(ctx context.Context, incidentID, marker string) (bool, error) {
+// HasWorkNote reports whether the incident has a work note starting with any of prefixes, compared literally.
+func (n *IncidentNotes) HasWorkNote(ctx context.Context, incidentID string, prefixes []string) (bool, error) {
 	var found bool
-	err := n.db.QueryRow(WithSystemIdentity(ctx),
-		`SELECT EXISTS (SELECT 1 FROM comment WHERE work_item_id = $1 AND strpos(content, $2) > 0)`, incidentID, marker).Scan(&found)
+	err := n.db.QueryRow(WithSystemIdentity(ctx), `SELECT EXISTS (
+	SELECT 1 FROM comment c, unnest($2::text[]) AS p(prefix)
+	WHERE c.work_item_id = $1 AND c.type = 'WORK_NOTE'::comment_type_enum AND left(c.content, length(p.prefix)) = p.prefix
+)`, incidentID, prefixes).Scan(&found)
 	if err != nil {
 		return false, fmt.Errorf("find note on incident %s: %w", incidentID, err)
 	}

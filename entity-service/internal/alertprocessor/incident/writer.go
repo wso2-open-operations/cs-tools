@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/severity"
@@ -40,7 +41,8 @@ type Service interface {
 
 // Notes tells whether an incident already carries a work note, which makes adding one safe to retry.
 type Notes interface {
-	HasNote(ctx context.Context, incidentID, marker string) (bool, error)
+	// HasWorkNote reports whether the incident has a work note starting with any of prefixes.
+	HasWorkNote(ctx context.Context, incidentID string, prefixes []string) (bool, error)
 }
 
 // Services finds CMDB services by name.
@@ -57,6 +59,14 @@ type Writer struct {
 	CallerID string
 	// DefaultServiceID is the service for an alert whose service label matches none.
 	DefaultServiceID string
+}
+
+// writeTimeout bounds one incident write, which runs detached from the caller's cancellation (see detached).
+const writeTimeout = 30 * time.Second
+
+// detached keeps an incident write running when the caller is cancelled, such as at shutdown: creating an incident commits it and then publishes incident.created, and a cancellation between the two would leave an incident that never pages.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 }
 
 // serviceSearchLimit bounds the services read when matching a label; the search ranks an exact name first.
@@ -88,7 +98,9 @@ func (s Writer) Open(ctx context.Context, e event.Event) (string, error) {
 	if env := strings.TrimSpace(e.Alert.Environment); env != "" {
 		req.Environment = &env
 	}
-	resp, err := s.Service.CreateIncident(ctx, req)
+	writeCtx, cancel := detached(ctx)
+	defer cancel()
+	resp, err := s.Service.CreateIncident(writeCtx, req)
 	if err != nil {
 		return "", fmt.Errorf("create incident: %w", err)
 	}
@@ -123,14 +135,16 @@ func (s Writer) Find(ctx context.Context, alertID string) (string, error) {
 	return s.byCorrelationID(ctx, correlationID(alertID))
 }
 
-// Fold adds the alert to the incident as a Duplicate or OK work note, once: a retry finds the note by the alert id it names.
+// Fold adds the alert to the incident as a Duplicate or OK work note, once: a retry finds the note by how it begins, which names the alert, so text elsewhere in a note never counts.
 func (s Writer) Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error {
-	noted, err := s.Notes.HasNote(ctx, incidentID, noteMarker(e.AlertID))
+	noted, err := s.Notes.HasWorkNote(ctx, incidentID, foldNotePrefixes(e.AlertID))
 	if err != nil || noted {
 		return err
 	}
 	note := foldNote(outcome, e)
-	_, err = s.Service.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
+	writeCtx, cancel := detached(ctx)
+	defer cancel()
+	_, err = s.Service.UpdateIncident(writeCtx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
 	return err
 }
 
