@@ -14,384 +14,182 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
-import {
-  ArrowRight,
-  CalendarClock,
-  CircleCheck,
-  Headset,
-  History,
-  Lightbulb,
-  PackageCheck,
-  RefreshCw,
-  RotateCcw,
-  TriangleAlert,
-  User,
-} from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX, type ReactNode } from "react";
+import { Box, Button, Card, Chip, Drawer, IconButton, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { ArrowRight, ChevronDown, History, RefreshCw, X } from "@wso2/oxygen-ui-icons-react";
+import { useEffect, useId, useRef, useState, type JSX } from "react";
 import { isFeatureEnabled, SLA_TIMELINE_FEATURE_ID } from "@config/featureFlags";
-import {
-  formatAbsoluteForUser,
-  formatBackendTimestampForDisplay,
-} from "@utils/dateTime";
-import {
-  layoutSlaTrack,
-  type SlaTrackMarker,
-  type SlaTrackSide,
-} from "@features/csm-sla/utils/slaTrackLayout";
-import {
-  buildSlaImpactTimeline,
-  type SlaTimelineEvent,
-  type SlaTimelineSide,
-} from "@features/csm-sla/utils/slaImpactTimeline";
+import { formatAbsoluteForUser, getUserPreferredTimeZone } from "@utils/dateTime";
+import { buildSlaImpactTimeline, type SlaTimelineEvent } from "../utils/slaImpactTimeline";
+import { clusterTimelineEvents, elapsedLabel, ownershipTimeline, timestampMs, type OwnershipPeriod, type OwnershipSide } from "../utils/slaTimelinePresentation";
+import type { WorkItemSla } from "../types/workItemSla";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
 
-type Tone = "info" | "warning" | "success" | "error" | "neutral";
-
-const SIDE_LABEL: Record<SlaTimelineSide, string> = {
-  customer: "Customer side",
-  wso2: "WSO2 side",
+const COLORS: Record<OwnershipSide, string> = { wso2: "info.main", customer: "warning.main", closed: "text.secondary" };
+const SEGMENT_CONTRAST: Record<OwnershipSide, string> = {
+  wso2: "info.contrastText",
+  customer: "warning.contrastText",
+  closed: "background.paper",
 };
-
-// Palette roles only, so light and dark both follow the theme. The filled
-// badge pairs `<role>.main` with `<role>.contrastText` (the same pairing the
-// filled status chips use); the side is also spelled out as text, so colour is
-// never the only cue.
-function eventTone(event: SlaTimelineEvent): Tone {
-  switch (event.kind) {
-    case "state":
-      return event.side === "customer" ? "warning" : "info";
-    case "closed":
-    case "workaround":
-    case "update_released":
-      return "success";
-    case "severity":
-      return "error";
-    default:
-      return "neutral";
-  }
-}
-
-function eventIcon(event: SlaTimelineEvent): ReactNode {
-  switch (event.kind) {
-    case "state":
-      return event.side === "customer" ? <User size={16} /> : <Headset size={16} />;
-    case "closed":
-      return <CircleCheck size={16} />;
-    case "reopened":
-      return <RotateCcw size={16} />;
-    case "eta":
-      return <CalendarClock size={16} />;
-    case "workaround":
-    case "workaround_withdrawn":
-      return <Lightbulb size={16} />;
-    case "severity":
-      return <TriangleAlert size={16} />;
-    default:
-      return <PackageCheck size={16} />;
-  }
-}
-
-const MARKER_PX = 32;
-const LANE_STEP_PX = 44;
-const TRACK_PX = 10;
-const PLOT_INSET_PX = 24;
-
-const TRACK_COLOR: Record<SlaTrackSide, string> = {
-  wso2: "info.main",
-  customer: "warning.main",
-  closed: "text.secondary",
-};
-
-const LEGEND: { side: SlaTrackSide; label: string }[] = [
-  { side: "wso2", label: "WSO2 side" },
-  { side: "customer", label: "Customer side" },
-  { side: "closed", label: "Closed" },
-];
-
-function tickLabel(ms: number, spanMs: number): string {
-  const iso = new Date(ms).toISOString();
-  const options: Intl.DateTimeFormatOptions =
-    spanMs < 2 * 24 * 60 * 60 * 1000
-      ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
-      : spanMs > 300 * 24 * 60 * 60 * 1000
-        ? { month: "short", day: "numeric", year: "numeric" }
-        : { month: "short", day: "numeric" };
-  return formatBackendTimestampForDisplay(iso, options) ?? "";
-}
-
-function describeChanges(event: SlaTimelineEvent): string[] {
-  return event.changes.map((c) => `${c.label}: ${c.from ?? "None"} to ${c.to ?? "Cleared"}`);
-}
-
-function MarkerTooltip({ event }: { event: SlaTimelineEvent }): JSX.Element {
-  const when = formatAbsoluteForUser(event.at);
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, py: 0.25 }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }} color="inherit">
-          {event.title}
-        </Typography>
-        {event.side ? (
-          <Chip
-            size="small"
-            color={event.side === "customer" ? "warning" : "info"}
-            label={SIDE_LABEL[event.side]}
-          />
-        ) : null}
-      </Box>
-      {event.changes.map((c) => (
-        <Box key={c.label} sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
-          <Typography variant="caption" color="inherit">{`${c.label}:`}</Typography>
-          <Typography variant="caption" color="inherit">{c.from ?? "None"}</Typography>
-          <ArrowRight size={12} aria-label="to" />
-          <Typography variant="caption" sx={{ fontWeight: 600 }} color="inherit">
-            {c.to ?? "Cleared"}
-          </Typography>
-        </Box>
-      ))}
-      <Typography variant="caption" color="inherit">
-        {[when ?? "Unknown time", event.actor].filter(Boolean).join(" · ")}
-      </Typography>
-    </Box>
-  );
-}
-
-function Marker({ marker, trackY }: { marker: SlaTrackMarker; trackY: number }): JSX.Element {
-  const { event, lane, leftPct } = marker;
-  const tone = eventTone(event);
-  const when = formatAbsoluteForUser(event.at);
-  const above = lane % 2 === 1;
-  const offset = lane === 0 ? 0 : (above ? -1 : 1) * Math.ceil(lane / 2) * LANE_STEP_PX;
-  const centerY = trackY + offset;
-  const label = [event.title, ...describeChanges(event), event.actor, when]
-    .filter(Boolean)
-    .join(", ");
-  return (
-    <>
-      {lane > 0 ? (
-        <Box
-          aria-hidden
-          sx={{
-            position: "absolute",
-            left: `${leftPct}%`,
-            width: 2,
-            ml: "-1px",
-            top: Math.min(centerY, trackY),
-            height: Math.abs(offset),
-            bgcolor: "divider",
-          }}
-        />
-      ) : null}
-      <Tooltip title={<MarkerTooltip event={event} />} arrow enterTouchDelay={0} leaveTouchDelay={5000}>
-        <Box
-          component="button"
-          type="button"
-          aria-label={label}
-          sx={{
-            position: "absolute",
-            left: `${leftPct}%`,
-            top: centerY - MARKER_PX / 2,
-            ml: `${-MARKER_PX / 2}px`,
-            width: MARKER_PX,
-            height: MARKER_PX,
-            p: 0,
-            borderRadius: "50%",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: 2,
-            borderColor: tone === "neutral" ? "text.secondary" : "background.paper",
-            bgcolor: tone === "neutral" ? "background.paper" : `${tone}.main`,
-            color: tone === "neutral" ? "text.primary" : `${tone}.contrastText`,
-            "&:focus-visible": { outline: "2px solid", outlineColor: "text.primary", outlineOffset: 2 },
-          }}
-        >
-          {eventIcon(event)}
-        </Box>
-      </Tooltip>
-    </>
-  );
-}
-
-function TimelineTrack({
-  entries,
-  openedAt,
-  currentState,
-}: {
-  entries: SlaTimelineEvent[];
-  openedAt?: string;
-  currentState?: string;
-}): JSX.Element {
-  // Fixed per mount: the track's right edge is "now" as of when the tab opened.
-  const [nowMs] = useState(() => Date.now());
-  const layout = layoutSlaTrack({
-    events: entries,
-    openedAt,
-    currentState,
-    nowMs,
-    formatTick: tickLabel,
-  });
-  const aboveLevels = Math.ceil(layout.maxLane / 2);
-  const belowLevels = Math.floor(layout.maxLane / 2);
-  const trackY = aboveLevels * LANE_STEP_PX + MARKER_PX / 2 + 4;
-  const tickY = trackY + belowLevels * LANE_STEP_PX + MARKER_PX / 2 + 8;
-
-  return (
-    <Box sx={{ overflowX: "auto", maxWidth: "100%", pb: 0.5 }}>
-      <Box sx={{ minWidth: layout.baseWidthPx + 2 * PLOT_INSET_PX, px: `${PLOT_INSET_PX}px` }}>
-        <Box
-          role="group"
-          aria-label="SLA events, oldest to newest"
-          sx={{ position: "relative", height: tickY + 28 }}
-        >
-          <Box
-            aria-hidden
-            sx={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: trackY - TRACK_PX / 2,
-              height: TRACK_PX,
-              borderRadius: TRACK_PX,
-              overflow: "hidden",
-              bgcolor: "divider",
-            }}
-          >
-            {layout.segments.map((seg, i) => (
-              <Box
-                key={i}
-                sx={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: `${seg.leftPct}%`,
-                  width: `${seg.widthPct}%`,
-                  bgcolor: TRACK_COLOR[seg.side],
-                }}
-              />
-            ))}
-          </Box>
-          {layout.ticks.map((t) => (
-            <Box
-              key={t.leftPct}
-              aria-hidden
-              sx={{ position: "absolute", left: `${t.leftPct}%`, top: tickY, width: 0 }}
-            >
-              <Box sx={{ width: 1, height: 6, bgcolor: "text.secondary", mx: "auto" }} />
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{
-                  display: "block",
-                  whiteSpace: "nowrap",
-                  transform: "translateX(-50%)",
-                  // Keep the first and last label inside the plot.
-                  ...(t.leftPct === 0 && { transform: "translateX(-8px)" }),
-                  ...(t.leftPct === 100 && { transform: "translateX(calc(-100% + 8px))" }),
-                }}
-              >
-                {t.label}
-              </Typography>
-            </Box>
-          ))}
-          {layout.markers.map((m) => (
-            <Marker key={m.event.id} marker={m} trackY={trackY} />
-          ))}
-        </Box>
-      </Box>
-    </Box>
-  );
-}
+const LABELS: Record<OwnershipSide, string> = { wso2: "With Choreo Labs", customer: "With customer", closed: "Closed" };
+const LATEST_LIMIT = 3;
+const when = (ms: number) => formatAbsoluteForUser(new Date(ms).toISOString()) ?? "Unknown time";
+const changeText = (event: SlaTimelineEvent) => event.changes.map((c) => `${c.label}: ${c.from ?? "None"} → ${c.to ?? "Cleared"}`).join(" · ");
 
 interface SlaImpactTimelineProps {
-  /** The case's audited field changes; the caller owns the fetch. */
   entries: CaseAuditEntry[] | undefined;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
-  /** When the case was opened; the track starts here (else at its first event). */
   openedAt?: string;
-  /** The case's current state; colours the track when no state change was audited. */
   currentState?: string;
+  closedAt?: string;
+  slas?: WorkItemSla[];
+  isSlasLoading?: boolean;
+  isSlasError?: boolean;
 }
 
-/**
- * Horizontal track, open to now (or closure), of what moved a case's SLA, coloured by
- * whose side holds the case with a marker per event: switches between the
- * customer and WSO2 side, fix ETA changes, workaround, severity, closure and
- * reopening. Rendered after the SLA table on the case SLA tab. Hidden when
- * the `support.case-sla-timeline` feature is overridden to `hidden` (or `wip`)
- * in `CSM_PORTAL_FEATURE_OVERRIDES`.
- */
-export function SlaImpactTimeline({
-  entries,
-  isLoading,
-  isError,
-  onRetry,
-  openedAt,
-  currentState,
-}: SlaImpactTimelineProps): JSX.Element | null {
-  if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)) return null;
+function TimelineContent({ entries, openedAt, currentState, closedAt, slas = [], isSlasLoading, isSlasError }: SlaImpactTimelineProps): JSX.Element {
+  const selectionId = useId();
+  const [now, setNow] = useState(() => Date.now());
+  // Keep the clock moving so elapsed times and events recorded after mount
+  // appear, and refresh it as soon as the audit or case inputs change.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => setNow(Date.now()), [entries, currentState, closedAt]);
+  const plot = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(640);
+  const [selection, setSelection] = useState<OwnershipPeriod | null>(null);
+  const [history, setHistory] = useState<{ events: SlaTimelineEvent[]; selectedId?: string } | null>(null);
+  const historyRefs = useRef(new Map<string, HTMLButtonElement>());
+  useEffect(() => {
+    const element = plot.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.max(1, entry.contentRect.width)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!history?.selectedId) return;
+    // The drawer's content mounts after its opening transition begins.
+    const timer = setTimeout(() => historyRefs.current.get(history.selectedId!)?.scrollIntoView?.({ block: "nearest" }), 0);
+    return () => clearTimeout(timer);
+  }, [history]);
 
-  const events = buildSlaImpactTimeline(entries ?? []);
+  const audit = buildSlaImpactTimeline(entries ?? []);
+  const allEvents = audit;
+  const timeline = ownershipTimeline(allEvents, openedAt, currentState, now, closedAt);
+  const events = timeline.events;
+  const breachedSlas = slas.filter((sla) => sla.hasBreached);
+  const latest = events.slice(-LATEST_LIMIT).reverse();
+  const periods = timeline.periods;
+  const selected = selection && periods.find((period) => period.start === selection.start && period.end === selection.end) || periods.at(-1);
+  const span = Math.max(1, timeline.end - timeline.start);
+  const pct = (ms: number) => (ms - timeline.start) / span * 100;
+  const regularGroups = clusterTimelineEvents(events, timeline.start, timeline.end, width, 28);
+
+  const openEvent = (event: SlaTimelineEvent) => setHistory({ events: [...events].reverse(), selectedId: event.id });
+  const groupLabel = (group: SlaTimelineEvent[]) => group.map((e) => `${e.title}, ${changeText(e)}, ${e.actor}, ${when(timestampMs(e.at)!)}`).join("; ");
+  const openGroup = (group: SlaTimelineEvent[]) => openEvent(group.at(-1)!);
+  const renderEvent = (event: SlaTimelineEvent, detailed = false) => (
+    <Button
+      key={event.id}
+      ref={(element) => { if (detailed && element) historyRefs.current.set(event.id, element); }}
+      onClick={() => detailed ? setHistory((previous) => previous ? { ...previous, selectedId: previous.selectedId === event.id ? undefined : event.id } : null) : openEvent(event)}
+      aria-expanded={detailed ? history?.selectedId === event.id : undefined}
+      sx={{ textTransform: "none", borderRadius: 0, color: "text.primary", justifyContent: "flex-start", textAlign: "left", width: "100%", py: 1.25, borderBottom: 1, borderColor: "divider", bgcolor: detailed && history?.selectedId === event.id ? "action.selected" : undefined }}
+    >
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, minWidth: 0 }}>
+        <Typography variant="caption" color="text.secondary">{when(timestampMs(event.at)!)}</Typography>
+        <Typography variant="body2">{event.title}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>{changeText(event)}</Typography>
+        {detailed && <Typography variant="caption" color="text.secondary">{event.actor || "Unknown actor"}</Typography>}
+      </Box>
+    </Button>
+  );
 
   return (
-    <Card
-      component="section"
-      aria-label="SLA impact timeline"
-      sx={{ p: 2.5, mt: 2, display: "flex", flexDirection: "column", gap: 2, minWidth: 0, maxWidth: "100%" }}
-    >
-      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
-        <History size={16} />
-        <Typography variant="subtitle2">SLA impact timeline</Typography>
-        {!isLoading && !isError ? (
-          <Chip size="small" variant="outlined" label={`${events.length} events`} />
-        ) : null}
-      </Box>
-
-      {isLoading ? (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }} aria-busy="true">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} variant="rounded" height={44} />
-          ))}
-        </Box>
-      ) : isError ? (
-        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, py: 3 }}>
-          <Typography variant="body2" color="error">
-            Could not load the SLA impact timeline for this case.
-          </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<RefreshCw size={14} />}
-            onClick={onRetry}
-            sx={{ textTransform: "none" }}
-          >
-            Retry
-          </Button>
-        </Box>
-      ) : events.length === 0 ? (
-        <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-          No SLA-affecting changes recorded for this case yet.
-        </Typography>
-      ) : (
-        <>
-          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-            {LEGEND.map((l) => (
-              <Box key={l.side} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                <Box
-                  aria-hidden
-                  sx={{ width: 20, height: TRACK_PX, borderRadius: TRACK_PX, bgcolor: TRACK_COLOR[l.side] }}
-                />
-                <Typography variant="caption">{l.label}</Typography>
-              </Box>
-            ))}
+    <>
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+        <Box><Typography variant="caption" color="text.secondary">Case elapsed time</Typography><Typography>{elapsedLabel(timeline.end - timeline.start)}</Typography></Box>
+        {(["wso2", "customer"] as const).map((side) => (
+          <Box key={side}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}><Box aria-hidden sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: COLORS[side] }} /><Typography variant="caption" color="text.secondary">{LABELS[side]}</Typography></Box>
+            <Typography>{elapsedLabel(periods.filter((p) => p.side === side).reduce((sum, p) => sum + p.end - p.start, 0))}</Typography>
           </Box>
-          <TimelineTrack entries={events} openedAt={openedAt} currentState={currentState} />
-        </>
-      )}
+        ))}
+      </Box>
+      <Typography variant="caption" color="text.secondary">{getUserPreferredTimeZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone} · elapsed time, not SLA business hours</Typography>
+      <Box ref={plot} sx={{ minWidth: 0, px: 1.5 }}>
+        <Box aria-hidden sx={{ position: "relative", height: 20 }}>
+          {selected && <Box sx={{ position: "absolute", left: `${pct((selected.start + selected.end) / 2)}%`, transform: "translateX(-50%)", display: "flex", color: "text.primary" }}><ChevronDown size={20} strokeWidth={3} /></Box>}
+        </Box>
+        <Box role="group" aria-label="Ownership timeline" sx={{ display: "flex", alignItems: "center", height: 28, overflow: "visible" }}>
+          {periods.map((period, index) => {
+            const isSelected = selected?.start === period.start;
+            const endRadius = periods.length === 1 ? "999px"
+              : index === 0 ? "999px 0 0 999px"
+                : index === periods.length - 1 ? "0 999px 999px 0" : "0";
+            return (
+              <Box
+                component="button"
+                type="button"
+                key={period.start}
+                aria-label={`${LABELS[period.side]}, ${elapsedLabel(period.end - period.start)} elapsed, ${when(period.start)} to ${when(period.end)}`}
+                aria-pressed={isSelected}
+                aria-describedby={isSelected ? selectionId : undefined}
+                onClick={() => setSelection(period)}
+                sx={{
+                  flex: period.end - period.start,
+                  height: isSelected ? 24 : 16,
+                  borderRadius: isSelected ? "999px" : endRadius,
+                  bgcolor: COLORS[period.side],
+                  color: SEGMENT_CONTRAST[period.side],
+                  minWidth: 0,
+                  border: 0,
+                  p: 0,
+                  cursor: "pointer",
+                  position: "relative",
+                  zIndex: isSelected ? 1 : 0,
+                  boxShadow: isSelected ? 2 : "none",
+                  transition: "height 150ms ease, box-shadow 150ms ease",
+                  "@media (prefers-reduced-motion: reduce)": { transition: "none" },
+                  "&:focus-visible": { outline: "2px dashed", outlineColor: "text.primary", outlineOffset: 2 },
+                }}
+              />
+            );
+          })}
+        </Box>
+        <Box role="group" aria-label="SLA events, oldest to newest" sx={{ position: "relative", height: 24, mt: -0.5 }}>
+          {regularGroups.map((group) => <Box component="button" type="button" key={group[0].id} aria-label={groupLabel(group)} onClick={() => openGroup(group)} sx={{ position: "absolute", left: `${pct((timestampMs(group[0].at)! + timestampMs(group.at(-1)!.at)!) / 2)}%`, transform: "translateX(-50%)", width: 24, height: 24, border: 0, bgcolor: "transparent", color: "text.primary", cursor: "pointer", p: 0 }}><Box component="span" sx={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: group.length > 1 ? 20 : 10, height: group.length > 1 ? 20 : 10, fontSize: 11, border: 1, borderColor: "text.secondary", borderRadius: "50%", bgcolor: "background.paper" }}>{group.length > 1 ? group.length : null}</Box></Box>)}
+        </Box>
+        <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="caption" color="text.secondary">Opened<br />{when(timeline.start)}</Typography><Typography variant="caption" color="text.secondary" sx={{ textAlign: "right" }}>{currentState?.toLowerCase() === "closed" || events.at(-1)?.kind === "closed" ? "Closed" : "Now"}<br />{when(timeline.end)}</Typography></Box>
+      </Box>
+      {breachedSlas.length > 0 && <Box aria-label="Breached SLAs" sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+        {breachedSlas.map((sla) => <Chip key={sla.id} color="error" variant="outlined" size="small" label={`${sla.definition || "SLA"} · Breached`} />)}
+      </Box>}
+      {isSlasLoading && <Typography variant="caption" color="text.secondary">Loading SLA statuses…</Typography>}
+      {isSlasError && <Typography variant="caption" color="error">SLA statuses could not be loaded. The ownership history is still available.</Typography>}
+      {selected && <Box id={selectionId} aria-live="polite" sx={{ p: 1.5, bgcolor: "action.selected", borderLeft: 3, borderColor: "primary.main", borderRadius: 1 }}><Typography variant="caption" color="text.secondary">Selected period</Typography><Typography variant="body2">{LABELS[selected.side]} · {elapsedLabel(selected.end - selected.start)} elapsed</Typography><Typography variant="caption" color="text.secondary">{when(selected.start)} → {when(selected.end)}</Typography></Box>}
+      <Box><Typography variant="subtitle2">Latest changes</Typography><Typography variant="caption" color="text.secondary">Latest {latest.length} of {events.length} · newest first</Typography>{latest.map((event) => renderEvent(event))}</Box>
+      {events.length > LATEST_LIMIT ? <Button size="small" onClick={() => setHistory({ events: [...events].reverse() })} endIcon={<ArrowRight size={14} />} sx={{ alignSelf: "flex-start", textTransform: "none" }}>View all {events.length} events</Button> : events.length === 0 ? <Typography variant="body2" color="text.secondary">No SLA-affecting changes recorded for this case yet.</Typography> : null}
+      <Drawer anchor="right" open={!!history} onClose={() => setHistory(null)} PaperProps={{ "aria-label": "SLA event history", sx: { width: { xs: "100%", sm: 440 }, maxWidth: "100%" } }}>
+        <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+          <Box sx={{ p: 2, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: 1, borderColor: "divider" }}><Box><Typography variant="subtitle1">SLA event history</Typography><Typography variant="caption" color="text.secondary">{history?.events.length} events · newest first</Typography></Box><IconButton aria-label="Close SLA history" onClick={() => setHistory(null)}><X size={18} /></IconButton></Box>
+          <Box sx={{ px: 2, pb: 2, overflowY: "auto", minHeight: 0 }}>{history?.events.map((event) => renderEvent(event, true))}</Box>
+        </Box>
+      </Drawer>
+    </>
+  );
+}
+
+export function SlaImpactTimeline(props: SlaImpactTimelineProps): JSX.Element | null {
+  if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)) return null;
+  return (
+    <Card component="section" aria-label="SLA impact timeline" sx={{ p: 2.5, mt: 2, display: "flex", flexDirection: "column", gap: 2, minWidth: 0, maxWidth: "100%" }}>
+      <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1 }}><History size={16} /><Typography variant="subtitle2">SLA impact timeline</Typography></Box>
+      {props.isLoading ? <Skeleton variant="rounded" height={180} /> : props.isError ? <Box><Typography color="error">Could not load the SLA impact timeline for this case.</Typography><Button size="small" onClick={props.onRetry} startIcon={<RefreshCw size={14} />}>Retry</Button></Box> : <TimelineContent {...props} />}
     </Card>
   );
 }

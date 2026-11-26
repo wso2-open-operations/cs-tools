@@ -125,6 +125,9 @@ type slaEngineService interface {
 	// ReviseClocks is called from handleSeverityChanged — see that method's
 	// own doc comment.
 	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string)
+	// RegisterIncidentClocks is called from handleIncidentCreated and
+	// handleIncidentPriorityElevated -- see slaengine.Engine's own doc comment.
+	RegisterIncidentClocks(ctx context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -323,10 +326,10 @@ type Dispatcher struct {
 	// state" email (project.reactivated); set via WithACPReactivation. Empty
 	// sends with no CC. Dropped in EMAIL_DEBUG_MODE, like defaultCSMEmailCC.
 	acpReactivationCC []string
-	// acpInternalDomain is the only domain the "Back to Open state" email is
-	// sent to ("@wso2.com" in production; set via WithACPReactivation): it
-	// is an internal notice. Empty means "@wso2.com".
-	acpInternalDomain string
+	// acpInternalDomains are the only domains the "Back to Open state" email
+	// is sent to (ACP_INTERNAL_EMAIL_DOMAINS, set via WithACPReactivation):
+	// it is an internal notice. Empty means "@wso2.com".
+	acpInternalDomains []string
 	// acpReactivationLedger, when set, records the "Back to Open state"
 	// emails already sent (Redis), so a redelivery never sends one twice.
 	acpReactivationLedger ReactivationLedger
@@ -453,11 +456,11 @@ func NewDispatcher(email emailSender, googleChat googleChatSender, call callSend
 }
 
 // WithACPReactivation sets the CC list of the "Back to Open state" email
-// (project.reactivated) and the only domain it may be sent to ("@wso2.com"
-// in production), and returns d for chaining.
-func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Dispatcher {
+// (project.reactivated) and the only domains it may be sent to ("@wso2.com"
+// when none), and returns d for chaining.
+func (d *Dispatcher) WithACPReactivation(cc []string, internalDomains []string) *Dispatcher {
 	d.acpReactivationCC = cc
-	d.acpInternalDomain = internalDomain
+	d.acpInternalDomains = internalDomains
 	return d
 }
 
@@ -1209,9 +1212,14 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
 	case events.TypeIncidentAssigned:
 		return d.handleIncidentAssigned(ctx, record, env.EntityID, env.Payload)
-	case events.TypeIncidentAcknowledged, events.TypeIncidentPriorityElevated, events.TypeIncidentCommentAdded:
+	case events.TypeIncidentPriorityElevated:
+		// The call-escalation ladder (internal/paging) owns this event; the
+		// dispatcher only registers any SLA clock the raised priority started.
+		d.registerElevatedIncidentClocks(ctx, env.EntityID, env.Payload)
+		return nil
+	case events.TypeIncidentAcknowledged, events.TypeIncidentCommentAdded:
 		// The incident call-escalation ladder (internal/paging) owns
-		// these three; the notification dispatcher reacts to none of them. Same
+		// these two; the notification dispatcher reacts to neither. Same
 		// reasoning as the sla.* case below — erroring here would burn this
 		// consumer's retries and dead-letter a perfectly valid event that
 		// simply is not this consumer's concern.
@@ -1739,7 +1747,9 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 // publishing: the audience comes from an approval group or a project's
 // contacts, and the subject reproduces ServiceNow's per-branch wording
 // verbatim. Re-deriving either here would mean maintaining a second copy of
-// logic that only exists to match a system being decommissioned.
+// logic that only exists to match a system being decommissioned. Only the
+// subject's "[WSO2 Support]" prefix is changed, to the configured company name
+// (crSubject).
 //
 // It also does not use groupByLink. That splits a case's recipients by which
 // portal each should be linked to, and needs a caseID to do it — a change
@@ -1814,7 +1824,7 @@ func (d *Dispatcher) handleCRApprovalRequested(ctx context.Context, record event
 	if p.Audience == crAudienceCustomer {
 		to, bcc = []string{d.email.FromAddress()}, recipients
 	}
-	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, p.Subject, body, nil); err != nil {
+	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, crSubject(p.Subject), body, nil); err != nil {
 		return fmt.Errorf("dispatch: send CR approval notice for %s: %w", p.ChangeRequestID, err)
 	}
 	slog.InfoContext(ctx, "dispatch: CR approval notice sent",
@@ -2371,6 +2381,22 @@ func subjectLine(wso2CaseID, caseNumber, caseID, title string) string {
 	return fmt.Sprintf("[%s Support] (%s/%s) %s", notifications.CompanyName(), displayInternalRef(wso2CaseID, caseID), displayCaseRef(caseNumber, caseID), title)
 }
 
+// crFlowSubjectPrefix is the prefix csm-flow-service writes at the start of
+// every change request subject it renders.
+const crFlowSubjectPrefix = "[WSO2 Support]"
+
+// crSubject is a change request notice's subject as the flow rendered it, with
+// its crFlowSubjectPrefix naming the configured company instead, the same
+// prefix subjectLine builds for a case email. The rest of the subject is the
+// flow's own wording and is sent unchanged, as is a subject without the prefix.
+func crSubject(subject string) string {
+	rest, ok := strings.CutPrefix(subject, crFlowSubjectPrefix)
+	if !ok {
+		return subject
+	}
+	return "[" + notifications.CompanyName() + " Support]" + rest
+}
+
 // maskPhone redacts all but the last 4 characters of an E.164 phone number
 // for logging — this repo's own convention is to log only ids and sanitised
 // summaries, not raw PII, and a phone number is PII the same way a recipient
@@ -2634,6 +2660,15 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 		}
 	}
 
+	// After the call and the card: registration reads each clock from
+	// entity-service (with a short retry when none is found, the usual case
+	// for an incident outside the SLA policies), and that must not delay the
+	// page. Best effort and idempotent, so a redelivered record re-registering
+	// is harmless.
+	if d.slaEngine != nil {
+		d.slaEngine.RegisterIncidentClocks(ctx, incidentID, p.Priority, incidentEventTime(p.ReportedAt), p.Number, p.Title, p.Team, p.Service)
+	}
+
 	// endRecord runs exactly once per call, as in handleCaseCreated.
 	safeToRelease := endRecord(len(errs) > 0)
 	if record.NoMoreRetries || safeToRelease {
@@ -2641,6 +2676,35 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 		d.forget(chatKey)
 	}
 	return errors.Join(errs...)
+}
+
+// registerElevatedIncidentClocks registers the SLA clocks of an incident
+// whose priority was raised: entity-service's incident SLA policy starts on
+// Critical/High, so the raise may have started one. Best effort and never an
+// error -- the event belongs to the paging ladder, and a clock already
+// registered is left as it is (SetClock keeps the same incarnation's tiers).
+// The event carries no service, so the SLA card of a clock first registered
+// here shows none.
+func (d *Dispatcher) registerElevatedIncidentClocks(ctx context.Context, incidentID string, raw json.RawMessage) {
+	if d.slaEngine == nil {
+		return
+	}
+	var p events.IncidentPriorityElevatedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		slog.WarnContext(ctx, "dispatch: incident.priority_elevated payload not decodable, sla clocks not registered", "incidentId", incidentID, "err", err)
+		return
+	}
+	d.slaEngine.RegisterIncidentClocks(ctx, incidentID, p.NewPriority, incidentEventTime(p.ElevatedAt), p.Number, p.Title, p.Team, "")
+}
+
+// incidentEventTime parses an incident event's RFC 3339 timestamp, falling
+// back to now: it only stands in for a clock's start when entity-service
+// reports none, which a registered clock always has.
+func incidentEventTime(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	return time.Now()
 }
 
 // handleIncidentAssigned posts the "Incident Acknowledged." reply in the incident's Chat thread.
@@ -2765,7 +2829,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 	if p.Audience == crAudienceCustomer {
 		to, bcc = []string{d.email.FromAddress()}, recipients
 	}
-	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, p.Subject, body, inlineAttachments(images)); err != nil {
+	if err := d.email.SendEmail(ctx, to, nil, bcc, nil, crSubject(p.Subject), body, inlineAttachments(images)); err != nil {
 		return fmt.Errorf("dispatch: send plan date notice for %s: %w", p.ChangeRequestID, err)
 	}
 	slog.InfoContext(ctx, "dispatch: plan date notice sent",

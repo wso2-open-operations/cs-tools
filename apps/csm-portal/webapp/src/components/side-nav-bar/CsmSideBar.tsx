@@ -32,6 +32,7 @@ import {
   visibleRailChildren,
   visibleShortcutTo,
 } from "@config/featureFlags";
+import { companyName } from "@config/appearanceConfig";
 import { useFeaturePreviewOverrides } from "@config/featurePreview";
 import type { PortalAccess } from "@context/current-user/portalAccess";
 import { usePortalAccess, useSafeCurrentUserId } from "@context/current-user/usePortalAccess";
@@ -42,9 +43,8 @@ import { useNavTransition } from "@hooks/useNavTransition";
 const wipTooltip = (label: string): string =>
   `${label} — this section is still under construction`;
 
-const COMPANY_NAME = "WSO2 LLC";
-const TERMS_OF_SERVICE_URL = "https://wso2.com/terms-of-use/";
-const PRIVACY_POLICY_URL = "https://wso2.com/privacy-policy/";
+const TERMS_OF_SERVICE_URL = "https://choreolabs.com/terms-of-use/";
+const PRIVACY_POLICY_URL = "https://choreolabs.com/privacy-policy";
 
 // Persists the last resolved section across a full page reload, and is the
 // single home for it — no in-component ref/state mirror, so nothing is read
@@ -385,7 +385,7 @@ export default function CsmSideBar({
             }}
           >
             <Typography variant="caption" color="text.secondary">
-              © {new Date().getFullYear()} {COMPANY_NAME}. All rights reserved.
+              © {new Date().getFullYear()} {companyName()}. All rights reserved.
             </Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 1.5, rowGap: 0.25 }}>
               <Link

@@ -145,22 +145,11 @@ attempt to post the card** — there is no "first match wins" behavior
 anywhere in this decision. A failure on one of them is logged on its own
 and does not stop the others.
 
-Two things are worth flagging about how complete this decision actually is
-in practice for each alert type:
-
-- The **frustration alert** has everything it needs to make this decision
-  in full — the comment's own case data carries its team, its evaluation
-  flag, and its onboarding status.
-- The **SLA breach alert** does not: nothing published to this service any
-  longer carries a case's evaluation-account flag or onboarding status by
-  the time an SLA tracker needs them, so an SLA alert's version of this
-  decision always treats the case as not an evaluation account and as
-  having no onboarding status — meaning, in practice, an SLA breach on an
-  evaluation or newly-onboarded account's case is only ever distinguishable
-  from an ordinary one by its team-or-monitoring-space outcome (steps 1 and
-  3 above never actually apply to an SLA alert today). This is a known,
-  accepted gap, not a bug — it would need a publisher to start sending
-  those two facts on the events this tracker already consumes.
+Both alert types resolve this decision in full today: the frustration alert
+from the comment's own case data (team, evaluation flag, onboarding status),
+and the SLA breach alert from a dedicated, per-tier lookup it makes against
+the core entity service right before sending — see section 3.2 for where
+that lookup comes from and what else it is used for.
 
 #### 2.1.4 One more override just for frustration alerts: migration-type comments
 
@@ -527,14 +516,51 @@ customer's name or contact details on the alert itself.
 ### 3.2 Service-level agreement alerts
 
 An SLA-tracking component inside the service watches each case's own
-timeline and sends a chat alert when a case crosses a warning or breach
-threshold (50%, 75%, and fully breached). These alerts follow the same
-team-aware decision as the frustration alert above (section 2.1.3) — team
-space first, general monitoring space otherwise, plus the onboarding/
-overnight/weekend additions — except that an SLA alert is never able to
-resolve the evaluation-account or onboarding-status checks in practice,
-since the information those two checks need isn't available to this part
-of the service (also noted in section 2.1.3).
+timeline and sends a chat alert — plus, as of this change, one or two
+separate emails (see below) — when a case crosses a warning or breach
+threshold (50%, 75%, and fully breached). The chat alert follows the same
+team-aware decision as the frustration alert above (section 2.1.3) in full —
+team space first, general monitoring space otherwise, plus the onboarding/
+overnight/weekend additions, including the evaluation-account and
+onboarding-status checks, resolved via the same per-tier core-entity-service
+lookup described in section 3.2.1.
+
+**The emails are a separate channel from the chat alert, not a rendering of
+the same decision.** Two are always attempted — one to the case's assigned
+engineer, one to the case's own team (its real group inbox, plus a second,
+onboarding-team inbox when the project is still onboarding) — and a third is
+attempted only during the overnight window from step 4 of section 2.1.3 (9
+PM-6 AM IST): a fixed, separately-configured team's own inbox, so that
+overnight coverage reaches a real mailbox and not only the shared chat space
+the same window also adds. That configured team is independent of whatever
+team the overnight chat audience itself routes to — a deployment can point
+the two at the same team or different ones. If the fixed team's inbox turns
+out to be the same address the case's own team already received the email
+at, it is not sent a second, identical copy. Each recipient that could not be
+resolved to a real address (no assignee, or — for the overnight email — no
+fixed team configured at all) is simply skipped, logged, and not treated as an
+error.
+
+**No CRE team inbox: the CRE head gets the team email.** When the entity
+service answers for the clock but the case's account has no CRE team (ABT), or
+its team has no inbox, the team email goes to the CRE head instead (alongside
+the onboarding team's inbox, when there is one), so an at-risk or breached SLA
+on an unassigned, team-less case still reaches a person. The CRE head is the
+one the case-alert call ladder reaches: the configured `heads.cre`, else
+whoever holds the `cre_head` role in the leadership team. A `heads.cre` with
+only a phone gets no email (the role holders are not emailed in its place). With no ABT the
+Team row reads "No ABT assigned (sent to the CRE head)". A lookup that failed
+or found no clock does not count as "no team" (it says nothing about the
+team), so an entity-service outage does not send the head every case's alert.
+Cases only: an incident's team email goes to its SRE team(s), never the CRE
+head, even when it has none.
+
+One known, accepted limitation specific to the overnight email: the fixed
+team it goes to is resolved from the same reference data the chat space's
+own routing table is refreshed from, on the same periodic schedule — so a
+team's inbox changed in the underlying system can take up to that refresh
+interval to take effect here, the same lag every other team-sourced lookup
+in this service already has.
 
 **What starts a clock, and for how long, is decided entirely by the core
 entity service's own SLA policy table — not a fixed table of durations per
@@ -563,14 +589,10 @@ alert is deferred to the next successful check rather than sent without
 being able to verify it hasn't already been resolved — an outage delays an
 alert, it never risks sending a duplicate or a false one.
 
-One known limitation: the alert is meant to name the team's own lead, but
-that information is not currently available to this part of the service, so
-the alert only shows the team name.
-
 #### 3.2.1 When an SLA alert fires, and what is checked before it is sent
 
 (Where the clocks themselves are stored and how they pause, resume and
-breach: the core entity service's SLA document, `entity-service/docs/sla.md`.)
+breach: the core entity service's SLA document, `entity-service/docs/specs/sla.md`.)
 
 **Alert points.** Each clock is alerted at 50%, 75% and 100% of its duration.
 This service keeps its own schedule of those moments in Redis rather than
@@ -631,7 +653,8 @@ for their due times.
    per space. A failed post is logged and not retried, so one broken space
    cannot cause repeated duplicates elsewhere.
 9. Email the case assignee and the team group, using the addresses fetched in
-   step 5. A recipient with no address (for example when that lookup failed) is
+   step 5; with no CRE team inbox, the CRE head stands in for the team (see
+   above). A recipient with no address (for example when that lookup failed) is
    skipped, and nothing is sent if no email client is configured. In debug
    mode the mail goes to the debug recipients instead, with the intended
    recipient shown in the body.

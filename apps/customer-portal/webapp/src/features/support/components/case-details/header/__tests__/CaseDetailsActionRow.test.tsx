@@ -18,6 +18,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 
 vi.mock("@api/useGetProjectFilters", () => ({
   default: () => ({
@@ -55,10 +57,28 @@ vi.mock("@context/error-banner/ErrorBannerContext", () => ({
 
 // Defaults to an external (customer) caller, the normal customer portal user;
 // individual tests override this where internal behaviour matters.
-const useCustomerPermissionsMock = vi.fn(() => ({
-  isExternalUser: true,
-  canCreateCase: true,
-  canUpdateCase: true,
+const useCustomerPermissionsMock = vi.fn(
+  (): {
+    isExternalUser: boolean;
+    isInternalUser?: boolean;
+    canCreateCase: boolean;
+    canUpdateCase: boolean;
+  } => ({
+    isExternalUser: true,
+    canCreateCase: true,
+    canUpdateCase: true,
+  }),
+);
+
+// The row's hooks log through useLogger, which needs a LoggerProvider this
+// test does not set up.
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
 }));
 
 vi.mock("@hooks/useCustomerPermissions", () => ({
@@ -68,17 +88,25 @@ vi.mock("@hooks/useCustomerPermissions", () => ({
 function renderActionRow(
   props: Partial<Parameters<typeof CaseDetailsActionRow>[0]> = {},
 ) {
+  // The row's child dialogs read the query cache and the router.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <ThemeProvider theme={createTheme()}>
-      <CaseDetailsActionRow
-        assignedEngineer="Jane Doe"
-        engineerInitials="JD"
-        statusLabel="Open"
-        projectId="proj-1"
-        caseId="case-1"
-        {...props}
-      />
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ThemeProvider theme={createTheme()}>
+          <CaseDetailsActionRow
+            assignedEngineer="Jane Doe"
+            engineerInitials="JD"
+            statusLabel="Open"
+            projectId="proj-1"
+            caseId="case-1"
+            {...props}
+          />
+        </ThemeProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -135,9 +163,18 @@ describe("CaseDetailsActionRow", () => {
     beforeEach(() => {
       useCustomerPermissionsMock.mockReturnValue({
         isExternalUser: false,
+        isInternalUser: true,
         canCreateCase: true,
         canUpdateCase: true,
       });
+    });
+
+    it("offers Wait on WSO2 on an Awaiting Info case", () => {
+      renderActionRow({ statusLabel: "Awaiting Info" });
+
+      expect(
+        screen.getByRole("button", { name: "Wait on WSO2" }),
+      ).toBeInTheDocument();
     });
 
     it("disables Close and cannot open the confirm dialog", () => {
@@ -176,6 +213,29 @@ describe("CaseDetailsActionRow", () => {
         ),
       ).toBeInTheDocument();
     });
+  });
+
+  it("never offers Wait on WSO2 to an external user on an Awaiting Info case", () => {
+    renderActionRow({ statusLabel: "Awaiting Info" });
+
+    expect(
+      screen.queryByRole("button", { name: "Wait on WSO2" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+
+  it("hides Wait on WSO2 until the user is known to be internal", () => {
+    useCustomerPermissionsMock.mockReturnValue({
+      isExternalUser: false,
+      isInternalUser: false,
+      canCreateCase: true,
+      canUpdateCase: true,
+    });
+    renderActionRow({ statusLabel: "Awaiting Info" });
+
+    expect(
+      screen.queryByRole("button", { name: "Wait on WSO2" }),
+    ).not.toBeInTheDocument();
   });
 
   it("should render solution actions for solution proposed status", () => {

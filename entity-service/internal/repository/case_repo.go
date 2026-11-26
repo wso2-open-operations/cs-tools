@@ -584,22 +584,36 @@ type CaseRepository interface {
 	// deeper, already-surfaced problem, not something to fail subscription
 	// over).
 	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
+	// AddCaseWatcherByEmailIfAbsent is AddCaseWatcherIfAbsent for a caller
+	// that doesn't already have the watcher's resolved platform id -- only
+	// an identity string of unverified shape, matched as EITHER a user id
+	// or an email (see the implementation's own doc comment for why this
+	// can't assume one shape). work_item.created_by is exactly such a
+	// string: not reliably a platform id across every create path and
+	// deployment. A caseID or identity that resolves to no real row is a
+	// no-op, not an error -- never a guess, and never two round trips for
+	// something this cheap to resolve-and-insert in one.
+	AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, identity string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
-	// four named stakeholders' email addresses -- technical_owner_id,
+	// named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
-	// renewal_account_manager_id (migration 0012), whichever are set and
-	// have an email on file, deduplicated. customer_success_manager_id is
-	// deliberately excluded: unlike the other four, the CSM is not meant to
-	// receive these default case notifications. A project with no linked
+	// renewal_account_manager_id, customer_success_manager_id (all
+	// migration 0012) -- plus projectID's own onboarding_owner_id
+	// (migration 0104), but the latter only while the project's
+	// onboarding_status is IN_PROGRESS: an onboarding owner is only a
+	// default recipient during the onboarding window itself, not before it
+	// starts or after it finishes. Whichever of these are set and have an
+	// email on file are included, deduplicated. A project with no linked
 	// account, or a project id that does not exist, returns an empty slice
 	// rather than an error: this is a default watch list, not a
 	// requirement. Used to compute a case.* event's email
-	// Recipients fresh at publish time: these four are deliberately never
+	// Recipients fresh at publish time: these are deliberately never
 	// persisted into work_item_watcher (see SetCaseWatchList's own callers'
-	// doc comments) specifically so a later stakeholder reassignment is
-	// reflected on the very next notification, not stuck on whoever held the
-	// role when the case was created or last had its watch list edited. A
-	// stakeholder with no email on file is silently excluded, same as
+	// doc comments) specifically so a later stakeholder reassignment (or
+	// the project moving into or out of onboarding) is reflected on the
+	// very next notification, not stuck on whoever held the role when the
+	// case was created or last had its watch list edited. A stakeholder
+	// with no email on file is silently excluded, same as
 	// watchListUserEmails does for an explicit watcher.
 	AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error)
 	// AccountSRETeam returns the SRE team (account.sre_team_id) of the account owning projectID, "" for none or no such project.
@@ -1760,6 +1774,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		sreTeamID, sreTeamName                   *string
 		creatorEmail                             string
 		creatorID, creatorName                   *string
+		creatorInternal                          bool
 		bestCaseEta, mostLikelyEta, worstCaseEta *time.Time
 		etaSharedOn                              *time.Time
 		autoclosureStep                          *string
@@ -1785,6 +1800,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta, wi.eta_shared_on,
 		        `+caseLikeAutoclosureStepColumn+`, `+caseLikeAutoclosureStateOnColumn+`,
 		        wi.created_by, creator.id, COALESCE(creator.name, NULLIF(TRIM(CONCAT_WS(' ', creator.first_name, creator.last_name)), '')),
+		        COALESCE(creator.user_type = 'INTERNAL'::user_type_enum, false),
 		        p.id, p.name,
 		        d.id, d.name,
 		        dp.id, prod.name || COALESCE(' ' || pv.version, ''),
@@ -1827,7 +1843,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&cv.Subject,
 		&bestCaseEta, &mostLikelyEta, &worstCaseEta, &etaSharedOn,
 		&autoclosureStep, &autoclosureStateOn,
-		&creatorEmail, &creatorID, &creatorName,
+		&creatorEmail, &creatorID, &creatorName, &creatorInternal,
 		&projID, &projName,
 		&depID, &depName,
 		&dpID, &dpDisplayName,
@@ -2020,6 +2036,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		id2 = *creatorID
 	}
 	cv.CreatedBy = domain.NewUserReference(id2, creatorEmail, name)
+	if cv.CreatedBy != nil {
+		cv.CreatedBy.IsInternal = creatorInternal
+	}
 	if aeID != nil {
 		aName := ""
 		if aeName != nil {
@@ -2355,7 +2374,8 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	// available when it happens to match a known user's email.
 	dataQuery := fmt.Sprintf(`
 		SELECT cc.id, cc.work_item_id, cc.type, cc.content, cc.created_by, cc.created_on,
-		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
+		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')),
+		       COALESCE(u.user_type::text, '') = 'INTERNAL'
 		FROM comment cc
 		`+userByEmailJoin("u", "cc.created_by")+`
 		WHERE cc.work_item_id = $1%s
@@ -2388,9 +2408,10 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 			var c domain.CaseComment
 			var typeRaw, authorEmail string
 			var authorID, authorName *string
+			var authorInternal bool
 			if err := rows.Scan(
 				&c.ID, &c.CaseID, &typeRaw, &c.Content, &authorEmail, &c.CreatedOn,
-				&authorID, &authorName,
+				&authorID, &authorName, &authorInternal,
 			); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
@@ -2404,6 +2425,9 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 				c.CreatedBy = domain.NewUserReference(*authorID, authorEmail, name)
 			} else {
 				c.CreatedBy = domain.NewUserReference("", authorEmail, "")
+			}
+			if c.CreatedBy != nil {
+				c.CreatedBy.IsInternal = authorInternal
 			}
 			result = append(result, c)
 		}
@@ -2451,6 +2475,26 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // labels by UpdateCase below (state/work_state upper-cased, severity mapped
 // through caseSeverityToEnum) -- case_state_enum's "CLOSED" is what $2 = ”
 // compares a non-empty state against here, not the domain value "closed".
+// reopen_reason ($9) is only ever non-nil when CaseService.UpdateCase has
+// already confirmed this is a genuine admin reopen (UpdateCaseRequest.
+// AdminReopen); the CASE WHEN here is the actual gate for when it gets
+// written, keyed off the row's own pre-statement state (same "state"
+// right-hand-side reference as closed_by_user_id above) rather than a
+// separate flag, since a transition OUT of closed can only happen through
+// that same admin-reopen path in the first place (every other caller's
+// state-transition table has no entry for closed at all). This column is
+// write-only -- see migration 0292's own comment -- so it is never in this
+// query's RETURNING list.
+// resolved_on's own fourth branch (admin reopen into anything but
+// CLOSED/SOLUTION_PROPOSED, both already handled by the branches above it)
+// clears a stale resolved_on left over from the PRIOR closure --
+// CodeRabbit-caught gap: without it, reopening into e.g. work_in_progress
+// fell through to the trailing ELSE and kept the old timestamp, which a
+// later re-close's own COALESCE(resolved_on, NOW()) branch would then
+// reuse instead of recording the new resolution. Same admin-reopen
+// detection condition as reopen_reason just below, for the same reason --
+// keyed off real state values, not a separate flag, since only the
+// admin-reopen path can ever produce a transition OUT of closed at all.
 // work_state is only meaningful while state is work_in_progress: an explicit
 // workState wins, otherwise a state change to awaiting_info pauses it and a
 // change to any other non-work_in_progress state clears it to NULL, in the
@@ -2478,11 +2522,13 @@ const updateCaseQuery = `
 		    resolved_on       = CASE WHEN $2 = 'SOLUTION_PROPOSED' AND COALESCE(state::TEXT, '') NOT IN ('WAITING_ON_WSO2', 'SOLUTION_PROPOSED') THEN NOW()
 		                          WHEN $2 = 'CLOSED' THEN COALESCE(resolved_on, NOW())
 		                          WHEN $2 = 'REOPENED' THEN NULL
+		                          WHEN $2 <> '' AND $2 <> 'CLOSED' AND state = 'CLOSED'::case_state_enum THEN NULL
 		                          ELSE resolved_on END,
 		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::case_state_enum THEN $8::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
 		    resolution_code   = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,
 		    cause             = CASE WHEN $6 <> '' THEN $6::case_cause_enum ELSE cause END,
-		    close_notes       = COALESCE($7, close_notes)
+		    close_notes       = COALESCE($7, close_notes),
+		    reopen_reason     = CASE WHEN $2 <> '' AND $2 <> 'CLOSED' AND state = 'CLOSED'::case_state_enum THEN $9 ELSE reopen_reason END
 		WHERE id = $1
 		RETURNING id, severity, issue_type, state, work_state, closed_on, resolved_on
 	),
@@ -2873,7 +2919,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 		// race on — skip the transaction/lock overhead entirely.
 		if req.Severity == nil {
 			c, prevState, err := r.updateLockingPreviousState(ctx, req, func(q rowQuerier) (domain.Case, error) {
-				return scanUpdatedCaseWithResolvedOn(q.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
+				return scanUpdatedCaseWithResolvedOn(q.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason))
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return domain.Case{}, nil, nil, &apierror.NotFoundError{Msg: "case not found"}
@@ -2894,7 +2940,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 				return err
 			}
 			var txErr error
-			c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
+			c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason))
 			if txErr != nil {
 				return txErr
 			}
@@ -4120,13 +4166,11 @@ type rowsQuerier interface {
 //     that floor was removed), but the product decision here is to still
 //     *display* them on this read, read-only, so a caller can see every
 //     stakeholder associated with the case without being able to remove
-//     one. This is a strictly larger set than AccountDefaultWatcherEmails'
-//     own four -- that function deliberately excludes
-//     customer_success_manager_id from the default email audience (see its
-//     own doc comment), which is a decision about who gets emailed by
-//     default, not about who the account's named stakeholders are; this
-//     display is the latter, so the CSM is included here even though they
-//     are not unioned into a case.* email's Recipients.
+//     one. AccountDefaultWatcherEmails' own set now includes these same
+//     five (see its own doc comment) plus, conditionally, the project's
+//     onboarding owner during active onboarding -- a project-level role,
+//     not an account stakeholder, so it is not synthesized into this
+//     display at all.
 //   - A user who is both a real persisted watcher AND one of those five
 //     stakeholders appears exactly once, as the locked (stakeholder) copy --
 //     the inner DISTINCT ON picks locked=true first on a duplicate id. The
@@ -4151,7 +4195,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 		),
 		persisted AS (
 			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
-			       false AS locked
+			       false AS locked, COALESCE(u.user_type = 'INTERNAL'::user_type_enum, false) AS is_internal
 			FROM work_item_watcher w
 			JOIN "user" u ON u.id = w.user_id
 			WHERE w.work_item_id = $1
@@ -4168,7 +4212,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 		),
 		stakeholders AS (
 			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
-			       true AS locked
+			       true AS locked, COALESCE(u.user_type = 'INTERNAL'::user_type_enum, false) AS is_internal
 			FROM case_context cc
 			JOIN "user" u ON u.id IN (
 			    cc.technical_owner_id, cc.secondary_technical_owner_id,
@@ -4177,7 +4221,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			)
 		),
 		deduped AS (
-			SELECT DISTINCT ON (id) id, user_name, name, email, locked
+			SELECT DISTINCT ON (id) id, user_name, name, email, locked, is_internal
 			FROM (
 			    SELECT * FROM persisted
 			    UNION ALL
@@ -4185,7 +4229,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			) combined
 			ORDER BY id, locked DESC
 		)
-		SELECT id, user_name, name, email, locked FROM deduped
+		SELECT id, user_name, name, email, locked, is_internal FROM deduped
 		ORDER BY user_name`, caseID)
 	if err != nil {
 		return nil, fmt.Errorf("query case watch list: %w", err)
@@ -4196,9 +4240,13 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 	for rows.Next() {
 		var id, userName, name string
 		var email *string
-		var locked bool
-		if err := rows.Scan(&id, &userName, &name, &email, &locked); err != nil {
+		var locked, isInternal bool
+		if err := rows.Scan(&id, &userName, &name, &email, &locked, &isInternal); err != nil {
 			return nil, fmt.Errorf("scan case watcher: %w", err)
+		}
+		user := domain.NewUserReference("", stringOrEmpty(email), name)
+		if user != nil {
+			user.IsInternal = isInternal
 		}
 		watchers = append(watchers, domain.WatchListUser{
 			ID:       id,
@@ -4211,7 +4259,7 @@ func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]dom
 			// not guaranteed to point at a user record"). Pass "" rather
 			// than id so NewUserReference omits it, even though this
 			// particular row is known to resolve to a real user.
-			User: domain.NewUserReference("", stringOrEmpty(email), name),
+			User: user,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -4285,6 +4333,34 @@ func (r *caseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID st
 	return nil
 }
 
+// AddCaseWatcherByEmailIfAbsent implements CaseRepository.
+func (r *caseRepo) AddCaseWatcherByEmailIfAbsent(ctx context.Context, caseID, identity string) error {
+	// Same ON CONFLICT DO NOTHING shape as AddCaseWatcherIfAbsent, with the
+	// identity-to-"user".id resolution folded into the same statement (a
+	// join, not a prior lookup). identity is matched as EITHER a user id
+	// (u.id::text, never cast the other way -- casting an arbitrary string
+	// to uuid raises rather than failing the WHERE, which a plain email
+	// would trip on every call) OR an email, case-insensitively: callers of
+	// this method pass whatever work_item.created_by actually holds for
+	// the case's own data source, which in practice is not consistently
+	// one shape or the other (confirmed live: a dual-write create's
+	// createdBy is ServiceNow's own raw actor string; a same-looking column
+	// on another path can already be a resolved id). Either way, an
+	// identity matching no user, like a caseID that doesn't exist, simply
+	// inserts zero rows rather than erroring or guessing.
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO work_item_watcher (id, work_item_id, user_id)
+		SELECT gen_random_uuid(), wi.id, u.id
+		FROM work_item wi
+		JOIN "user" u ON u.id::text = $2 OR LOWER(u.email) = LOWER($2)
+		WHERE wi.id = $1
+		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, identity)
+	if err != nil {
+		return fmt.Errorf("add case watcher by email if absent: %w", err)
+	}
+	return nil
+}
+
 // AccountSRETeam implements CaseRepository.
 func (r *caseRepo) AccountSRETeam(ctx context.Context, projectID string) (string, string, error) {
 	var id, name string
@@ -4306,17 +4382,20 @@ func (r *caseRepo) AccountSRETeam(ctx context.Context, projectID string) (string
 
 // AccountDefaultWatcherEmails implements CaseRepository.
 func (r *caseRepo) AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error) {
-	var towEmail, stowEmail, amEmail, ramEmail *string
+	var towEmail, stowEmail, amEmail, ramEmail, csmEmail, onboardingOwnerEmail *string
 	err := r.db.QueryRow(ctx, `
-		SELECT tow.email, stow.email, am.email, ram.email
+		SELECT tow.email, stow.email, am.email, ram.email, csm.email,
+			CASE WHEN p.onboarding_status = 'IN_PROGRESS' THEN oo.email END
 		FROM project p
 		JOIN account a ON a.id = p.account_id
 		LEFT JOIN "user" tow ON tow.id = a.technical_owner_id
 		LEFT JOIN "user" stow ON stow.id = a.secondary_technical_owner_id
 		LEFT JOIN "user" am ON am.id = a.account_manager_id
 		LEFT JOIN "user" ram ON ram.id = a.renewal_account_manager_id
+		LEFT JOIN "user" csm ON csm.id = a.customer_success_manager_id
+		LEFT JOIN "user" oo ON oo.id = p.onboarding_owner_id
 		WHERE p.id = $1`, projectID,
-	).Scan(&towEmail, &stowEmail, &amEmail, &ramEmail)
+	).Scan(&towEmail, &stowEmail, &amEmail, &ramEmail, &csmEmail, &onboardingOwnerEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -4324,9 +4403,9 @@ func (r *caseRepo) AccountDefaultWatcherEmails(ctx context.Context, projectID st
 		return nil, fmt.Errorf("account default watcher emails: %w", err)
 	}
 
-	emails := make([]string, 0, 4)
-	seen := make(map[string]struct{}, 4)
-	for _, email := range []*string{towEmail, stowEmail, amEmail, ramEmail} {
+	emails := make([]string, 0, 6)
+	seen := make(map[string]struct{}, 6)
+	for _, email := range []*string{towEmail, stowEmail, amEmail, ramEmail, csmEmail, onboardingOwnerEmail} {
 		if email == nil || *email == "" {
 			continue
 		}
@@ -5097,8 +5176,9 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 		fileName, contentType            *string
 		sizeBytes                        *int64
 		fieldName, oldValue, newValue    *string
+		createdByInternal                bool
 	)
-	if err := row.Scan(&id, &kind, &content, &createdOn, &email, &firstName, &lastName, &name, &commentTypeRaw, &fileName, &contentType, &sizeBytes, &fieldName, &oldValue, &newValue); err != nil {
+	if err := row.Scan(&id, &kind, &content, &createdOn, &email, &firstName, &lastName, &name, &commentTypeRaw, &fileName, &contentType, &sizeBytes, &fieldName, &oldValue, &newValue, &createdByInternal); err != nil {
 		return domain.CaseActivity{}, err
 	}
 	a := domain.CaseActivity{
@@ -5113,6 +5193,9 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 	// other read in this service does: "user".name first, falling back to
 	// first_name+last_name only if name is unset.
 	a.CreatedBy = domain.NewUserReference("", stringOrEmpty(email), stringOrEmpty(name))
+	if a.CreatedBy != nil {
+		a.CreatedBy.IsInternal = createdByInternal
+	}
 	switch kind {
 	case "comment":
 		a.Type = domain.ActivityTypeComment
@@ -5228,13 +5311,15 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				c.id, 'comment' AS kind, c.content, c.created_on AS created_on,
 				c.email, c.first_name, c.last_name, c.name, c.type::text AS comment_type,
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
+				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value,
+				c.created_by_internal
 			FROM (
 				SELECT
 					cm.id, cm.content, cm.created_on, cm.created_by AS email,
 					u1.first_name, u1.last_name,
 					COALESCE(u1.name, NULLIF(TRIM(CONCAT_WS(' ', u1.first_name, u1.last_name)), '')) AS name,
-					cm.type
+					cm.type,
+					COALESCE(u1.user_type::text, '') = 'INTERNAL' AS created_by_internal
 				FROM comment cm
 				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1` + commentWorkNoteDataFilter + `
@@ -5248,11 +5333,12 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				COALESCE(u4.name, NULLIF(TRIM(CONCAT_WS(' ', u4.first_name, u4.last_name)), '')) AS name,
 				NULL::text AS comment_type,
 				COALESCE(wa.name, '')::text, COALESCE(wa.content_type, '')::text, COALESCE(wa.size_bytes, 0)::bigint,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
+				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value,
+				COALESCE(u4.user_type::text, '') = 'INTERNAL' AS created_by_internal
 			FROM work_item_attachment wa
 			JOIN work_item wi ON wi.id = wa.work_item_id
 			LEFT JOIN LATERAL (
-				SELECT u.email, u.first_name, u.last_name, u.name
+				SELECT u.email, u.first_name, u.last_name, u.name, u.user_type
 				FROM "user" u
 				WHERE LOWER(u.email) = LOWER(wa.created_by)
 				ORDER BY u.id
@@ -5269,13 +5355,15 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				fc.email, fc.first_name, fc.last_name, fc.name,
 				NULL::text AS comment_type,
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
-				fc.field_name, fc.old_value, fc.new_value
+				fc.field_name, fc.old_value, fc.new_value,
+				fc.created_by_internal
 			FROM (
 				SELECT
 					wa.id, wa.created_on, wa.user_email AS email,
 					u3.first_name, u3.last_name,
 					COALESCE(u3.name, NULLIF(TRIM(CONCAT_WS(' ', u3.first_name, u3.last_name)), '')) AS name,
-					wa.field_name, wa.old_value, wa.new_value
+					wa.field_name, wa.old_value, wa.new_value,
+					COALESCE(u3.user_type::text, '') = 'INTERNAL' AS created_by_internal
 				FROM work_item_activity wa
 				` + userByEmailJoin("u3", "wa.user_email") + `
 				WHERE wa.work_item_id = $1
@@ -5283,7 +5371,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	}
 	dataQuery += `
 		)
-		SELECT id, kind, content, created_on, email, first_name, last_name, name, comment_type, file_name, content_type, size_bytes, field_name, old_value, new_value
+		SELECT id, kind, content, created_on, email, first_name, last_name, name, comment_type, file_name, content_type, size_bytes, field_name, old_value, new_value, created_by_internal
 		FROM activity
 		ORDER BY created_on DESC, id
 		LIMIT $2 OFFSET $3`
@@ -5338,7 +5426,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 // same transaction. An unassigned work item has no engineer to conflict with
 // and proceeds.
 func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, workItemType, state, severity, workState, resolutionCode, cause string, actorID *string) (domain.Case, *domain.CaseSeverity, error) {
-	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID}, "case"
+	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason}, "case"
 	if workItemType != "CASE" {
 		var ok bool
 		query, args, label, ok = caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)

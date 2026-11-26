@@ -979,7 +979,10 @@ func TestDispatcher_Handle_CommentAdded_TruncatedComment_FetchFailureFallsBackTo
 
 // mockSLAEngine is a hand-written fake for slaEngineService.
 type mockSLAEngine struct {
-	mu                    sync.Mutex
+	mu sync.Mutex
+	// onIncidentRegister, when set, runs at the start of RegisterIncidentClocks,
+	// so a test can see what already happened when registration began.
+	onIncidentRegister    func()
 	registerCalls         []struct{ caseID, priority, caseNumber string }
 	applyStateCalls       []struct{ caseID, newStatus string }
 	completeResponseCalls []string
@@ -991,6 +994,21 @@ type mockSLAEngine struct {
 	recalculateCalls   int
 	recalculateErr     error
 	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string }
+	incidentCalls      []mockIncidentClockCall
+}
+
+type mockIncidentClockCall struct {
+	incidentID, priority, number, title, assignmentGroup, service string
+	createdAt                                                     time.Time
+}
+
+func (m *mockSLAEngine) RegisterIncidentClocks(_ context.Context, incidentID, priority string, createdAt time.Time, number, title, assignmentGroup, service string) {
+	if m.onIncidentRegister != nil {
+		m.onIncidentRegister()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.incidentCalls = append(m.incidentCalls, mockIncidentClockCall{incidentID, priority, number, title, assignmentGroup, service, createdAt})
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _, _ string) {
@@ -3051,6 +3069,58 @@ func TestDispatcher_Handle_CRApprovalRequested_UsesTheFlowsSubject(t *testing.T)
 	}
 	if len(sent.to) != 1 || sent.to[0] != testRecipient {
 		t.Errorf("to = %v, want the payload's resolved recipients verbatim", sent.to)
+	}
+}
+
+// TestDispatcher_Handle_CRNotices_SubjectUsesConfiguredCompanyName: the flow
+// writes "[WSO2 Support]" at the start of every change request subject, so a
+// deployment that configures EMAIL_TEMPLATE_COMPANY_NAME must see its own name
+// there, as it does on a case email, with the rest of the subject unchanged.
+func TestDispatcher_Handle_CRNotices_SubjectUsesConfiguredCompanyName(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	tests := []struct {
+		name   string
+		record eventbus.Record
+		want   string
+	}{
+		{"approval request", crRecord("internal", ""),
+			"[Acme Support] [CR][Choreo] (CHG0031234) Request for approval - Review"},
+		{"plan date notice", planDateRecord("accepted", "customer", "PROJ-1"),
+			"[Acme Support] [CR] (CHG0031234) Customer has updated the plan start date"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockEmailSender{}
+			d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+
+			if err := d.Handle(context.Background(), tt.record); err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+			if len(mock.calls) != 1 {
+				t.Fatalf("sent %d emails, want 1", len(mock.calls))
+			}
+			if got := mock.calls[0].subject; got != tt.want {
+				t.Errorf("subject = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCRSubject_LeavesASubjectWithoutTheFlowsPrefix: only the flow's own
+// leading prefix names the company; anything else is the flow's wording.
+func TestCRSubject_LeavesASubjectWithoutTheFlowsPrefix(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	for _, subject := range []string{
+		"[CR] (CHG0031234) Request for approval - Review",
+		"Re: [WSO2 Support] [CR] (CHG0031234) Request for approval - Review",
+	} {
+		if got := crSubject(subject); got != subject {
+			t.Errorf("crSubject(%q) = %q, want it unchanged", subject, got)
+		}
 	}
 }
 

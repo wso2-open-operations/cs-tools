@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { NESTED_LIST_SX } from "@components/rich-text-editor/nestedListSx";
 import type { CaseDetailsDetailsPanelProps } from "@features/support/types/supportComponents";
 import {
   Autocomplete,
@@ -59,6 +60,9 @@ import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDispl
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import CaseEscalationLevelsCard from "@case-details-details/CaseEscalationLevelsCard";
 import ApiErrorState from "@components/error/ApiErrorState";
+import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
+import { joinStaffName } from "@utils/staffNameMarker";
 import {
   formatValue,
   formatUtcToLocalNoTimezone,
@@ -109,7 +113,7 @@ export default function CaseDetailsDetailsPanel({
       (contactsData ?? [])
         .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
         .map((c) => ({
-          label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+          label: joinStaffName(c.firstName, c.lastName) || c.email,
           value: c.email,
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
@@ -325,9 +329,12 @@ export default function CaseDetailsDetailsPanel({
           {data?.createdBy ? (
             <Box>
               <Typography {...labelSx}>Created by</Typography>
-              <Typography {...valueSx}>
-                {formatValue(data.createdBy)}
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={0.75}>
+                <Typography {...valueSx}>
+                  {formatValue(stripStaffNameMarker(data.createdBy))}
+                </Typography>
+                {data.createdByIsInternal && <TechnicalTeamBadge />}
+              </Stack>
             </Box>
           ) : null}
           {data?.relatedCase?.id ? (
@@ -469,6 +476,7 @@ export default function CaseDetailsDetailsPanel({
                 color: "text.primary",
                 "& p": { mb: 0.5 },
                 "& p:last-child": { mb: 0 },
+                ...NESTED_LIST_SX,
                 "& code": {
                   display: "block",
                   p: 1,
@@ -708,7 +716,7 @@ export default function CaseDetailsDetailsPanel({
         }
       >
         {isEditingWatchList ? (() => {
-          type WatchOption = { label: string; value: string; readonly?: boolean; locked?: boolean };
+          type WatchOption = { label: string; value: string; locked?: boolean };
           // The account's 4 stakeholder watchers (CSM, technical owner, ...) —
           // the backend always re-adds these on the next write regardless of
           // what's submitted, so offering a working remove control for them
@@ -723,19 +731,27 @@ export default function CaseDetailsDetailsPanel({
               .filter(Boolean),
           );
           const isLocked = (email: string) => lockedEmails.has(email);
-          const hiddenWatcherOptions: WatchOption[] = pendingWatchList
-            .filter((email) => isLocked(email) || !contactOptions.some((o) => o.value === email))
-            .map((email) => ({
-              label:
-                data?.watchList?.find((w) => w.email === email || w.userName === email)?.name ??
-                email,
-              value: email,
-              readonly: true,
-              locked: isLocked(email),
-            }));
-          const editableValue: WatchOption[] = pendingWatchList
-            .filter((email) => !isLocked(email) && contactOptions.some((o) => o.value === email))
-            .map((email) => contactOptions.find((o) => o.value === email)!);
+          const options: WatchOption[] = [...contactOptions];
+          for (const watcher of data?.watchList ?? []) {
+            const email = watcher.email ?? watcher.userName;
+            if (email && !options.some((option) => option.value === email)) {
+              options.push({ label: stripStaffNameMarker(watcher.name) || email, value: email });
+            }
+          }
+          for (const email of pendingWatchList) {
+            if (!options.some((option) => option.value === email)) options.push({ label: email, value: email });
+          }
+          options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+          const selectedOptions = pendingWatchList.map((email) => ({
+            ...options.find((option) => option.value === email)!,
+            locked: isLocked(email),
+          }));
+          const renderWatcherLabel = (option: WatchOption) => (
+            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+              {stripStaffNameMarker(option.label)}
+              {data?.watchList?.some((watcher) => (watcher.email === option.value || watcher.userName === option.value) && watcher.isInternal) && <TechnicalTeamBadge />}
+            </Box>
+          );
           return (
             <Box>
             <Autocomplete<WatchOption, true>
@@ -743,17 +759,12 @@ export default function CaseDetailsDetailsPanel({
               disableCloseOnSelect
               loading={isContactsLoading}
               loadingText="Loading..."
-              options={contactOptions}
+              options={options}
               getOptionLabel={(option) => option.label}
-              value={[...hiddenWatcherOptions, ...editableValue]}
+              value={selectedOptions}
               onChange={(_event, newValue) => {
-                const visibleEmails = newValue
-                  .filter((o) => !o.readonly)
-                  .map((o) => o.value);
-                const hiddenEmails = pendingWatchList.filter(
-                  (email) => isLocked(email) || !contactOptions.some((o) => o.value === email),
-                );
-                setPendingWatchList([...visibleEmails, ...hiddenEmails]);
+                const selectedEmails = newValue.map((option) => option.value);
+                setPendingWatchList([...new Set([...selectedEmails, ...pendingWatchList.filter(isLocked)])]);
               }}
               isOptionEqualToValue={(option, val) => option.value === val.value}
               renderOption={(props, option, { selected }) => {
@@ -765,7 +776,7 @@ export default function CaseDetailsDetailsPanel({
                       checked={selected}
                       sx={{ mr: 1, p: 0.5 }}
                     />
-                    {option.label}
+                    {renderWatcherLabel(option)}
                   </li>
                 );
               }}
@@ -793,27 +804,19 @@ export default function CaseDetailsDetailsPanel({
                         describeChild
                       >
                         <Chip
-                          label={option.label}
+                          label={renderWatcherLabel(option)}
                           size="small"
                           icon={<Lock size={12} aria-hidden />}
                           {...tagProps}
                           tabIndex={0}
-                          aria-label={option.label}
+                          aria-label={stripStaffNameMarker(option.label)}
                           sx={{ opacity: 0.6, "& .MuiChip-icon": { ml: "6px" } }}
                         />
                       </Tooltip>
                     );
                   }
-                  return option.readonly ? (
-                    <Chip
-                      key={key}
-                      label={option.label}
-                      size="small"
-                      {...tagProps}
-                      sx={{ opacity: 0.7 }}
-                    />
-                  ) : (
-                    <Chip key={key} label={option.label} size="small" onDelete={onDelete} {...tagProps} />
+                  return (
+                    <Chip key={key} label={renderWatcherLabel(option)} size="small" onDelete={onDelete} {...tagProps} />
                   );
                 })
               }
@@ -852,36 +855,50 @@ export default function CaseDetailsDetailsPanel({
             </Box>
           );
         })() : (() => {
-          const displayItems = savedWatchList
-            ? savedWatchList.map((email) => ({
-                key: email,
-                label:
-                  contactOptions.find((o) => o.value === email)?.label ??
-                  data?.watchList?.find((w) => w.email === email || w.userName === email)?.name ??
-                  email,
-              }))
-            : (data?.watchList ?? [])
+          const watchers = data?.watchList ?? [];
+          const displayItems = (savedWatchList
+            ? savedWatchList.map((email) => {
+                const watcher = watchers.find((w) => w.email === email || w.userName === email);
+                return {
+                  key: email,
+                  label: contactOptions.find((o) => o.value === email)?.label ?? watcher?.name ?? email,
+                  isInternal: !!watcher?.isInternal,
+                };
+              })
+            : watchers
                 .filter((w) => w.email ?? w.userName ?? w.name)
                 .map((w) => ({
                   key: w.email ?? w.userName ?? w.name ?? "",
                   label: w.name ?? w.userName ?? w.email ?? "",
-                }));
-          return displayItems.length > 0 ? (
+                  isInternal: !!w.isInternal,
+                })))
+            .map((item) => ({ ...item, label: stripStaffNameMarker(item.label) || item.key }))
+            .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+          const customers = displayItems.filter((item) => !item.isInternal);
+          const engineers = displayItems.filter((item) => item.isInternal);
+          const renderMembers = (members: typeof displayItems) => (
             <Stack direction="row" flexWrap="wrap" gap={1}>
-              {displayItems.map(({ key, label }) => (
-                  <Chip
-                    key={key}
-                    label={label}
-                    size="small"
-                    variant="outlined"
-                    sx={{
-                      borderColor: "transparent",
-                      bgcolor: "action.hover",
-                      height: 24,
-                      fontSize: "0.75rem",
-                    }}
-                  />
+              {members.map(({ key, label, isInternal }) => (
+                <Chip
+                  key={key}
+                  label={
+                    <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+                      {label}
+                      {isInternal && <TechnicalTeamBadge />}
+                    </Box>
+                  }
+                  size="small"
+                  variant="outlined"
+                  sx={{ borderColor: "transparent", bgcolor: "action.hover", height: 24, fontSize: "0.75rem" }}
+                />
               ))}
+            </Stack>
+          );
+          return displayItems.length > 0 ? (
+            <Stack gap={2} aria-label="Watch list">
+              {customers.length > 0 && renderMembers(customers)}
+              {customers.length > 0 && engineers.length > 0 && <Divider />}
+              {engineers.length > 0 && renderMembers(engineers)}
             </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">No watchers added</Typography>

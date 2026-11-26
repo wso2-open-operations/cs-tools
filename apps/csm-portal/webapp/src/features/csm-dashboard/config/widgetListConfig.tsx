@@ -85,6 +85,7 @@ import { vulnerabilityPriorityColor } from "@features/csm-security-center/utils/
 import ProductVulnerabilityPreviewDrawer from "@features/csm-security-center/components/ProductVulnerabilityPreviewDrawer";
 import type { BeProductVulnerabilityView } from "@api/backend/types";
 import type { BeCallRequestView } from "@api/backend/types";
+import { withoutStaffNameMarker } from "@utils/staffNameMarker";
 
 /** Raw item shape a dashboard widget's `/search` response resolves to —
  * matches `WidgetItem` in `widgetResourceConfig.ts` (kept loose there since
@@ -555,7 +556,7 @@ function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
                 </Typography>
               ),
               <Typography key="assignedTo" variant="body2" noWrap>
-                {problem.assignedTo?.name || "—"}
+                {withoutStaffNameMarker(problem.assignedTo?.name) || "—"}
               </Typography>,
             ],
           };
@@ -615,7 +616,7 @@ function IncidentTaskWidgetList({ items, isLoading }: WidgetListRendererProps): 
               {task.assignmentGroup?.name || "—"}
             </Typography>,
             <Typography key="assignedTo" variant="body2" noWrap>
-              {task.assignedTo?.name || "—"}
+              {withoutStaffNameMarker(task.assignedTo?.name) || "—"}
             </Typography>,
           ],
         };
@@ -732,7 +733,7 @@ function UserWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
           // is already the link (with state), matching every sibling widget's
           // "name" cell (see AccountWidgetList/ProjectWidgetList above).
           cells: [
-            previewCell(u.name || u.userName, () => setPreviewUser(u)),
+            previewCell(withoutStaffNameMarker(u.name) || u.userName, () => setPreviewUser(u)),
             <Typography key="user" variant="body2" noWrap>
               {u.userName}
             </Typography>,
@@ -793,7 +794,7 @@ function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps
           </Box>,
           org.owner ? (
             <Typography key="owner" variant="body2" noWrap>
-              {org.owner.name}
+              {withoutStaffNameMarker(org.owner.name) || "—"}
             </Typography>
           ) : (
             <Typography key="owner" variant="body2" color="warning.main">
@@ -850,7 +851,7 @@ function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps
           <StatusChip key="stage" value={r.lifecycleStage} kind="lifecycle" />,
           r.owner ? (
             <Typography key="owner" variant="body2" noWrap>
-              {r.owner.name}
+              {withoutStaffNameMarker(r.owner.name) || "—"}
             </Typography>
           ) : (
             <Typography key="owner" variant="body2" color="warning.main">
@@ -965,7 +966,7 @@ function TaskWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
               </Typography>
             ),
             <Typography key="assignedTo" variant="body2" noWrap>
-              {task.assignedTo?.name || "—"}
+              {withoutStaffNameMarker(task.assignedTo?.name) || "—"}
             </Typography>,
             <Typography key="updated" variant="caption" color="text.secondary" noWrap>
               {formatDate(task.updatedOn)}
@@ -1114,6 +1115,23 @@ function CaseFeedbackWidgetList({ items, isLoading }: WidgetListRendererProps): 
   );
 }
 
+/**
+ * Structurally-required `shape: "list"` renderer for `resourceType: "mttr"`
+ * -- genuinely unreachable: `ParseGenerated` refuses every shape but
+ * `pie`/`bar` with `groupBy.bucket` for this resourceType (backend's own
+ * `noSlices`/`shapes` rule), so no saved dashboard can ever produce a
+ * `shape: "list"` mttr widget for this to render. Exists only because
+ * `WIDGET_LIST_RENDERERS` is a `Record<BeWidgetResourceType, ...>` -- every
+ * key needs an entry, or the map fails to compile.
+ */
+function MttrWidgetList(): JSX.Element {
+  return (
+    <Typography variant="body2" color="text.secondary">
+      MTTR has no list view.
+    </Typography>
+  );
+}
+
 /** Per-resourceType renderer for a `shape: "list"` dashboard widget. Every
  * resource type is covered — `WIDGET_RESOURCE_CONFIG` (in
  * `widgetResourceConfig.ts`) is keyed the same way, so a missing entry here
@@ -1145,4 +1163,5 @@ export const WIDGET_LIST_RENDERERS: Record<
   case_feedback: CaseFeedbackWidgetList,
   plg_organization: PlgOrganizationWidgetList,
   plg_registration: PlgRegistrationWidgetList,
+  mttr: MttrWidgetList,
 };

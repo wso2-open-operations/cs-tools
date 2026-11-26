@@ -52,6 +52,7 @@ import type { Account } from "@features/csm-accounts/types/csmAccounts";
 import { useAccountOptions } from "../api/useAccountOptions";
 import { useSearchAllocations } from "../api/useAllocations";
 import AllocationStateChip from "../components/AllocationStateChip";
+import { joinStaffName } from "@utils/staffNameMarker";
 import type { Allocation, AllocationSortField } from "../types";
 import { ALLOCATION_STATE_OPTIONS, formatDateSpan, formatUtilization } from "../utils/allocations";
 import {
@@ -85,7 +86,7 @@ const accountId = (a: Account): string => a.id;
 const accountLabel = (a: Account): string => a.name;
 const userId = (u: BeUser): string => u.id ?? "";
 const userLabel = (u: BeUser): string =>
-  [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || u.userName || userId(u);
+  joinStaffName(u.firstName, u.lastName) || u.email || u.userName || userId(u);
 
 /** Cross-customer list of engineer allocations to customer engagements. */
 export default function CsmAllocationsPage(): JSX.Element {

@@ -63,6 +63,7 @@ import {
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import type { GlobalSearchCase, GlobalSearchProject } from "@features/project-hub/types/globalSearch";
 import { getCaseNavigationPath, getCaseTypeChipProps } from "@features/project-hub/utils/globalSearchNavigation";
+import { formatClosureState } from "@features/project-hub/utils/closureState";
 
 type ExportFormat = "csv" | "pdf";
 
@@ -645,7 +646,7 @@ export default function UserGlobalSearch(): JSX.Element {
                         <TableCell>
                           <Chip
                             color={isSuspended ? "warning" : "success"}
-                            label={project.closureState ?? "Active"}
+                            label={formatClosureState(project.closureState)}
                             size="small"
                             sx={{ fontWeight: 500 }}
                             variant="outlined"

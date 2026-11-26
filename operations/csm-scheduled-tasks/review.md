@@ -100,6 +100,15 @@ catches it too.
       report-style task, `SUB_CRON_RECIPIENTS` is the actual report audience, unrelated to failure
       alerting; a deployment wanting the same people for both has to configure both explicitly.
 
+## Email templates
+
+- [ ] A template baked with `bakeLogo` is also listed in `logoTemplates()` (internal/notify), or
+      `EMAIL_LOGO_LIGHT_URL` and `EMAIL_TEMPLATE_COMPANY_NAME` silently skip it — the SLA breach and the
+      EOL usage reports were each left out once and kept the default branding after an override.
+
+- [ ] White text on a navy region (a template header, a Go-built cell) uses the gradient-clipped span wrapped in
+      `[if !mso]` comments and carries the navy as a gradient too — plain white-on-navy turns dark in Gmail's dark mode.
+
 ## Dates, time zones, and "which clock"
 
 - [ ] A new date/time cutoff states explicitly whether it's anchored to UTC (a calendar-day

@@ -7901,6 +7901,12 @@ components:
           type: string
         createdByFullName:
           type: string
+        createdByIsInternal:
+          type: boolean
+          description: >-
+            True when the author resolved to an INTERNAL-type user (WSO2 staff,
+            such as a support engineer). Omitted otherwise, so absent means "not
+            known to be internal", never "known external".
         commentType:
           type: string
         fileName:

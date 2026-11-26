@@ -851,6 +851,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		callerEmail, _ := emailFromJWT(middleware.UserIDTokenFromContext(ctx))
 		s.addRequestedWatchers(ctx, c.ID, callerEmail, watcherIDs)
 	}
+	s.subscribeCreatorToWatchList(ctx, c.ID, c.CreatedBy)
 	// Publish case.created here too -- previously only createCaseSNFirst
 	// (the SN-mirror path, reached when s.snMirror != nil) did this, so a
 	// deployment with no ServiceNow mirror at all never published
@@ -1003,7 +1004,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	s.mirrorInitialSNComments(ctx, c.ID, req.Type, req.Description)
 
 	// Persists whatever the caller's own req.WatchList already asked for --
-	// the account's four named stakeholders are deliberately NOT persisted
+	// the account's named stakeholders are deliberately NOT persisted
 	// here (see addRequestedWatchers' own doc comment): they're resolved
 	// fresh, straight from the account row, every time a case.* event is
 	// about to be emailed instead (publishCaseCreatedEvent and friends,
@@ -1011,6 +1012,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// reassignment is reflected on the very next notification rather than
 	// staying stuck on whoever held the role at creation time.
 	s.addRequestedWatchers(ctx, c.ID, c.CreatedBy, watcherIDs)
+	s.subscribeCreatorToWatchList(ctx, c.ID, c.CreatedBy)
 
 	// SLA-clock registration runs BEFORE the publish below, not after --
 	// this order is load-bearing (see CreateCase's own doc comment on the
@@ -1220,9 +1222,12 @@ func mergeUnique(a, b []string) []string {
 
 // addRequestedWatchers persists a just-created case's explicitly requested
 // watchers (the caller's own CreateCaseRequest.WatchList) to
-// work_item_watcher. The account's four named stakeholders (technical
+// work_item_watcher. The account's named stakeholders (technical
 // owner, secondary technical owner, account manager, renewal account
-// manager -- migration 0012) are deliberately NOT added here, and never
+// manager, customer success manager -- migration 0012 -- plus the
+// project's own onboarding owner, migration 0104, while onboarding is
+// IN_PROGRESS; see AccountDefaultWatcherEmails' own doc comment) are
+// deliberately NOT added here, and never
 // persisted into work_item_watcher at all, on either the create or the
 // update path (see updateCaseWatchList's own doc comment for its matching
 // rule) -- a real, reported problem with the old design this replaces: a
@@ -1254,6 +1259,42 @@ func (s *caseService) addRequestedWatchers(ctx context.Context, caseID, callerEm
 	}
 	if _, _, err := s.repo.SetCaseWatchList(ctx, caseID, requestedWatcherIDs, callerEmail); err != nil {
 		slog.ErrorContext(ctx, "create case: adding requested watchers failed", "caseId", caseID, "error", err)
+	}
+}
+
+// subscribeCreatorToWatchList adds the case's own creator as a watcher, so
+// whoever created it always sees its updates whether or not they named
+// themselves in watchList -- same reasoning as subscribeCommenterToWatchList,
+// applied at creation instead of on comment. Internal or external makes no
+// difference here: that distinction has no bearing on whether the creator
+// belongs on the watch list.
+//
+// creatorIdentity is c.CreatedBy, whatever shape it actually has -- NOT
+// reliably a resolved platform user id. The plain-Postgres path's is one
+// only when req.CreatedBy arrived empty and was resolved from the caller's
+// own token; in practice (confirmed live on a real deployment) it can
+// already be an email by the time CreateCase runs, and the ServiceNow-mirror
+// path's is always ServiceNow's own raw actor string (also, in practice, an
+// email) -- see CreateCaseFromServiceNow's own doc comment. Binding either
+// straight into work_item_watcher's real UUID user_id column the way
+// AddCaseWatcherIfAbsent (the commenter-subscribe path, which always does
+// have a resolved id from its own userRepo.GetUserByEmail call) does would
+// fail silently and leave the creator unsubscribed -- caught on review once
+// for the ServiceNow-mirror path specifically, then found live for the
+// plain-Postgres path too. AddCaseWatcherByEmailIfAbsent resolves either
+// shape itself, in the same insert statement, and skips -- never guesses --
+// when it matches no real user row.
+//
+// Additive and idempotent, so this never disturbs whatever addRequestedWatchers
+// already wrote from an explicit watchList -- in either call order.
+// Best-effort and silent on failure: the case has already been created by
+// the time this runs, so a write failure here must never fail the request.
+func (s *caseService) subscribeCreatorToWatchList(ctx context.Context, caseID, creatorIdentity string) {
+	if creatorIdentity == "" {
+		return
+	}
+	if err := s.repo.AddCaseWatcherByEmailIfAbsent(ctx, caseID, creatorIdentity); err != nil {
+		slog.ErrorContext(ctx, "create case: subscribe creator to watch list failed", "caseId", caseID, "error", err)
 	}
 }
 
@@ -2066,6 +2107,16 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.ActorEmail != nil && req.MarkFixIssued == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "actorEmail is only allowed when markFixIssued is also provided"}
 	}
+	// AdminReopen/ReopenReason ride along with a state change only, same
+	// restriction as resolutionCode/cause/closeNotes just above -- see
+	// UpdateCaseRequest.AdminReopen's own doc comment for what they do and
+	// who is trusted to set them.
+	if req.AdminReopen != nil && req.State == nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen is only allowed when state is also provided"}
+	}
+	if req.ReopenReason != nil && (req.AdminReopen == nil || !*req.AdminReopen) {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "reopenReason is only allowed when adminReopen is true"}
+	}
 	if req.WatchList != nil {
 		return s.updateCaseWatchList(ctx, req)
 	}
@@ -2156,6 +2207,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, err
 	}
 
+	// adminReopen is set inside the state-transition guard just below and
+	// reused further down to skip the SLA-engine and status-changed-event
+	// side effects a reopen-from-closed must not trigger (no clock to
+	// resume, no "status changed" email) -- declared here so both reads are
+	// in scope regardless of which branch below set it.
+	var adminReopen bool
+
 	// State-transition guard: until this was added, entity-service only
 	// validated that a requested state was a real enum value (validCaseState,
 	// above), never that moving to it from the case's current state was a
@@ -2194,7 +2252,43 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		_, byAutoclosure := autoclosureActorFromContext(ctx)
 		autoclosureClose := byAutoclosure && *req.State == domain.CaseStateClosed &&
 			(*before.State == domain.CaseStateAwaitingInfo || *before.State == domain.CaseStateSolutionProposed)
-		if *before.State != *req.State && !autoclosureClose && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
+		// adminReopen is the one other transition allowed past the table --
+		// req.AdminReopen, set only by apps/csm-portal/backend after its own
+		// PermAdmin check (see UpdateCaseRequest.AdminReopen), moving a
+		// closed case to any other state. isInternalCaller alone is NOT
+		// enough: it only distinguishes WSO2 staff from an external/customer
+		// caller, so any internal user (not just an admin) with a valid
+		// token could otherwise call this endpoint directly and set
+		// AdminReopen themselves, bypassing the portal's own PermAdmin
+		// check entirely -- CodeRabbit-caught gap in an earlier revision of
+		// this change. The actual admin-role decision is made once, by the
+		// portal backend; this additionally requires the caller's own
+		// client id to BE the portal backend's configured client id
+		// (s.csmPortalClientID, the same identity mayListDeletedAttachments
+		// already trusts for an equivalent admin-only override), so no
+		// other caller of this same domain.UpdateCaseRequest -- whatever
+		// its own access level -- can ever reach this bypass on its own.
+		// The non-empty check guards against an unset csmPortalClientID
+		// (empty string) matching an equally-empty/unset caller client id.
+		// It only ever applies to a case that is actually closed -- it
+		// grants no bypass for any other transition.
+		//
+		// Scoped to work_item type "case" only -- CaseRepository.UpdateCase's
+		// reopen_reason column write (updateCaseQuery) only exists on the
+		// "case" extension table, not the other four case-like types'
+		// (engagement/service_request/security_report_analysis/
+		// announcement, see caseLikeExtensionUpdate). Rejected explicitly
+		// here rather than silently reaching the repository and having
+		// ReopenReason just disappear unpersisted -- CodeRabbit-caught gap:
+		// an admin reopening one of those other types would otherwise get a
+		// 200 with no signal their reason was never saved.
+		if req.AdminReopen != nil && *req.AdminReopen && before.Type != nil && *before.Type != "case" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen is only supported for cases"}
+		}
+		adminReopen = isInternalCaller && req.AdminReopen != nil && *req.AdminReopen &&
+			s.csmPortalClientID != "" && auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID &&
+			*before.State == domain.CaseStateClosed && *req.State != domain.CaseStateClosed
+		if *before.State != *req.State && !autoclosureClose && !adminReopen && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{
 				Msg:  fmt.Sprintf("state cannot move from %q to %q", string(*before.State), string(*req.State)),
 				Code: "case_invalid_state_transition",
@@ -2391,7 +2485,12 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// effect harmlessly. This is a real, live-observed gap this fixes: the
 	// Postgres/dual-write path never paused/resumed/completed workaround or
 	// resolution clocks on any state transition at all before now.
-	if s.slaEngine != nil && req.State != nil && c.State != nil {
+	//
+	// !adminReopen: a closed case has no open clocks left to pause/resume --
+	// they were all force-completed when it closed -- so there is nothing
+	// for this to do on an admin reopen, by design (see
+	// UpdateCaseRequest.AdminReopen's own doc comment).
+	if s.slaEngine != nil && req.State != nil && c.State != nil && !adminReopen {
 		s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, *c.State)
 	}
 
@@ -2416,7 +2515,11 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// notify about it, so a future data-source change doesn't silently stop
 	// notifications from firing. State/Severity are mutually exclusive on
 	// this request (fieldCount above), so at most one of these two fires.
-	if req.State != nil && before != nil && derefState(before.State) != *req.State {
+	//
+	// !adminReopen: an admin reopen must not send a "status changed" email
+	// to the case's watchers -- see UpdateCaseRequest.AdminReopen's own doc
+	// comment.
+	if req.State != nil && before != nil && derefState(before.State) != *req.State && !adminReopen {
 		if label, ok := caseStateDisplayLabel[*req.State]; ok {
 			before.WatchList = s.filterActiveWatchListUsers(ctx, *before, before.WatchList)
 			publishStatusChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, req.ID, label, *before)
@@ -2781,7 +2884,7 @@ func newlyAddedWatcherIDs(current []domain.WatchListUser, submitted []string) []
 
 // updateCaseWatchList implements UpdateCase's WatchList branch: replacing
 // the case's watch list wholesale with req's user ids via
-// CaseRepository.SetCaseWatchList. The account's four named stakeholders are
+// CaseRepository.SetCaseWatchList. The account's named stakeholders are
 // never part of this -- see addRequestedWatchers' own doc comment for why
 // they're not persisted into work_item_watcher at all, on either the create
 // or the update path: they're resolved fresh from the account row at

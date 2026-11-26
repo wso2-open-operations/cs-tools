@@ -86,11 +86,12 @@ import (
 // gap only because one day cannot hold a second day.
 
 // worklogDropWeekendCards makes the weekly ignore cards dated on a Saturday
-// or Sunday, because the previous system gives weekend dates no team. It is
-// a single switch: set it to false to count weekend time. Absence (leave,
-// exclusion, allocation) is NOT such a switch -- absent-day time is always
-// counted on the weekly.
-const worklogDropWeekendCards = true
+// or Sunday, as the previous system did (it gives weekend dates no team).
+// It is off: time logged at the weekend is real work, by the weekend crew or
+// anyone else, and the weekly counts it under the person's team. Worked Days
+// still counts weekdays only, so weekend hours raise Avg time/day. Absence
+// (leave, exclusion, allocation) never drops time on the weekly either.
+const worklogDropWeekendCards = false
 
 // Only two states reach the report at all. addTimeReportDetails maps
 // 'Approved' to the approved bucket and 'Submitted' to the pending one,
@@ -197,6 +198,10 @@ type perUser struct {
 	// cmn_schedule_span of type 'exclude', or a customer engagement
 	// allocation at full utilization.
 	excluded bool
+	// rotaExcluded is set when the absence behind excluded is an EXCLUDED
+	// one (excluded from the rota), not an allocation. A rotation turn
+	// keeps an allocated person on the daily, never a rota-excluded one.
+	rotaExcluded bool
 }
 
 func (s *worklogReportService) BuildReport(ctx context.Context, req domain.WorklogReportRequest) (domain.WorklogReport, error) {
@@ -261,6 +266,24 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	for _, id := range rostered {
 		isRostered[id] = true
 	}
+	// AN ALLOCATION DOES NOT HIDE A ROTATION TURN. The roster shows both
+	// on the same day (docs/specs/team-schedule.md, "Two tags in one day"), and
+	// an engineer allocated to a customer still works their 6-9 morning,
+	// 6-9 evening or weekend turn and logs time against it. The daily used
+	// to drop every allocated person outright, so that rota time appeared
+	// in no daily at all. A daily now keeps an allocated person who holds
+	// a rotation turn that day; the weekly is untouched (it already counts
+	// time logged on absent days).
+	onTurn := map[string]bool{}
+	if daily {
+		turns, err := s.repo.RotationTurnUserIDs(ctx, from, to)
+		if err != nil {
+			return domain.WorklogReport{}, err
+		}
+		for _, id := range turns {
+			onTurn[id] = true
+		}
+	}
 
 	users := make(map[string]*perUser, len(roster))
 	for _, r := range roster {
@@ -302,6 +325,9 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		// part of this report".
 		if l.Bucket != "LEAVE" {
 			u.excluded = true
+			if l.Bucket != "ALLOCATION" {
+				u.rotaExcluded = true
+			}
 			continue
 		}
 		if u.leaveCode == "" {
@@ -353,16 +379,16 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			continue
 		}
 
-		// WEEKLY ATTRIBUTES TIME PER DATE, WITH ONE DELIBERATE DEPARTURE.
+		// WEEKLY COUNTS EVERY LOGGED CARD, TWO DELIBERATE DEPARTURES.
 		// The previous system gives weekend dates an empty team list, and
 		// also empties days covered by leave (a half day included), an
 		// exclusion or a confirmed allocation, so cards on those days
-		// vanished from its report. We keep the weekend rule
-		// (worklogDropWeekendCards) but NOT the absence rule: time an
-		// engineer actually logged on a day marked absent is counted, as
-		// it was real work. This is a product decision, not parity. The
-		// daily report is a single date and applies its own presence
-		// rules further down; it is unchanged by this.
+		// vanished from its report. We keep neither rule: time an engineer
+		// actually logged at the weekend or on a day marked absent is
+		// counted, as it was real work (worklogDropWeekendCards is off).
+		// These are product decisions, not parity. The daily report is a
+		// single date and applies its own presence rules further down; it
+		// is unchanged by this.
 		if !daily && worklogDropWeekendCards && isWeekend(t.WorkDate) {
 			continue
 		}
@@ -445,21 +471,29 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		// entries and could only have been drawn from the rota.
 		//
 		// The union degrades safely: where no rota rows exist for a range,
-		// a report still lists everyone who logged time or took leave
-		// rather than coming back empty.
-		if daily && u.excluded {
+		// a report still lists everyone who logged time rather than coming
+		// back empty. (A weekend daily no longer lets in leave alone; see
+		// below.)
+		//
+		// An allocation or exclusion drops the person from the daily,
+		// except an allocated person on a rotation turn that day (onTurn).
+		if daily && u.excluded && (u.rotaExcluded || !onTurn[u.roster.UserID]) {
 			continue
 		}
 		// A weekday daily applies no rota gate at all -- the roster IS
 		// the membership, which is why rotaGated is false for it and
-		// this whole branch is skipped. For the weekly, and for a
-		// weekend daily, a person still appears if they logged time or
-		// were away even without a rota row: the union degrades safely
-		// where no rota rows exist for a range, rather than returning
-		// an empty report.
+		// this whole branch is skipped. A weekend daily lists the weekend
+		// crew, plus anyone off it who logged time (approved, pending or
+		// rejected), so the union degrades safely where no rota rows exist
+		// rather than returning an empty report.
+		//
+		// Leave alone does NOT qualify. It used to, which put people on
+		// long leave (maternity, say) who were never on the weekend rota
+		// into every weekend daily, as absent members of their team. A
+		// crew member on leave is still listed, through isRostered.
 		if rotaGated && !isRostered[u.roster.UserID] && u.approvedMin == 0 && u.pendingMin == 0 &&
 			len(u.approvedKeys) == 0 && len(u.pendingKeys) == 0 &&
-			u.disapproved == 0 && u.leaveCode == "" {
+			u.disapproved == 0 {
 			continue
 		}
 
@@ -508,7 +542,7 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			DisapprovedEntries: u.disapproved,
 		}
 		if daily {
-			dev.Leave = u.leaveCode
+			dev.Leave = worklogLeaveLabel(u.leaveCode, u.leaveHalf)
 		} else {
 			dev.WorkedDays = workedDays
 			dev.AvgTimePerDay = safeDiv(totalHrs, workedDays)
@@ -943,6 +977,23 @@ func dateOnly(t time.Time) time.Time {
 
 func minutesToHours(m int) float64 {
 	return round2(float64(m) / 60)
+}
+
+// worklogLeaveLabel is what the daily's Leave column shows: FD for a
+// full-day leave of any kind (annual, sick, maternity, a public holiday,
+// ...), HD for a half day, and nothing when the person is not on leave.
+// The kind itself is left out on purpose: the column says how much of the
+// day was away, and a leave kind such as maternity or sick is not for a
+// mail sent to every team.
+func worklogLeaveLabel(code string, half bool) string {
+	switch {
+	case code == "":
+		return ""
+	case half:
+		return "HD"
+	default:
+		return "FD"
+	}
 }
 
 // safeDiv never returns NaN or Infinity. The delivered weekly mail does

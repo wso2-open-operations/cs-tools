@@ -39,6 +39,7 @@ export const CASE_CLASSIFICATION_ENDPOINT = "/cases/classify";
 export const CASE_STATS_ENDPOINT = (id: string) => `/projects/${id}/stats/cases`;
 export const CASE_DETAILS_ENDPOINT = (id: string) => `/cases/${id}`;
 export const CASE_COMMENTS_ENDPOINT = (id: string) => `/cases/${id}/comments`;
+export const CASE_ACTIVITIES_SEARCH_ENDPOINT = (id: string) => `/cases/${id}/activities/search`;
 export const CASE_ATTACHMENTS_ENDPOINT = (id: string) => `/cases/${id}/attachments`;
 export const CASE_FEEDBACK_ENDPOINT = (id: string) => `/cases/${id}/feedback`;
 export const CASE_CALL_REQUESTS_ENDPOINT = (id: string) => `/cases/${id}/call-requests/search`;
@@ -60,6 +61,6 @@ export const NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT = (sessionId: string) =>
     `/websocket/v1.0/ws?sessionId=${sessionId}`,
   );
 
-export const CHANGE_PASSWORD_URL = "https://wso2.com/user/password";
+export const CHANGE_PASSWORD_URL = "https://choreolabs.com/user/password";
 
 export const PDF_JS_DIST_CDN = (version: string) => `https://unpkg.com/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;

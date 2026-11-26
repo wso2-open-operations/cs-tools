@@ -21,6 +21,7 @@ import type { ServiceRequest, ServiceRequestSummary } from "@src/types/service.m
 import type { ServiceRequestDto, ServiceRequestsDto } from "@src/types/service.dto";
 
 import { CASE_DETAILS_ENDPOINT, PROJECT_CASES_ENDPOINT } from "@config/endpoints";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const getAllServiceRequests = async (
   id: string,
@@ -57,7 +58,7 @@ export function toServiceRequestSummary(dto: ServiceRequestsDto["cases"][number]
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     title: dto.title,
     description: dto.description ?? "",
     assignee: dto.assignedTeam?.label,
@@ -74,7 +75,7 @@ export function toServiceRequest(dto: ServiceRequestDto): ServiceRequest {
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
     updatedOn: new Date(dto.updatedOn.replace(" ", "T")),
-    createdBy: dto.createdBy,
+    createdBy: stripStaffNameMarker(dto.createdBy),
     title: dto.title,
     description: dto.description ?? "",
     assignee: dto.assignedTeam?.label,

@@ -83,7 +83,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	})
 
 	userRepo := repository.NewUserRepository(db)
-	userSvc := service.NewUserService(userRepo, accessSvc)
+	userSvc := service.NewUserService(userRepo, accessSvc, cfg.CSMPortalBackendClientID)
 
 	// The case-volume-trend cache behind POST /cases/volume-trend is a
 	// plain per-pod in-memory map -- deliberately not Redis-backed, even
@@ -134,7 +134,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
 	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
-	var systemDashboardHandler *handler.SystemDashboardHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -148,9 +147,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
 			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
-		)
-		systemDashboardHandler = handler.NewSystemDashboardHandler(
-			service.NewSystemDashboardService(repository.NewSystemDashboardRepository(db), cfg.CSMPortalBackendClientID),
 		)
 	}
 
@@ -376,6 +372,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// rest of the Team Schedule.
 	var rotaGenerateHandler *handler.RotaGenerateHandler
 	var rotaAccessHandler *handler.RotaAccessHandler
+	// Who may de-escalate any case; set once the database is available.
+	var caseEscalationAccessHandler *handler.CaseEscalationAccessHandler
 	var scheduleReminderHandler *handler.ScheduleReminderHandler
 	var rotaReminderSettingsHandler *handler.RotaReminderSettingsHandler
 	var rotaReminderRequestHandler *handler.RotaReminderRequestHandler
@@ -385,10 +383,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var pagingChainHandler *handler.PagingChainHandler
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
+	var deprecatedProductUsageReportHandler *handler.DeprecatedProductUsageReportHandler
 	var longOpenCaseReportHandler *handler.LongOpenCaseReportHandler
+	var mttrReportHandler *handler.MTTRReportHandler
 	var runbookHandler *handler.RunbookHandler
 	var portalBannerHandler *handler.PortalBannerHandler
+	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
+	var eolProductUsageReportHandler *handler.EolProductUsageReportHandler
+	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
 
@@ -628,6 +631,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Notify:          projectEventPublisher != nil,
 				DryRun:          cfg.ACPReopenDryRun,
 				TestProjectSfID: cfg.ACPReopenTestProjectSfID,
+				InternalDomains: cfg.ACPInternalEmailDomains,
 			}
 			// Dual-write: copy each reopen to the previous system, as PATCH
 			// /projects/{id} copies ACP's suspension.
@@ -1344,22 +1348,28 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			repository.NewHolidayAvailabilityRepository(db), publicHolidayRepo, accessSvc,
 			service.RotaWriterCheck(scheduleSvc), rotaZone)
 		holidayAvailabilityHandler = handler.NewHolidayAvailabilityHandler(holidayAvailabilitySvc)
-		publicHolidaySvc := service.WithHolidayTagPlacer(
-			service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
-			holidayAvailabilitySvc)
+		// Portal and rota admins may also add holidays by hand
+		// (migration 0293), the only source where no calendar is configured.
+		publicHolidaySvc := service.WithHolidayEditorCheck(
+			service.WithHolidayTagPlacer(
+				service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
+				holidayAvailabilitySvc),
+			service.HolidayEditorCheck(scheduleSvc))
 		publicHolidayHandler = handler.NewPublicHolidayHandler(publicHolidaySvc)
+		// First run shortly after start, then daily, always: with no calendar
+		// or employee service the run fetches nothing but still places the
+		// coming weeks' Public holiday tags for the holidays added by hand.
+		// Stopped with the other background workers by closePublishers.
+		ingestRetryWG.Add(1)
+		go func() {
+			defer ingestRetryWG.Done()
+			service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
+		}()
 		if holidayCalendar != nil || employeeLocations != nil {
-			// First run shortly after start, then daily. Stopped with the
-			// other background workers by closePublishers.
-			ingestRetryWG.Add(1)
-			go func() {
-				defer ingestRetryWG.Done()
-				service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
-			}()
 			slog.Info("team schedule public holidays: daily refresh enabled",
 				"calendar", holidayCalendar != nil, "employeeLocations", employeeLocations != nil)
 		} else {
-			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; no refresh runs, the roster shows only stored holidays")
+			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; holidays come only from the portal (added by hand), and the daily run only places their tags")
 		}
 		engagementAllocationViewHandler = handler.NewEngagementAllocationViewHandler(
 			service.NewEngagementAllocationViewService(repository.NewEngagementAllocationViewRepository(db), accessSvc),
@@ -1476,6 +1486,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// The ABT team leads (who may de-escalate) live in Postgres team data
 		// whatever DATA_SOURCE is.
 		caseEscalationSvc = service.WithCaseTeamLeads(caseEscalationSvc, escalationRepo)
+		// Besides them, the people an admin named (role case_deescalator).
+		caseEscalationAccessRepo := repository.NewCaseEscalationAccessRepository(db)
+		caseEscalationSvc = service.WithCaseDeescalators(caseEscalationSvc, caseEscalationAccessRepo)
+		caseEscalationAccessHandler = handler.NewCaseEscalationAccessHandler(
+			service.NewCaseEscalationAccessService(caseEscalationAccessRepo, accessSvc, cfg.CSMPortalBackendClientID),
+		)
 	}
 	caseEscalationHandler := handler.NewCaseEscalationHandler(caseEscalationSvc)
 
@@ -1734,6 +1750,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 					AccountsTag:       cfg.MigrationCaseReportAccountsTag,
 					RecipientTeamKeys: cfg.MigrationCaseReportTeamKeys,
 				}))
+		// Monthly deprecated product usage report: customers running a
+		// product version whose support status is Deprecated in Primary
+		// Production, for the scheduled task that mails it to account
+		// managers and CS leadership. It reads deployed products from
+		// Postgres, so it is offered only when they are read from Postgres
+		// (UsageReadRoute): in any other mode the route is absent and the
+		// task fails loudly instead of mailing an incomplete report.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			deprecatedProductUsageReportHandler = handler.NewDeprecatedProductUsageReportHandler(
+				service.NewDeprecatedProductUsageReportService(
+					repository.NewDeprecatedProductUsageReportRepository(repository.NewScoped(db))))
+		}
 		// Long-open cases report: the cases still being worked on after a
 		// given age, in two tables by their project's onboarding status. It
 		// reads the Postgres case tables only, so it is not offered when cases
@@ -1747,6 +1775,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
 						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
 					}))
+			// MTTR report: average time from a case's creation to its last
+			// entry into Solution Proposed, by severity band (S1-S4, S1-S3,
+			// S1, S2, S3, S4) and trailing window (1/3/6/12 months), read
+			// from the Postgres case/work_item_activity tables only -- same
+			// reason as the long-open-cases report above.
+			mttrReportHandler = handler.NewMTTRReportHandler(
+				service.NewMTTRReportService(
+					repository.NewMTTRReportRepository(repository.NewScoped(db))))
 		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
@@ -1754,6 +1790,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		portalBannerHandler = handler.NewPortalBannerHandler(
 			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
 		)
+		// Product catalogue routes of the products API: editable by
+		// AUTH_PRODUCT_CATALOG_MANAGER_ROLES and by CSM admins. Postgres data
+		// source only: in ServiceNow mode the product searches read ServiceNow.
+		if cfg.DataSource != config.DataSourceServiceNow {
+			productCatalogHandler = handler.NewProductCatalogHandler(
+				service.NewProductCatalogService(repository.NewProductCatalogRepository(db),
+					repository.NewProductRepository(db), repository.NewProductVersionRepository(db), accessSvc,
+					append(append([]string{}, cfg.AuthProductCatalogManagerRoles...), cfg.AuthAdminRoles...)),
+			)
+		}
 		// Monthly product regression reports: one business unit's regression
 		// cases whose fix ETA was shared last month, for the scheduled task
 		// that mails one report per unit.
@@ -1761,6 +1807,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewProductRegressionReportService(
 				repository.NewProductRegressionReportRepository(repository.NewScoped(db)),
 				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
+		// Monthly EOL product usage report: customers running a product
+		// version past its EOL date in Primary Production, for the scheduled
+		// task that mails it to account managers and CS leadership. Offered
+		// only when deployed products are read from Postgres, for the same
+		// reason as the deprecated product usage report above.
+		if cfg.UsageReadRoute() == config.UsageReadRoutePostgres {
+			eolProductUsageReportHandler = handler.NewEolProductUsageReportHandler(
+				service.NewEolProductUsageReportService(
+					repository.NewEolProductUsageReportRepository(repository.NewScoped(db))))
+		}
+		// Weekly SLA breach reports: the clocks that breached last week, under
+		// each report's own stage and onboarding-status filters, for the
+		// scheduled tasks that mail them.
+		slaBreachReportHandler = handler.NewSLABreachReportHandler(
+			service.NewSLABreachReportService(
+				repository.NewSLABreachReportRepository(repository.NewScoped(db))))
 		caseAlertSettingsHandler = handler.NewCaseAlertSettingsHandler(
 			service.NewCaseAlertSettingsService(repository.NewCaseAlertSettingsRepository(db), repository.NewPagingChainRepository(db), accessSvc,
 				service.CaseAlertSettingsConfig{
@@ -2220,6 +2282,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if publicHolidayHandler != nil {
 		mux.HandleFunc("POST /team-schedule/public-holidays/search", publicHolidayHandler.SearchPublicHolidays)
+		mux.HandleFunc("GET /team-schedule/public-holidays", publicHolidayHandler.ListPublicHolidays)
+		mux.HandleFunc("POST /team-schedule/public-holidays", publicHolidayHandler.AddPublicHolidays)
+		mux.HandleFunc("DELETE /team-schedule/public-holidays/{country}/{date}", publicHolidayHandler.DeletePublicHoliday)
 		mux.HandleFunc("POST /team-schedule/public-holidays/refresh", serviceOnly(accessSvc, publicHolidayHandler.RefreshPublicHolidays))
 	}
 	if holidayAvailabilityHandler != nil {
@@ -2272,15 +2337,34 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// assigned to each migration; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/migration-cases", internalOnly(accessSvc, migrationCaseReportHandler.GetMigrationCaseReport))
 	}
+	if deprecatedProductUsageReportHandler != nil {
+		// internalOnly: the report names customers and their deployments.
+		mux.HandleFunc("GET /reports/deprecated-product-usage", internalOnly(accessSvc, deprecatedProductUsageReportHandler.GetDeprecatedProductUsageReport))
+	}
 	if longOpenCaseReportHandler != nil {
 		// internalOnly: the report names customers' cases and who is
 		// assigned to each; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/long-open-cases", internalOnly(accessSvc, longOpenCaseReportHandler.GetLongOpenCaseReport))
 	}
+	if mttrReportHandler != nil {
+		// internalOnly: an aggregate, but still an internal operational
+		// metric with no per-project/customer scoping concept -- same
+		// posture as the reports above.
+		mux.HandleFunc("GET /reports/mttr", internalOnly(accessSvc, mttrReportHandler.GetMTTRReport))
+	}
 	if productRegressionReportHandler != nil {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	if eolProductUsageReportHandler != nil {
+		// internalOnly: the report names customers and their deployments.
+		mux.HandleFunc("GET /reports/eol-product-usage", internalOnly(accessSvc, eolProductUsageReportHandler.GetEolProductUsageReport))
+	}
+	if slaBreachReportHandler != nil {
+		// internalOnly, same reasoning as the regression report above: the
+		// report names customers' cases, accounts and assignees.
+		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
 	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
@@ -2289,6 +2373,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /runbooks/import", internalOnly(accessSvc, runbookHandler.ImportRunbooks))
 		mux.HandleFunc("PUT /runbooks/{id}", internalOnly(accessSvc, runbookHandler.UpdateRunbook))
 		mux.HandleFunc("DELETE /runbooks/{id}", internalOnly(accessSvc, runbookHandler.DeleteRunbook))
+	}
+	if productCatalogHandler != nil {
+		// The rest of the products API: the catalogue.
+		mux.HandleFunc("GET /products/{id}", productCatalogHandler.GetProduct)
+		mux.HandleFunc("POST /products", productCatalogHandler.CreateProduct)
+		mux.HandleFunc("PATCH /products/{id}", productCatalogHandler.UpdateProduct)
+		mux.HandleFunc("POST /products/{id}/versions", productCatalogHandler.CreateProductVersions)
+		mux.HandleFunc("POST /product-versions/search", productCatalogHandler.SearchAllProductVersions)
+		mux.HandleFunc("GET /product-versions/{id}", productCatalogHandler.GetProductVersion)
+		mux.HandleFunc("PATCH /product-versions/{id}", productCatalogHandler.UpdateProductVersion)
+		mux.HandleFunc("POST /product-versions/{id}/retire", productCatalogHandler.RetireProductVersion)
+		mux.HandleFunc("GET /release-lines", productCatalogHandler.ListReleaseLines)
+		mux.HandleFunc("POST /release-lines", productCatalogHandler.CreateReleaseLine)
+		mux.HandleFunc("PATCH /release-lines/{id}", productCatalogHandler.UpdateReleaseLine)
+		mux.HandleFunc("POST /release-lines/{id}/retire", productCatalogHandler.RetireReleaseLine)
+		mux.HandleFunc("GET /carbon-platform-history", productCatalogHandler.ListCarbonPlatformHistory)
+		mux.HandleFunc("GET /carbon-kernel-releases", productCatalogHandler.ListCarbonKernelReleases)
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that
@@ -2334,6 +2435,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /team-schedule/absences/{id}", scheduleHandler.DeleteScheduleAbsence)
 		mux.HandleFunc("POST /team-schedule/absence-kinds", scheduleHandler.CreateScheduleAbsenceKind)
 		mux.HandleFunc("DELETE /team-schedule/absence-kinds/{code}", scheduleHandler.DeleteScheduleAbsenceKind)
+	}
+	if caseEscalationAccessHandler != nil {
+		// Who may de-escalate any case besides the case's team leads. The
+		// service requires a CSM admin's user token for all three.
+		mux.HandleFunc("GET /case-escalation-access/deescalators", caseEscalationAccessHandler.ListDeescalators)
+		mux.HandleFunc("PUT /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.GrantDeescalator)
+		mux.HandleFunc("DELETE /case-escalation-access/deescalators/{userId}", caseEscalationAccessHandler.RevokeDeescalator)
 	}
 	if rotaAccessHandler != nil {
 		// Who holds a rota admin role or marks a team's rota, and changing
@@ -2431,15 +2539,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
 	}
-	if systemDashboardHandler != nil {
-		// System dashboards (no owner): the CSM portal backend upserts them
-		// on startup, reads them back and removes the ones whose file is gone;
-		// no other caller is admitted.
-		mux.HandleFunc("GET /system-dashboards", systemDashboardHandler.List)
-		mux.HandleFunc("GET /system-dashboards/{key}", systemDashboardHandler.Get)
-		mux.HandleFunc("PUT /system-dashboards/{key}", systemDashboardHandler.Save)
-		mux.HandleFunc("DELETE /system-dashboards/{key}", systemDashboardHandler.Delete)
-	}
 	if customDashboardShareHandler != nil {
 		// Sharing the caller's saved dashboards (owner) and the ones shared
 		// with the caller (recipient, view only).
@@ -2498,6 +2597,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /teams/{id}/members", teamHandler.GetTeamMembers)
 		mux.HandleFunc("POST /teams/search", teamHandler.SearchTeams)
 		mux.HandleFunc("GET /teams/chat-webhooks", teamHandler.ListChatWebhooks)
+		mux.HandleFunc("GET /teams/group-emails", teamHandler.ListGroupEmails)
 		mux.HandleFunc("GET /teams/{id}", teamHandler.GetTeam)
 		mux.HandleFunc("PATCH /teams/{id}", teamHandler.UpdateTeam)
 		mux.HandleFunc("POST /teams/{id}/lead", teamHandler.AssignLead)
@@ -2516,6 +2616,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	// Counts per onboarding owner / status / region for dashboard widgets; the
+	// project table is Postgres, so the legacy data source has no aggregate.
+	if cfg.DataSource != config.DataSourceServiceNow && db != nil {
+		projectAggregateHandler := handler.NewProjectAggregateHandler(service.NewProjectAggregateService(repository.NewProjectAggregateRepository(repository.NewScoped(db)), accessSvc))
+		mux.HandleFunc("POST /projects/aggregate", projectAggregateHandler.AggregateProjects)
+	}
 	// Product-consumption provisioning state, internal callers only: the status
 	// carries the project's client secret and HMAC secret keys, and the update
 	// replaces them. The caller is the subscription service (its client id in
@@ -2908,6 +3014,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Last: the retry worker above can still be invalidating users
 		// until it has stopped.
 		closeRedis()
+	}
+
+	// The audit log's upkeep (migration 0295), called by csm-scheduled-tasks, weekly by default.
+	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
+	// EXECUTE on the audit_* functions for the application's database role.
+	if db != nil && cfg.AuditLogEnabled {
+		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
+			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead, cfg.AuditLogRetentionMonths))
+		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))
 	}
 
 	// PLG Customer Success Portal. Every repository, service, handler and route

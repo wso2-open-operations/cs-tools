@@ -91,6 +91,29 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.total).toBe(10);
   });
 
+  it("draws a staff owner's name without the circled W", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "u-1", label: "Jane Doe Ⓦ", count: 3 },
+        { key: "u-2", label: "Sam  Customer", count: 1 },
+        { key: "u-3", label: "Ⓦ", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "project", {}, { field: "onboardingOwner" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // A name without the marker is left exactly as sent (its double space
+    // included); a name that is only the marker reads "Unnamed".
+    expect(result.current.slices.map((slice) => slice.label)).toEqual(["Jane Doe", "Sam  Customer", "Unnamed"]);
+  });
+
   it("scopes a resourceType with no case-DSL/filter-array/named-array field (e.g. incident_task) to a flat top-level key", async () => {
     postMock.mockResolvedValue({
       groups: [{ key: "P1", label: "P1", count: 4 }],
@@ -299,6 +322,54 @@ describe("useWidgetGroupByData", () => {
       ["Example Corp Production", 5, { filters: [{ field: "projectId", op: "in", values: ["6a0e1b52-0000-4000-8000-000000000001"] }] }],
       ["EXCORP-PROJ-2", 1, { filters: [{ field: "projectId", op: "in", values: ["6a0e1b52-0000-4000-8000-000000000002"] }] }],
     ]);
+  });
+
+  it("groups a team's onboarding projects by owner through the project aggregate, each bar opening that owner's projects", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "11111111-0000-4000-8000-000000000001", label: "Jane Doe", count: 4 },
+        { key: "11111111-0000-4000-8000-000000000002", label: "John Roe", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+    const filters = {
+      onboardingStatus: ["In-Progress"],
+      onboardingOwnerTeamIds: ["22222222-0000-4000-8000-000000000001"],
+      // A scalar the preview URL round trip turned into a list is unwrapped.
+      closureStatus: ["Open"],
+    };
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("by-owner", "project", filters, { field: "onboardingOwner", maxGroups: 20 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/projects/aggregate",
+      {
+        filters: { ...filters, closureStatus: "Open" },
+        groupBy: "onboardingOwner",
+        maxGroups: 20,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query])).toEqual([
+      ["Jane Doe", 4, { onboardingOwnerIds: ["11111111-0000-4000-8000-000000000001"] }],
+      ["John Roe", 2, { onboardingOwnerIds: ["11111111-0000-4000-8000-000000000002"] }],
+    ]);
+  });
+
+  it.each([
+    ["onboardingStatus", "In-Progress", { onboardingStatus: ["In-Progress"] }],
+    ["region", "apac", { regions: ["apac"] }],
+  ] as const)("opens the projects of a %s bucket", async (field, key, want) => {
+    postMock.mockResolvedValue({ groups: [{ key, label: key, count: 1 }], othersCount: 0, totalRecords: 1 });
+    const { result } = renderHook(() => useWidgetGroupByData("w", "project", {}, { field }), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.slices[0].query).toEqual(want);
   });
 
   it("keeps the groupBy field as the filter field outside the case family", async () => {

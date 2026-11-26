@@ -40,8 +40,8 @@ func TestSetLogoURLs_ReplacesEveryBakedLogo(t *testing.T) {
 		t.Errorf("light logo not replaced")
 	}
 	if !strings.Contains(projectContactRegisteredTemplate, "https://example.test/dark.png") ||
-		strings.Contains(projectContactRegisteredTemplate, wso2LogoWhiteURL) {
-		t.Errorf("white logo not replaced")
+		strings.Contains(projectContactRegisteredTemplate, wso2LogoLightURL) {
+		t.Errorf("light logo not replaced")
 	}
 }
 
@@ -53,8 +53,10 @@ func TestSetLogoURLs_EmptyKeepsDefaults(t *testing.T) {
 	}
 }
 
-func TestSetFooterIconURL_ReplacesEveryBakedIcon(t *testing.T) {
-	tmpls := footerIconTemplates()
+// The onboarding footer shows the full dark-coloured logo, so the configured
+// dark logo reaches it, and the old pulse icon is gone.
+func TestOnboardingFooterShowsTheConfiguredDarkLogo(t *testing.T) {
+	tmpls := logoTemplates()
 	orig := make([]string, len(tmpls))
 	for i, p := range tmpls {
 		orig[i] = *p
@@ -65,19 +67,27 @@ func TestSetFooterIconURL_ReplacesEveryBakedIcon(t *testing.T) {
 		}
 	})
 
-	SetFooterIconURL("https://example.test/icon.png")
-
-	if !strings.Contains(projectContactRegisteredTemplate, "https://example.test/icon.png") ||
-		strings.Contains(projectContactRegisteredTemplate, wso2FooterIconURL) {
-		t.Errorf("footer icon not replaced")
+	for name, tmpl := range map[string]string{
+		"new": projectContactInvitedNewTemplate, "existing": projectContactInvitedExistingTemplate,
+		"reminder": projectContactInvitedReminderTemplate, "registered": projectContactRegisteredTemplate,
+	} {
+		if strings.Contains(tmpl, "Pulse") {
+			t.Errorf("%s onboarding email still carries the pulse icon", name)
+		}
+		if !strings.Contains(tmpl, "All rights reserved.</td>") || !strings.Contains(tmpl, wso2LogoURL) {
+			t.Errorf("%s onboarding email's footer does not carry the dark logo beside the copyright line", name)
+		}
 	}
-}
 
-func TestSetFooterIconURL_EmptyKeepsDefault(t *testing.T) {
-	before := projectContactRegisteredTemplate
-	SetFooterIconURL("  ")
-	if projectContactRegisteredTemplate != before {
-		t.Errorf("empty value must keep the default footer icon")
+	SetLogoURLs("https://example.test/dark.png", "")
+	for name, tmpl := range map[string]string{
+		"new": projectContactInvitedNewTemplate, "existing": projectContactInvitedExistingTemplate,
+		"reminder": projectContactInvitedReminderTemplate, "registered": projectContactRegisteredTemplate,
+	} {
+		footer := tmpl[strings.LastIndex(tmpl, `<tr><td class="px" style="padding:28px`):]
+		if !strings.Contains(footer, "https://example.test/dark.png") || strings.Contains(footer, wso2LogoURL) {
+			t.Errorf("%s onboarding email's footer logo did not follow the configured dark logo", name)
+		}
 	}
 }
 
@@ -160,6 +170,28 @@ func TestSetTemplateCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	}
 	if !strings.Contains(projectContactRegisteredTemplate, "Welcome to the Acme Customer Support Portal.") {
 		t.Errorf("\"Customer Support Portal\" phrase not replaced in projectContactRegisteredTemplate")
+	}
+}
+
+// TestRenderCRPlanDateNoticeEmail_ClosingLineUsesConfiguredCompanyName: the
+// accepted/rejected closing lines are written in Go, not baked into the
+// template, so SetTemplateCompanyName's phrase rewrite never reaches them —
+// they must read CompanyName() when rendered instead.
+func TestRenderCRPlanDateNoticeEmail_ClosingLineUsesConfiguredCompanyName(t *testing.T) {
+	SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { SetTemplateCompanyName(defaultCompanyName) })
+
+	for kind, want := range map[string]string{
+		"accepted": "The proposed plan start date accepted by the Acme Team.",
+		"rejected": "Acme Team request to change the plan start date.",
+	} {
+		body, _ := RenderCRPlanDateNoticeEmail(CRPlanDateEmailData{Kind: kind, Number: "CHG0031234"})
+		if !strings.Contains(body, want) {
+			t.Errorf("%s: body does not carry %q", kind, want)
+		}
+		if strings.Contains(body, "WSO2 Team") || strings.Contains(body, crPlanDateCompanySlot) {
+			t.Errorf("%s: body still names WSO2 or shows the unfilled company slot", kind)
+		}
 	}
 }
 

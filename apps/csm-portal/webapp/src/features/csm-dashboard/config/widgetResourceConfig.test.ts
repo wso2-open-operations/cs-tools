@@ -204,8 +204,9 @@ describe("WIDGET_RESOURCE_CONFIG.case — previously-dropped fields", () => {
   // have the same latent bug, fixed alongside onboarding status.
   //
   // Unlike `state`/`tag`, `projectOnboardingStatus` doesn't get its own
-  // second `exclude...` field: its domain is the 4 fixed values in
-  // `onboardingStatus.ts`, so `notIn(X)` decodes to `onboardingStatuses`
+  // second `exclude...` field: its domain is the 7 real values in
+  // `onboardingStatus.ts` (ALL_ONBOARDING_STATUSES, matching entity-service's
+  // own onboarding_status_enum), so `notIn(X)` decodes to `onboardingStatuses`
   // holding `in`(every other known value) — the complement — rather than a
   // separate field that could collide with (or be conflated with) the plain
   // `onboardingStatuses` one the bar's own control edits.
@@ -218,7 +219,7 @@ describe("WIDGET_RESOURCE_CONFIG.case — previously-dropped fields", () => {
     const parsed = readCasesFiltersFromUrl(hrefParams(href));
 
     expect(parsed.onboardingStatuses.sort()).toEqual(
-      ["Not-Started", "Completed", "Not-Applicable"].sort(),
+      ["Not-Started", "Completed", "Not-Applicable", "On-Hold", "Expired", "Cancelled"].sort(),
     );
   });
 
@@ -259,7 +260,7 @@ describe("WIDGET_RESOURCE_CONFIG.case — previously-dropped fields", () => {
     expect(parsed.onboardingStatuses).toEqual(["Completed"]);
   });
 
-  // Regression (CodeRabbit): a `notIn` excluding every one of the 4 known
+  // Regression (CodeRabbit): a `notIn` excluding every one of the 7 known
   // values leaves the complement genuinely empty. The naive fix (`if
   // (onboardingStatuses.length > 0) out.onboardingStatuses = ...`) would
   // then leave the field unset entirely -- which this app's convention
@@ -268,13 +269,21 @@ describe("WIDGET_RESOURCE_CONFIG.case — previously-dropped fields", () => {
   // sign-flip failure mode this field's whole design exists to prevent, just
   // reached via the one degenerate input the complement conversion itself
   // introduced.
-  it("projectOnboardingStatus notIn excluding all 4 known values resolves to a no-match filter, never an unfiltered one", () => {
+  it("projectOnboardingStatus notIn excluding all 7 known values resolves to a no-match filter, never an unfiltered one", () => {
     const href = WIDGET_RESOURCE_CONFIG.case.buildHref({
       filters: [
         {
           field: "projectOnboardingStatus",
           op: "notIn",
-          values: ["In-Progress", "Not-Started", "Completed", "Not-Applicable"],
+          values: [
+            "In-Progress",
+            "Not-Started",
+            "Completed",
+            "Not-Applicable",
+            "On-Hold",
+            "Expired",
+            "Cancelled",
+          ],
         },
       ],
     });
@@ -284,7 +293,15 @@ describe("WIDGET_RESOURCE_CONFIG.case — previously-dropped fields", () => {
     // (non-empty) and must not equal any real onboarding-status choice.
     expect(parsed.onboardingStatuses.length).toBeGreaterThan(0);
     expect(parsed.onboardingStatuses).not.toEqual(
-      expect.arrayContaining(["In-Progress", "Not-Started", "Completed", "Not-Applicable"]),
+      expect.arrayContaining([
+        "In-Progress",
+        "Not-Started",
+        "Completed",
+        "Not-Applicable",
+        "On-Hold",
+        "Expired",
+        "Cancelled",
+      ]),
     );
   });
 
@@ -721,6 +738,30 @@ describe("WIDGET_RESOURCE_CONFIG.project.buildHref", () => {
   // (`query: {onboardingStatus: ["In-Progress"]}`) landed on the plain,
   // unfiltered Projects page with no way to tell which status it meant.
   const buildHref = WIDGET_RESOURCE_CONFIG.project.buildHref;
+
+  it("opens the list (not the preview page) for a region and onboarding owner filter", () => {
+    expect(
+      buildHref({
+        onboardingStatus: ["In-Progress"],
+        regions: ["APAC"],
+        onboardingOwnerIds: ["11111111-1111-1111-1111-111111111111"],
+        onboardingOwnerEmails: ["owner@example.com"],
+      }),
+    ).toBe(
+      "/customers/projects?onboardingStatus=In-Progress&regions=APAC&onboardingOwnerIds=11111111-1111-1111-1111-111111111111&onboardingOwnerEmails=owner%40example.com",
+    );
+  });
+
+  it("sends a scalar region, or a still-unresolved current user, to the preview page", () => {
+    for (const filters of [
+      { regions: "APAC" },
+      { onboardingOwnerIds: ["__current_user__"] },
+      { onboardingOwnerEmails: [42] },
+    ]) {
+      const href = buildHref(filters as Record<string, unknown>);
+      expect(href.startsWith("/customers/projects")).toBe(false);
+    }
+  });
 
   it("carries a single onboardingStatus value as a URL query param", () => {
     expect(buildHref({ onboardingStatus: ["In-Progress"] })).toBe(

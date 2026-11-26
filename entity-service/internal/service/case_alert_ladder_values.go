@@ -103,6 +103,7 @@ var caseAlertValueSpecs = map[string]caseAlertValueSpec{
 	"teams.rotaTeams":                 {creOnly, stringListValue(30, anyTeamItem)},
 	"teams.unassignedTeamLead":        {creOnly, enumValue("pool", "none")},
 	"teams.unassignedTeamLeadCount":   {creOnly, intValue(0, 10)},
+	"teams.unassignedLeads":           {creOnly, enumValue("rules", "shift_leads")},
 	"heads.cre":                       {creOnly, headValue},
 	"heads.cs":                        {creOnly, headValue},
 	"alertDuty.tiers":                 {creOnly, stringListValue(9, tierItem)},

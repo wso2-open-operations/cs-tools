@@ -135,7 +135,7 @@ func TestInternalInvoiceNoticeBody(t *testing.T) {
 			if !strings.Contains(got, "Due Date: 2026-10-10") {
 				t.Error("body missing Due Date field")
 			}
-			if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "WSO2 Team") {
+			if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "Choreo Labs Team") {
 				t.Error("body missing the sign-off")
 			}
 
@@ -158,13 +158,13 @@ func TestCustomerInvoiceNoticeBody(t *testing.T) {
 	t.Run("reminder window: gentle payment reminder wording", func(t *testing.T) {
 		got := customerInvoiceNoticeBody(closure.NoticeWindow7, proj, invoice)
 
-		if !strings.Contains(got, "This is a gentle reminder that payment for your WSO2 subscription associated with the project Example Wholesale & Grocers - Subscription which is due on 10/10/2026 if not settled.") {
+		if !strings.Contains(got, "This is a gentle reminder that payment for your Choreo Labs subscription associated with the project Example Wholesale & Grocers - Subscription which is due on 10/10/2026 if not settled.") {
 			t.Errorf("body missing the reminder intro sentence with the correct project name/date, got: %s", got)
 		}
 		if !strings.Contains(got, "billing@wso2.com") {
 			t.Error("body missing the billing@wso2.com contact reference")
 		}
-		if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "WSO2 Team") {
+		if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "Choreo Labs Team") {
 			t.Error("body missing the sign-off")
 		}
 		// Reminder body must not mention suspension — it's a different
@@ -177,7 +177,7 @@ func TestCustomerInvoiceNoticeBody(t *testing.T) {
 	t.Run("terminal window: past-due suspension wording", func(t *testing.T) {
 		got := customerInvoiceNoticeBody(closure.NoticeWindow0, proj, invoice)
 
-		if !strings.Contains(got, "Your WSO2 subscription for Example Wholesale & Grocers - Subscription(EXWHOLESALESUB) is currently past due.") {
+		if !strings.Contains(got, "Your Choreo Labs subscription for Example Wholesale & Grocers - Subscription(EXWHOLESALESUB) is currently past due.") {
 			t.Errorf("body missing the suspended intro sentence with the correct project name/key, got: %s", got)
 		}
 		if !strings.Contains(got, "suspended on 10/10/2026") {
@@ -186,7 +186,7 @@ func TestCustomerInvoiceNoticeBody(t *testing.T) {
 		if !strings.Contains(got, "billing@wso2.com") {
 			t.Error("body missing the billing@wso2.com contact reference")
 		}
-		if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "WSO2 Team") {
+		if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "Choreo Labs Team") {
 			t.Error("body missing the sign-off")
 		}
 	})

@@ -220,3 +220,23 @@ func TestMapCaseDetails_MapsLinkedChangeRequestsWithNumber(t *testing.T) {
 		t.Errorf("expected Number 'CHG0039182', got %q", cr2.Number)
 	}
 }
+
+func TestMapCaseDetails_WatcherInternalType(t *testing.T) {
+	got := MapCaseDetails(entity.CaseView{WatchList: []entity.WatchListUser{
+		{ID: "staff", User: &entity.UserReference{IsInternal: true}},
+		{ID: "customer", User: &entity.UserReference{}},
+		{ID: "unknown"},
+	}})
+	if !got.WatchList[0].IsInternal || got.WatchList[1].IsInternal || got.WatchList[2].IsInternal {
+		t.Fatalf("watcher classifications lost: %+v", got.WatchList)
+	}
+}
+
+func TestMapCaseDetails_CreatorInternalType(t *testing.T) {
+	for _, internal := range []bool{true, false} {
+		got := MapCaseDetails(entity.CaseView{CreatedByDetails: entity.UserRef{Name: "Jane Doe", IsInternal: internal}})
+		if got.CreatedBy != "Jane Doe" || got.CreatedByIsInternal != internal {
+			t.Fatalf("creator type lost: %+v", got)
+		}
+	}
+}

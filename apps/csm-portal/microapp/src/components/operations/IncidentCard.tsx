@@ -21,6 +21,7 @@ import { Link } from "react-router-dom";
 import type { IncidentSummary } from "@src/types";
 import { fromNow } from "@utils/dateTime";
 import { incidentPriorityColor, incidentPriorityLabel, incidentStateColor, incidentStateLabel } from "./incidentConfig";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 // Mirrors ChangeRequestCard.tsx's layout exactly, swapping project name for caller and
 // change-request impact for incident priority. `item.id` is nullable (an edge case the backend's
@@ -44,7 +45,7 @@ export function IncidentCard({ item }: { item: IncidentSummary }) {
 
       {item.caller?.name && (
         <Typography variant="subtitle2" color="text.secondary" noWrap>
-          {item.caller.name}
+          {stripStaffNameMarker(item.caller.name)}
         </Typography>
       )}
 

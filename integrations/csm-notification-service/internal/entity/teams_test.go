@@ -93,3 +93,98 @@ func TestGetTeamChatWebhooks_SkipsBlankAndDuplicateNames(t *testing.T) {
 		t.Errorf("GetTeamChatWebhooks() = %v, want %v", got, want)
 	}
 }
+
+// TestGetTeamGroupEmails_SendsBearerToken mirrors
+// TestGetTeamChatWebhooks_SendsBearerToken for GET /teams/group-emails.
+func TestGetTeamGroupEmails_SendsBearerToken(t *testing.T) {
+	var gotAuthorization, gotPath string
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"teams": []map[string]string{
+				{"key": "americas_cre_team", "groupEmail": "americas-cre@example.test"},
+			},
+		})
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newCustomerTokenServer(t)
+	defer tokenSrv.Close()
+
+	c := newTestCustomerClient(t, tokenSrv, apiSrv)
+
+	got, err := c.GetTeamGroupEmails(context.Background())
+	if err != nil {
+		t.Fatalf("GetTeamGroupEmails returned error: %v", err)
+	}
+	want := map[string]string{"americas_cre_team": "americas-cre@example.test"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetTeamGroupEmails() = %v, want %v", got, want)
+	}
+	if gotPath != "/teams/group-emails" {
+		t.Errorf("request path = %q, want /teams/group-emails", gotPath)
+	}
+	if gotAuthorization != "Bearer test-token" {
+		t.Errorf("Authorization = %q, want %q", gotAuthorization, "Bearer test-token")
+	}
+}
+
+// TestGetTeamGroupEmails_SkipsBlankAndDuplicateKeys mirrors
+// TestGetTeamChatWebhooks_SkipsBlankAndDuplicateNames, keyed by key instead
+// of name.
+func TestGetTeamGroupEmails_SkipsBlankAndDuplicateKeys(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"teams": []map[string]string{
+				{"key": "", "groupEmail": "blank-key@example.test"},
+				{"key": "castor", "groupEmail": ""},
+				{"key": "apollo", "groupEmail": "apollo-1@example.test"},
+				{"key": "apollo", "groupEmail": "apollo-2@example.test"},
+				{"key": "vega", "groupEmail": "vega@example.test"},
+			},
+		})
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newCustomerTokenServer(t)
+	defer tokenSrv.Close()
+
+	c := newTestCustomerClient(t, tokenSrv, apiSrv)
+
+	got, err := c.GetTeamGroupEmails(context.Background())
+	if err != nil {
+		t.Fatalf("GetTeamGroupEmails returned error: %v", err)
+	}
+	want := map[string]string{"apollo": "", "vega": "vega@example.test"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetTeamGroupEmails() = %v, want %v", got, want)
+	}
+}
+
+func TestGetTeamChatWebhooksByKey_KeysByTeamKey(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"teams": []map[string]string{
+				{"name": "IaaS", "key": " IaaS ", "chatWebhookUrl": "https://example.com/iaas"},
+				{"name": "Apollo", "key": "apollo", "chatWebhookUrl": "https://example.com/apollo-1"},
+				{"name": "Apollo 2", "key": "apollo", "chatWebhookUrl": "https://example.com/apollo-2"},
+				{"name": "Vega", "chatWebhookUrl": "https://example.com/vega"},
+				{"name": "Artemis", "key": "artemis", "chatWebhookUrl": ""},
+			},
+		})
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newCustomerTokenServer(t)
+	defer tokenSrv.Close()
+
+	got, err := newTestCustomerClient(t, tokenSrv, apiSrv).GetTeamChatWebhooksByKey(context.Background())
+	if err != nil {
+		t.Fatalf("GetTeamChatWebhooksByKey returned error: %v", err)
+	}
+	// Lower-cased key; a duplicate key, a missing key and a blank URL are dropped.
+	if want := map[string]string{"iaas": "https://example.com/iaas"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("GetTeamChatWebhooksByKey() = %v, want %v", got, want)
+	}
+}

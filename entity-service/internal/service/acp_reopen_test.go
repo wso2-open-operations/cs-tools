@@ -271,7 +271,7 @@ func acpRenewedSF() *acpFakeSF {
 // newACPTestService builds the reopen check with notices on when pub is set
 // (pub itself is not called: the notice is queued in the repository).
 func newACPTestService(repo *acpFakeRepo, sf *acpFakeSF, pub EventPublisherService, mod func(*ACPReopen)) *salesforceEventService {
-	r := ACPReopen{Projects: repo, SalesEntity: sf, Notify: pub != nil, InternalDomain: "@example.com",
+	r := ACPReopen{Projects: repo, SalesEntity: sf, Notify: pub != nil, InternalDomains: []string{"@example.com"},
 		Now: func() time.Time { return acpTestNow }}
 	if mod != nil {
 		mod(&r)
@@ -594,7 +594,7 @@ func TestACPReopen_OffMeansNothing(t *testing.T) {
 func TestBuildProjectReactivatedPayload_FallsBackToCSM(t *testing.T) {
 	p := domain.ACPReopenProject{ID: "pid", SfID: "sfid", Name: "CSM Name -[S]", Key: "KEY"}
 	got := buildProjectReactivatedPayload(p, salesentity.Project{}, nil,
-		domain.ACPReopenWrite{ReopenEndDate: true, ReopenInvoice: true}, acpTestNow, "@example.com")
+		domain.ACPReopenWrite{ReopenEndDate: true, ReopenInvoice: true}, acpTestNow, []string{"@example.com"})
 	if got.ProjectName != "CSM Name -[S]" || got.ProjectKey != "KEY" || got.ProjectSfID != "sfid" {
 		t.Errorf("payload = %+v", got)
 	}

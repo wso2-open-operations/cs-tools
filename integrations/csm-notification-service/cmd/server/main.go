@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -55,9 +56,12 @@ func main() {
 	middleware.ConfigureLogger()
 
 	// Optional logo overrides for every email; unset keeps the built-in URLs.
-	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_WHITE_URL"))
-	// Optional footer-icon override for the onboarding emails; unset keeps the built-in icon.
-	notifications.SetFooterIconURL(os.Getenv("EMAIL_FOOTER_ICON_URL"))
+	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_LIGHT_URL"))
+	// Optional support address for the onboarding emails' "contact us" line (and
+	// their default Reply-To); unset keeps the built-in address.
+	if err := notifications.SetSupportAddress(os.Getenv("EMAIL_SUPPORT_ADDRESS")); err != nil {
+		slog.Warn("EMAIL_SUPPORT_ADDRESS ignored; keeping the built-in address", "err", err)
+	}
 	// Optional company-name override for the templates' footer disclaimer/signoff
 	// and the dispatch package's email subjects; unset keeps "WSO2".
 	notifications.SetTemplateCompanyName(os.Getenv("EMAIL_TEMPLATE_COMPANY_NAME"))
@@ -355,13 +359,25 @@ func main() {
 
 	// SLA notification killswitch, same disable-entirely convention as
 	// EMAIL_SENDING_ENABLED/CALL_SENDING_ENABLED above. When false, NO
-	// SLA-related message is sent: the SLA breach Google Chat card (and any
-	// SLA breach email, which this service does not send today). The
+	// SLA-related message is sent: the SLA breach Google Chat card and the
+	// SLA breach emails (assignee, team or CRE head, Americas). The
 	// sla.tier_reached event is still published and tier tracking still
 	// advances. Non-SLA alerts are unaffected.
 	slaEmailSendingEnabled := envBool("SLA_EMAIL_SENDING_ENABLED", true)
 	if !slaEmailSendingEnabled {
 		slog.Warn("SLA_EMAIL_SENDING_ENABLED=false; SLA breach Google Chat alerts (and SLA emails) are suppressed")
+	}
+	// Incident SLA alerts are a separate, default-off switch (the cutover
+	// convention, not the killswitch one): they need every SRE and SME team's
+	// team.chat_webhook_url and group_email set first, and until they are an
+	// incident's alert would reach its assignee alone. Off, the engine
+	// registers no incident clock and sends nothing for one; cases are
+	// tracked and alerted exactly as before either way.
+	incidentSLAAlertsEnabled := envBool("INCIDENT_SLA_ALERTS_ENABLED", false)
+	if incidentSLAAlertsEnabled {
+		slog.Info("INCIDENT_SLA_ALERTS_ENABLED=true; incident SLA clocks are tracked and alerted to the holding team's space and group email")
+	} else {
+		slog.Info("INCIDENT_SLA_ALERTS_ENABLED is not true; incident SLA clocks are not tracked (case SLA alerts are unaffected)")
 	}
 
 	// Fallback on-call number (incident.created's call only) for when a
@@ -396,8 +412,9 @@ func main() {
 		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
 		// (project.reactivated), e.g. the customer lifecycle and billing lists;
 		// checked by acpReactivationCC, which stops startup on a bad entry.
-		// The email goes only to @wso2.com addresses: it is an internal notice.
-		WithACPReactivation(acpReactivationCC(), "@wso2.com")
+		// The email goes only to the internal domains (ACP_INTERNAL_EMAIL_DOMAINS,
+		// default @wso2.com): it is an internal notice.
+		WithACPReactivation(acpReactivationCC(), acpInternalEmailDomains())
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to
@@ -578,6 +595,16 @@ func main() {
 	// Case Alerts rung email's "response SLA remaining time"; nil when the
 	// fetch failed (the email then uses the published defaults).
 	var slaDurations map[string]map[string]time.Duration
+	// slaEngine is constructed below (only when Redis is configured) and read
+	// again further down to refresh its team-group-email lookup table on the
+	// same ticker as the Chat team-webhook one -- hoisted to this scope
+	// (rather than a block-local :=) so it's reachable from there; nil when
+	// Redis isn't configured, same as slaProducer above.
+	var slaEngine *slaengine.Engine
+	// slaCREHeadsEntity backs the SLA breach email's CRE head fallback; kept
+	// at this scope so the escalation block below can hand the engine the
+	// configured heads.cre once that configuration has loaded.
+	var slaCREHeadsEntity *paging.EntityClient
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -666,7 +693,33 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients).
+			WithIncidentSLAAlerts(incidentSLAAlertsEnabled)
+		if incidentSLAAlertsEnabled {
+			slaEngine = slaEngine.
+				// An incident's SLA alert reaches its SRE team(s), resolved by the
+				// SRE ladder's group mapping, as a case's reaches its CRE team.
+				WithIncidentSLATeams(incidentRoutes.SRETeams).
+				// The ticker below starts before the Alert Settings mapping is
+				// applied (applyIncidentRoutes, further down); incident tiers wait
+				// for it. Released by IncidentRoutingReady once that setup ends.
+				// With the switch off no incident tier is ever sent, so there is
+				// nothing to hold.
+				HoldIncidentTiersUntilRoutingReady()
+		}
+		// A case with no CRE team inbox (no ABT) sends its at-risk/breach
+		// email to the CRE head instead. Until the escalation configuration
+		// below loads (after the ticker starts), the head is looked up by the
+		// cre_head role in the leadership team; then heads.cre, when set,
+		// takes over -- the same order the CRE ladder's own head rung uses.
+		slaCREHeadsEntity = paging.NewEntityClient(paging.EntityConfig{
+			BaseURL:      mustEnv("CUSTOMER_ENTITY_BASE_URL"),
+			TokenURL:     mustEnv("OAUTH2_TOKEN_URL"),
+			ClientID:     mustEnv("OAUTH2_CLIENT_ID"),
+			ClientSecret: mustEnv("OAUTH2_CLIENT_SECRET"),
+			Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+		})
+		slaEngine.SetCREHeads(paging.NewCREHeads(paging.LadderConfig{}, slaCREHeadsEntity))
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -718,21 +771,79 @@ func main() {
 	// CUSTOMER_ENTITY_BASE_URL like every other optional entity-service
 	// feature — without it, a team simply has no Chat space unless one is
 	// still listed in GOOGLE_CHAT_SPACES.
+	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "" && slaEngine != nil {
+		// No entity-service: no team SLA space or group email can ever load,
+		// so don't hold incident tiers for them.
+		slaEngine.IncidentTeamLookupsLoaded()
+	}
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") != "" {
+		// Releases the incident SLA tier hold once both team lookups an
+		// incident alert needs have loaded; never releases with no engine.
+		incidentLookups := newIncidentTeamLookups(func() {
+			if slaEngine != nil {
+				slaEngine.IncidentTeamLookupsLoaded()
+			}
+		})
 		refreshTeamAudienceSpaces := func(ctx context.Context) error {
-			fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			webhooks, err := customerEntityClient.GetTeamChatWebhooks(fetchCtx)
-			if err != nil {
+			webhookCtx, cancelWebhooks := context.WithTimeout(ctx, 30*time.Second)
+			webhooks, webhooksErr := customerEntityClient.GetTeamChatWebhooks(webhookCtx)
+			cancelWebhooks()
+			if webhooksErr != nil {
 				// Logged, not fatal: this client keeps whatever it already
 				// had (nil on the very first failed fetch, same as a team
 				// simply having no configured space yet) rather than
 				// crash-looping the whole service over a reachability blip.
-				slog.Error("notifications: failed to refresh team chat webhooks from entity-service; keeping the previous set", "err", err)
-				return err
+				slog.Error("notifications: failed to refresh team chat webhooks from entity-service; keeping the previous set", "err", webhooksErr)
+			} else {
+				googleChatClient.SetTeamAudienceSpaces(webhooks)
 			}
-			googleChatClient.SetTeamAudienceSpaces(webhooks)
-			return nil
+
+			// Piggybacks on this same ticker (rather than a second one) to
+			// also refresh slaEngine's team.key -> group_email lookup table
+			// (see Engine.SetTeamGroupEmails's own doc comment) -- a genuinely
+			// independent fetch, on its own context (not shared with the
+			// webhook one above, so a slow webhook call can't starve this
+			// one's own budget) and always attempted regardless of whether
+			// the webhook fetch above succeeded (a CodeRabbit-caught gap: an
+			// early return on a webhook failure used to skip this fetch
+			// entirely, silently going stale until the next scheduled tick).
+			// Only when Redis (and so the SLA engine) is configured at all.
+			if slaEngine != nil {
+				emailCtx, cancelEmails := context.WithTimeout(ctx, 30*time.Second)
+				groupEmails, emailsErr := customerEntityClient.GetTeamGroupEmails(emailCtx)
+				cancelEmails()
+				if emailsErr != nil {
+					slog.Error("slaengine: failed to refresh team group emails from entity-service; keeping the previous set", "err", emailsErr)
+				} else {
+					slaEngine.SetTeamGroupEmails(groupEmails)
+					incidentLookups.groupEmailsLoaded()
+				}
+
+				// The SRE teams' incident SLA spaces: the same
+				// team.chat_webhook_url, keyed by team key (an incident's
+				// assignment group resolves to a key). Its own fetch, so the
+				// case spaces above are untouched by it. Only with incident
+				// SLA alerts on: off, nothing reads these spaces, so the
+				// request (and its 30 s budget on the initial load) is skipped.
+				if incidentSLAAlertsEnabled {
+					slaSpacesCtx, cancelSLASpaces := context.WithTimeout(ctx, 30*time.Second)
+					byKey, byKeyErr := customerEntityClient.GetTeamChatWebhooksByKey(slaSpacesCtx)
+					cancelSLASpaces()
+					if byKeyErr != nil {
+						slog.Error("slaengine: failed to refresh SRE team incident SLA chat spaces from entity-service; keeping the previous set", "err", byKeyErr)
+					} else {
+						googleChatClient.SetIncidentSLATeamSpaces(byKey)
+						incidentLookups.slaSpacesLoaded()
+					}
+				}
+			}
+
+			// The startup retry loop below only cares about the webhook
+			// fetch's own success (same contract as before this change) --
+			// team-routed Chat is the one dependency that gates it; a
+			// group-email hiccup is logged above and simply retried on the
+			// next ordinary ticker interval, same as any other refresh here.
+			return webhooksErr
 		}
 		// Retry the initial fetch, with backoff, before consumers start --
 		// not just one attempt. googlechat.go's own sendCardToAudience
@@ -962,8 +1073,20 @@ func main() {
 		}
 		creCfg, creRunning := escalationCfg.For(paging.LadderKeyCRE)
 		sreCfg, sreRunning := escalationCfg.For(paging.LadderKeySRE)
+		// The SLA breach email's CRE head now follows heads.cre and
+		// teams.leadership too, whether or not the CRE ladder itself runs:
+		// the head is the same person either way.
+		if slaEngine != nil && cfgErr == nil {
+			slaEngine.SetCREHeads(paging.NewCREHeads(creCfg, slaCREHeadsEntity))
+		}
 		if cfgErr == nil {
 			applyIncidentRoutes(sreCfg, googleChatClient, incidentRoutes)
+		}
+		// Routing setup has ended either way (a config that failed to load
+		// applies no mapping, so an incident resolves to no SRE team and its
+		// SLA alert reaches the assignee only): release the held tiers.
+		if slaEngine != nil {
+			slaEngine.IncidentRoutingReady()
 		}
 		escalationRunning := creRunning || sreRunning
 		if cfgErr == nil {
@@ -1525,13 +1648,13 @@ func envBool(key string, def bool) bool {
 	}
 }
 
-// emailReplyTo reads EMAIL_REPLY_TO: unset means support@wso2.com, set but
+// emailReplyTo reads EMAIL_REPLY_TO: unset means the support address, set but
 // empty means no Reply-To.
 func emailReplyTo() string {
 	if v, ok := os.LookupEnv("EMAIL_REPLY_TO"); ok {
 		return v
 	}
-	return "support@wso2.com"
+	return notifications.SupportAddress()
 }
 
 func envOrDefault(key, def string) string {
@@ -1881,6 +2004,7 @@ func applyIncidentRoutes(sre paging.LadderConfig, chat *notifications.GoogleChat
 	routes.Set(table.Fanout)
 	routes.SetTeamless(table.Teamless)
 	routes.SetKnownSRETeam(func(group string) bool { return paging.KnownSRETeam(sre, group) })
+	routes.SetSRETeams(func(group string) []string { return paging.SRETeamsForGroup(sre, group) })
 	_, fallback := table.Spaces[notifications.IncidentFallbackAudience]
 	slog.Info("incident cards follow the Alert Settings group mapping",
 		"mappedGroups", table.Mapped, "defaultGroupsFannedOut", len(table.Fanout), "sharedSRERoom", fallback)
@@ -1900,6 +2024,37 @@ func acpReactivationCC() []string {
 		os.Exit(1)
 	}
 	return cc
+}
+
+// acpInternalEmailDomains reads ACP_INTERNAL_EMAIL_DOMAINS, the domains the
+// "Back to Open state" email may go to, and stops startup on an entry that
+// is not a domain: matched as a suffix, it could admit the wrong people.
+// Empty keeps the dispatcher's default (@wso2.com).
+func acpInternalEmailDomains() []string {
+	domains, err := parseACPInternalEmailDomains(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
+	if err != nil {
+		slog.Error("invalid ACP_INTERNAL_EMAIL_DOMAINS", "err", err)
+		os.Exit(1)
+	}
+	return domains
+}
+
+// emailDomainPattern is a bare domain name: dot-separated labels of letters,
+// digits and inner hyphens, at least two of them. A URL ("https://...") or a
+// port fails it, so it cannot become a suffix that matches nobody.
+var emailDomainPattern = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// parseACPInternalEmailDomains splits ACP_INTERNAL_EMAIL_DOMAINS on commas
+// (entries trimmed, empty ones dropped; the leading "@" is optional) and
+// refuses an entry that is not a domain name.
+func parseACPInternalEmailDomains(raw string) ([]string, error) {
+	domains := splitComma(raw)
+	for i, d := range domains {
+		if !emailDomainPattern.MatchString(strings.TrimPrefix(d, "@")) {
+			return nil, fmt.Errorf("entry %d is not a domain like @example.com", i+1)
+		}
+	}
+	return domains, nil
 }
 
 // parseACPReactivationCC splits ACP_REACTIVATION_CC on commas (entries

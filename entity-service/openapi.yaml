@@ -1989,12 +1989,12 @@ paths:
   /sla-status/clock-state:
     get:
       summary: >-
-        Return the full, current state of one (work item, clock target) "sla"
-        row, regardless of whether it is currently active — unlike
-        GET /sla-status, which only ever lists active rows. Lets a caller
-        tell a genuinely resolved clock (a real row, in a terminal stage)
-        apart from one that was never registered at all (no row found),
-        which the active-only list can never distinguish between. Used by
+        Return the current state of one (work item, clock target) "sla" row,
+        regardless of whether it is currently active — unlike GET
+        /sla-status, which only ever lists active rows. Lets a caller tell a
+        genuinely resolved clock (a real row, in a terminal stage) apart from
+        one that was never registered at all (no row found), which the
+        active-only list can never distinguish between. Used by
         integrations/csm-notification-service as a final check against this
         service's own durable record immediately before sending a breach
         alert for a clock whose Redis-held completion state may have fallen
@@ -2015,20 +2015,25 @@ paths:
           schema:
             type: string
             enum: [response, workaround, resolution]
-        - name: source
+        - name: slaId
           in: query
           description: >-
-            Optional, same accepted values as GET /sla-status's own "source".
-            Omitted matches a row of either source.
+            Optional. The exact "sla" row's own id (as previously returned
+            on this same field by this endpoint or by GET /sla-status) —
+            narrows the lookup to that specific row instead of the
+            ambiguous "whichever row is most recently started" default,
+            which cannot tell two policies that both have a genuinely open
+            clock on the same (work item, target) apart. Omitting it keeps
+            that original, ambiguous lookup.
           schema:
             type: string
-            enum: [csm, servicenow]
+            format: uuid
       responses:
         "200":
           description: >-
             The clock's current state, or an all-zero/false body with
-            found=false when no row exists for this (work item, target,
-            source) at all.
+            found=false when no row exists for this (work item, target)
+            at all, or (slaId given) no row with that exact id exists.
           content:
             application/json:
               schema:
@@ -4085,142 +4090,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /system-dashboards:
-    get:
-      summary: "List the system dashboards."
-      description: "Postgres-only. System dashboards belong to nobody: the CSM portal backend stores them here and overwrites them by key on every startup. Service to service: only the CSM portal backend's own client credential (x-jwt-assertion) is admitted, with no x-user-id-token needed. Never lists a user's saved dashboard."
-      operationId: listSystemDashboards
-      responses:
-        "200":
-          description: "Every system dashboard with its definition, ordered by key; an empty list when there are none."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SystemDashboardList'
-        "403":
-          description: "Forbidden: the caller is not the CSM portal backend."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /system-dashboards/{key}:
-    parameters:
-      - name: key
-        in: path
-        required: true
-        description: "The system dashboard's stable key: 1 to 255 letters, digits, dots, underscores or hyphens, starting with a letter or digit."
-        schema:
-          type: string
-          maxLength: 255
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
-    get:
-      summary: "Get one system dashboard."
-      description: "Postgres-only. Service to service: only the CSM portal backend's own client credential is admitted."
-      operationId: getSystemDashboard
-      responses:
-        "200":
-          description: "The system dashboard, with its definition."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SystemDashboard'
-        "400":
-          description: "Bad request: the key is not a valid system dashboard key."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: "Forbidden: the caller is not the CSM portal backend."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: "Not found: there is no system dashboard with that key."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    put:
-      summary: "Create or overwrite a system dashboard."
-      description: "Postgres-only. Creates the system dashboard with this key, or overwrites its name and definition when it exists (its id and creation time are kept); 200 either way. The definition is opaque text of at most 1048576 bytes, larger than a user's saved dashboard. Service to service: only the CSM portal backend's own client credential is admitted. Cannot touch a user's saved dashboard."
-      operationId: saveSystemDashboard
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SaveSystemDashboardRequest'
-      responses:
-        "200":
-          description: "The stored system dashboard."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SystemDashboard'
-        "400":
-          description: "Bad request: invalid key, a blank name or definition, or a name or definition over its limit."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: "Forbidden: the caller is not the CSM portal backend."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    delete:
-      summary: "Delete a system dashboard."
-      description: "Postgres-only. Removes the system dashboard with this key; the CSM portal backend calls it when a dashboard file it loaded has been removed or renamed. Only a system dashboard can be removed this way: a user's saved dashboard is never matched, whatever its id. Service to service: only the CSM portal backend's own client credential is admitted."
-      operationId: deleteSystemDashboard
-      responses:
-        "204":
-          description: "The system dashboard was deleted."
-        "400":
-          description: "Bad request: the key is not a valid system dashboard key."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: "Forbidden: the caller is not the CSM portal backend."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: "Not found: there is no system dashboard with that key."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /users/me/dashboards/{id}:
     parameters:
       - name: id
@@ -4992,17 +4861,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Update another user's profile (timezone and/or phone).
+      summary: Update another user's profile (timezone and/or phone), or flip them to internal.
       description: >-
         Internal callers only — unlike PATCH /users/me, the id comes from the
         path, not the caller's own token, so a trusted caller (e.g. an
         Asgardeo admin acting through apps/csm-portal/backend, when
         reassigning a team lead whose paging number needs to be set) can
-        update someone else's profile. Both fields are optional but at least
-        one must be present; phone has the same trim/E.164/length/clear rules as
-        PATCH /users/me. The incident call-escalation ladder dials this
+        update someone else's profile. At least one of timeZone, phone or
+        makeInternal must be present; phone has the same trim/E.164/length/clear
+        rules as PATCH /users/me. The incident call-escalation ladder dials this
         number for a team's lead, so fine-grained authorization beyond
-        "internal service" (e.g. admin-only) is the caller's own job.
+        "internal service" (e.g. admin-only) is the caller's own job — except
+        for makeInternal, which this service itself restricts further: true
+        grants the "internal" role and revokes the external-side role set
+        (external/customer/partner/customer_admin/partner_admin) — the only
+        way to actually change user_type, which is trigger-derived from
+        user_role membership. Restricted to a @wso2.com target, and callable
+        only through apps/csm-portal/backend acting on behalf of a signed-in
+        CSM admin (its own PermAdmin gate decides who may call this; a
+        service credential with no forwarded user, or a client id other than
+        csm-portal-backend's, is refused). Combinable with timeZone/phone in
+        the same call, or sent alone.
       operationId: updateUser
       tags: [Users]
       parameters:
@@ -5026,13 +4905,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PatchUserMeResponse'
         '400':
-          description: Bad request (malformed id, neither field present, or phone too long or not E.164).
+          description: Bad request (malformed id, none of the three fields present, phone too long or not E.164, or makeInternal on a non-@wso2.com target).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Caller is not an internal service.
+          description: Caller is not an internal service (or, for makeInternal, not apps/csm-portal/backend acting on behalf of a signed-in person).
           content:
             application/json:
               schema:
@@ -5428,6 +5307,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListTeamChatWebhooksResponse'
+        "403":
+          description: Caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /teams/group-emails:
+    get:
+      summary: >-
+        List every team's own configured notification mailbox
+        (team.group_email, migration 0117), keyed by team.key (migration
+        0152) rather than name. Internal callers only — reference data for a
+        backend service (integrations/csm-notification-service's SLA breach
+        engine, which looks up a specific team's email by its stable key,
+        e.g. "americas_cre_team"), not something any portal caller has a
+        legitimate use for. A team with no configured email is left out
+        entirely.
+      operationId: listTeamGroupEmails
+      responses:
+        "200":
+          description: Every team with a configured group_email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTeamGroupEmailsResponse'
         "403":
           description: Caller is not an internal service.
           content:
@@ -5871,6 +5782,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/aggregate:
+    post:
+      summary: >-
+        Count projects per onboarding owner, onboarding status or region
+        (Postgres data sources only).
+      description: >-
+        Counts exactly the projects POST /projects/search matches for the same
+        filters, scoped to the caller the same way. A project with no value for
+        the grouping counts in othersCount, never in a bucket. Not registered
+        on the legacy data source.
+      operationId: aggregateProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateProjectsRequest'
+      responses:
+        "200":
+          description: Project counts per value of groupBy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /projects/search:
     post:
       summary: Search projects by name, key, or subscription type.
@@ -7253,6 +7206,699 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products:
+    post:
+      summary: Add a product.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: createProduct
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWrite'
+      responses:
+        "201":
+          description: The new product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not returned by this create (it references nothing that can be missing); listed because every write documents 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{id}:
+    get:
+      summary: One product with its catalogue fields.
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: getProduct
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Change a product.
+      description: >
+        Fields present in the body are set (null clears an optional one). A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: updateProduct
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWrite'
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{id}/versions:
+    post:
+      summary: Add a version of a product.
+      description: >
+        Creates one row per deployment profile in profiles, all on one public listing (a new public id, or publicId to join a live listing of the same product and version). A profile the version already has is refused. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: createProductVersions
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVersionCreate'
+      responses:
+        "201":
+          description: The new rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-versions/search:
+    post:
+      summary: Search versions across products.
+      description: >
+        Ordered by product name, release date (newest first), version and profile. feed keeps the live rows with a public listing on that feed. Page size up to 1000. Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: searchAllProductVersions
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAllProductVersionsRequest'
+      responses:
+        "200":
+          description: Matching versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductVersionsResponse'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-versions/{id}:
+    get:
+      summary: One product version row.
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: getProductVersion
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersion'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Change a product version.
+      description: >
+        Listing fields apply to every live row of the version (its public listing, or the unpublished rows of the same product and version); deploymentProfile and publicId to this row only. On a retired row the change applies to that row alone. Dates must keep release <= earliest possible EOL <= EOL and EOL announcement <= EOL, and a version on a public feed needs a public abbreviation or a product code; both are checked on the row as written (the body over the stored values). publicId may only name a live listing of the same product and version. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: updateProductVersion
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVersionPatch'
+      responses:
+        "200":
+          description: The rows changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-versions/{id}/retire:
+    post:
+      summary: Retire a product version.
+      description: >
+        Retires every live row of the version: its public listing, or, when the row has no public id, the unpublished rows of the same product and version. Retired rows leave the catalogue and both public feeds; the product version searches still return them unless excludeRetired is set. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: retireProductVersion
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The rows retired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /release-lines:
+    get:
+      summary: Release lines.
+      description: >
+        Ordered by name. Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: listReleaseLines
+      tags: [Products]
+      parameters:
+        - name: includeRetired
+          in: query
+          required: false
+          description: Include retired release lines.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: The release lines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLineList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add a release line.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: createReleaseLine
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseLineWrite'
+      responses:
+        "201":
+          description: The new release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLine'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not returned by this create (it references nothing that can be missing); listed because every write documents 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /release-lines/{id}:
+    patch:
+      summary: Change a release line.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: updateReleaseLine
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseLineWrite'
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLine'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /release-lines/{id}/retire:
+    post:
+      summary: Retire a release line.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: retireReleaseLine
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLine'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /carbon-platform-history:
+    get:
+      summary: Carbon platform history (reference data).
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: listCarbonPlatformHistory
+      tags: [Products]
+      responses:
+        "200":
+          description: Every row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistoryList'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /carbon-kernel-releases:
+    get:
+      summary: Carbon kernel releases (reference data).
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: listCarbonKernelReleases
+      tags: [Products]
+      responses:
+        "200":
+          description: Every row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonKernelReleaseList'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
           content:
             application/json:
               schema:
@@ -10083,6 +10729,157 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/public-holidays:
+    get:
+      summary: The stored public holidays, for the holiday editor.
+      description: >
+        Internal staff only. Every stored day in the window (at most 366 days),
+        of one country when `country` is given, with where it came from:
+        CALENDAR (the daily refresh) or MANUAL (added in the portal, migration
+        0293). Also the countries in use (every stored one plus Sri Lanka and
+        India) and whether the caller may add or remove holidays.
+      operationId: listPublicHolidays
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: country, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: The stored days, the countries and canEdit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicHolidaysListResponse'
+        "400":
+          description: A date that is not YYYY-MM-DD, `to` before `from`, or a window over 366 days.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add one country's public holidays by hand.
+      description: >
+        A portal admin or a rota admin of any family (holidays are per country
+        and shared by every family). Up to 200 days, each a YYYY-MM-DD date from
+        last year to two years ahead with a title of at most 200 characters.
+        Each day is stored as a MANUAL row under the caller's email; a day
+        already stored (from the calendar or by hand) takes the new title and
+        becomes manual. The daily refresh never deletes or retitles a manual
+        row. The coming weeks' Public holiday tags (CRE) are placed in the
+        background right after.
+      operationId: addPublicHolidays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPublicHolidaysRequest'
+      responses:
+        "201":
+          description: How many days were stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddPublicHolidaysResponse'
+        "400":
+          description: A missing or invalid country, date or title, or too many days; the message names the day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not a portal admin or a rota admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/public-holidays/{country}/{date}:
+    delete:
+      summary: Remove one stored public holiday.
+      description: >
+        A portal admin or a rota admin of any family. Removes the day whether it
+        came from the calendar or by hand (a calendar day comes back at the next
+        refresh). The Public holiday tags are placed again in the background,
+        which takes away the day's tags nobody touched.
+      operationId: deletePublicHoliday
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: An invalid country or date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not a portal admin or a rota admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such day is stored, or no database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/public-holidays/search:
     post:
       summary: Public holidays of the given people over a date window.
@@ -10794,10 +11591,13 @@ paths:
     delete:
       summary: Delete a tag a lead added.
       description: >
-        Any team lead may. Only a tag added from the portal can be deleted, never
-        one of the catalogue's own, and only once no leave or allocation uses it
-        -- a tag still in use is refused with how many entries use it, since
-        retiring it quietly would leave those entries with no label or colour.
+        Only a tag added from the portal can be deleted, never one of the
+        catalogue's own, and only once no leave or allocation uses it -- a tag
+        still in use is refused with how many entries use it, since retiring it
+        quietly would leave those entries with no label or colour. Who may: a
+        portal admin, any custom tag; a rota admin, their own family's tags and
+        the shared ones (no family); a lead who is neither, the families of the
+        rota teams they lead. A refusal names which case applies.
       operationId: deleteScheduleAbsenceKind
       parameters:
         - name: code
@@ -10815,7 +11615,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: The caller leads no team, or the tag is a built-in one.
+          description: >
+            The caller leads no rota team and is no rota or portal admin, the tag
+            is a built-in one, the tag is another family's, or the tag is shared
+            and the caller is no rota or portal admin.
           content:
             application/json:
               schema:
@@ -11934,6 +12737,143 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      description: >
+        Everyone holding the `case_deescalator` role, one entry per person, with who granted
+        it and when. They may de-escalate any case besides the leads of the case's own ABT
+        team. Only through the CSM portal backend, which checks the caller is a CSM admin
+        (a user token; any other caller is refused). Postgres only.
+      operationId: listCaseDeescalators
+      responses:
+        "200":
+          description: The grants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseDeescalators'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal backend, or the caller is deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      description: >
+        Grants the `case_deescalator` role. Only through the CSM portal backend, which checks the
+        caller is a CSM admin. The person must be active internal
+        staff. Granting what is already held changes nothing. Audited.
+      operationId: grantCaseDeescalator
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The person ("user" id).
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: The user id is not a UUID, or the person is not active internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal backend, or the caller is deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      description: >
+        Removes the `case_deescalator` role. Only through the CSM portal backend, which checks the
+        caller is a CSM admin. Removing what is not held is not an
+        error. A team lead keeps the ability to de-escalate their own team's cases. Audited.
+      operationId: revokeCaseDeescalator
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The person ("user" id).
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: The user id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal backend, or the caller is deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only with a database pool.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/rota-access/admins/{family}/{userId}:
     put:
       summary: Make somebody a rota admin for one family.
@@ -13281,6 +14221,225 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/eol-product-usage:
+    get:
+      summary: >-
+        Monthly EOL product usage report: customers running a product version past its EOL date in Primary Production.
+      description: >
+        One entry per (project, product version) where an active deployed product of an active
+        PRIMARY_PRODUCTION deployment runs a version whose support EOL date is before asOf,
+        grouped by the account's region (ignoring case; accounts with no region last), then account and project.
+        Only customer accounts are listed (account life cycle exactly 'Customer', from Salesforce): lost
+        customers, prospects, partners and accounts with no life cycle are left out. Customers who have left
+        are not listed either: deleted accounts, inactive projects and projects WSO2 has closed.
+        A version run by several Primary Production deployments of one project is listed once.
+        Internal callers only; the scheduled task that mails the report is the expected caller.
+      operationId: getEolProductUsageReport
+      tags: [Reports]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Report date, YYYY-MM-DD; a version is EOL when its EOL date is before it. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EolProductUsageReport'
+        "400":
+          description: asOf is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/sla-breaches:
+    get:
+      summary: >-
+        Build one weekly SLA breach report: the SLA clocks on the named
+        definitions that breached during one calendar week, under the
+        given stage and onboarding-status filters. Read-only. Internal
+        callers only.
+      description: >-
+        A clock is listed when its policy is one of `definitions` (matched
+        exactly), it has breached, its recorded breach time falls at or
+        after the first instant of the week and before the first instant of
+        the next, in the report's timezone (Asia/Colombo), and it passes
+        whichever of `stages`, `onboardingStatuses` and
+        `excludeOnboardingStatuses` are given. `week` is any date inside
+        the week reported and defaults to the week before now; a week runs
+        Monday to Monday. Rows are ordered by the account's integration CS
+        team, then SLA definition, then breach time. Stage and status
+        values are matched case-insensitively with spaces and hyphens
+        treated as underscores, so ServiceNow's own spelling ("In
+        progress", "In-Progress") matches the stored enum; a value that
+        is not one of the enum's is rejected rather than silently
+        matching nothing.
+      operationId: getSLABreachReport
+      parameters:
+        - name: definitions
+          in: query
+          required: true
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+          description: The SLA definition names the report covers, comma-separated.
+        - name: stages
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            The clock stages the report covers, comma-separated. Omitted
+            means every stage.
+        - name: week
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          description: >-
+            Any date inside the week reported, YYYY-MM-DD. Defaults to the
+            week before now.
+        - name: onboardingStatuses
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            Keep only cases whose project carries one of these onboarding
+            statuses (ServiceNow's "is one of"). Omitted applies no such
+            restriction.
+        - name: excludeOnboardingStatuses
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            Drop cases whose project carries one of these (ServiceNow's
+            "is not one of"). A case with no project, and so no status, is
+            kept. Omitted applies no exclusion.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLABreachReport'
+        "400":
+          description: >-
+            definitions is missing, week is not a date, or a stage or
+            onboarding status is not one of the enum's values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/deprecated-product-usage:
+    get:
+      summary: >-
+        Monthly deprecated product usage report: customers running a product version whose support status is Deprecated in Primary Production.
+      description: >
+        One entry per (project, product version) where an active deployed product of an active
+        PRIMARY_PRODUCTION deployment runs a version whose support status is DEPRECATED, whether its
+        EOL date has passed or not (one past its EOL date is in the EOL product usage report too),
+        grouped by the account's region (ignoring case; accounts with no region last), then account and project.
+        Only customer accounts are listed (account life cycle exactly 'Customer', from Salesforce): lost
+        customers, prospects, partners and accounts with no life cycle are left out. Customers who have left
+        are not listed either: deleted accounts, inactive projects and projects WSO2 has closed.
+        A version run by several Primary Production deployments of one project is listed once.
+        Internal callers only; the scheduled task that mails the report is the expected caller.
+      operationId: getDeprecatedProductUsageReport
+      tags: [Reports]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Report date shown in the report, YYYY-MM-DD; the list is the versions' current status whatever the date. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeprecatedProductUsageReport'
+        "400":
+          description: asOf is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/migration-cases:
     get:
       summary: >-
@@ -13404,6 +14563,79 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: The report's project types are not configured on this deployment, or the caller's identity could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/mttr:
+    get:
+      summary: >-
+        Mean time to resolution (MTTR), by severity band and trailing
+        window. Read-only. Internal callers only.
+      description: >-
+        For each severity band (S1-S4, S1-S3, S0, S1, S2, S3, S4 -- the two
+        combined bands never include S0), the average time in hours from a case's creation to the
+        LAST time it entered Solution Proposed (a rejected proposal bounces
+        a case back for more work before a later one sticks, so the last
+        entry, not the first, is when the case was actually resolved), over
+        cases whose last such entry falls within the trailing window.
+        `creTeamId` may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Not offered when this deployment's cases are
+        served from the other data source.
+      operationId: getMTTRReport
+      parameters:
+        - name: months
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months. Exactly one of `months` and `days` is required.
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [7]
+          description: The trailing window, in days. Exactly one of `months` and `days` is required.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: exactly one of months (1, 3, 6 or 12) or days (7) is required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
           content:
             application/json:
               schema:
@@ -18693,6 +19925,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /audit-log/maintenance:
+    post:
+      summary: Run the audit log's upkeep (service credentials only).
+      description: |
+        Registered only when CSM_AUDIT_LOG_ENABLED=true; otherwise the route does not exist and answers 404.
+
+        Called by csm-scheduled-tasks, weekly by default (its schedule can be overridden). Creates the coming monthly partitions of the audit log,
+        checks the log's health, puts back audit triggers that are missing, disabled or different from their
+        registration on registered tables, and deletes the monthly partitions that ended at least CSM_AUDIT_LOG_RETENTION_MONTHS
+        (default 18) ago, dropped for good and not archived, and deletes the rows that old from the catch-all
+        partition. Safe to repeat. It tries every step even if one fails.
+
+        A 200 means the request was handled, not that everything is fine: read the lists. Health
+        problems, unresolved triggers and step errors need a person. A repaired trigger was off for a while, so the history had a
+        gap.
+      responses:
+        "200":
+          description: The upkeep ran; the body says what it found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogMaintenanceResponse'
+        "400":
+          description: The request has a body that is not empty or a single JSON object (the call takes no options).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The audit log is switched off (CSM_AUDIT_LOG_ENABLED is not true).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: |
+            Unexpected failure, for example the request was cancelled. A step that could not run is
+            not a 500: it is reported in stepErrors with a 200, so the other steps' results are kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /instances/usage-rollups/daily:
     post:
       summary: Recompute one UTC day's daily usage rows from the hourly rows (internal callers only).
@@ -22232,9 +23519,9 @@ components:
       description: >
         The admin-targeted counterpart to PatchUserMeRequest, for
         PATCH /users/{id} -- updating someone else's profile by id rather
-        than the caller's own. Both fields are optional pointers (unlike
-        PatchUserMeRequest.timeZone, which can never be cleared), but at
-        least one must be present.
+        than the caller's own, or flipping them to internal. All three
+        fields are optional pointers (unlike PatchUserMeRequest.timeZone,
+        which can never be cleared), but at least one must be present.
       properties:
         timeZone:
           type: string
@@ -22246,9 +23533,19 @@ components:
           description: >
             Trimmed. At most 32 characters after trimming (400 otherwise). An
             empty (or whitespace-only) value clears it.
+        makeInternal:
+          type: boolean
+          description: >
+            true grants the "internal" role and revokes the external-side
+            role set (external/customer/partner/customer_admin/partner_admin)
+            -- the only way to actually change user_type. Restricted to a
+            @wso2.com target and to apps/csm-portal/backend as the caller
+            (see this operation's own description). false/absent leave roles
+            untouched; there is no "make external" via this field.
       anyOf:
         - required: [timeZone]
         - required: [phone]
+        - required: [makeInternal]
 
     PatchUserMeUpdated:
       type: object
@@ -22267,6 +23564,12 @@ components:
         phone:
           type: string
           description: The profile's phone number after the update. Omitted when none is stored (PostgreSQL data source only).
+        userType:
+          type: string
+          enum: [internal, customer, system]
+          description: >
+            Set only when this request's makeInternal was true -- the
+            resulting user_type. Omitted on every other PATCH /users/{id}.
 
     PatchUserMeResponse:
       type: object
@@ -23057,6 +24360,11 @@ components:
           description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          description: The account's customer success manager. null when not set.
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         activationDate:
           type: string
           nullable: true
@@ -23147,6 +24455,11 @@ components:
           description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          description: The account's customer success manager. null when not set.
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         activationDate:
           type: string
           nullable: true
@@ -23234,6 +24547,26 @@ components:
         offset:
           type: integer
 
+    AggregateProjectsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          description: The project search filters (pagination and sort are not used).
+          allOf:
+            - $ref: '#/components/schemas/SearchProjectsRequest'
+        groupBy:
+          type: string
+          enum: [onboardingOwner, onboardingStatus, region]
+          description: >-
+            onboardingOwner buckets by the owner's user id (label: their name,
+            else email); onboardingStatus by the status label; region by the
+            account region, ignoring case and surrounding spaces.
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: Largest buckets returned (default 10); the rest fold into othersCount.
     SearchProjectsRequest:
       type: object
       properties:
@@ -23274,6 +24607,40 @@ components:
         subRegion:
           type: string
           description: Only projects whose account has this sub-region (case-insensitive).
+        regions:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose account's region is any of these, e.g. "APAC"
+            (exact, case-insensitive); a project with no account region matches
+            none. Postgres only; a 400 on any other data source.
+        onboardingOwnerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only projects whose onboarding owner is any of these user ids; a
+            project with no owner matches none. A non-UUID returns 400. Postgres
+            only; a 400 on any other data source.
+        onboardingOwnerEmails:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose onboarding owner's email is any of these
+            (case-insensitive); ANDed with onboardingOwnerIds. Postgres only; a
+            400 on any other data source.
+        onboardingOwnerTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only projects whose onboarding owner is a current member of any of
+            these teams (team ids, as time cards' teamIds). A non-UUID returns
+            400. Postgres only; a 400 on any other data source.
         arrTodayGte:
           type: string
           description: >-
@@ -24222,6 +25589,10 @@ components:
 
     Product:
       type: object
+      description: >
+        A product. The catalogue fields (code to activeVersionCount) were
+        added with the product catalogue; unit, businessUnit and
+        manufacturer are lowercase enum values.
       properties:
         id:
           type: string
@@ -24236,7 +25607,29 @@ components:
         updatedOn:
           type: string
           format: date-time
-
+        code:
+          type: string
+          nullable: true
+        unit:
+          type: string
+          nullable: true
+        businessUnit:
+          type: string
+          nullable: true
+        manufacturer:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        versionCount:
+          type: integer
+          description: Live (not retired) version rows.
+        retiredVersionCount:
+          type: integer
+        activeVersionCount:
+          type: integer
+          description: Live version rows not discontinued.
     SearchProductsResponse:
       type: object
       properties:
@@ -24310,9 +25703,24 @@ components:
         deploymentProfile:
           type: string
           description: Only versions with this deployment profile (e.g. "All In One"), matched case-insensitively. Omit it, or send an empty string, to return every profile. Postgres data source only.
-
+        excludeRetired:
+          type: boolean
+          description: Leave out retired rows. Omitted or false returns every row, retired ones included. Postgres data source only.
+        feed:
+          type: string
+          enum: [support-matrix, release-matrix]
+          description: Only the live rows with a public listing on this feed. Postgres data source only.
+        publicId:
+          type: integer
+          format: int64
+          description: Only the rows of this public listing. Postgres data source only.
     ProductVersion:
       type: object
+      description: >
+        One product version row (one deployment profile). The live rows
+        sharing publicId are one public listing on the Support Matrix and
+        Release Matrix. The fields from productName on were added with the
+        product catalogue (Postgres data source only).
       properties:
         id:
           type: string
@@ -24322,7 +25730,8 @@ components:
           type: string
         currentSupportStatus:
           type: string
-          enum: [available, extended, deprecated, discontinued, null]
+          description: The stored enum value, uppercase.
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
           nullable: true
         releaseDate:
           type: string
@@ -24346,7 +25755,59 @@ components:
         updatedOn:
           type: string
           format: date-time
-
+        productName:
+          type: string
+        productCode:
+          type: string
+          nullable: true
+        serialNumber:
+          type: string
+          nullable: true
+        supportEolAnnouncementDate:
+          type: string
+          format: date-time
+          nullable: true
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+        publicName:
+          type: string
+          nullable: true
+        publicAbbreviation:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        isPublic:
+          type: boolean
+          description: Listed on the Release Matrix.
+        showInSupportMatrix:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        releaseLinks:
+          type: string
+          nullable: true
+        legacyStatus:
+          type: boolean
+          description: The legacy status bit; defaults to true.
+        releaseLineId:
+          type: string
+          format: uuid
+          nullable: true
+        releaseLineName:
+          type: string
+          nullable: true
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        retiredOn:
+          type: string
+          format: date-time
+          nullable: true
     SearchProductVersionsResponse:
       type: object
       properties:
@@ -25136,6 +26597,25 @@ components:
         closeNotes:
           type: string
           description: Close notes. Only allowed when state is closed or solution_proposed.
+        adminReopen:
+          type: boolean
+          enum: [true]
+          description: >-
+            Moves a closed case to any other state, bypassing the normal state-transition
+            rule (closed is otherwise terminal for every caller). Only honored for an
+            internal (WSO2 staff) caller calling through the CSM portal backend, and only
+            when the case's current state is actually closed and the case's own type is
+            `case` — rejected with a 400 for every other case-like type (engagement,
+            service_request, security_report_analysis, announcement), since the reopen
+            reason has nowhere to be stored for those. Only `true` is meaningful; omit
+            rather than sending `false`. Only allowed alongside `state`.
+        reopenReason:
+          type: string
+          description: >-
+            Optional free-text note on why the case was reopened. Only allowed alongside
+            `adminReopen: true` (and, like `adminReopen`, only for a case of type `case`).
+            Write-only — never returned by this or any other endpoint, and not shown in
+            any UI.
         bestCaseFixEta:
           type: string
           format: date
@@ -25987,6 +27467,13 @@ components:
             non-user identifier such as an automation account.
         name:
           type: string
+        isInternal:
+          type: boolean
+          description: >-
+            True when the person resolved to an INTERNAL-type user (WSO2
+            staff). Set on comment authors and on case/incident activity-feed
+            actors; omitted elsewhere, so absent means "not known to be
+            internal", never "known external".
     AssignedEngineerRef:
       type: object
       nullable: true
@@ -30167,7 +31654,7 @@ components:
               tier:
                 type: string
                 enum: [L1, L2, L3]
-                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
+                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, SRE_WE_DAY and SRE_WE_NIGHT, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
               from: {type: string, format: date, description: Inside the period.}
               to: {type: string, format: date, description: Inside the period.}
               note: {type: string}
@@ -30581,6 +32068,45 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SchedulePublicHoliday' }
         count: { type: integer }
+    StoredPublicHoliday:
+      type: object
+      required: [country, date, title, source]
+      properties:
+        country: { type: string }
+        date: { type: string, format: date }
+        title: { type: string }
+        source: { type: string, enum: [CALENDAR, MANUAL] }
+        updatedBy:
+          type: string
+          description: Who added or last changed a manual row; absent for the refresh's rows.
+    PublicHolidaysListResponse:
+      type: object
+      required: [holidays, countries, canEdit]
+      properties:
+        holidays:
+          type: array
+          items: { $ref: '#/components/schemas/StoredPublicHoliday' }
+        countries: { type: array, items: { type: string } }
+        canEdit: { type: boolean }
+    AddPublicHolidaysRequest:
+      type: object
+      required: [country, holidays]
+      properties:
+        country: { type: string, maxLength: 100 }
+        holidays:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [date, title]
+            properties:
+              date: { type: string, format: date }
+              title: { type: string, maxLength: 200 }
+    AddPublicHolidaysResponse:
+      type: object
+      required: [stored]
+      properties:
+        stored: { type: integer }
     PublicHolidayRefreshResult:
       type: object
       properties:
@@ -31506,7 +33032,8 @@ components:
             teams.leadership, teams.teamLeadsToCall, teams.teamLeads,
             teams.rotaMembersToCall, teams.americasWeekendRotaShifts,
             teams.rotaTeams, teams.unassignedTeamLead,
-            teams.unassignedTeamLeadCount, heads.cre, heads.cs (name and email
+            teams.unassignedTeamLeadCount, teams.unassignedLeads (rules or
+            shift_leads), heads.cre, heads.cs (name and email
             only), alertDuty.tiers, alertDuty.perTeam,
             acknowledgement.requireBoth, email.enabled, email.teamLists (CRE
             team key to one mailing list address), email.creTeamList,
@@ -31872,6 +33399,9 @@ components:
           type: string
         chatWebhookUrl:
           type: string
+        key:
+          type: string
+          description: The team's key (team.key); omitted when the team has none. csm-notification-service keys an incident's SRE team SLA space by it.
 
     ListTeamChatWebhooksResponse:
       type: object
@@ -31880,6 +33410,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamChatWebhook'
+
+    TeamGroupEmail:
+      type: object
+      properties:
+        key:
+          type: string
+        groupEmail:
+          type: string
+
+    ListTeamGroupEmailsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGroupEmail'
 
     TeamDetail:
       type: object
@@ -32358,6 +33904,259 @@ components:
         sentOn:
           type: string
           format: date-time
+    CatalogCarbon:
+      type: object
+      nullable: true
+      properties:
+        platformRelease:
+            type: string
+            nullable: true
+        platformVersion:
+            type: string
+            nullable: true
+        carbonKernelVersion:
+            type: string
+            nullable: true
+        releaseChunk:
+            type: string
+            nullable: true
+        kernelPatchNo:
+            type: string
+            nullable: true
+    ProductVersionList:
+      type: object
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVersion'
+    SearchAllProductVersionsRequest:
+      type: object
+      additionalProperties: false
+      description: The per-product version search's filters, plus productId, across products.
+      properties:
+        pagination:
+          type: object
+          additionalProperties: false
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              description: Rows per page. Defaults to 20, capped at 1000 (the whole catalogue fits in one page).
+            offset:
+              type: integer
+              minimum: 0
+              description: Zero-based offset into the result set.
+        productId:
+          type: string
+          format: uuid
+          description: Only this product.
+        searchQuery:
+          type: string
+          description: Case-insensitive match against the version string.
+        deploymentProfile:
+          type: string
+          description: Only rows with this deployment profile, matched case-insensitively.
+        excludeRetired:
+          type: boolean
+          description: Leave out retired rows.
+        feed:
+          type: string
+          enum: [support-matrix, release-matrix]
+          description: Only the live rows with a public listing on this feed.
+        publicId:
+          type: integer
+          format: int64
+          description: Only the rows of this public listing.
+    ProductWrite:
+      type: object
+      additionalProperties: false
+      description: name and class are required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        class: {type: string, enum: [software, service]}
+        code: {type: string, maxLength: 64, nullable: true}
+        unit: {type: string, enum: [integration, iot, iam, choreo, asgardeo, apim, analytics, devant, bijira, null], nullable: true}
+        businessUnit: {type: string, enum: [integration_software, integration_cloud, iam, corporate, null], nullable: true}
+        manufacturer: {type: string, enum: [wso2, wso2_cloud, null], nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+    ProductVersionPatch:
+      type: object
+      additionalProperties: false
+      description: Dates are YYYY-MM-DD. Listing fields apply to every live row of the version; deploymentProfile and publicId to this row only.
+      properties:
+        currentSupportStatus:
+          type: string
+          nullable: true
+          description: Case-insensitive; reads return the uppercase form.
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, maxLength: 150, nullable: true}
+        publicAbbreviation: {type: string, maxLength: 64, nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+        releaseLinks: {type: string, maxLength: 255, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          nullable: true
+          items: {type: string, maxLength: 50}
+        legacyStatus: {type: boolean}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        deploymentProfile:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: This row only.
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+          description: This row only; a live listing of the same product and version.
+    ProductVersionCreate:
+      type: object
+      additionalProperties: false
+      required: [version, profiles]
+      description: Dates are YYYY-MM-DD. One row per profile, all on one public listing.
+      properties:
+        version: {type: string, maxLength: 20}
+        profiles:
+          type: array
+          minItems: 1
+          description: One row per deployment profile; "" is a row with no profile.
+          items: {type: string, maxLength: 255}
+        currentSupportStatus:
+          type: string
+          nullable: true
+          description: Case-insensitive; reads return the uppercase form.
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, maxLength: 150, nullable: true}
+        publicAbbreviation: {type: string, maxLength: 64, nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+        releaseLinks: {type: string, maxLength: 255, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          nullable: true
+          items: {type: string, maxLength: 50}
+        legacyStatus: {type: boolean}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+          description: A live listing of the same product and version to join; omit it to start a new listing.
+    ReleaseLineWrite:
+      type: object
+      additionalProperties: false
+      description: name is required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        startDate: {type: string, format: date, nullable: true}
+        status: {type: string, maxLength: 50, nullable: true}
+    ReleaseLine:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        startDate:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        legacyId:
+          type: integer
+          format: int64
+          nullable: true
+        versionCount:
+          type: integer
+        retiredOn:
+          type: string
+          format: date-time
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    ReleaseLineList:
+      type: object
+      properties:
+        releaseLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseLine'
+    CarbonPlatformHistory:
+      type: object
+      description: >
+        A Carbon platform release and the product versions built on it.
+        releaseDateText is the legacy M/d/yyyy text, kept for the legacy
+        feed's ordering. The remaining properties are one version string
+        per Carbon-era product (esbVersion, apiManagerVersion, ...).
+      properties:
+        id:
+          type: integer
+        carbonVersion:
+            type: string
+            nullable: true
+        releaseDate:
+            type: string
+            format: date
+            nullable: true
+        releaseDateText:
+            type: string
+            nullable: true
+      additionalProperties:
+        type: string
+        nullable: true
+    CarbonPlatformHistoryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarbonPlatformHistory'
+    CarbonKernelRelease:
+      type: object
+      properties:
+        id:
+          type: integer
+        kernelRelease:
+            type: string
+            nullable: true
+        releaseDate:
+            type: string
+            format: date
+            nullable: true
+        carbonPlatform:
+            type: string
+            nullable: true
+    CarbonKernelReleaseList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarbonKernelRelease'
     CustomDashboard:
       type: object
       required: [id, name, definition, createdOn, updatedOn]
@@ -32376,51 +34175,6 @@ components:
         updatedOn:
           type: string
           format: date-time
-    SystemDashboard:
-      type: object
-      additionalProperties: false
-      required: [id, systemKey, isSystem, name, definition, createdOn, updatedOn]
-      properties:
-        id:
-          type: string
-          format: uuid
-        systemKey:
-          type: string
-        isSystem:
-          type: boolean
-          description: "Always true."
-        name:
-          type: string
-        definition:
-          type: string
-          description: "The dashboard JSON as text. Validated by the CSM portal backend; not parsed here."
-        createdOn:
-          type: string
-          format: date-time
-        updatedOn:
-          type: string
-          format: date-time
-    SystemDashboardList:
-      type: object
-      additionalProperties: false
-      required: [dashboards]
-      properties:
-        dashboards:
-          type: array
-          items:
-            $ref: '#/components/schemas/SystemDashboard'
-    SaveSystemDashboardRequest:
-      type: object
-      additionalProperties: false
-      required: [name, definition]
-      properties:
-        name:
-          type: string
-          maxLength: 255
-          description: "Trimmed; must not be blank."
-        definition:
-          type: string
-          description: "The dashboard JSON as text, at most 1048576 bytes; must not be blank."
     CustomDashboardSummary:
       type: object
       required: [id, name, createdOn, updatedOn]
@@ -32700,6 +34454,139 @@ components:
           type: string
           format: date-time
           nullable: true
+    EolProductUsageReport:
+      type: object
+      required: [generatedOn, asOf, totalVersions, totalAccounts, regions]
+      properties:
+        generatedOn: {type: string, format: date-time}
+        asOf: {type: string, format: date}
+        totalVersions:
+          type: integer
+          description: (project, product version) entries listed.
+        totalAccounts: {type: integer}
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageRegion'
+    EolProductUsageRegion:
+      type: object
+      required: [region, accounts]
+      properties:
+        region:
+          type: string
+          nullable: true
+          description: The account's region; null for accounts with no region (listed last).
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageAccount'
+    EolProductUsageAccount:
+      type: object
+      required: [accountId, accountName, csAbt, region, accountManager, technicalOwner, projects]
+      properties:
+        accountId: {type: string, format: uuid}
+        accountName: {type: string}
+        csAbt:
+          type: string
+          nullable: true
+          description: The account's CRE (ABT) team name; null when it has none.
+        region: {type: string, nullable: true}
+        accountManager:
+          $ref: '#/components/schemas/EolProductUsagePerson'
+        technicalOwner:
+          $ref: '#/components/schemas/EolProductUsagePerson'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageProject'
+    EolProductUsagePerson:
+      type: object
+      nullable: true
+      description: Null when the account has none; a name or email the user record lacks is left out.
+      properties:
+        name: {type: string}
+        email: {type: string}
+    EolProductUsageProject:
+      type: object
+      required: [projectId, projectName, projectKey, versions]
+      properties:
+        projectId: {type: string, format: uuid}
+        projectName: {type: string}
+        projectKey:
+          type: string
+          nullable: true
+          description: Null when the project has none.
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageVersion'
+    EolProductUsageVersion:
+      type: object
+      required: [productVersionId, productName, version, supportStatus, eolDate]
+      properties:
+        productVersionId: {type: string, format: uuid}
+        productName: {type: string}
+        version: {type: string}
+        supportStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        eolDate: {type: string, format: date}
+    SLABreachRow:
+      type: object
+      description: >-
+        One breached SLA clock, carrying the columns the source report
+        lists plus the case number its link needs.
+      properties:
+        team:
+          type: string
+          description: The account's integration CS team; the report groups on it.
+        wso2CaseId:
+          type: string
+        caseNumber:
+          type: string
+          description: Not a column in the source report; the case link needs it.
+        product:
+          type: string
+        caseType:
+          type: string
+        priority:
+          type: string
+          description: The case severity, which the source report labels Priority.
+        target:
+          type: string
+          description: The SLA policy's target - RESPONSE, RESOLUTION or WORKAROUND.
+        businessElapsedPercent:
+          type: number
+          format: double
+          description: Over 100 on a breached clock.
+        definition:
+          type: string
+          description: The SLA policy name; the sort key within a team.
+        breachedOn:
+          type: string
+          format: date-time
+        onboardingStatus:
+          type: string
+          description: The project onboarding status that decided which report this row belongs to.
+    SLABreachReport:
+      type: object
+      properties:
+        periodStart:
+          type: string
+          format: date-time
+          description: First instant of the week reported, inclusive.
+        periodEnd:
+          type: string
+          format: date-time
+          description: First instant of the next week, exclusive.
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLABreachRow'
+          description: >-
+            The matching breaches, ordered by the account's integration CS
+            team, then SLA definition, then breach time.
     ProductRegressionReport:
       type: object
       description: One monthly product regression report.
@@ -32945,6 +34832,88 @@ components:
           type: string
         technicalOwnerEmail:
           type: string
+    DeprecatedProductUsageReport:
+      type: object
+      required: [generatedOn, asOf, totalVersions, totalAccounts, regions]
+      properties:
+        generatedOn: {type: string, format: date-time}
+        asOf: {type: string, format: date}
+        totalVersions:
+          type: integer
+          description: (project, product version) entries listed.
+        totalAccounts: {type: integer}
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageRegion'
+    DeprecatedProductUsageRegion:
+      type: object
+      required: [region, accounts]
+      properties:
+        region:
+          type: string
+          nullable: true
+          description: The account's region; null for accounts with no region (listed last).
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageAccount'
+    DeprecatedProductUsageAccount:
+      type: object
+      required: [accountId, accountName, csAbt, region, accountManager, technicalOwner, projects]
+      properties:
+        accountId: {type: string, format: uuid}
+        accountName: {type: string}
+        csAbt:
+          type: string
+          nullable: true
+          description: The account's CRE (ABT) team name; null when it has none.
+        region: {type: string, nullable: true}
+        accountManager:
+          $ref: '#/components/schemas/DeprecatedProductUsagePerson'
+        technicalOwner:
+          $ref: '#/components/schemas/DeprecatedProductUsagePerson'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageProject'
+    DeprecatedProductUsagePerson:
+      type: object
+      nullable: true
+      description: Null when the account has none; a name or email the user record lacks is left out.
+      properties:
+        name: {type: string}
+        email: {type: string}
+    DeprecatedProductUsageProject:
+      type: object
+      required: [projectId, projectName, projectKey, versions]
+      properties:
+        projectId: {type: string, format: uuid}
+        projectName: {type: string}
+        projectKey:
+          type: string
+          nullable: true
+          description: Null when the project has none.
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageVersion'
+    DeprecatedProductUsageVersion:
+      type: object
+      required: [productVersionId, productName, version, supportStatus, eolDate]
+      properties:
+        productVersionId: {type: string, format: uuid}
+        productName: {type: string}
+        version: {type: string}
+        supportStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        eolDate:
+          type: string
+          format: date
+          nullable: true
+          description: The version's EOL date; null when it has none yet.
     MigrationCaseReport:
       type: object
       description: The weekly migration case scan.
@@ -33085,6 +35054,55 @@ components:
         csTeam:
           type: string
           description: Name of the CS team that owns the case's account, or empty.
+    MTTRReport:
+      type: object
+      description: The MTTR report.
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [0, 1, 3, 6, 12]
+          description: 0 when the report was asked for a day window.
+        windowDays:
+          type: integer
+          enum: [7]
+          description: Present only for a day window.
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+    MTTRReportBand:
+      type: object
+      description: One severity band's MTTR over the requested window.
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
     WorklogReport:
       type: object
       description: >-
@@ -33174,7 +35192,7 @@ components:
                     email: { type: string }
                     name: { type: string }
                     workedDays: { type: number, format: double }
-                    leave: { type: string }
+                    leave: { type: string, enum: [FD, HD], description: "Daily only: FD for a full-day leave, HD for a half day; omitted when not on leave." }
                     approvedIssues: { type: integer }
                     approvedHours: { type: number, format: double }
                     pendingIssues: { type: integer }
@@ -33346,6 +35364,55 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
+    AuditTriggerProblem:
+      type: object
+      properties:
+        schema:
+          type: string
+        table:
+          type: string
+        problem:
+          type: string
+
+    AuditLogMaintenanceResponse:
+      type: object
+      properties:
+        partitionsCreated:
+          type: integer
+          description: Monthly partitions this run created.
+        partitionsDeleted:
+          type: array
+          description: Names of the monthly partitions this run deleted because they ended at least the retention period ago.
+          items:
+            type: string
+        defaultRowsDeleted:
+          type: integer
+          format: int64
+          description: Rows older than the retention period this run deleted from the catch-all partition.
+        healthProblems:
+          type: array
+          description: |
+            Rows in the catch-all partition, or a missing monthly partition from this month to CSM_AUDIT_LOG_MONTHS_AHEAD months ahead.
+          items:
+            type: string
+        repairedTriggers:
+          type: array
+          description: Triggers that were missing, disabled or different from their registration and have been put back.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        unresolvedTriggers:
+          type: array
+          description: Triggers that are still wrong after the repair.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        stepErrors:
+          type: array
+          description: |
+            Steps that could not run at all, in words that carry no database detail (the full error
+            is in the service log). The other steps still ran and are reported above.
+          items:
+            type: string
+
     ErrorResponse:
       type: object
       description: >-
@@ -37277,9 +39344,28 @@ components:
         but callers should send the upper-case form.
       enum: [ESCALATE, DEESCALATE]
 
+    CaseDeescalators:
+      type: object
+      required: [deescalators]
+      properties:
+        deescalators:
+          type: array
+          items:
+            type: object
+            required: [userId, name, email, grantedBy, grantedOn, active]
+            properties:
+              userId: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: string }
+              grantedBy: { type: string }
+              grantedOn: { type: string, format: date-time }
+              active:
+                type: boolean
+                description: False when the holder is not active internal staff; the grant is listed so it can be removed but lets nobody de-escalate.
+
     CaseEscalationHistory:
       type: object
-      required: [escalations, total, currentNotifiedUsers, teamLeads]
+      required: [escalations, total, currentNotifiedUsers, teamLeads, deescalators]
       properties:
         escalations:
           type: array
@@ -37301,8 +39387,15 @@ components:
             $ref: '#/components/schemas/EscalationNotifiedUser'
           description: >-
             The leads of the case's account's CRE (ABT) team. Only these users may de-escalate
-            the case from the CSM portal. Empty when the account has no CRE team or the team
-            has no lead.
+            the case from the CSM portal, besides `deescalators`. Empty when the account has no
+            CRE team or the team has no lead.
+        deescalators:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationNotifiedUser'
+          description: >-
+            Active internal users an admin named as allowed to de-escalate any case (role
+            `case_deescalator`), besides the case's team leads. Empty when none is named.
 
     CaseEscalationCreateRequest:
       description: >
@@ -38472,6 +40565,14 @@ components:
       properties:
         caseId:
           type: string
+        id:
+          type: string
+          format: uuid
+          description: >-
+            This exact "sla" row's own id — pass it as GET
+            /sla-status/clock-state's slaId query parameter to re-check this
+            specific row later instead of its ambiguous "most recently
+            started" default.
         clockType:
           type: string
           description: One of response, workaround, resolution.
@@ -38556,6 +40657,13 @@ components:
       properties:
         found:
           type: boolean
+        id:
+          type: string
+          format: uuid
+          description: >-
+            This exact "sla" row's own id — pass it back as this endpoint's
+            slaId query parameter to re-check this specific row again,
+            instead of the ambiguous "most recently started" default.
         isActive:
           type: boolean
         stage:
@@ -38608,6 +40716,15 @@ components:
         teamLeadName:
           type: string
           description: Mirrors SLAStatus.teamLeadName. Empty when not resolvable.
+        assignmentGroupName:
+          type: string
+          description: An incident's current assignment group name. Omitted for every other work item type.
+        assignmentGroupTeamKey:
+          type: string
+          description: >-
+            The key of the team whose id an incident's current assignment group has: a specialist
+            handoff escalates to its SME team's group, which shares that team's id. Omitted when
+            none, and for every other type.
 
     SLADurationPolicyItem:
       type: object

@@ -18,11 +18,12 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { navNodeById } from "@config/csmNavItems";
+import { getPortalAccess } from "@context/current-user/portalAccess";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
 import HelpPage from "./HelpPage";
 
-// A CS engineer is shown every Help topic; the per-role filtering is
-// covered by featureFlags.access.test.ts.
+// A CS engineer is shown every Help topic except the catalogue managers' one;
+// the per-role filtering is covered by featureFlags.access.test.ts.
 vi.mock("@context/current-user/CurrentUserContext", () => ({
   useCurrentUser: () => ({
     user: { roles: ["cs_engineer"] },
@@ -56,7 +57,13 @@ describe("HelpPage", () => {
     render(<HelpPage />);
     const nav = screen.getByRole("navigation", { name: "Help topics" });
     const help = navNodeById("help");
-    const labels = (help?.children ?? []).map((child) => child.label);
+    // The mocked user is a plain cs_engineer: topics gated on access they lack
+    // (the Product catalogue, catalogue managers only) are left out.
+    const access = getPortalAccess(["cs_engineer"]);
+    const labels = (help?.children ?? [])
+      .filter((child) => !child.requires || access[child.requires])
+      .map((child) => child.label);
+    expect(labels).not.toContain("Product catalogue");
 
     const links = within(nav).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(labels);

@@ -25,6 +25,16 @@ describe("githubIssueCaseTags", () => {
     ]);
   });
 
+  it("tags a Feature Request s_dip like a Discussion, plus migration when it is one", () => {
+    expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Feature" })).toEqual([
+      "s_dip",
+    ]);
+    expect(githubIssueCaseTags({ reason: "migration", issueTypeLabel: "Type/Feature" })).toEqual([
+      "s_dip",
+      "migration",
+    ]);
+  });
+
   it("tags the case patch, and not s_dip, for a patch issue", () => {
     expect(githubIssueCaseTags({ reason: "default", issueTypeLabel: "Type/Patch" })).toEqual([
       "patch",

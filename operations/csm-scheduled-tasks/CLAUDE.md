@@ -34,7 +34,10 @@ either it's fixed or its own next period supersedes it.
    atomically decides allow/deny: a period this task hasn't seen before first supersedes any other
    still-open row for the same task, then claims fresh; an existing row whose retry time has
    arrived is bumped and claimed; anything else is denied.
-3. If allowed, run `Task.Handler`, then report back via `PATCH /scheduled-tasks/attempts/{id}`
+3. If allowed, run `Task.Handler` with the claimed period in its context (`schedule.WithPeriod`; a handler that
+   depends on its period reads it with `schedule.PeriodFromContext` rather than re-deriving it from the clock, which
+   after slow earlier tasks in the same tick can already be the next period), then report back via
+   `PATCH /scheduled-tasks/attempts/{id}`
    (one endpoint for both outcomes, `internal/ledger.Client.Complete`/`Fail` on the Go side) —
    `Complete` (success) or `Fail` (failure —
    sets `nextRetryOn`, never a permanent give-up state).
@@ -147,7 +150,7 @@ below for why that's not a generic engine feature. It mails entity-service's lon
 and OAuth client credentials as the other entity-service clients, no extra env vars) and
 `notify.RenderLongOpenCasesReport` renders the result as two tables, in this order: "Ongoing cases"
 (the report's `cases`, projects that are not being onboarded) and "Ongoing cases on onboarding
-projects" (`onboardingCases`). Columns: Case, WSO2 Case ID, Integration CS Team, Assignee, State,
+projects" (`onboardingCases`). Columns: Case, Choreo Labs Case ID, Integration CS Team, Assignee, State,
 Severity (S0-S4), Last updated, Created. Which cases count as ongoing, the split between the tables, the
 oldest-first order and the per-table row cap all live in entity-service; this task only fetches,
 renders and sends. The 30-day window is a fixed constant (`staleCaseOlderThanDays` in
@@ -230,6 +233,7 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 | Task | Default schedule | Announces |
 |---|---|---|
 | `rota_weekday_reminder` | `30 3 * * 0-4` (09:00 Colombo, Sun–Thu) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): always tomorrow, so **Monday from Sunday** |
+| `rota_weekday_mark_check` | `30 11 * * 0-3,6` (17:00 Colombo, Sat–Wed) | nothing to the rota: the evening before each `rota_weekday_reminder` run, tells the rota admins when a weekday rotation of the day that run will announce is short (see "Weekday rota check" below) |
 | `rota_weekend_notice` | `30 3 * * 1-4` (09:00 Colombo, Mon–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once (on Monday when it is already marked); until then the rota admins are asked every morning |
 | `rota_weekend_reminder` | `30 3 * * 5` (09:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
@@ -250,13 +254,25 @@ schedules assume `TZ=UTC` like every other here.
   a shift and its on-call variant (`<CODE>_OC`), which share hours: Morning (with its on-call
   person) and Evening. The email lists its window's people.
 - **Weekend: one summary email plus one invitation email per team per day.** The summary goes
-  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike, in the layout the
-  CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
-  ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
-  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
-  window longer than 10 hours that has 2+ people every day asking them to split it into morning
-  and evening shifts), the zone
-  legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
+  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike: "Hello Team,",
+  one sentence with the dates and two short points (check your hours, tell your team lead about a
+  swap; no "confirm your contact details": the email shows none), then **one plain table per day** ("Saturday, 14 November"):
+  Rotation | CRE Team | SRE Team, **a row per window** in rota order, so two rows, LK and Americas
+  (`dayRows`): the rotation with that day's hours on its own clock under it ("06:00 AM – 09:00 PM
+  IST"; the Americas rotations in PDT/PST), the CRE people one per line (the on-call person in
+  their window's row as "Jay (on-call)"), and the SRE people whose turns fall in it.
+  A turn on other hours than its window's row gets a row of its own; the SRE column is left out
+  when there are no SRE turns. Then a **Rotation Definitions** table, one row per CRE window
+  (a shift and its on-call variant share it): Rotation with its member count ("2 members + 1
+  on-call") | Local time | UTC window | Role ("General support", "General support + On-call";
+  no zone prefix, the local time names it). A general-support window longer than 10 hours with
+  2+ people every day gets "Please sync internally and ensure coverage throughout the window."
+  under its role. SRE rotations are not defined there. (Folding the definitions into the day
+  rows was tried and rejected: the separate table read better.) The email is up to 900px wide.
+  Under the definitions, the zone legend (with each
+  zone's UTC offset) and one daylight saving note per window; then a Notes list only when something
+  is not yet marked (the invitation line was dropped by request); then the Handover paragraphs,
+  the schedule link and "Regards, CSM Team Schedule" (`notify.RenderWeekendRota`).
   The Americas Weekend's hours, and the Americas On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
   invitations use the same hours. Then each window (LK
@@ -266,13 +282,17 @@ schedules assume `TZ=UTC` like every other here.
 - **The CRE weekend summary also lists the SRE weekend people** (`Config.Support`,
   `rotareminder.SREWeekendSupport`, set in `main.go` when `ROTA_REMINDER_FAMILY` is CRE): a
   second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
-  ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days. They
-  appear in an "SRE Weekend Support" block after the day teams ("Name (SRE Weekend, L1)", the
-  turn's `tier`), get one Rotation Definitions row per rotation (IST hours, "SRE support (L1 →
-  L2)" from the tiers seen), and are added to the summary's To. That is all: they never count
+  ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days, and
+  the weekend Day/Night windows that replace them once switched on, `SRE_WE_DAY` ("SRE
+  Weekend (Day)") and `SRE_WE_NIGHT` ("SRE Night (Weekend Night)"). They
+  are in each day's SRE Team column, each turn in the CRE window whose hours it overlaps most
+  (SRE Weekend with LK, SRE Night with Americas; the nearest start when none overlaps): "Kim (L1)"
+  (name and the turn's `tier`), one per line, with only the turn's IST hours under them
+  ("06:00 PM – 06:00 AM IST"): no rotation name, since the column is the SRE team's and the
+  tier and hours say which turn it is (by request). No disclaimer (dropped as noise, by request). They are added to the summary's To. That is all: they never count
   toward the weekend minimums, get no invitation or cancellation, and are not in the weekend
   record; IaaS and PaaS turns are not listed. The SRE read happens only when the summary is
-  being sent, and a failed read is logged and the summary goes without the block.
+  being sent, and a failed read is logged and the summary goes without the SRE column.
 - **Settings saved on the Rota Access tab win.** Every run first reads
   `GET /team-schedule/reminder-settings/{family}` (entity-service, migration 0242; the
   "CRE rota reminders" card, editable by a CSM admin or the CRE rota admin). When something
@@ -328,6 +348,20 @@ schedules assume `TZ=UTC` like every other here.
   so a test event never stands in for or blocks the real one; and the weekend's send record is
   neither read nor written, so the real reminders are unaffected. Works in every environment,
   production included, and needs no `ROTA_REMINDER_REDIRECT_TO`.
+- **Weekday rota check, and the rota admins on every weekday reminder.** A weekday reminder is never
+  held back. `rota_weekday_mark_check` runs at 17:00 IST the evening before each
+  `rota_weekday_reminder` run and checks the day it will announce (`NextWorkingDay` of tomorrow:
+  Saturday checks Monday, Wednesday Friday). A shift with fewer people than
+  `ROTA_REMINDER_WEEKDAY_REQUIRED` (default `CRE_EVENING=7`; people on leave are not counted, the
+  on-call variant does not count, one person counts once) gets one email to the family's rota admins
+  (`GET /team-schedule/rota-admins/{family}`; the task's alert audience when there are none) with a
+  Day | Rotation | Marked | Needed table naming the reminder's own date; a fully marked day sends
+  nothing. Only codes the weekday reminders announce are checked, and a retry that runs after the
+  09:00 reminder sends nothing (the admins are already copied on it). The weekday switch on the
+  card applies; the minimums are not on the card. Then every weekday reminder, scheduled and Send now,
+  copies (Cc) the rota admins, the email carrying the invitation included, and never makes them guests
+  of the event (`Config.Admins` / `AdminCopy`); the plain `copyTo` copy skips them. A failed admin read
+  is logged and the reminders go without the copy. "Send a test to me" copies nobody.
 - **Only a fully marked weekend is announced.** `ROTA_REMINDER_WEEKEND_REQUIRED` (default
   `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) is how many people each shift needs on each day; the on-call
   variant does not count. Until that holds, `rota_weekend_notice` emails the family's rota admins
@@ -365,8 +399,8 @@ schedules assume `TZ=UTC` like every other here.
   window -- its date and hours on the rotation's own clock (`clockOf`: IST, except a rotation in
   `ROTA_REMINDER_WINDOWS`, e.g. the Americas Weekend in PDT/PST) -- a Name | Rotation table, the
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
-  (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
-  Definitions table, the zone note and the handover paragraphs. Rotation names come from config
+  (`notify.RenderWeekendRota`, described above): "Hello Team,", the two points, a table per day (LK and Americas rows),
+  the rotation definitions, the zone note, the notes and the handover paragraphs. Still plain: greys only, no logo or branding. Rotation names come from config
   (`CODE=Name`). Names are escaped. Every subject starts `[<family>]`
   (`[CRE] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
@@ -635,8 +669,10 @@ both places.
   its date or invoice moved the event. An Open track whose saved `event_type` is `suspend` (and whose
   `actionSuspendProject`, if present, is `SUCCESSFUL`) does nothing when the decision is to suspend: no notice,
   no suspension, no record, and it does not mark the project closed for the other track
-  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
-  still resets the event to `open`, which clears this.
+  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date that has moved out past the
+  recorded window (`movedOut`: more days remain than the recorded window's day count, 0 for a recorded
+  suspend) resets the event to `open`, which clears this; the reset applies to any distance, not only
+  beyond 90 days (a date extended from +7 to +45 starts the next term's reminders over).
 - **Hybrid evaluation (screening, `ACP_SCREENING`, default ON).** Today every open project costs about six
   sequential Salesforce-backed calls, so a run takes tens of minutes. With screening on, a run first decides
   from **CSM's own copy** of the Salesforce data (entity-service's `/invoices/search` and
@@ -650,7 +686,7 @@ both places.
   - *Superset rule.* A project is a candidate if any of: (date) its CSM end date is missing or on or before
     today + 91 days (the widest window plus a day of margin; past dates included); (state) its
     `suspensionProcessState` records anything but "open" for either track, or cannot be parsed
-    (`suspensionstate.HasRecordedEvent`; the renewal reset still runs for a project far from its end date);
+    (`suspensionstate.HasRecordedEvent`; the reset still runs for a project whose date moved out past its recorded window);
     (invoice) it owns, through a link, an unpaid invoice with a due date on or before today + 91 days. The
     invoice test is safe because the suspend date is the due date, or invoice date + 60 days when the grace
     period applies and the credit period is at most 60 days, which is never earlier than the due date: a
@@ -869,7 +905,7 @@ csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 -
 
 **Recipient override (`--recipients`, `--cc`).** Valid for every report task: the two CS Worklogs reports,
 `migration_case_report`, `open_cases_report`, `stale_cases_report`, `unresolved_products_digest`, the three
-`product_regression_report_*` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
+`product_regression_report_*`, `eol_product_usage_report` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
 refuses to run if one of them is registered without the hook, `tasksMissingReportRunNow`). One mechanism: each task's
 `RunNowNarrow` is `reportRunNow(normal, raw, build)` (the CS Worklogs ones `worklogsRunNow`, which also takes the window
 flags), and `build` is the task's own handler constructor, so the scheduled `Handler` is untouched. With
@@ -913,6 +949,7 @@ reading the handlers' code and doc comments (a judgement, not a test):
 - **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
   `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
   `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports,
+  `eol_product_usage_report` (a run-now sends whatever the date),
   `time_card_report` (customer-facing: a repeat mails every contact of the project again).
   `unresolved_products_digest` also mails every run it finds anything.
 - **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
@@ -937,6 +974,16 @@ the run-now is safe beside the scheduled run for the reason above: entity-servic
 `--limit` may not exceed `AUTOCLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
 `AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
 the logs (`run-now: ...`).
+
+## Audit log maintenance
+
+**`audit_log_maintenance`** (default `0 1 * * 1`, Mondays at 01:00 UTC) is the weekly upkeep of entity-service's field-level audit log (its migration `0295`). It is a trigger, not a calculator: `internal/auditlog.Client` calls `POST /audit-log/maintenance` (service credentials only: this component's client id must be in entity-service's `M2M_CLIENT_IDS`), and the work runs in the database. Entity-service creates the coming monthly partitions, checks the log's health and puts back audit triggers that were missing, disabled or different from their registration; its own CLAUDE.md ("Audit log maintenance") has the details. This is the only scheduler of that upkeep: entity-service has none of its own.
+
+A 200 from entity-service means the steps ran, not that all is well, so `auditlog.Maintenance` reads the lists in the response and **returns an error for any of them**: a step that could not run (`stepErrors`), a health problem (rows in the catch-all partition, a missing monthly partition from this month to the months entity-service creates ahead), a trigger that was repaired (the history had a gap while it was off) or one still wrong after the repair. The error names each, the engine mails it, and the next tick retries. The upkeep is safe to repeat, so the retry succeeds once nothing is wrong any more, which is also how a repaired trigger stops alerting.
+
+**Off unless `AUDIT_LOG_MAINTENANCE_ENABLED=true`** (default false): neither the client nor the task is created otherwise. Turn it on only once entity-service has `CSM_AUDIT_LOG_ENABLED=true` (without it the endpoint answers 404), migration `0295` applied and its database role has `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health(int)`, `audit_reconcile(boolean)`, `audit_delete_expired_partitions(int, text)` and `audit_delete_expired_default_rows(int, text)`; before that every run fails and mails. A failed audit write fails the business write, so once the audit log is in use, a stopped upkeep is an outage a few months out: alert on `SELECT count(*) FROM audit_partition_health()` too, which does not depend on this task.
+
+Deleting audit data older than 18 months is part of the same entity-service call (its last step, `CSM_AUDIT_LOG_RETENTION_MONTHS`): the response lists the dropped partitions as `partitionsDeleted` and the expired catch-all rows as `defaultRowsDeleted`, which this task ignores because a deletion is the expected outcome, not a problem. A step that could not run still arrives in `stepErrors` and fails the run like any other (see entity-service's CLAUDE.md).
 
 ## Usage rollups
 
@@ -1046,15 +1093,59 @@ that's too noisy for a given task in practice, the fix is a notification-frequen
 on top later, not a retry cap.
 
 The email itself (`internal/notify/templates/alert.html`, rendered by `notify.RenderAlertEmail`) is
-a plain HTML template in the same table-based, WSO2-branded style
-`integrations/csm-notification-service`'s own templates use (`escapeHTML`/`escapeMultiline` mirror
-that service's own functions of the same name) — task name, period, attempt count, next retry time,
-and the failure's error message.
+a plain HTML template in the same table-based, configurable-branding style (see "Logo and company
+name" below) `integrations/csm-notification-service`'s own templates use (`escapeHTML`/
+`escapeMultiline` mirror that service's own functions of the same name) — task name, period,
+attempt count, next retry time, and the failure's error message.
 
 The engine itself still never sends a success email on any task's behalf — `stale_cases_report`'s
 and `open_cases_report`'s own reports (see "Stale cases report"/"Open cases report" above) are each
 sent from inside that task's own handler, not through this alerting path at all. See "Per-task
 report emails" below for why that's not a generic engine feature.
+
+## Logo and company name
+
+Every email this component sends — `internal/notify`'s eight report/alert templates and
+`internal/acp/notify`'s five ACP closure templates alike — carries a configurable logo and company
+name, mirroring `integrations/csm-notification-service`'s own equivalent config.
+`EMAIL_LOGO_DARK_URL`/`EMAIL_TEMPLATE_COMPANY_NAME` are the same env var names that service uses,
+reusable verbatim across a deployment; `EMAIL_LOGO_LIGHT_URL` is this component's own name for its
+equivalent of that service's `EMAIL_LOGO_WHITE_URL`. Unset keeps every built-in default: the company name `Choreo Labs`,
+a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
+
+- **`EMAIL_LOGO_LIGHT_URL`** overrides `internal/notify.SetLogoURL` — all eight of that package's
+  templates share one dark navy header, so they all need the same light-colored logo.
+  **`EMAIL_LOGO_DARK_URL`** overrides `internal/acp/notify.SetLogoURL` — all five of that package's
+  templates share one light background, so they need a dark-colored logo instead. The two are
+  deliberately separate env vars, not one shared value, since the two packages' templates need
+  opposite logo colors.
+- **`EMAIL_TEMPLATE_COMPANY_NAME`** overrides both packages' `SetCompanyName` with the same value —
+  it is the same real-world company name regardless of which package sends the email. Replaces the
+  default name "Choreo Labs" in: the copyright line and the "Choreo Labs Case Id"/"Choreo Labs Case
+  ID"/"Choreo Labs ID"/"Choreo Labs Product" report column headers (`internal/notify`); the footer disclaimer ("sent by Choreo Labs's
+  support system") and logo alt text, across all five ACP templates (`internal/acp/notify`); and
+  the plain-text ACP suspension/invoice notice bodies' own "Choreo Labs Team" signoffs and "Choreo Labs
+  subscription"/"Choreo Labs Account Manager"/"Choreo Labs services" body copy (`internal/acp/sweep`'s
+  `sweep.go`/`invoice.go`, which call `notify.CompanyName()` — note this is `internal/acp/notify`'s
+  `CompanyName`, not `internal/notify`'s own same-named function; the two packages are independent
+  and only share the config value, never package state).
+- **Deliberately NOT routed through this config**: `internal/notify.humanizeState`'s own "wso2" ->
+  "WSO2" case-state mapping (e.g. "Waiting On WSO2") stays hardcoded — see that function's own doc
+  comment for why (an internal-only report audience, no branding reason to vary it).
+  `time_card_report.html` (the one genuinely customer-facing email in this component) and the rota
+  reminder emails carry no logo or company name at all, by design — see "Monthly time card report"
+  and "Rota reminders" above.
+- **Gmail dark mode.** Gmail ignores `prefers-color-scheme` and recolours emails itself, which turned the navy
+  header and its white title grey. Each template's header band and title cell therefore carry the navy as
+  `background-image: linear-gradient(...)` as well as `background-color`, the white title and the worklogs
+  figures sit in a span with the white gradient clipped to the text (`-webkit-background-clip: text`, transparent
+  fill), and a `.headerBand` rule pins the band in the dark-mode block. The span is wrapped in `[if !mso]`
+  comments because Outlook desktop ignores the clip and would show an invisible title; there the cell's own white
+  applies. Reuse this for any new white-on-navy text.
+- A template baked with `bakeLogo` must also be listed in `logoTemplates()` (internal/notify), or neither
+  override reaches it; `TestLogoTemplates_ListsEveryBakedTemplate` fails when one is missing.
+- Wired once, unconditionally, in `cmd/server/main.go`, right after `loadDotEnv`/the logger setup —
+  before anything else in `main` constructs an email client or renders a template.
 
 ## Environment variables
 
@@ -1077,6 +1168,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_COPY_TASK_RECIPIENTS` | No (default `false`) | Also copies each task's `SUB_CRON_RECIPIENTS` on every reminder |
 | `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
+| `ROTA_REMINDER_WEEKDAY_REQUIRED` | No (default `CRE_EVENING=7`) | `CODE=N` pairs: how many people each weekday shift needs; `rota_weekday_mark_check` tells the rota admins the evening before when one is short |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the Americas On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
@@ -1089,12 +1181,17 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `ATTACHMENT_RETENTION_ENABLED` / `ATTACHMENT_RETENTION_DAYS` / `ATTACHMENT_RETENTION_DRY_RUN` / `ATTACHMENT_RETENTION_BATCH_SIZE` | No (defaults `false` / `90` / `true` / `100`) | Registers and tunes the `attachment_retention_expire` sub-cron — see "Housekeeping" above |
+| `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset uses `CSM_PORTAL_WEB_BASE_URL`; with neither set, plain text |
+| `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the deprecated product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `AUDIT_LOG_MAINTENANCE_ENABLED` | No (default `false`) | Registers the `audit_log_maintenance` sub-cron — see "Audit log maintenance" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset uses `CSM_PORTAL_WEB_BASE_URL`; with neither set, plain text |
+| `EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the EOL product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
@@ -1104,6 +1201,53 @@ instead of being cut off mid-request with no chance to react.
 
 `.env` is auto-loaded from the working directory at startup if present (silently ignored if
 absent), matching `integrations/csm-notification-service`'s own convention.
+
+## Monthly deprecated product usage report
+
+`internal/deprecatedusagescan.SendReport`, registered as **`deprecated_product_usage_report`**, is the port of
+the previous system's *Deprecated Product Version Usage Monthly Report*: the customers running a product version whose support
+status is Deprecated in an active Primary Production deployment, mailed to the people who should act on it.
+entity-service builds the list (`GET /reports/deprecated-product-usage?asOf=YYYY-MM-DD`, client in
+`internal/deprecatedusagereport`; the joins and the Deprecated rule live there) and this task mails it through its own
+template (`internal/notify/templates/deprecated_product_usage_report.html`,
+`notify.RenderDeprecatedProductUsageReport`): the previous mail's opening sentence and a call to action, then one
+table per region, each account's cells (account, CS ABT, account manager, technical owner) spanning its rows and each
+project's cell spanning its versions; there is no Region column, as each region has its own heading. A version with
+no EOL date yet shows "Not set". It has the same structure and behaviour as the EOL product usage report; only the
+version rule differs. A deprecated version whose EOL date has passed is in both reports, on purpose.
+
+- **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's date in Asia/Colombo and
+  sends only when it is a Monday from the 1st to the 7th; any other date succeeds without fetching anything. That Monday is the
+  run's claimed period (`schedule.PeriodFromContext`; `Options.Anchor` only outside the engine), not the clock: the engine retries a
+  failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
+  A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
+  report can then be sent by hand with `--run-now=deprecated_product_usage_report`. A `--run-now` sends whatever the
+  date (`Options.AnyDay`) and takes `--recipients`/`--cc` like every report task (`reportTaskNames`). A
+  `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use `--run-now` with `--recipients`
+  to test on another day.
+- **Report date.** The day the run actually happens, in Asia/Colombo: the list is the versions' current Deprecated
+  status, so a first-Monday run retried on Thursday shows Thursday's catalogue and is dated Thursday. Only the "is it
+  the first Monday" check uses the period key. (The EOL report differs on purpose: its date drives its query.)
+- **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
+  audience agreed with CS. It is internal only.
+- **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
+  account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
+  To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
+  `To`/`Cc` nil for the same reason as theirs: failures go to `ALERT_RECIPIENTS` alone, never to every account
+  manager on each retry. Because of that, `main.go` checks its own audience against `EMAIL_BASE_URL` at startup.
+- **No deprecated usage.** An empty report **is sent**: a short "no customers are using deprecated product
+  versions" note to the configured to/cc only, so the leadership group knows the report ran.
+- `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages;
+  unset, the report uses `CSM_PORTAL_WEB_BASE_URL` (the portal URL the other reports link to), and with neither set
+  names stay plain text. A non-https value refuses to start.
+- **An empty `to` only switches the report off for a plain sender.** With a debug list (debug mail mode) or a run-now
+  recipient override, `notify.Redirects` is true and both monthly reports still build and send, to the redirect only;
+  configuring a debug list without a `to` is how a report is tried without its real recipients.
+- **Same checks as the EOL report.** A scheduled run sends only when its date is a Monday from the 1st to the 7th, and
+  `Audience` adds an account manager or technical owner only when it is a single plain address (`net/mail`) and, when
+  `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` is set, in one of those domains; the rest are dropped and counted
+  in a warning. Keep the two tasks' rules the same when changing either.
 
 ## Monthly product regression reports
 
@@ -1138,6 +1282,49 @@ unit mail groups, and a failed period is retried on every tick, so failure alert
 `ALERT_RECIPIENTS` only.
 `PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
 (`<prefix>/<case number>`); unset keeps the plain text the PDF had.
+
+## Monthly EOL product usage report
+
+`internal/eolusagescan.SendReport`, registered as **`eol_product_usage_report`**, is the port of the previous system's *EOL
+Product Version Usage Monthly Report*: the customers still running a product version past its EOL date in an active
+Primary Production deployment, mailed to the people who should act on it. entity-service builds the list (`GET
+/reports/eol-product-usage?asOf=YYYY-MM-DD`, client in `internal/eolusagereport`; the joins and the EOL rule live
+there) and this task mails it through its own template (`internal/notify/templates/eol_product_usage_report.html`,
+`notify.RenderEolProductUsageReport`): the introduction the previous mail carried, then one table per region, each
+account's cells (account, CS ABT, account manager, technical owner) spanning its rows; there is no Region column, as each region has its own heading and table and each project's cell
+spanning its versions.
+
+- **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's date in Asia/Colombo and
+  sends only when it is a Monday from the 1st to the 7th; any other date succeeds without fetching anything. That Monday is the
+  run's claimed period (`schedule.PeriodFromContext`; `Options.Anchor` only outside the engine), not the clock: the engine retries a
+  failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
+  A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
+  report can then be sent by hand with `--run-now=eol_product_usage_report`. A `--run-now` sends whatever
+  the date (`Options.AnyDay`). A `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use
+  `--run-now` with `--recipients` to test on another day.
+- **Report date.** The report is fetched as of the run's Monday in Asia/Colombo, so a retry later in the week lists
+  the same versions.
+- **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
+  audience agreed with CS (account managers, technical owners and leadership see the same list). It is internal
+  only.
+- **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
+  account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
+  To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
+  `To`/`Cc` nil for the same reason as theirs: failures go to `ALERT_RECIPIENTS` alone, never to every account
+  manager on each retry; `eolUsageTaskWithRecipients` carries its audience to the startup `EMAIL_BASE_URL` check.
+- **No EOL usage.** Unlike the regression reports, an empty report **is sent**: a short "no customers are using EOL
+  product versions" note to the configured to/cc only, so the leadership group knows the report ran.
+- `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset,
+  the report uses `CSM_PORTAL_WEB_BASE_URL` (the portal URL the other reports link to), and with neither set names
+  stay plain text. A non-https value refuses to start.
+- **Account contacts are checked before they are mailed.** The report names customers, projects and versions, and the
+  manager and owner addresses come from user rows. `Audience` adds one only when it is a single plain address
+  (`net/mail`) and, when `EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` is set, in one of those domains; the rest are
+  dropped and counted in a warning. The configured to/cc are taken as given.
+- **First Monday, checked on the run's own date.** A scheduled run sends only when its date (the claimed period, so a
+  retry later in the week still counts) is a Monday from the 1st to the 7th, so a schedule overridden to fire daily
+  does not mail the report seven times.
 
 ## Monthly time card report
 
@@ -1287,3 +1474,5 @@ no server to leave running.
 go vet ./...              # vet
 go test -race ./...       # race-detector tests
 ```
+
+**Logo size is set by height, not width.** Every logo `<img>` in `internal/notify/templates` has a `height` attribute and `style="height:30px; width:auto"` (30 is the old 120px width divided by the built-in logo's 1277 x 317 ratio), so a configured logo shows at the same height the built-in one has and keeps its own proportions. The built-in logo looks as before. `TestEveryLogoIsSizedByHeight` enforces it for a new template.

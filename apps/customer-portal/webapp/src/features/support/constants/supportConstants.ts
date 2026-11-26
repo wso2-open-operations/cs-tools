@@ -130,6 +130,7 @@ export const CALL_SCHEDULABLE_CASE_STATUSES: CaseStatus[] = [
 export const CallRequestStatus = {
   CANCELED: "Canceled",
   COMPLETED: "Completed",
+  IN_PROGRESS: "In Progress",
   PENDING: "Pending",
   PENDING_ON_CUSTOMER: "Pending on Customer",
   REJECTED: "Rejected",

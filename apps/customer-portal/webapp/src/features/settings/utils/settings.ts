@@ -19,11 +19,11 @@ import { colors } from "@wso2/oxygen-ui";
 import { Code, Crown, Monitor, Shield, Star, Users } from "@wso2/oxygen-ui-icons-react";
 import {
   SETTINGS_CUSTOMER_ADMIN_ROLES,
-  NULL_PLACEHOLDER,
   SETTINGS_AVATAR_BACKGROUND_COLORS,
 } from "@features/settings/constants/settingsConstants";
 import type { SettingsRoleBadge } from "@features/settings/types/settings";
 import type { ProjectContact } from "@features/settings/types/users";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 /**
  * Returns all applicable role badges for a contact.
@@ -195,10 +195,15 @@ export function getInitials(
   lastName?: string,
   email?: string,
 ): string {
-  if (firstName || lastName) {
-    const first = (firstName ?? "").charAt(0).toUpperCase();
-    const last = (lastName ?? "").charAt(0).toUpperCase();
-    if (first || last) return `${first}${last}`.trim() || NULL_PLACEHOLDER;
+  // First two words of the cleaned, combined name -- not one initial per
+  // field -- so a multi-word firstName (e.g. "Mary Jane") still only
+  // contributes its own first two words, consistent with every other
+  // initials helper in this app.
+  const words = joinStaffName(firstName, lastName).split(/\s+/).filter(Boolean);
+  if (words.length > 0) {
+    return words.length === 1
+      ? words[0].charAt(0).toUpperCase()
+      : (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
   }
   if (email) {
     const parts = email.split("@")[0];

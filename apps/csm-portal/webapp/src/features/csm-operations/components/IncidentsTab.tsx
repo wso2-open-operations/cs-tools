@@ -87,8 +87,9 @@ import {
 } from "@features/csm-operations/utils/incidentsFiltersUrl";
 import {
   DEFAULT_VISIBLE_INCIDENT_COLUMNS,
-  INCIDENT_OPTIONAL_COLUMNS,
-  type IncidentOptionalColumnId,
+  INCIDENT_COLUMNS,
+  INCIDENT_COLUMNS_VIEW_ID,
+  type IncidentColumnId,
 } from "@features/csm-operations/utils/incidentListColumns";
 import IncidentsFilterBar from "@features/csm-operations/components/IncidentsFilterBar";
 import SortableHeaderCell from "@features/csm-operations/components/SortableHeaderCell";
@@ -109,9 +110,7 @@ const incidentSelectable = (incident: BeIncident): boolean => !isIncidentTermina
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
 
-const INCIDENT_OPTIONAL_COLUMN_IDS = Object.keys(
-  INCIDENT_OPTIONAL_COLUMNS,
-) as IncidentOptionalColumnId[];
+const INCIDENT_COLUMN_IDS = Object.keys(INCIDENT_COLUMNS) as IncidentColumnId[];
 
 function formatDate(value?: string | null): string {
   return (
@@ -123,9 +122,41 @@ function formatDate(value?: string | null): string {
   );
 }
 
-/** The cell of one optional column (see `INCIDENT_OPTIONAL_COLUMNS`) for an incident row; "—" when the value is missing. */
-function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident): JSX.Element {
+/** The cell of one column (see `INCIDENT_COLUMNS`) for an incident row; "—" when the value is missing. */
+function renderCell(id: IncidentColumnId, incident: BeIncident): JSX.Element {
   switch (id) {
+    case "number":
+      return <>{incident.number || "—"}</>;
+    case "subject":
+      return (
+        <Typography variant="body2" noWrap title={incident.subject ?? undefined}>
+          {incident.subject || "—"}
+        </Typography>
+      );
+    case "caller":
+      return <>{incident.caller?.name || "—"}</>;
+    case "state":
+      return incident.state ? (
+        <Chip
+          size="small"
+          variant="outlined"
+          color={incidentStateColor(incident.state)}
+          label={incidentStateLabel(incident.state)}
+        />
+      ) : (
+        <>—</>
+      );
+    case "priority":
+      return incident.priority ? (
+        <Chip
+          size="small"
+          variant="outlined"
+          color={incidentPriorityColor(incident.priority)}
+          label={incidentPriorityLabel(incident.priority)}
+        />
+      ) : (
+        <>—</>
+      );
     case "category":
       return <>{incident.category || "—"}</>;
     case "assignmentGroup":
@@ -140,10 +171,59 @@ function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident):
       return <>{incident.updatedBy || "—"}</>;
     case "createdOn":
       return <>{formatDate(incident.createdOn)}</>;
+    case "openedOn":
+      return <>{formatDate(incident.openedOn)}</>;
+    case "updatedOn":
+      return <>{formatDate(incident.updatedOn)}</>;
+  }
+}
+
+/** The plain-text value of one column for the CSV export, mirroring `renderCell`; empty when the value is missing. */
+function cellText(id: IncidentColumnId, incident: BeIncident): string {
+  switch (id) {
+    case "number":
+      return incident.number ?? "";
+    case "subject":
+      return incident.subject ?? "";
+    case "caller":
+      return incident.caller?.name ?? "";
+    case "state":
+      return incidentStateLabel(incident.state);
+    case "priority":
+      return incidentPriorityLabel(incident.priority);
+    case "category":
+      return incident.category ?? "";
+    case "assignmentGroup":
+      return incident.assignmentGroup?.name ?? "";
+    case "assignedTo":
+      return incident.assignedTo?.name || "Unassigned";
+    case "parent":
+      return incident.parent?.name ?? "";
+    case "createdBy":
+      return incident.createdBy ?? "";
+    case "updatedBy":
+      return incident.updatedBy ?? "";
+    case "createdOn":
+      return formatBackendTimestampForDisplay(incident.createdOn, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }) ?? "";
+    case "openedOn":
+      return formatDate(incident.openedOn);
+    case "updatedOn":
+      return formatDate(incident.updatedOn);
   }
 }
 
 type IncidentSortField = "createdOn" | "updatedOn" | "openedOn";
+
+/** The columns whose header sorts the list, and the field each sorts by. */
+const SORT_FIELD_BY_COLUMN: Partial<Record<IncidentColumnId, IncidentSortField>> = {
+  createdOn: "createdOn",
+  openedOn: "openedOn",
+  updatedOn: "updatedOn",
+};
 
 /**
  * Incidents listing for the Operations → Incidents tab. Searches
@@ -190,10 +270,10 @@ export default function IncidentsTab(): JSX.Element {
   const incidents = useMemo(() => data?.incidents ?? [], [data]);
   const total = data?.total ?? 0;
 
-  // "Customise columns" — see `caseListColumns.ts`'s equivalent doc comment;
-  // the default visible set is empty since none of these were columns at
-  // all before this feature, so a returning user sees no change until they
-  // open the picker.
+  // "Customise columns" — see `caseListColumns.ts`'s equivalent doc comment.
+  // Every column, the original seven included, can be hidden or reordered;
+  // the default visible set is those seven, so nothing changes until the
+  // picker is opened.
   const currentUserEmail = useIdTokenClaims()?.email;
   const currentUserId = useCurrentUser().user?.id;
   const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
@@ -202,17 +282,15 @@ export default function IncidentsTab(): JSX.Element {
     true,
   );
   const columnPrefs = useColumnPreferences({
-    viewId: "incidents",
+    viewId: INCIDENT_COLUMNS_VIEW_ID,
     userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
-    columns: INCIDENT_OPTIONAL_COLUMN_IDS.map((id) => ({
+    columns: INCIDENT_COLUMN_IDS.map((id) => ({
       id,
-      label: INCIDENT_OPTIONAL_COLUMNS[id].label,
+      label: INCIDENT_COLUMNS[id].label,
     })),
     defaultVisibleIds: DEFAULT_VISIBLE_INCIDENT_COLUMNS,
   });
-  const visibleOptionalColumns = columnPrefs.visibleColumns.map(
-    (c) => c.id as IncidentOptionalColumnId,
-  );
+  const visibleColumns = columnPrefs.visibleColumns.map((c) => c.id as IncidentColumnId);
   // Bulk actions (Edit, Assign to me) on the selected rows, for those who may write.
   const { canWrite } = usePortalAccess();
   const queryClient = useQueryClient();
@@ -278,7 +356,7 @@ export default function IncidentsTab(): JSX.Element {
     selectAllRef.current?.focus();
   };
 
-  const columnCount = (canWrite ? 8 : 7) + visibleOptionalColumns.length; // [select,] Number, Subject, Caller, State, Priority, Opened, Updated + optional
+  const columnCount = (canWrite ? 1 : 0) + visibleColumns.length; // [select,] + the chosen columns
 
   const setFilters = useCallback(
     (next: IncidentFilters) => {
@@ -333,17 +411,10 @@ export default function IncidentsTab(): JSX.Element {
     [api, payload.filters, payload.sortBy],
   );
 
+  // The export follows the columns picked in "Customise incident columns", in the order shown.
   const incidentToCsvRow = useCallback(
-    (incident: BeIncident): string[] => [
-      incident.number ?? "",
-      incident.subject ?? "",
-      incident.caller?.name ?? "",
-      incidentStateLabel(incident.state),
-      incidentPriorityLabel(incident.priority),
-      formatDate(incident.openedOn),
-      formatDate(incident.updatedOn),
-    ],
-    [],
+    (incident: BeIncident): string[] => visibleColumns.map((id) => cellText(id, incident)),
+    [visibleColumns],
   );
 
   return (
@@ -358,7 +429,7 @@ export default function IncidentsTab(): JSX.Element {
         <FilteredExportMenu<BeIncident>
           entityName="incidents"
           title="Incidents"
-          header={["Number", "Subject", "Caller", "State", "Priority", "Opened", "Updated"]}
+          header={visibleColumns.map((id) => INCIDENT_COLUMNS[id].label)}
           toRow={incidentToCsvRow}
           fetchPage={fetchIncidentsPage}
           disabled={isError}
@@ -449,26 +520,20 @@ export default function IncidentsTab(): JSX.Element {
                     />
                   </TableCell>
                 )}
-                <TableCell>Number</TableCell>
-                <TableCell>Subject</TableCell>
-                <TableCell>Caller</TableCell>
-                <TableCell>State</TableCell>
-                <TableCell>Priority</TableCell>
-                {visibleOptionalColumns.map((id) => (
-                  id === "createdOn" ? (
+                {visibleColumns.map((id) => {
+                  const sortField = SORT_FIELD_BY_COLUMN[id];
+                  return sortField ? (
                     <SortableHeaderCell
                       key={id}
-                      label={INCIDENT_OPTIONAL_COLUMNS[id].label}
-                      field="createdOn"
+                      label={INCIDENT_COLUMNS[id].label}
+                      field={sortField}
                       sort={sort}
                       onSort={handleSort}
                     />
                   ) : (
-                    <TableCell key={id}>{INCIDENT_OPTIONAL_COLUMNS[id].label}</TableCell>
-                  )
-                ))}
-                <SortableHeaderCell label="Opened" field="openedOn" sort={sort} onSort={handleSort} />
-                <SortableHeaderCell label="Updated" field="updatedOn" sort={sort} onSort={handleSort} />
+                    <TableCell key={id}>{INCIDENT_COLUMNS[id].label}</TableCell>
+                  );
+                })}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -476,16 +541,9 @@ export default function IncidentsTab(): JSX.Element {
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
                     {canWrite && <TableCell padding="checkbox" />}
-                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={72} height={22} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
-                    {visibleOptionalColumns.map((id) => (
+                    {visibleColumns.map((id) => (
                       <TableCell key={id}><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
                     ))}
-                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : isError ? (
@@ -557,42 +615,11 @@ export default function IncidentsTab(): JSX.Element {
                         )}
                       </TableCell>
                     )}
-                    <TableCell>{incident.number || "—"}</TableCell>
-                    <TableCell sx={{ maxWidth: 360 }}>
-                      <Typography variant="body2" noWrap title={incident.subject ?? undefined}>
-                        {incident.subject || "—"}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>{incident.caller?.name || "—"}</TableCell>
-                    <TableCell>
-                      {incident.state ? (
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          color={incidentStateColor(incident.state)}
-                          label={incidentStateLabel(incident.state)}
-                        />
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {incident.priority ? (
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          color={incidentPriorityColor(incident.priority)}
-                          label={incidentPriorityLabel(incident.priority)}
-                        />
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    {visibleOptionalColumns.map((id) => (
-                      <TableCell key={id}>{renderOptionalCell(id, incident)}</TableCell>
+                    {visibleColumns.map((id) => (
+                      <TableCell key={id} sx={id === "subject" ? { maxWidth: 360 } : undefined}>
+                        {renderCell(id, incident)}
+                      </TableCell>
                     ))}
-                    <TableCell>{formatDate(incident.openedOn)}</TableCell>
-                    <TableCell>{formatDate(incident.updatedOn)}</TableCell>
                   </TableRow>
                 ))
               )}

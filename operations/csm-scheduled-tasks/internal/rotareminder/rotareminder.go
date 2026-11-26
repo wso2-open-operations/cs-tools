@@ -90,6 +90,12 @@ type ReminderStore interface {
 	RotaAdmins(ctx context.Context, family string) ([]teamschedule.RotaAdmin, error)
 }
 
+// AdminReader is the subset of *teamschedule.Client that says who the
+// family's rota admins are, for copying them on the weekday reminders.
+type AdminReader interface {
+	RotaAdmins(ctx context.Context, family string) ([]teamschedule.RotaAdmin, error)
+}
+
 // Config is what both tasks are built from. Everything about who is reminded
 // of what is configuration, set in cmd/server/main.go from the environment.
 type Config struct {
@@ -135,6 +141,19 @@ type Config struct {
 	// the weekend is announced ("CRE_WEEKEND" -> 3, "CRE_WEEKEND_NIGHT" -> 1).
 	// Only people on the shift itself count, not its on-call variant.
 	Required map[string]int
+	// WeekdayRequired is how many people each weekday shift needs
+	// ("CRE_EVENING" -> 7), checked the evening before the reminders by
+	// WeekdayMarkCheck. Only people on the shift itself count, not its
+	// on-call variant. Not changed by the saved settings.
+	WeekdayRequired map[string]int
+	// Admins, when set, is asked at every weekday reminder run who the
+	// family's rota admins are; they are copied (Cc) on every weekday
+	// reminder, the one carrying the invitation included, and are never a
+	// guest of the event. A failed read is logged and the reminders go
+	// without them.
+	Admins AdminReader
+	// AdminCopy is the rota admins' addresses Admins found for this run.
+	AdminCopy []string
 	// Support is another family's weekend turns the weekend summary also
 	// lists (the SRE people on the CRE weekend). They are added to the
 	// summary's recipients only: they are not counted for the minimums and
@@ -193,9 +212,28 @@ func WeekdayReminder(rota RotaReader, email EmailSender, cfg Config) func(ctx co
 		if err != nil || !on {
 			return err
 		}
+		cfg.AdminCopy = adminCopy(ctx, cfg)
 		day := dayOf(cfg.anchor(), cfg.Zone)
 		return announce(ctx, rota, email, cfg, []time.Time{NextWorkingDay(day)})
 	}
+}
+
+// adminCopy is the rota admins' addresses to copy on this run's weekday
+// reminders. None for a test (nothing is copied) or without cfg.Admins. A
+// failed read is logged and none are copied: the reminder matters more than
+// the copy, and failing would hold it back.
+func adminCopy(ctx context.Context, cfg Config) []string {
+	if cfg.Admins == nil || cfg.Test {
+		return nil
+	}
+	admins, err := cfg.Admins.RotaAdmins(ctx, cfg.Family)
+	if err != nil {
+		slog.ErrorContext(ctx, "rota reminder: could not read the rota admins; the reminders go without copying them",
+			"family", cfg.Family, "err", err)
+		return nil
+	}
+	to, _ := adminAddresses(admins)
+	return to
 }
 
 // anchor is the moment the run's rota days are counted from (Config.Anchor).

@@ -18,9 +18,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
@@ -38,6 +40,29 @@ type ProductRepository interface {
 	// with the total count of matching rows before pagination.
 	// COUNT and SELECT are executed concurrently on separate pool connections.
 	SearchProducts(ctx context.Context, req domain.SearchProductsRequest) ([]domain.Product, int, error)
+	// GetProduct returns nil when there is no such id.
+	GetProduct(ctx context.Context, id string) (*domain.Product, error)
+}
+
+// productSelect reads a product with its catalogue fields and version counts.
+const productSelect = `SELECT p.id, p.name, p.category, p.created_on, p.updated_on,
+	p.code, lower(p.unit::text), lower(p.business_unit::text), lower(p.manufacturer::text), p.description,
+	(SELECT count(*) FROM product_version pv WHERE pv.product_id = p.id AND pv.retired_on IS NULL),
+	(SELECT count(*) FROM product_version pv WHERE pv.product_id = p.id AND pv.retired_on IS NOT NULL),
+	(SELECT count(*) FROM product_version pv WHERE pv.product_id = p.id AND pv.retired_on IS NULL
+		AND pv.current_support_status IS DISTINCT FROM 'DISCONTINUED')
+	FROM product p`
+
+func scanProduct(row pgx.Row) (domain.Product, error) {
+	var p domain.Product
+	var category string
+	if err := row.Scan(&p.ID, &p.Name, &category, &p.CreatedOn, &p.UpdatedOn,
+		&p.Code, &p.Unit, &p.BusinessUnit, &p.Manufacturer, &p.Description,
+		&p.VersionCount, &p.RetiredVersionCount, &p.ActiveVersionCount); err != nil {
+		return p, err
+	}
+	p.Class = domain.ProductClass(strings.ToLower(category))
+	return p, nil
 }
 
 type productRepo struct {
@@ -59,25 +84,24 @@ func (r *productRepo) SearchProducts(ctx context.Context, req domain.SearchProdu
 	if req.SearchQuery != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.SearchQuery)
 		pattern := "%" + escaped + "%"
-		where += fmt.Sprintf(" AND (name ILIKE $%d ESCAPE '\\')", argIdx)
+		where += fmt.Sprintf(" AND (p.name ILIKE $%d ESCAPE '\\')", argIdx)
 		filterArgs = append(filterArgs, pattern)
 		argIdx++
 	}
 
 	if req.Class != "" {
-		where += fmt.Sprintf(" AND category = $%d::product_category_enum", argIdx)
+		where += fmt.Sprintf(" AND p.category = $%d::product_category_enum", argIdx)
 		filterArgs = append(filterArgs, strings.ToUpper(string(req.Class)))
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM product " + where
+	countQuery := "SELECT COUNT(*) FROM product p " + where
 
 	dataQuery := fmt.Sprintf(
-		`SELECT id, name, category, created_on, updated_on
-		 FROM product %s
-		 ORDER BY created_on DESC, id
+		`%s %s
+		 ORDER BY p.created_on DESC, p.id
 		 LIMIT $%d OFFSET $%d`,
-		where, argIdx, argIdx+1,
+		productSelect, where, argIdx, argIdx+1,
 	)
 	dataArgs := append(append([]any{}, filterArgs...), req.Pagination.Limit, req.Pagination.Offset)
 
@@ -102,12 +126,10 @@ func (r *productRepo) SearchProducts(ctx context.Context, req domain.SearchProdu
 
 		result := make([]domain.Product, 0, req.Pagination.Limit)
 		for rows.Next() {
-			var p domain.Product
-			var category string
-			if err := rows.Scan(&p.ID, &p.Name, &category, &p.CreatedOn, &p.UpdatedOn); err != nil {
+			p, err := scanProduct(rows)
+			if err != nil {
 				return fmt.Errorf("scan product: %w", err)
 			}
-			p.Class = domain.ProductClass(strings.ToLower(category))
 			result = append(result, p)
 		}
 		if err := rows.Err(); err != nil {
@@ -122,4 +144,16 @@ func (r *productRepo) SearchProducts(ctx context.Context, req domain.SearchProdu
 	}
 
 	return products, total, nil
+}
+
+// GetProduct implements ProductRepository.
+func (r *productRepo) GetProduct(ctx context.Context, id string) (*domain.Product, error) {
+	p, err := scanProduct(r.db.QueryRow(ctx, productSelect+` WHERE p.id = $1::uuid`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get product: %w", err)
+	}
+	return &p, nil
 }

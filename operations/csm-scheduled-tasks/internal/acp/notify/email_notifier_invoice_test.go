@@ -43,7 +43,7 @@ func invoiceReminderBody() string {
 		"Opportunity: Acme - APIM - Y1",
 		"Due Date: 2026-02-15",
 		"Since projects need to be due on the due date of each invoice, kindly take the remedial actions to avoid any disruptions of subscription support. We appreciate your understanding and your prompt attention to this matter.",
-		"Best Regards,\nWSO2 Team",
+		"Best Regards,\nChoreo Labs Team",
 	}, "\n\n")
 }
 
@@ -97,10 +97,10 @@ func TestEmailNotifier_Send_InternalInvoiceNoticeNestsInvoiceFields(t *testing.T
 	if !strings.Contains(got, "Dear Jordan Perera") {
 		t.Error("htmlBody missing the greeting")
 	}
-	if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "WSO2 Team") {
+	if !strings.Contains(got, "Best Regards") || !strings.Contains(got, "Choreo Labs Team") {
 		t.Error("htmlBody missing the sign-off")
 	}
-	if !strings.Contains(got, wso2LogoURL) {
-		t.Error("htmlBody missing the WSO2 logo")
+	if !strings.Contains(got, defaultLogoURL) {
+		t.Error("htmlBody missing the logo")
 	}
 }

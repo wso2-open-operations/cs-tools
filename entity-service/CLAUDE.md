@@ -69,7 +69,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
-| `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
+| `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; a value Salesforce sends empty clears its column; see "Salesforce Account ingest" for the full column set |
 | `CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Opportunity` envelopes (`sf_opportunity` plus its `sf_opportunity_product` line items, see "Salesforce Opportunity ingest" below) and `Linked_Opportunity__c`, `Invoice__c` and standalone `OpportunityLineItem` envelopes (`sf_opportunity_link`, `sf_invoice`, `sf_opportunity_product`); off, they are acknowledged and ignored. Keep it off while csm-sync-service still copies these tables from ServiceNow: the two writers use different row ids and `sf_id` is not unique, so both on means duplicate rows |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project__c` envelopes (see "Salesforce Project ingest" below); off, they are acknowledged and ignored. Update-only unless the insert switch is on too |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` | no | `false` | With the project flag on, lets the Project ingest and `EnsureProject` insert projects CSM does not have. Keep it off while csm-sync-service still inserts `project` rows (different id schemes and a UNIQUE `key`: its insert would fail forever); turn it on at cutover |
@@ -77,7 +77,11 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_ACP_REOPEN_ENABLED` | no | `false` | Must be `"true"` for the ACP reopen check to run after `Project__c` / `Invoice__c` events (see "ACP reopen" below). Also needs a pool and the `SALES_ENTITY_*` client. Independent of the ingest flags |
 | `CSM_ACP_REOPEN_DRY_RUN` | no | `true` | The reopen check decides and logs `acp reopen: dry run, would reopen`, and writes nothing. Only an explicit `false` turns it off; an unparseable value keeps it on |
 | `CSM_ACP_REOPEN_TEST_PROJECT_SF_ID` | no | — | When set, the reopen check acts on this one Salesforce project only (15- or 18-character id). For staging tests |
+| `ACP_INTERNAL_EMAIL_DOMAINS` | no | `@wso2.com` | Comma-separated domains the "Back to Open state" notice may go to. Each must start with `@` (it is matched as a suffix, so `wso2.com` would admit `someone@notwso2.com`); `Validate` refuses anything else. Add a domain here, not in code, when internal addresses move to another one |
 | `ACP_REACTIVATION_POLL_INTERVAL` | no | `5s` | How often `ProjectReactivationDrainer` looks for queued "Back to Open state" notices. Its own setting, so tuning `INCIDENT_REPORT_POLL_INTERVAL` never changes it |
+| `CSM_AUDIT_LOG_ENABLED` | no | `false` | Registers `POST /audit-log/maintenance`, the audit log's upkeep (see "Audit log maintenance" below). Off = the route is not registered and answers 404, and nothing runs. Parsed as a boolean; an unparseable value keeps it off, with a warning. Turn it on only once migration `0295` is applied and the database role has `EXECUTE` on the audit functions, then turn on csm-scheduled-tasks' `AUDIT_LOG_MAINTENANCE_ENABLED` |
+| `CSM_AUDIT_LOG_MONTHS_AHEAD` | no | `3` | Months past the current one that get an audit log partition when `POST /audit-log/maintenance` runs (see "Audit log maintenance" below). Must be 2 to 24: below 2 the log's own health check reports a problem every day. Any other value falls back to 3, with a warning naming it |
+| `CSM_AUDIT_LOG_RETENTION_MONTHS` | no | `18` | How long audit rows are kept. Each weekly `POST /audit-log/maintenance` run deletes (detaches and drops) the monthly partitions that ended at least this many months ago; nothing is archived. Must be 12 to 120: the floor stops a typo from deleting recent history. Any other value falls back to 18, with a warning naming it |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
 | `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
@@ -138,7 +142,23 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
   One run at a time per process. It upserts the current and next year for every country in
   use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
-  transient answer never wipes a year. Re-running is safe.
+  transient answer never wipes a year. Re-running is safe. The daily run starts **always**,
+  calendar configured or not: with neither `HOLIDAY_CALENDAR_*` nor `HR_ENTITY_*` it fetches
+  nothing but still places the Public holiday tags for the stored (manual) days.
+- **Added by hand** (migration 0293, `team_schedule_public_holiday.source` = `CALENDAR` /
+  `MANUAL`, `updated_by`): where no calendar is configured (prod today) this is the only
+  source. `GET /team-schedule/public-holidays?from&to&country` (internal staff, at most 366
+  days) lists the stored days with their source, the countries (stored ones plus Sri Lanka
+  and India) and `canEdit`; `POST /team-schedule/public-holidays {country, holidays:[{date,
+  title}]}` (up to 200 days, last year to two years ahead) stores them as MANUAL, a day
+  already stored taking the new title; `DELETE /team-schedule/public-holidays/{country}/{date}`
+  removes any stored day (404 when none). Writes are for a portal admin or a rota admin of
+  any family (`HolidayEditorCheck`, `schedule_holiday_editor.go`); a lead or Rota Manager may
+  not, because a holiday is per country and shared by every family. Each write places the
+  tags again in the background (`placeSoon`, past the request deadline), which also takes
+  away a removed day's untouched tags. **The refresh replaces only CALENDAR rows**
+  (`ReplaceCountryRange`): it never deletes a manual day or retitles one, so a calendar
+  configured later cannot wipe what was added by hand.
 - **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
   roster works while the services are down. A holiday is not leave and moves no shift.
 - **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
@@ -147,8 +167,11 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
     places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
     colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
-    on every member of a rostered CRE team (management left out) for each weekday holiday of
-    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    on every member of a rostered CRE team (management left out) for each coming weekday holiday
+    of their country, however far ahead (two years at most, a guard against a mistyped year), so
+    the roster shows a holiday's tags as soon as it is stored; a past day is never tagged. Leave
+    marked later over a tagged day cuts the tag out (`ApplyAbsence`), so an early tag blocks
+    nobody, and since the placement is recorded the tag does not come back. Like every tag it takes the day off the timesheet (the
     worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
     Alerts does not call them. A lead or rota manager makes somebody available by removing the
     tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
@@ -157,7 +180,18 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     placement and is kept after the tag is removed, so a removed tag is never placed again. A
     day the person already has any tag on (leave wins) is skipped and tried again the next day.
     A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
-    touched (still one day, created and updated by the actor) and forgets the placements.
+    touched (still one day, created and updated by the actor) and forgets the placements. So does
+    a tag whose country is no longer the person's (location changed, the India team became known)
+    or whose person left CRE (`RemoveMisplacedHolidayTags`, every run); their own country's holiday
+    is then placed. An empty member read removes nothing.
+    **Removal versus a run already placing:** `PlaceHolidayTag` tags only a day still stored and
+    holds that holiday row `FOR SHARE` until the tag commits, so a removal (by hand or by the
+    calendar) waits for it and the cleanup it starts sees the tag; and the cleanup never
+    forgets a placement whose tag is still standing untouched (one committed after its read),
+    so the next run removes that tag instead of leaving it with no record. A tag the cleanup
+    removes has its placement forgotten by its tag id in the same transaction, so a holiday
+    stored again meanwhile cannot leave a placement with no tag. Both are covered by
+    `TestHolidayAvailabilityRepository_RemovedHolidayRace`.
   - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
     its person available (no tag that day) **and** the team is confirmed
     (`team_schedule_holiday_confirmation`, one row per team and day). Confirm
@@ -178,6 +212,125 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
     leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
     (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
+
+## Audit log maintenance
+
+Migration `0295_audit_log_foundation.sql` adds the field-level audit log: `csm_audit_log` (one row per changed field, one partition per UTC month) and `audit_config` (the tables that are audited). A table is audited only after `register_audit()` is called for it, normally in the migration that creates it.
+
+### What is logged
+
+- **Updates and deletes only.** Every audit trigger is `AFTER UPDATE OR DELETE`, `audit_config` included. An update logs each changed field (old and new value); a delete logs every non-NULL column.
+- **`updated_on` and `updated_by` are never logged**, on any table. `audit_log_row_change` always leaves them out: each log row already has the actor and the time, and jobs that rewrite them on every run (the Salesforce ingest) would only add noise. An update that changes only those two logs nothing.
+- **Who added or changed a row is the row's own columns** (`created_by`, `created_on`, `updated_by`, `updated_on`), not the log. An audited table must carry them or an equivalent: `work_item`'s cover the 14 type tables that share its id, `case_attachment` has `uploaded_by`, `plg_note_revision` has `edited_by` / `edited_on`.
+- **Adding the columns to a table that lacks them** goes in a migration of its own, as `0304` did: nullable, `created_on DEFAULT now()`, `created_by DEFAULT audit_actor()`, and a `BEFORE UPDATE` trigger `csm_stamp_update` (`audit_stamp_update()`) that sets `updated_on` / `updated_by`. It is an ordinary trigger, so it does not fire under `session_replication_role = replica`; the audit trigger does.
+- **`created_by` is mandatory on `role`, `team`, `team_member`, `"user"` and `user_role`** (`0305`): `NOT NULL` with `DEFAULT audit_actor()`, so an insert that leaves it out is stamped instead of failing. A table that still holds a NULL stops the migration, naming the table and the row count.
+- **Who is the actor.** The trigger reads `app.audit_actor`, then `app.viewer_email`, then the database role. `repository.WithSystemIdentity` clears the viewer, so it keeps the person in `SearchScope.AuditActor`, and `queueIdentity` / `setCallerIdentity` set `app.audit_actor` with `app.viewer_email`. `ResolveScope` fills `AuditActor` for staff on any portal and for an `M2M_CLIENT_IDS` service that forwards a user token. A job with no request has no person, so its rows name the database role.
+- The `INSERT` branch in `audit_log_row_change` and `'INSERT'` in the action check are unused but kept: a database with older INSERT triggers keeps working while it is converted.
+
+### Tables that are audited
+
+| Migration | Tables |
+|---|---|
+| `0296`, `0297` | `work_item` and its 14 types, every column |
+| `0298` | `account`, `account_contact`, `project`, `project_contact`, `project_contact_group`, `user`, `role`, `user_role`; `account.sync_time_stamp` left out |
+| `0299` | `case_attachment`, `case_escalation`, `comment`, `comment_attachment`, `customer_call`, `sla`, `time_card`, `work_item_attachment`, `work_item_feedback`, `work_item_watcher` |
+| `0300` | `deployed_product`, `deployment`, `deployment_attachment`, `product`, `product_version`, `product_vulnerability`, `project_group`, `project_group_role`, `project_role`, `project_type` |
+| `0301`, `0302` | `case_escalation_notification_list`; `team`, `team_member` |
+| `0303` | `sf_invoice`, `sf_opportunity`, `sf_opportunity_link`, `sf_opportunity_product` (`sync_time_stamp` and `updated_on` left out), `sla_policy`, `plg_note_revision` |
+
+Other tables are added in their own migration when wanted. The Salesforce ingest writes the `sf_*` tables, so a bulk run pays the audit cost per row, and its rows name the ingest's database role. A column added to an audited table later is recorded with no change. Exclusions, masks and the binary-column rule are fixed by column name at registration: a `bytea` column added later is recorded, and renaming an excluded or masked column starts recording it, so call `register_audit` again after either.
+
+### The weekly upkeep
+
+`POST /audit-log/maintenance` (`serviceOnly`; `service.AuditLogMaintenanceService`) is called by `operations/csm-scheduled-tasks`, weekly (Mondays) by default, (its `audit_log_maintenance` sub-cron, which retries a failed run and mails the failure). This service has no scheduler for it, and one must not be added.
+
+- **Off unless `CSM_AUDIT_LOG_ENABLED=true`** (default false): the route is not registered and answers 404. Turning it on does not audit any table.
+- **Steps, in order:** create the coming partitions (`CSM_AUDIT_LOG_MONTHS_AHEAD`, default 3), reconcile triggers, delete expired partitions, delete expired catch-all rows, check health. Every step runs even if an earlier one fails. The SQL functions take an advisory lock, so a repeated or concurrent call is harmless.
+- **200 means the request was handled, not that all is well.** The body lists `partitionsDeleted`, `defaultRowsDeleted`, `healthProblems`, `repairedTriggers` (were missing, disabled or different from their registration, so the history had a gap), `unresolvedTriggers` (need a person) and `stepErrors` (a step that could not run, with no database detail; the full error is in this service's log). The scheduled task turns any problem into a failure and mails it. A 500 means only that the request was cancelled.
+- **Reconcile runs twice**, with repair on and then off. What the second call still lists is unresolved. A table that cannot be repaired logs a WARNING and does not stop the others.
+- **Locks are bounded.** The partition functions and a repairing `audit_reconcile` set a 2s `lock_timeout` first, so it covers the wait for the advisory lock too. A timeout is a step error, and the next weekly run tries again.
+- **Health** (`audit_partition_health(p_months_ahead)`) reports rows in the catch-all partition, and the current month and any of the next `CSM_AUDIT_LOG_MONTHS_AHEAD` months with no monthly partition, checked month by month, so a missed month is reported on the next run. Data past retention is not reported: a failed deletion is already a step error, and a second alert would cost more than the storage it protects. `SELECT count(*) FROM audit_partition_health()` (2 months ahead) works for a monitoring role even if the scheduled task is down.
+
+### Retention: 18 months, set in configuration
+
+`CSM_AUDIT_LOG_RETENTION_MONTHS` (default 18, from 12 to 120) is the only place the period is set. The SQL functions take it as an argument. Nothing is archived, and nothing is deleted row by row.
+
+- **Old partitions:** `audit_delete_expired_partitions` detaches and drops each monthly partition that ended at least that many months ago, in one transaction, so a failed drop puts it back. A partition that ended exactly 18 months ago goes; one that ended 17 months ago stays.
+- **Catch-all rows:** `audit_delete_expired_default_rows` handles the default partition, which is not a range. The log is append-only, so a DELETE is refused. It swaps the partition instead, in one transaction: detach it, create a fresh one with its TRUNCATE guard, copy the younger rows back with one `INSERT ... SELECT`, check that kept plus expired equals the total (else roll back), and drop the old table. With no expired row, the usual case, it takes no table lock. It takes the advisory lock first, so the check and the swap are one decision.
+- **Shared rules:** `audit_retention_cutoff` refuses a retention below 1 month, which would delete everything. Younger rows stay in the catch-all and keep raising a health problem, so a missed month is still alerted.
+- **Cost:** a detach briefly blocks audit writes, so each deletion gives up after the lock timeout and retries the next day. Tables an admin detached by hand earlier are not tracked: drop them yourself.
+
+### Operating it
+
+- **Grants.** The application role needs `EXECUTE` on `audit_create_partitions(int)`, `audit_partition_health(int)`, `audit_reconcile(boolean)`, `audit_delete_expired_partitions(int, text)` and `audit_delete_expired_default_rows(int, text)`, and nothing on the audit tables. The functions are `SECURITY DEFINER` and revoked from `PUBLIC`, as is the trigger function `audit_log_row_change()` (a trigger needs no grant to run). The role must not own the audit tables, or it could drop the trigger or insert rows. Without the grants the daily run fails and mails every day. Re-running `0295` drops a function whose name or signature changed, and its grant goes with it.
+- **Who may read the log.** It holds old and new field values, so `0295` revokes everything on `csm_audit_log` and `audit_config` from `PUBLIC` and grants `SELECT` on `csm_audit_log` only to the login-less role `csm_audit_reader`. It creates that role only when the migration role has `CREATEROLE`; otherwise it prints a notice and nobody but the owner can read. In prod a DBA runs this, adding only named people, never the application role or `PUBLIC`:
+
+  ```sql
+  CREATE ROLE csm_audit_reader NOLOGIN;  -- skip if it exists
+  GRANT SELECT ON csm_audit_log TO csm_audit_reader;
+  GRANT csm_audit_reader TO <person_role>, <person_role>;
+  ```
+
+  Members read through `csm_audit_log` (new partitions are covered; a query on a partition itself is refused), cannot read `audit_config` and cannot change anything. To review access:
+
+  ```sql
+  SELECT DISTINCT grantee FROM information_schema.role_table_grants
+   WHERE table_name = 'csm_audit_log' AND privilege_type = 'SELECT';
+  SELECT member::regrole FROM pg_auth_members WHERE roleid = 'csm_audit_reader'::regrole;
+  ```
+
+- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
+
+  ```sql
+  DO $$
+  DECLARE cfgs audit_config[]; c audit_config;
+  BEGIN
+      SELECT array_agg(a) INTO cfgs FROM audit_config a WHERE a.enabled;
+      FOREACH c IN ARRAY cfgs LOOP
+          PERFORM register_audit(c.schema_name, c.table_name, c.key_columns, c.excluded_columns, c.masked_columns);
+      END LOOP;
+  END $$;
+  ```
+
+- **Rows in the catch-all block their month.** Creating a monthly partition fails while rows for that month sit in `csm_audit_log_default`, so `audit_create_partitions` skips that month with a WARNING and `healthProblems` reports the rows. An admin moves them in one transaction (rename first: the old table must not keep the name `csm_audit_log_default`):
+
+  ```sql
+  BEGIN;
+  SET LOCAL lock_timeout = '5s';
+  -- Block audit writes first, so the count below stays true until COMMIT.
+  LOCK TABLE csm_audit_log IN SHARE MODE;
+  CREATE TEMP TABLE audit_rows_before ON COMMIT DROP AS SELECT count(*) AS n FROM csm_audit_log;
+  ALTER TABLE csm_audit_log DETACH PARTITION csm_audit_log_default;
+  ALTER TABLE csm_audit_log_default RENAME TO csm_audit_log_default_old;
+  CREATE TABLE csm_audit_log_default PARTITION OF csm_audit_log DEFAULT;
+  CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_default
+      FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
+  SELECT audit_create_partitions(<months>);   -- current and coming months only
+  -- Past months: one partition each, explicit UTC bounds, with the TRUNCATE guard.
+  CREATE TABLE csm_audit_log_2026_09 PARTITION OF csm_audit_log
+      FOR VALUES FROM ('2026-09-01 00:00:00+00') TO ('2026-10-01 00:00:00+00');
+  CREATE TRIGGER csm_audit_log_no_truncate BEFORE TRUNCATE ON csm_audit_log_2026_09
+      FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
+  INSERT INTO csm_audit_log SELECT * FROM csm_audit_log_default_old;
+  -- Verify: this must return true, else ROLLBACK (everything above is undone).
+  SELECT count(*) = (SELECT n FROM audit_rows_before) AS all_rows_moved FROM csm_audit_log;
+  DROP TABLE csm_audit_log_default_old;
+  COMMIT;
+  ```
+
+  The lock holds audit writes (and the business writes behind them) until `COMMIT`, which is why the lock timeout is short; if it times out, run it again. `audit_create_partitions` covers only the current and coming months, so a past month with rows in the catch-all needs its own `CREATE TABLE … PARTITION OF` as above. Rows whose month still has no partition land in the new catch-all.
+
+### Rules for new code
+
+- `register_audit` refuses a key column that is also excluded or masked, or that is binary (`bytea`, which is left out of the fields but would still go into the record id): the record id is built from the key columns and stored in clear. It also refuses a column name with a comma, which the trigger's comma-separated lists would split. A key is the primary key's key columns only, not its `INCLUDE` columns. A one-column key is the plain value (`42`); a composite key is a JSON array (`["acme","prod"]`), so two keys never share an id.
+- `exclude_from_audit` on a registered table also drops its trigger, as `unregister_audit` does.
+- Every partition carries its own `csm_audit_log_no_truncate` guard, because a statement trigger on the parent does not reach them. `audit_create_partitions` adds it to each new month.
+- Everything lives in the schema the migration runs in (`current_schema()`), so the audit log works in `public` or in a `DB_SCHEMA`. The `SECURITY DEFINER` functions are installed through `DO` blocks that fill the schema into their search path and table names (`__SCHEMA__` / `__SCHEMA_LIT__`). A new function that touches the audit tables must be added the same way, never with `public` written in. Inside `format()` pass the schema as an argument (`%I`), never inside the format string. Their search path ends with `pg_temp`, so a caller's temp table cannot stand in for `audit_config`.
+- The new-table warning (an event trigger, needs superuser) watches that schema only.
+
+### Tests
+
+`audit_log_maintenance_service_test.go` (service, fake repository). Real Postgres with the migration applied, skipped without `ENTITY_TEST_DATABASE_URL`: `audit_log_migration_integration_test.go` (triggers and registration), `audit_log_retention_integration_test.go` (deletion, health, lock timeouts), `audit_log_columns_integration_test.go` (created and updated columns, the actor), and `audit_log_repo_integration_test.go`.
 
 ## Health probes
 
@@ -492,6 +645,74 @@ does it elsewhere in this codebase: an inclusion-list `{"field": "type", "op": "
 ["case", "engagement", "security_report_analysis"]}` filter, set in the dashboard's own JSON
 config, not hardcoded into the endpoint.
 
+## GET /reports/mttr: mean time to resolution by severity band
+
+Backs a dashboard's MTTR numbers: for each severity band (`S1-S4`, `S1-S3`, `S1`, `S2`, `S3`,
+`S4`, plus `S0`/catastrophic as its own band; the two combined bands S1-S4 and S1-S3 never include S0, so the overall figure keeps its original meaning), the average time from a case's `created_on` to the
+**last** time it entered Solution Proposed, over cases whose last such entry falls within a
+trailing window: `months` (`1`/`3`/`6`/`12`) or `days` (`7`), exactly one of them -- anything else is a 400; the response's `windowMonths` is 0 and `windowDays` set for a day window. An optional
+repeated `creTeamId` query param restricts to cases whose account's CRE team
+(`account.cre_team_id`) is one of the given `"group"` ids; omitted, every team is included.
+`internalOnly`-gated at the route, like `/reports/long-open-cases`, and not registered at all
+under `DATA_SOURCE=servicenow` -- it reads the Postgres case/`work_item_activity` tables only.
+
+**Filtered by when a case was resolved, not when it was created.** An earlier case-created-date
+filter was considered and rejected: a case opened four months ago and resolved last month should
+count toward a 3-month MTTR, because the metric answers "how fast are we resolving things
+lately" -- filtering on `created_on` instead would exclude it and bias the average toward only
+recently-opened, already-fast cases. The same trade-off was seen on real data: counting only cases
+opened in the window left out the older cases resolved in it, and made the figure look faster
+than the support actually delivered (one severity read about 4 days instead of about 10).
+
+**Only cases that are resolved now.** A case counts only while its current state (`"case".state`) is
+Solution Proposed or Closed. A rejected proposal sends the case back (e.g. to Work In Progress) but its
+earlier Solution Proposed entry stays in `work_item_activity`, so without this check the case would count as
+resolved at that earlier time. It counts again once it is proposed again or closed. The check is on the
+`"case"` row the query already joins by primary key, after the window has narrowed the rows.
+
+**"Last entry", not "first entry", into Solution Proposed.** A case can be proposed a solution,
+have it rejected (bounced back for more work), and have a later proposal actually stick before
+the case closes. `work_item_activity` has no explicit "rejected" state -- it only logs state
+transitions, not why a case left one -- so there is no way to tell "the customer rejected it"
+apart from "we pulled it back for more work" from this table alone. Given that, `MAX(created_on)`
+per case (not `MIN`) is the deliberate choice: it measures how long the case actually took to
+reach a proposal that held, not how fast the first (possibly rejected) attempt was -- the explicit
+call made when this was raised as an open question.
+
+**Matches both casings the column actually carries.** `work_item_activity.new_value` for a
+state entry is written as either the raw enum label (`SOLUTION_PROPOSED`) or the display label
+(`Solution Proposed`), depending on the write path, confirmed directly against prod (roughly
+90k rows of the former, ~1.5k of the latter). `LOWER(new_value) IN ('solution_proposed',
+'solution proposed')` catches both -- the same case-insensitive convention the case search's own
+`stateEntered` filter already uses (see that filter's own comment in `case_repo.go`), served by
+the same partial index, `idx_work_item_activity_state_entered` (migration 0283).
+
+**`work_item_activity` has `FORCE ROW LEVEL SECURITY`.** A plain `psql` session with no
+`app.is_internal` session variable set sees zero rows from this table, not an error -- looking
+empty when it is not. `MTTRReportService.BuildReport` runs its repository read under
+`repository.WithSystemIdentity(ctx)` for exactly this reason, same as the long-open-cases report;
+a raw query against this table (e.g. ad hoc investigation) needs the identical session variable
+set, or it will silently read as empty.
+
+`internal/domain/mttr_report.go`, `internal/repository/mttr_report_repo.go`,
+`internal/service/mttr_report_service.go`, `internal/handler/mttr_report_handler.go`.
+
+## Who may de-escalate a case: team leads and the `case_deescalator` role
+
+De-escalating is allowed for the leads of the case's own ABT team (`team_member` role `lead` on
+`account.cre_team_id`, `teamLeads` on `GET /cases/{id}/escalations`) **and** for anyone an admin named: holders of
+the stored role `case_deescalator` (no migration seeds it: the first admin grant creates the role row, by name), returned as `deescalators` (active internal users only) on the
+same response, so the portal decides from one read. A CSM admin manages the list through
+`GET /case-escalation-access/deescalators` and `PUT`/`DELETE /case-escalation-access/deescalators/{userId}`
+(`CaseEscalationAccessService`): all three are gated on the caller's client id (`CSM_PORTAL_BACKEND_CLIENT_ID`) plus a
+forwarded signed-in person, exactly as portal banners are (`requireCSMPortalBackendCaller`), not on `AUTH_ADMIN_ROLES` or the
+stored `admin` role: csm-portal-backend's `PermAdmin` gate on these routes is the one admin check, so a second,
+separately-configured role list here cannot disagree with it (it did: a real admin got a 403 from an unset copy). Any other
+caller is refused. A grant needs an active internal user; both changes are idempotent and audited; a deactivated person
+(`is_active = FALSE`) is refused even through the portal backend. A holder who stops being active internal staff is listed as `active: false` (so
+it can be removed) and is left out of `deescalators`. Escalating is unchanged (any internal engineer).
+entity-service does not enforce de-escalation itself, as before: csm-portal-backend decides from this response.
+
 ## Salesforce Account ingest
 
 `POST /salesforce/events` accepts the ASB envelope `{eventType, entity, referenceId}`
@@ -524,17 +745,20 @@ the list.
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
   `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
   `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
-- `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
+  Also plain assignment: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
-  `deactivation_date`. Sales Entity sends these only after its "customer fields"
-  change (SE-1 in `docs/customer-onboarding/SALESFORCE_SYNC_PLAN.md`); until then they
-  keep the ServiceNow sync's value. Switch them to plain assignment once SE-1 ships.
+  `deactivation_date`. A NULL cleared in Salesforce clears the column. For the
+  three person columns only, an empty email clears but an email CSM cannot resolve
+  to a user (no match, provisioning off or failed) keeps the stored value
+  (`Keep*` flags on `SalesforceAccountUpsert`, `$33`-`$35`); the event still succeeds.
 - Never written: `number` on an existing row (a new row gets the Salesforce Id,
   decision D9), `cre_team_id`, `sre_team_id`, `support_tier`, `support_timezone`,
   `suspension_process_state`, the two AI flags, `drive_location`.
 - Person references resolve by email against `"user"` (`LookupUserIDByEmail`); an
-  email with no user writes NULL and logs a WARN with the role and email.
+  email with no user logs a WARN with the role and email, and writes NULL
+  (`account_manager_id`, `technical_owner_id`) or keeps the stored value (the three
+  person columns above).
 - A value longer than its VARCHAR column (`accountColumnLimits`) or a date that does
   not parse (`2006-01-02`) is written as NULL with a WARN, so one bad field cannot
   fail the event.
@@ -1227,7 +1451,8 @@ reopen logs a WARN at every start as the reminder.
   email showed it) / key, start and end date, account owner name and email, `reasons` (`renewal`,
   `invoice_paid`, none for a project opened by hand), `recipients` and `reactivatedOn`.
   **Recipients** are the account owner, renewal account manager and technical owner, each once,
-  keeping only well-formed plain addresses in `@wso2.com` (`acpInternalAddress`): it is an internal
+  keeping only well-formed plain addresses in the internal domains (`acpInternalAddress`,
+  `ACP_INTERNAL_EMAIL_DOMAINS`, default `@wso2.com`): it is an internal
   notice, the technical owner in Salesforce is sometimes a customer's person, and the notification
   service rejects the whole event for one bad address. csm-notification-service sends the email and
   adds its own CC list. **Deploy csm-notification-service with `project.reactivated` first**: it
@@ -1487,9 +1712,9 @@ revisited.
 
   **`Recipients` depends on `req.Type`.** For `case`/`engagement`/
   `service_request`/`security_report_analysis` it's the case's own resolved
-  watch list emails, unioned with the account's four default-watcher
+  watch list emails, unioned with the account's default-watcher
   stakeholders resolved fresh via `CaseRepository.AccountDefaultWatcherEmails`
-  — see "Case watch list" below for why those four are resolved at publish
+  — see "Case watch list" below for why those are resolved at publish
   time rather than read from the persisted watch list. For `announcement`,
   `publishCaseCreatedEvent` instead resolves the audience via
   `CaseService.ProjectContactEmailsByRole` — every `project_contact`
@@ -2808,12 +3033,43 @@ revision replaced it with a brand new incarnation" — all three look
 identical to that caller ("not in the active list" / "some other active row
 of this type exists"), and treating either of the latter two as "resolved"
 would wrongly suppress a genuine alert. `domain.SLAClockState`
-(`Found`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists specifically
-to make those three distinguishable: `GetClockState` returns the single
-most recently-started row for `(workItemID, target[, source])`,
-**regardless of `is_active`**, with `Found=false` (every other field zero)
-when no row exists at all. `StartedOn` is what lets the caller compare
-clock *incarnations*, not just clock types, after a severity revision.
+(`Found`/`ID`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists
+specifically to make those three distinguishable: `GetClockState` returns
+one row for `(workItemID, target)`, **regardless of `is_active`**, with
+`Found=false` (every other field zero) when no row exists at all. `StartedOn`
+is what lets the caller compare clock *incarnations*, not just clock types,
+after a severity revision. (The `source` query param this endpoint used to
+also take was removed along with `sla.source` itself — a caller that still
+sends one is simply ignored.)
+
+**`slaId`, an optional third parameter, narrows the lookup to one exact
+`sla` row instead of this method's own default — the real fix for a former
+"known, deliberate limitation" here.** Without it, this method always
+picked "whichever row is most recently started" for `(workItemID, target)`
+— a real problem once a caller tracks a *specific* clock over time, because
+the per-policy registration guard genuinely lets two policies both have a
+*open* clock on the same target at once (confirmed live, not theoretical —
+see `ActiveClockPolicies`' own doc comment below for the Hosting-case
+example, and staging/production both show plenty of real `RESPONSE`/
+`RESOLUTION` cases with more than one simultaneously-active policy). A
+caller with no row id to disambiguate could have this method's own terminal-
+stage answer about one sibling policy wrongly confirmed as "resolved" for a
+DIFFERENT, still genuinely due sibling. `csm-notification-service` found
+this the hard way: `verifyTierStillDue`'s own terminal-stage check (see that
+repo's own `CLAUDE.md`) had to be reordered to close a real production false
+alert, and a CodeRabbit review on that fix caught that the reordering could,
+in the two-simultaneously-open-policies case, now wrongly suppress a
+genuine alert instead. `ID` (this exact row's own primary key, on both
+`SLAClockState` and `SLAStatus`) is what that service now remembers — in its
+own Redis-held `ClockMeta.SLAID` — and passes back here as `slaId` every
+time it re-checks a clock it already tracks, so entity-service's answer is
+about THAT specific row, not an ambiguous "whichever one is newest." Passing
+`slaId=""` (or omitting it) keeps the original behavior, for a caller that's
+discovering entity-service's current policy resolution rather than
+re-verifying one it already knows (`ReviseClocks`'s own
+`refreshAndReconcileClock` call, deliberately — see that function's own doc
+comment there). A `slaId` matching no row for the given `(workItemID,
+target)` reports `Found=false`, same as no row existing at all.
 
 **`GetClockState` also resolves `AssigneeName`/`AssigneeEmail`/`TeamEmail`/
 `TeamLeadName`** (`work_item`/`account`/`"group"`/`"user"` joins, the exact
@@ -3175,6 +3431,17 @@ the Query/SecReport Analysis family) on no severity at all.
   `active_escalation.*`/`escalation_severity`/`source_table`) and the
   space-containing `NOT IN` operator are parsed defensively — never panic,
   an unknown clause just always evaluates false.
+- **The one incident policy, "Cloud Incident - High Priority", is stored
+  decoded too (migration `0293`)**: `priorityINCRITICAL,HIGH^category=SERVICE_INTERRUPTION`
+  starts its 4 h, 24 x 7 resolution clock for an incident of **any** service;
+  On Hold, Resolved and Closed stop it as met; Canceled, a category change
+  or a priority drop below High cancel it. The raw row's two
+  `business_service` clauses (a gate on two named services) were dropped on
+  purpose, so `isIncidentPolicy` now also recognises a row by a
+  `category=`/`category!=` clause, not only by `business_service`.
+  `translateIncidentSLACondition` still runs over the row at read time and
+  leaves decoded text unchanged, so an environment that has not applied
+  `0293` yet keeps evaluating the raw, service-gated row as before.
 - **`repository.SLAEngineRepository.GetCaseFacts`** reads a case's current
   `state`/`priority`/`case_type`/`project_type`/`product`/
   `cs_engineer_response_comment`/workaround-provided/fix-ETA-shared/
@@ -4309,6 +4576,23 @@ already use — no route path, request, or response shape changed.
   string with no name field on its wire contract at all — deliberately left
   as-is; the webapp only reads a comment's display name from `SearchComments`
   once the list is (re)fetched, never from the create response.
+- **A comment author's `UserReference` also carries `isInternal`** — true when
+  the same `userByEmailJoin` row has `user_type = INTERNAL` (the join exposes
+  `u2.user_type` for this), set by `SearchCaseComments` (`case_repo.go`),
+  `SearchComments` (`comment_repo.go`, via `CommentRow.CreatedByInternal`) and
+  the case/incident activity feeds (`SearchCaseActivities`/
+  `SearchIncidentActivities`, every UNION branch carries `created_by_internal`
+  since they share `scanCaseActivity` — the customer portal reads its comments
+  from that feed), `omitempty` so every other `UserReference` is unchanged. Added so a portal
+  can mark a support engineer's comment avatar without a per-comment user
+  lookup: the webapp's own `authorRole` is NOT that signal — its mapper
+  defaults every non-bot, non-system case comment to `"wso2_engineer"`, so a
+  badge keyed on it marked customers as staff too (reported live). An
+  automation/system author resolves to no `"user"` row (or a `SYSTEM` type)
+  and gets no flag. `GET /cases/{id}` carries the same flag on `createdBy` and on
+  each `watchList[].user` (`fetchCaseWatchers` reads `user_type` for the persisted
+  and the stakeholder rows alike), so a portal can badge the creator and sort or
+  group watchers by staff/customer from the response alone.
 - **Adding a comment to a case stamps its `updated_on`/`updated_by`.** A comment
   is activity on a case — ServiceNow advances `sys_updated_on` for any journal
   entry — and the lists' Updated column, the `updatedOn` search filter (relative
@@ -4657,6 +4941,39 @@ changed.
   way, this addition is purely about what the Postgres mirror also
   guarantees.
 
+  **The case's own creator is always added as a watcher on create, on
+  every data source and every case-like type** (`subscribeCreatorToWatchList`,
+  called from both `CreateCase`'s plain-Postgres branch and
+  `createCaseSNFirst`, right alongside `addRequestedWatchers`) — via
+  `CaseRepository.AddCaseWatcherByEmailIfAbsent`, a single insert statement
+  that matches `"user"` by EITHER id (as text) or email, whichever
+  `c.CreatedBy` turns out to hold. It can't be assumed to already be a
+  resolved platform id the way `subscribeCommenterToWatchList`'s own
+  `AddCaseWatcherIfAbsent` call can (that one always has a real id, from its
+  own `userRepo.GetUserByEmail` call): on `createCaseSNFirst`, `c.CreatedBy`
+  is ServiceNow's own raw actor string, forwarded as-is into the VARCHAR
+  `work_item.created_by` column with no lookup; on the plain-Postgres path it
+  is normally `req.CreatedBy` resolved from the caller's token, but a real
+  staging case showed the same column holding an email there too — this
+  isn't reliably one shape across every create path or deployment. Matching
+  either way in one statement means an identity that resolves to no platform
+  user simply inserts nothing rather than guessing or failing on a type
+  mismatch against the real UUID `user_id` column (caught on review, then
+  found live for the plain path too, before this shipped as one robust
+  method rather than two shape-specific ones). Unconditional either way: the
+  creator is added whether or not they named themselves (or anyone else) in
+  `watchList`, and regardless of whether they are internal or external —
+  that distinction has no bearing on whether they're a watcher at all (it
+  only changes which portal link csm-notification-service embeds in the
+  email it already sends every watcher, not the email's content or whether
+  it's sent). Because this writes a real `work_item_watcher` row, it flows
+  through `fetchCaseWatchers` below like any other watcher — including that
+  CTE's own `EXTERNAL`-watcher caveat:
+  an external creator shows up on the case's "Watchers" list only while
+  they are still a live, non-`DEACTIVATED` `project_contact` of that
+  project (true at creation time, since they just acted on it, but not
+  guaranteed to stay true forever).
+
   **The account's four named stakeholders are never persisted into
   `work_item_watcher` at all, on either the create or the update path —
   they're resolved fresh, straight from the account row, every time a
@@ -4688,13 +5005,27 @@ changed.
   `validateWatchListProjectMembership` for a submitted id (nothing exempt
   to submit any more).
 
+  **`customer_success_manager_id` and the project's `onboarding_owner_id`
+  were later added to `AccountDefaultWatcherEmails`, by explicit product
+  request, reversing the original exclusion above.** The CSM is now unioned
+  into a `case.*` email's `Recipients` the same way the other four
+  stakeholders are. The project's own onboarding owner (`project.
+  onboarding_owner_id`, migration 0104) is unioned in too, but only while
+  `project.onboarding_status` is `IN_PROGRESS` — an onboarding owner is a
+  default recipient during the onboarding window itself, not before it
+  starts or after it finishes, so the query gates that one column on the
+  other (`CASE WHEN p.onboarding_status = 'IN_PROGRESS' THEN oo.email END`)
+  rather than always including it. Resolved fresh at publish time like every
+  other stakeholder here, so a project moving into or out of onboarding (or
+  the CSM/onboarding owner being reassigned) is reflected on the very next
+  notification, not stuck on whoever held the role earlier.
+
   **Superseded below: `fetchCaseWatchers` now also synthesizes the
   account's named stakeholders directly into every read, not just into the
   email audience.** The paragraph above (and `AccountDefaultWatcherEmails`)
   is still exactly how `Recipients` is resolved for a `case.*` email — that
-  hasn't changed, `customer_success_manager_id` included: the CSM still
-  isn't unioned into a case.* email's `Recipients`. What changed, by later
-  explicit product request, is the *display* side: a case's "Watchers" list
+  hasn't changed. What changed, by later explicit product request, is the
+  *display* side: a case's "Watchers" list
   in both portals previously showed only real `work_item_watcher` rows, so
   the stakeholders being emailed by default were invisible on that list
   entirely — a customer or engineer looking at "who's watching this case"
@@ -4710,18 +5041,16 @@ changed.
     subject to that check at all, which is also what keeps an engineer's
     own Follow/Unfollow self-subscribe working regardless of
     `project_contact` membership.
-  - `stakeholders` resolves **five** account roles — the same four
-    `AccountDefaultWatcherEmails` resolves, plus
-    `customer_success_manager_id` — and synthesizes one row per resolved
-    stakeholder, every time, with `locked = true`. This is a strictly
-    larger set than the email audience by deliberate product decision: the
-    CSM is a real stakeholder worth *showing* on the case, even though
-    `AccountDefaultWatcherEmails` still deliberately excludes them from the
-    default email audience (see that function's own doc comment — a
-    decision about who gets emailed, not about who the account's
-    stakeholders are). None of these five are auto-persisted into
-    `work_item_watcher` (see above) and still aren't; this is a read-time
-    join, not a write.
+  - `stakeholders` resolves **five** account roles — the same five
+    `AccountDefaultWatcherEmails` resolves (technical owner, secondary
+    technical owner, account manager, renewal account manager, customer
+    success manager) — and synthesizes one row per resolved stakeholder,
+    every time, with `locked = true`. `AccountDefaultWatcherEmails` also
+    unions in the project's own onboarding owner, conditionally, which is
+    a project-level role rather than one of the account's named
+    stakeholders and so is not one of this display's five. None of these
+    five are auto-persisted into `work_item_watcher` (see above) and still
+    aren't; this is a read-time join, not a write.
   - A user who is both a real persisted watcher and one of the five
     stakeholders appears exactly once, as the locked (stakeholder) copy —
     `DISTINCT ON (id)` ordered `locked DESC` after `UNION ALL`-ing the two
@@ -4897,6 +5226,26 @@ applies upstream.
 - The refusal carries a machine-readable `case_invalid_state_transition` error code (the same
   `apierror.ValidationError.Code` convention change requests use -- see "Error types"), alongside a
   message naming both the current and requested state.
+
+**Admin reopen of a closed case (`UpdateCaseRequest.AdminReopen`/`ReopenReason`)** is the one
+caller-specific bypass of both tables above: neither table has an entry for `CaseStateClosed` (it
+is otherwise terminal for every caller, same as a plain state value with no entry at all), so
+`apps/csm-portal/backend`'s `CaseHandler.PatchCase` sets `AdminReopen: true` itself -- never
+forwarded verbatim from a client's own request body, see `sanitizeAdminReopenAttrs` in that
+component's `state.go` -- once its own `PermAdmin` check passes and the case's current state is
+genuinely closed. `isValidCaseStateTransition`'s caller in `case_service.go` additionally requires
+`isInternalCaller` AND that the caller's own client id is the configured CSM portal backend's
+(`CaseService.csmPortalClientID`, the same identity `mayListDeletedAttachments` already trusts for
+an equivalent admin-only override) -- `isInternalCaller` alone only separates WSO2 staff from an
+external/customer caller, not an admin from any other internal caller, so without the client-id
+check any internal user (direct M2M, or their own token resolved straight from `x-user-id-token`,
+neither of which goes through the portal's `PermAdmin` gate at all) could set `AdminReopen`
+themselves and reopen a closed case -- a real gap caught in review before merge. The same flag also skips
+the SLA-engine (`ApplyCaseStateEffects`) and `case.status_changed` publish side effects a
+reopen-from-closed must not trigger -- a closed case has no open clocks left to resume, and
+watchers must not get an email for this. `ReopenReason` (optional free text, only meaningful
+alongside `AdminReopen`) is persisted to `"case".reopen_reason` (migration 0292) but deliberately
+never selected back by any read query -- write-only by design, not shown in any UI or API response.
 
 ## PATCH /cases/{id}: assignee, acknowledge, parent, and the combinable field bundle
 
@@ -5370,7 +5719,7 @@ security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.g
 
 ## Change requests
 
-Tests: `entity-service/docs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.
+Tests: `entity-service/docs/specs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.
 
 `change_request` (migration 0043) is a shared-PK extension of `work_item`,
 same pattern as `"case"` (`change_request.id` IS `work_item.id`). `SearchChangeRequests`,
@@ -9193,8 +9542,9 @@ is the replacement for configuring a team's own Chat space by hand in
 `team.chat_webhook_url` (nullable TEXT, never written by the ServiceNow sync —
 same "platform-owned config, not synced vocabulary" posture as `team.key`/
 `group_email`) holds the team's own incoming-webhook URL, set directly by
-platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl}]}` for
-every team that has one set — a team with none is left out, same as today's
+platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl, key}]}` for
+every team that has one set (`key` is `team.key`, omitted when empty: an
+incident's SLA alert finds its SRE team's space by key, a case's by name) — a team with none is left out, same as today's
 "not in `GOOGLE_CHAT_SPACES`" case. **Internal-caller-only**
 (`TeamService.ListChatWebhooks` → `RequireInternalCaller`, the same gate
 `GET /sla-status` uses) — a webhook URL lets anyone holding it post
@@ -9205,6 +9555,24 @@ never something a portal caller should reach. Standing audiences that aren't
 teams at all ("Incident Monitor", "Onboarding", "Americas", "Evaluation") stay
 config-driven on that service's own side — this table only ever holds a real
 team's own space.
+
+**`GET /teams/group-emails`** (`team_repo.go` `ListGroupEmails`, `team.group_email`,
+migration `0117`) mirrors `GET /teams/chat-webhooks` exactly, for a team's own
+notification mailbox instead of its Chat webhook: `{teams: [{key, groupEmail}]}`
+for every team that has one set, a team with none left out. **Keyed by
+`team.key` (migration `0152`), not `name`** — unlike the Chat-webhook route,
+this one exists so a caller can look up one *specific* team's email by its
+stable handle (e.g. `csm-notification-service`'s SLA breach engine looking up
+`"americas_cre_team"` to also email that team during its overnight coverage
+window — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine"), and a
+team's `name` is a display string with no such stability guarantee the way
+`key` is designed to have. **Internal-caller-only**
+(`TeamService.ListGroupEmails` → `RequireInternalCaller`), same reasoning as
+`GET /teams/chat-webhooks` even though a plain email address is less
+sensitive than a webhook URL — this is still routing data for an internal
+notification feature, not general-purpose team data (`POST /teams/search`
+deliberately never includes `group_email` either, same as it excludes
+`chat_webhook_url`).
 
 **`GET`/`PATCH /teams/{id}`** (`team_repo.go`'s `GetTeamDetail`/
 `SetChatWebhookURL`, the latter against the same `team.chat_webhook_url`
@@ -11552,6 +11920,46 @@ unaffected and keeps creating external users exactly as before. `apps/csm-portal
 disables the "External" option in its type selector rather than offering a choice the backend will
 reject — all three are temporary, meant to come out together once external-type creation is ready.
 
+## Flipping an existing user to INTERNAL (`PATCH /users/{id}`'s `makeInternal` field)
+
+`POST /users` (above) only sets `user_type` at creation time. There was no way to fix an
+existing user afterward: a production user mistakenly flipped by hand (writing `"user".user_type`
+directly, in a one-off SQL fix) reverts the moment any `user_role` row for that user changes,
+because `user_type` is trigger-derived from role membership (`recompute_user_type`, migration
+0011) and never a plain settable column — confirmed live, chasing exactly that symptom.
+
+This is `req.MakeInternal` on the existing `UpdateUser` (`PATCH /users/{id}`), not a separate
+route — a dedicated `POST /users/{id}/internalize` was the first design, dropped once it was clear
+an existing endpoint could serve it the same way `PATCH /projects/{id}`'s `closureState` narrows a
+shared route in-handler rather than getting its own endpoint (see that pattern's own reasoning
+below). `true` grants the `internal` role and revokes every `externalSideRoles` role the user holds
+(`external`/`customer`/`partner`/`customer_admin`/`partner_admin` — the same set
+`recompute_user_type`'s trigger maps to `user_type = EXTERNAL`) in one transaction
+(`UserRepository.MakeUserInternal`, `user_repo.go`), reusing the identical grant-and-revoke shape
+`project_membership_repo.go`'s own `syncGlobalRoles` already established for a Salesforce-driven
+account reclassification — just invoked directly here instead of from inside a membership upsert.
+Combinable with `timeZone`/`phone` in the same call, or sent alone; `UpdateUser`'s own "at least one
+field" check now accepts any of the three.
+
+- **Restricted to a `@wso2.com` target**, the same `wso2EmailDomain` check `CreateUser`'s own
+  `requestsInternalUserType` branch already enforces (see above) — an external/customer address
+  must never become internal regardless of who asks.
+- **`req.MakeInternal` needs a narrower gate than the rest of `UpdateUser`.** The route is
+  internal-callers-only in general (`RequireInternalCaller`), but flipping a user's trust level is
+  callable only by `apps/csm-portal/backend` specifically, via `requireCSMPortalBackendCaller` — the
+  same pattern (and the same reasoning) as `CaseEscalationAccessService`/`portalBannerService`/
+  `slaStatusService`/`caseSLARecalcService`'s own copies of this method: the caller's `ClientID`
+  must equal `CSMPortalBackendClientID` *and* a forwarded `x-user-id-token` must carry a real
+  signed-in person (`auth.IdentityFromContext(ctx).UserEmail`) — a pure M2M credential with no
+  forwarded user is refused even from the right client id. Whether that signed-in person is a CSM
+  admin is decided once, by that backend's own `PermAdmin` gate on the route; this service does not
+  re-check it against a second, independently-configured role list. `UpdateUser` runs this check
+  only when `req.MakeInternal` is true, so a plain timezone/phone PATCH keeps its existing,
+  broader `RequireInternalCaller`-only gate.
+- `PatchUserMeUpdated.UserType` carries the resulting `user_type` — read fresh after the role sync
+  commits, not merely echoed back — set only when this request's `makeInternal` was true, omitted
+  on every other `PATCH /users/{id}`.
+
 ## Creating a deployed product on PostgreSQL (`POST /deployed-products`)
 
 It used to be refused on the plain PostgreSQL data source with a 400 ("not supported"); dual-write
@@ -11978,6 +12386,131 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
   changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
+
+## Product catalogue (products API, Postgres only)
+
+The product and EOL data the wso2.com Support Matrix and Release Matrix publish (it used to come from the
+retired wso2-product-service; `integrations/legacy-product-api` serves that old read contract from here) is
+part of the products API. `Product` and `ProductVersion` carry the catalogue fields, so
+`POST /products/search` and `POST /products/{id}/versions/search` return them (existing fields and behaviour
+unchanged: retired rows are still returned unless `excludeRetired`). The rest is `ProductCatalogService`
+(`internal/service/product_catalog_service.go`) behind `ProductCatalogHandler`: `GET/PATCH /products/{id}`,
+`POST /products`, `POST /products/{id}/versions`, `POST /product-versions/search`, `GET/PATCH
+/product-versions/{id}`, `POST /product-versions/{id}/retire`, `/release-lines` (+ `/{id}`, `/{id}/retire`),
+`GET /carbon-platform-history`, `GET /carbon-kernel-releases`. Tables: migrations 0270-0272
+(`product_version` public/EOL columns, `product_version_carbon`, `release_line`, `carbon_platform_history`,
+`carbon_kernel_release`). Registered only with a database
+pool and not in the ServiceNow data source (there the two searches read ServiceNow).
+
+- **Who.** Reads: any internal caller (CSM staff tokens, allow-listed M2M clients). Writes: a token role in
+  `AUTH_PRODUCT_CATALOG_MANAGER_ROLES` or `AUTH_ADMIN_ROLES`, matched exactly; the caller's email is the actor.
+- **A write applies at once.** There are no drafts. A body carries only the keys being set (null clears).
+  `prepareCatalogChange` validates it against a fixed field table (key → column, SQL cast, kind); the column
+  names and casts come from that table, never the request. `ApplyChange` writes the rows in one transaction
+  (`created_by` / `updated_by` / `retired_by` name the person); it returns the ids written and the service
+  answers with the rows read back. There is no catalogue-specific audit: the platform's database-level audit
+  covers these tables.
+- **Wire formats.** Reads keep the existing conventions: dates are RFC 3339 timestamps, `currentSupportStatus`
+  the uppercase enum text. Writes take `YYYY-MM-DD` and either case.
+- **Public listings.** The feeds publish one row per version, but `product_version` has one row per
+  deployment profile, so the profile rows of one listing share `public_id` (legacy ids kept; new listings take
+  `product_version_public_id_seq`, from 1100). `POST /products/{id}/versions` creates every profile
+  (`profiles`) of a new version in one transaction on one listing, under a row lock on the product, and refuses a
+  profile the version already has (NULL profiles are distinct to the unique constraint, so it would not). A PATCH
+  or retire of a live version row applies to all live rows of the version: its listing, or, without a
+  `public_id`, the unpublished rows of the same product and version; on a retired row it touches only that row.
+  `deploymentProfile` and `publicId` are row-only: `publicId` may only name a live listing of the same
+  product and version, and a `deploymentProfile` the version already has (NULL included) is refused under the same
+  product lock.
+- **Error messages are in request terms.** The CSM portal shows a write's 400 reason to the user, so `changeError`
+  maps each catalogue constraint to a field or rule (`catalogConstraintMessages`, `catalogColumnFields`) and never
+  echoes `pgErr.Detail` or `pgErr.Message`.
+- **Rules, checked in the write transaction on the rows as written** (`checkVersionRules`), so a body is always
+  judged with the stored values it leaves alone: release <= earliest possible EOL <= EOL, announcement <= EOL, and
+  a row on a public feed needs `public_abbreviation` or a product `code`, checked when a write publishes a row or
+  sets its abbreviation (five legacy rows are published without one and stay editable); a product PATCH that
+  clears the code is refused while it has published rows that rely on it. A listing's live rows must agree on the listing fields a write sets (all of
+  them when a row joins a listing), so a listing split by the import on another field can still be edited.
+- **Never delete a version.** Deployments, work items and change requests reference it (change requests by
+  cascade). Retire sets `retired_on` on every live row of the listing; retired rows leave the feeds. A product
+  cannot be retired.
+- **csm-sync-service also writes `product_version`.** Every column added is nullable or defaulted, and the
+  catalogue tables have no row-level security.
+
+Tests: `product_catalog_service_test.go` (unit).
+
+## EOL product usage report (`GET /reports/eol-product-usage`)
+
+`EolProductUsageReportService` (`internal/service/eol_product_usage_report_service.go`) builds the monthly report
+`operations/csm-scheduled-tasks` mails to account managers, technical owners and CS leadership: customers running a
+product version past its EOL date in Primary Production. Internal callers only; reads under the system identity.
+
+- **Rows** (`eol_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an active
+  `PRIMARY_PRODUCTION` deployment whose version's `support_eol_date` is before `asOf` (default today in Asia/Colombo),
+  listed once per (project, product version) however many such deployments run it.
+- **Only customer accounts are listed:** `account.life_cycle = 'Customer'` exactly (Salesforce's account status; the
+  rule Customer Health uses). "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner" and a NULL life cycle
+  (e.g. internal accounts) are left out even when their deployments are still marked active, which is common for lost
+  customers whose deployment records were never closed. `lost_date` and `deactivation_date` are not used: `lost_date`
+  is unset on some lost accounts and some customers have a `deactivation_date`.
+- **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
+  active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed: they
+  are still customers. `deployed_product.life_cycle_stage_status` is deliberately not used: every active product in
+  Primary Production on an EOL version is reported, whatever the deployed product's lifecycle status says.
+- **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
+  `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
+- **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
+  met), then account, then project; versions oldest EOL first. Text a row lacks (region, CS ABT, project key) is
+  `null`, never `""`; a person's missing name or email is left out (`omitempty`). The timestamp is `generatedOn`.
+- **Only when deployed products are read from Postgres** (`cfg.UsageReadRoute() == UsageReadRoutePostgres`, the default):
+  under `DATA_SOURCE=servicenow` or `USAGE_READ_MODE=legacy` the route is not registered, so the monthly task fails and
+  alerts instead of mailing a report that silently misses customers.
+
+Tests: `eol_product_usage_report_service_test.go` (unit), `eol_product_usage_report_integration_test.go`
+(`ENTITY_TEST_DATABASE_URL`).
+
+## Deprecated product usage report (`GET /reports/deprecated-product-usage`)
+
+`DeprecatedProductUsageReportService` (`internal/service/deprecated_product_usage_report_service.go`) builds the
+monthly report `operations/csm-scheduled-tasks` mails to account managers, technical owners and CS leadership:
+customers running a product version whose support status is Deprecated in Primary Production. Internal callers
+only; reads under the system identity. Same shape and rules as the EOL product usage report; only the version rule
+differs.
+
+- **Rows** (`deprecated_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an
+  active `PRIMARY_PRODUCTION` deployment whose version's `current_support_status` is `DEPRECATED`, whether its EOL
+  date has passed or not, listed once per (project, product version) however many such deployments run it. A
+  deprecated version whose EOL date has passed is also in the EOL product usage report, on purpose: it is both
+  deprecated and past its EOL date. `asOf` (default today in
+  Asia/Colombo) is only the report date shown; the status is the current one.
+- **Only customer accounts are listed:** `account.life_cycle = 'Customer'` exactly (Salesforce's account status; the
+  rule Customer Health uses). "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner" and a NULL life cycle
+  (e.g. internal accounts) are left out even when their deployments are still marked active, which is common for lost
+  customers whose deployment records were never closed. `lost_date` and `deactivation_date` are not used: `lost_date`
+  is unset on some lost accounts and some customers have a `deactivation_date`.
+- **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
+  active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed.
+  `deployed_product.life_cycle_stage_status` is deliberately not used.
+- **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
+  `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
+- **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
+  met), then account, then project; versions by EOL date (none last). Text a row lacks (region, CS ABT, project key,
+  EOL date) is `null`, never `""`; a person's missing name or email is left out (`omitempty`). The timestamp is
+  `generatedOn`.
+- **Only when deployed products are read from Postgres** (`cfg.UsageReadRoute() == UsageReadRoutePostgres`, the default):
+  under `DATA_SOURCE=servicenow` or `USAGE_READ_MODE=legacy` the route is not registered, so the monthly task fails and
+  alerts instead of mailing a report that silently misses customers.
+
+Tests: `deprecated_product_usage_report_service_test.go` (unit),
+`deprecated_product_usage_report_integration_test.go` (`ENTITY_TEST_DATABASE_URL`).
+
+**Change the two report queries together.** `listDeprecatedUsageSQL` is the EOL report's query
+(`eol_product_usage_report_repo.go`) with only the version predicate changed (`current_support_status = 'DEPRECATED'`
+instead of the EOL date). The rules for customers who have left (deleted account, inactive or closed project, NULL read
+as active), the Customer-only life-cycle rule, the Primary Production filter, the one-row-per-project-and-version
+rule and the grouping are the same in both.
+A change to any of them belongs in both repositories (and their integration tests) in the same change. The life-cycle
+value is one constant, `reportAccountLifeCycleCustomer`, passed to both queries as a bind parameter.
 
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 

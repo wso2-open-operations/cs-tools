@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
@@ -163,6 +164,51 @@ func TestGetProjectMetadata(t *testing.T) {
 				assertContentType(t, w, "application/json")
 			})
 		}
+	})
+}
+
+func TestAggregateProjects(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		w := httptest.NewRecorder()
+		h.AggregateProjects(w, httptest.NewRequest(http.MethodPost, "/projects/aggregate", strings.NewReader(`{}`)))
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		w := httptest.NewRecorder()
+		h.AggregateProjects(w, withUser(httptest.NewRequest(http.MethodPost, "/projects/aggregate", strings.NewReader(`not-json`))))
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+	})
+
+	t.Run("forwards the body verbatim and returns the groups", func(t *testing.T) {
+		const reqPayload = `{"filters":{"onboardingOwnerTeamIds":["11111111-1111-1111-1111-111111111111"]},"groupBy":"onboardingOwner","maxGroups":20}`
+		var captured []byte
+		h := NewProjectHandler(&mockEntityProjectClient{aggregateProjectsFn: func(_ context.Context, body []byte) ([]byte, error) {
+			captured = body
+			return []byte(`{"groups":[{"key":"u1","label":"Jane Doe","count":3}],"othersCount":0,"totalRecords":3}`), nil
+		}})
+		w := httptest.NewRecorder()
+		h.AggregateProjects(w, withUser(httptest.NewRequest(http.MethodPost, "/projects/aggregate", strings.NewReader(reqPayload))))
+		assertStatus(t, w, http.StatusOK)
+		if string(captured) != reqPayload {
+			t.Errorf("upstream body = %q, want %q", captured, reqPayload)
+		}
+		if resp := decodeJSON[map[string]any](t, w); resp["totalRecords"] != float64(3) {
+			t.Errorf("totalRecords = %v, want 3", resp["totalRecords"])
+		}
+	})
+
+	t.Run("maps an upstream 400 to a generic 400", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{aggregateProjectsFn: func(context.Context, []byte) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"message":"groupBy is required"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.AggregateProjects(w, withUser(httptest.NewRequest(http.MethodPost, "/projects/aggregate", strings.NewReader(`{}`))))
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "Failed to aggregate projects.")
 	})
 }
 

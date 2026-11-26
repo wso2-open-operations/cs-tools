@@ -28,7 +28,7 @@ func TestUserByEmailJoinShape(t *testing.T) {
 	got := userByEmailJoin("u", "c.created_by")
 	for _, want := range []string{
 		"LEFT JOIN LATERAL (",
-		"SELECT u2.id, u2.name, u2.first_name, u2.last_name",
+		"SELECT u2.id, u2.name, u2.first_name, u2.last_name, u2.user_type",
 		"WHERE LOWER(u2.email) = LOWER(c.created_by)",
 		"ORDER BY u2.is_active DESC NULLS LAST, u2.created_on DESC, u2.id",
 		"LIMIT 1",

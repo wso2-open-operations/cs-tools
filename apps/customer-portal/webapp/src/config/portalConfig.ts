@@ -32,6 +32,26 @@ export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL?: string;
   CUSTOMER_PORTAL_BACKEND_BASE_URL: string;
   CUSTOMER_PORTAL_THEME: string;
+  /** Optional name and logo settings. Each falls back to the stock WSO2 value when unset. */
+  CUSTOMER_PORTAL_APP_NAME?: string;
+  /**
+   * Company name, without "LLC": the footer prints "© <year> <name> LLC". Also
+   * used in the PDF report footers ("<name> Support 24x7") and in labels such as
+   * "<name> Products" and "<name> Resolution". Defaults to "WSO2".
+   */
+  CUSTOMER_PORTAL_COMPANY_NAME?: string;
+  /**
+   * Billing team's email address, shown on the suspended-project notice.
+   * Defaults to "billing@choreolabs.com".
+   */
+  CUSTOMER_PORTAL_BILLING_EMAIL?: string;
+  /**
+   * Logo for the light colour scheme; also used for dark when no dark-mode logo is set.
+   * The PDF report footers draw this one (the dark-mode one only when it is unset), and
+   * have no logo when neither is set. A URL on another origin must allow CORS for that.
+   */
+  CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL?: string;
+  CUSTOMER_PORTAL_LOGO_DARK_MODE_URL?: string;
   CUSTOMER_PORTAL_LOG_LEVEL: string;
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: boolean;
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY?: string;

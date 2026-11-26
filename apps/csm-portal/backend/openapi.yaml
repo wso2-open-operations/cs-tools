@@ -221,7 +221,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: Forbidden (including moving a closed case to any other state without the admin role).
           content:
             application/json:
               schema:
@@ -1046,7 +1046,11 @@ paths:
       description: >
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
-        effect. Supported by the ServiceNow data source only.
+        effect. Escalating needs an escalation role (escalator, CS engineer or
+        admin). De-escalating is allowed for somebody an admin named (Settings
+        > User management > Escalation access), who needs no escalation role,
+        or for a lead of the case's ABT team, who does. Supported by the
+        ServiceNow data source only.
       operationId: postCasesIdEscalations
       parameters:
         - name: id
@@ -2322,15 +2326,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
     patch:
-      summary: Update another user's profile (timezone and/or phone).
+      summary: Update another user's profile (timezone and/or phone), or flip them to internal.
       description: >
         Restricted to cs_engineer or admin. Lets one of those roles update
         someone else's profile — unlike PATCH /users/me, which only ever
-        resolves the caller's own id from their token. Both fields are
-        optional but at least one must be present. Needed when reassigning a
-        team's lead (POST /teams/{id}/lead): the incident call-escalation
-        ladder dials the lead's own phone number, so a newly assigned lead
-        with none on file is a silent paging gap until this is set here.
+        resolves the caller's own id from their token. At least one of
+        timeZone, phone or makeInternal must be present. Needed when
+        reassigning a team's lead (POST /teams/{id}/lead): the incident
+        call-escalation ladder dials the lead's own phone number, so a newly
+        assigned lead with none on file is a silent paging gap until this is
+        set here.
+
+        makeInternal is narrower: admin-only (a cs_engineer reaches this
+        route via its PermWrite floor but is refused in-handler the moment
+        this field is present), and restricted to a @wso2.com target —
+        checked here (a fast, friendly 400) and again by entity-service
+        itself (the real enforcement boundary). It grants the user the
+        "internal" role and revokes the external-side role set
+        (external/customer/partner/customer_admin/partner_admin) — the only
+        way to actually change user_type, which is trigger-derived from role
+        membership. Combinable with timeZone/phone in the same call, or sent
+        alone.
       operationId: updateUser
       parameters:
         - name: id
@@ -2353,7 +2369,7 @@ paths:
               schema:
                 type: object
         "400":
-          description: Bad request (malformed id, neither field present, or phone too long).
+          description: Bad request (malformed id, none of the three fields present, phone too long, or makeInternal on a non-@wso2.com target).
           content:
             application/json:
               schema:
@@ -2365,7 +2381,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden (cs_engineer or admin only).
+          description: Forbidden (cs_engineer or admin only; admin only for makeInternal).
           content:
             application/json:
               schema:
@@ -2790,6 +2806,147 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /case-escalation-access/deescalators:
+    get:
+      summary: The people an admin named as allowed to de-escalate any case.
+      operationId: listCaseDeescalators
+      description: >
+        Backed by entity-service. Admin-only. They may de-escalate any case besides the leads of the case's own ABT
+        team, who keep that ability for their team's cases.
+      responses:
+        "200":
+          description: The grants (userId, name, email, grantedBy, grantedOn, active).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deescalators:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string, format: uuid }
+                        name: { type: string }
+                        email: { type: string }
+                        grantedBy: { type: string }
+                        grantedOn: { type: string, format: date-time }
+                        active: { type: boolean }
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only; the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (the entity service has no database for it).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /case-escalation-access/deescalators/{userId}:
+    put:
+      summary: Let somebody de-escalate any case.
+      operationId: putCaseDeescalator
+      description: >
+        Admin-only. The person must be active internal staff. Idempotent. Audited by the entity service.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID, or refused by the entity service with its reason, e.g. the person is not active internal staff).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop letting somebody de-escalate any case.
+      operationId: deleteCaseDeescalator
+      description: >
+        Admin-only. Idempotent. A team lead keeps the ability to de-escalate their own team's cases.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done.
+        "400":
+          description: Bad request (userId not a UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /teams/{id}/lead:
     post:
       summary: Assign a user as the team's one lead.
@@ -3423,6 +3580,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProjectSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /projects/aggregate:
+    post:
+      summary: Count projects per onboarding owner, onboarding status or region.
+      description: >
+        Forwarded as is to the entity service, which checks the filters exactly
+        as POST /projects/search does and counts only projects the caller may
+        see. A project with no value for the grouping counts in othersCount.
+        Postgres data sources only.
+      operationId: postProjectsAggregate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [groupBy]
+              properties:
+                filters:
+                  description: The project search filters (pagination and sort are not used).
+                  allOf:
+                    - $ref: '#/components/schemas/ProjectSearchPayload'
+                groupBy:
+                  type: string
+                  enum: [onboardingOwner, onboardingStatus, region]
+                maxGroups:
+                  type: integer
+                  minimum: 0
+                  maximum: 50
+                  description: Largest buckets returned (default 10); the rest fold into othersCount.
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
         "400":
           description: BadRequest
           content:
@@ -4946,12 +5164,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: "The stored dashboards could not be read. Retry later."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
 
   /dashboards/filter-presets:
     get:
@@ -5118,12 +5330,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: "The stored dashboards could not be read. Retry later."
           content:
             application/json:
               schema:
@@ -8518,6 +8724,80 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: No group with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /reports/mttr:
+    get:
+      summary: MTTR (mean time to resolution) by severity band, over a trailing window.
+      description: >-
+        Thin proxy of entity-service's own GET /reports/mttr -- backs the dashboard
+        builder's "mttr" resourceType. For each severity band (S1-S4, S1-S3, S0, S1, S2, S3,
+        S4 -- the two combined bands never include S0), the average time in hours from a case's creation to
+        the LAST time it entered Solution Proposed (a rejected proposal bounces a case
+        back for more work before a later one sticks, so the last entry, not the first,
+        is when it was actually resolved), over cases whose last such entry falls within
+        the window. creTeamId may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Same read audience as the other aggregate widgets
+        (e.g. POST /cases/feedback/aggregate).
+      operationId: getMTTRReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: months
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months. Exactly one of `months` and `days` is required.
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [7]
+          description: The trailing window, in days. Exactly one of `months` and `days` is required.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: exactly one of months (1, 3, 6 or 12) or days (7) is required; or a creTeamId is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
           content:
             application/json:
               schema:
@@ -12574,6 +12854,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a product to the catalogue.
+      description: >
+        Creates a product (name and class required). Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreate'
+      responses:
+        "201":
+          description: The new product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /abt-teams:
     get:
@@ -16614,6 +16948,171 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays:
+    get:
+      summary: The stored public holidays, for the holiday editor.
+      operationId: listTeamSchedulePublicHolidays
+      description: >
+        Every stored day in the window (at most 366 days), of one country when
+        `country` is given, with where it came from (CALENDAR: the daily
+        refresh; MANUAL: added in the portal), the countries in use and whether
+        the caller may add or remove holidays. Forwarded to the entity service;
+        a 400 keeps its reason.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: country, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, countries, canEdit]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      type: object
+                      required: [country, date, title, source]
+                      properties:
+                        country: { type: string }
+                        date: { type: string, format: date }
+                        title: { type: string }
+                        source: { type: string, enum: [CALENDAR, MANUAL] }
+                        updatedBy: { type: string }
+                  countries: { type: array, items: { type: string } }
+                  canEdit: { type: boolean }
+        "400":
+          description: "Bad request: the message says what is wrong with the window."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add one country's public holidays by hand.
+      operationId: addTeamSchedulePublicHolidays
+      description: >
+        A portal admin or a rota admin of any family (the entity service
+        decides; a 403 keeps its reason). Up to 200 days, each stored as a
+        manual row that the daily refresh never deletes or retitles. A 400
+        names the day that is wrong. The coming weeks' Public holiday tags are
+        placed right after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [country, holidays]
+              properties:
+                country: { type: string, maxLength: 100 }
+                holidays:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [date, title]
+                    properties:
+                      date: { type: string, format: date }
+                      title: { type: string, maxLength: 200 }
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stored]
+                properties:
+                  stored: { type: integer }
+        "400":
+          description: "Bad request: the message names the day that is wrong."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays/{country}/{date}:
+    delete:
+      summary: Remove one stored public holiday.
+      operationId: deleteTeamSchedulePublicHoliday
+      description: >
+        A portal admin or a rota admin of any family. Removes the day whether
+        it came from the calendar or by hand; its untouched Public holiday tags
+        go with it.
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No such day is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/public-holidays/search:
     post:
       summary: Public holidays of the given engineers over a date window.
@@ -17940,6 +18439,11 @@ paths:
   /team-schedule/absence-kinds/{code}:
     delete:
       summary: Delete a leave or allocation tag once nothing uses it.
+      description: >
+        A portal admin may delete any tag added from the portal; a rota admin
+        their own family's and the shared ones; a lead the families of the rota
+        teams they lead. A 403 and a 409 keep entity-service's message, so the
+        portal can say why (whose tag it is, how many entries still use it).
       operationId: deleteTeamScheduleAbsenceKind
       parameters:
         - name: code
@@ -17964,13 +18468,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: >
+            The caller may not delete this tag: a built-in one, another
+            family's, or a shared one for a caller who is no rota or portal
+            admin. The message says which.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: The tag is still used; the message says by how many entries.
           content:
             application/json:
               schema:
@@ -18536,6 +19049,743 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+
+  /products/{id}:
+    get:
+      summary: One product with its catalogue fields.
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: getProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a product.
+      description: >
+        A present field sets it, null clears an optional one, an absent field is left alone. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreate'
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /products/{id}/versions:
+    post:
+      summary: Add a version with all its deployment profiles.
+      description: >
+        Creates one row per profile, all sharing one public listing (new, or the publicId given), in one transaction. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createProductVersions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionCreate'
+      responses:
+        "201":
+          description: The new rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/search:
+    post:
+      summary: Product versions of every product.
+      description: >
+        One row per (product, version, deployment profile), ordered by product name, release date (newest first), version and profile; paged (limit up to 1000). excludeRetired leaves retired rows out; feed restricts to the live rows on that public feed. Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: searchAllProductVersions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionSearch'
+      responses:
+        "200":
+          description: One page of versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionPage'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/{id}:
+    get:
+      summary: One product version row.
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: getProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersion'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a product version.
+      description: >
+        Listing-wide fields apply to every live row of its public listing (same publicId); deploymentProfile and publicId change this row only. The EOL date may not be before the release date. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionUpdate'
+      responses:
+        "200":
+          description: The rows changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/{id}/retire:
+    post:
+      summary: Retire a version.
+      description: >
+        Retires every live row of its public listing (only this row when it has no publicId), taking it off the catalogue and both public feeds. No body. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: retireProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The rows retired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines:
+    get:
+      summary: Release lines.
+      description: >
+        Live release lines by name; includeRetired=true adds retired ones. Only includeRetired is forwarded. Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listReleaseLines
+      parameters:
+        - name: includeRetired
+          in: query
+          required: false
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: The release lines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLineList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a release line.
+      description: >
+        Name required. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createReleaseLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReleaseLineSave'
+      responses:
+        "201":
+          description: The new release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines/{id}:
+    patch:
+      summary: Edit a release line.
+      description: >
+        Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateReleaseLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReleaseLineSave'
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines/{id}/retire:
+    post:
+      summary: Retire a release line.
+      description: >
+        No body. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: retireReleaseLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /carbon-platform-history:
+    get:
+      summary: Carbon platform history (reference data).
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listCarbonPlatformHistory
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistoryList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /carbon-kernel-releases:
+    get:
+      summary: Carbon kernel releases (reference data).
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listCarbonKernelReleases
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonKernelReleaseList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /portal-banners:
     get:
@@ -19998,7 +21248,7 @@ components:
               tier:
                 type: string
                 enum: [L1, L2, L3]
-                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
+                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, SRE_WE_DAY and SRE_WE_NIGHT, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
               from: {type: string, format: date, description: Inside the period.}
               to: {type: string, format: date, description: Inside the period.}
               note: {type: string}
@@ -20190,6 +21440,223 @@ components:
       properties:
         subject: { type: string, maxLength: 512 }
         content: { type: string, maxLength: 8000 }
+    CatalogProduct:
+      type: object
+      description: >
+        One product: the fields of POST /products/search plus its catalogue fields and
+        version counts.
+      required: [id, name, class, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        class: {type: string, enum: [software, service]}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        code: {type: string, nullable: true}
+        unit: {type: string, nullable: true}
+        businessUnit: {type: string, nullable: true}
+        manufacturer: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        versionCount: {type: integer, description: Live (not retired) versions of the product.}
+        retiredVersionCount: {type: integer, description: Retired versions of the product.}
+        activeVersionCount: {type: integer, description: Live versions whose support has not ended (not discontinued).}
+    CatalogProductCreate:
+      type: object
+      description: The fields of a product. name and class are required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        class: {type: string, enum: [software, service]}
+        code: {type: string, nullable: true, maxLength: 64}
+        unit: {type: string, nullable: true}
+        businessUnit: {type: string, nullable: true}
+        manufacturer: {type: string, nullable: true}
+        description: {type: string, nullable: true, maxLength: 2000}
+    CatalogVersion:
+      type: object
+      description: >
+        One product_version row (one deployment profile). A public listing is the live
+        rows sharing publicId. Dates are RFC 3339 timestamps; currentSupportStatus is
+        upper case.
+      required: [id, productId, version]
+      properties:
+        id: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        version: {type: string}
+        currentSupportStatus: {type: string, nullable: true, enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]}
+        releaseDate: {type: string, format: date-time, nullable: true}
+        supportEolDate: {type: string, format: date-time, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date-time, nullable: true}
+        deploymentProfile: {type: string, nullable: true}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        productName: {type: string}
+        productCode: {type: string, nullable: true}
+        serialNumber: {type: string, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date-time, nullable: true}
+        publicId: {type: integer, format: int64, nullable: true}
+        publicName: {type: string, nullable: true}
+        publicAbbreviation: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+        releaseLinks: {type: string, nullable: true}
+        legacyStatus: {type: boolean, nullable: true}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        releaseLineName: {type: string, nullable: true}
+        carbon:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CatalogCarbon'
+        retiredOn: {type: string, format: date-time, nullable: true}
+    CatalogVersionFields:
+      type: object
+      description: >
+        The listing fields of a version. Dates are YYYY-MM-DD; status and type are
+        accepted in either case. On PATCH a present field sets it, null clears it, an
+        absent field is left alone.
+      properties:
+        currentSupportStatus: {type: string, nullable: true}
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, nullable: true}
+        publicAbbreviation: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        releaseLinks: {type: string, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+        legacyStatus: {type: boolean, nullable: true}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CatalogCarbon'
+    CatalogVersionCreate:
+      allOf:
+        - $ref: '#/components/schemas/CatalogVersionFields'
+        - type: object
+          required: [version, profiles]
+          properties:
+            version: {type: string, maxLength: 20}
+            profiles:
+              type: array
+              minItems: 1
+              description: One row per profile; "" is a row with no profile.
+              items: {type: string}
+            publicId: {type: integer, format: int64, description: Join an existing public listing instead of starting a new one.}
+    CatalogVersionUpdate:
+      allOf:
+        - $ref: '#/components/schemas/CatalogVersionFields'
+        - type: object
+          properties:
+            deploymentProfile: {type: string, nullable: true, description: This row only.}
+            publicId: {type: integer, format: int64, nullable: true, description: This row only.}
+    CatalogVersionRows:
+      type: object
+      required: [productVersions]
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVersion'
+    CatalogVersionSearch:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery: {type: string}
+        deploymentProfile: {type: string}
+        productId: {type: string, format: uuid}
+        excludeRetired: {type: boolean}
+        feed: {type: string, enum: [support-matrix, release-matrix]}
+        publicId: {type: integer, format: int64}
+    CatalogVersionPage:
+      type: object
+      required: [productVersions, total, limit, offset, hasMore]
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVersion'
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+        hasMore: {type: boolean}
+    CatalogReleaseLine:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        startDate: {type: string, format: date-time, nullable: true}
+        status: {type: string, nullable: true}
+        legacyId: {type: integer, format: int64, nullable: true}
+        versionCount: {type: integer, description: Live versions on the line.}
+        retiredOn: {type: string, format: date-time, nullable: true}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    CatalogReleaseLineList:
+      type: object
+      required: [releaseLines]
+      properties:
+        releaseLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogReleaseLine'
+    CatalogReleaseLineSave:
+      type: object
+      description: name is required on create. startDate is YYYY-MM-DD.
+      properties:
+        name: {type: string, maxLength: 100}
+        startDate: {type: string, format: date, nullable: true}
+        status: {type: string, nullable: true, maxLength: 50}
+    CatalogCarbon:
+      type: object
+      description: The Carbon platform of a version.
+      properties:
+        platformRelease: {type: string, nullable: true}
+        platformVersion: {type: string, nullable: true}
+        carbonKernelVersion: {type: string, nullable: true}
+        releaseChunk: {type: string, nullable: true}
+        kernelPatchNo: {type: string, nullable: true}
+    CarbonPlatformHistoryList:
+      type: object
+      description: >
+        Carbon platform history rows: id, carbonVersion, releaseDate, releaseDateText and one
+        nullable *Version string per legacy product column, named as the legacy Product API
+        names them.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              id: {type: integer}
+              carbonVersion: {type: string, nullable: true}
+              releaseDate: {type: string, format: date, nullable: true}
+              releaseDateText: {type: string, nullable: true}
+    CarbonKernelReleaseList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer}
+              kernelRelease: {type: string, nullable: true}
+              releaseDate: {type: string, format: date, nullable: true}
+              carbonPlatform: {type: string, nullable: true}
     ErrorPayload:
       type: object
       description: >-
@@ -20853,6 +22320,21 @@ components:
         closeNotes:
           type: string
           description: Free-text closure notes — only allowed when state is closed or solution_proposed.
+        reopenReason:
+          type: string
+          description: >
+            Optional free-text note on why a closed case is being reopened. Only meaningful
+            alongside `state` when the case's current state is closed and the caller holds the
+            admin role — every other caller gets 403 for that transition regardless of this
+            field. An admin reopen (moving a closed case to any other state) is also only
+            supported for a plain case (type `case`): the entity service rejects it with a 400
+            for every other case-like type (engagement, service_request,
+            security_report_analysis, announcement), whether or not `reopenReason` is supplied
+            — this applies only to a genuine admin reopen of a closed case; an ordinary PATCH
+            with no state change ignores a stray `reopenReason` instead (the portal strips it
+            before forwarding when the request isn't actually reopening a closed case). Write-
+            only: never returned by this or any other endpoint, and not shown anywhere in the
+            portal.
         parentId:
           type: string
           format: uuid
@@ -22405,6 +23887,13 @@ components:
         name:
           type: string
           example: Jane Doe
+        isInternal:
+          type: boolean
+          description: >-
+            True when the person resolved to an INTERNAL-type user (WSO2
+            staff). Set on comment authors; omitted elsewhere, so absent means
+            "not known to be internal", never "known external".
+          example: true
 
     ChangeRequestCustomerContact:
       type: object
@@ -22911,7 +24400,7 @@ components:
           type: array
           items:
             type: string
-            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, admin]
+            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, product_catalog_manager, admin]
           description: >
             The portal roles the caller holds, decided from the roles on their token. A caller can
             hold several. Always present; empty when they hold none. This is not the entity
@@ -23152,10 +24641,11 @@ components:
 
     BeUpdateUserRequest:
       type: object
-      description: At least one of timeZone or phone is required.
+      description: At least one of timeZone, phone or makeInternal is required.
       anyOf:
         - required: [timeZone]
         - required: [phone]
+        - required: [makeInternal]
       properties:
         timeZone:
           type: string
@@ -23164,6 +24654,14 @@ components:
           description: >-
             Trimmed. At most 32 characters after trimming (400 otherwise).
             Empty (after trimming) clears the stored phone.
+        makeInternal:
+          type: boolean
+          description: >-
+            Admin-only, and only for a @wso2.com target. true grants the
+            "internal" role and revokes the external-side role set
+            (external/customer/partner/customer_admin/partner_admin) -- the
+            only way to actually change user_type. false/absent leave roles
+            untouched; there is no "make external" via this field.
 
     UserGroupRef:
       type: object
@@ -23762,6 +25260,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         creTeam:
           nullable: true
           allOf:
@@ -23835,6 +25337,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
@@ -23984,6 +25490,38 @@ components:
             Only projects whose overall closure state is any of these values (the
             include-side counterpart of excludeClosureStates; a project with no
             recorded closure state matches none). Postgres data sources only.
+        regions:
+          type: array
+          items:
+            type: string
+          description: >
+            Only projects whose account's region is any of these (exact,
+            case-insensitive); a project whose account has no region matches
+            none. Postgres data sources only.
+        onboardingOwnerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            Only projects whose onboarding owner is any of these user ids; a
+            project with no owner matches none. Postgres data sources only.
+        onboardingOwnerEmails:
+          type: array
+          items:
+            type: string
+          description: >
+            Only projects whose onboarding owner's email is any of these
+            (case-insensitive). Postgres data sources only.
+        onboardingOwnerTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            Only projects whose onboarding owner is a current member of any of
+            these teams (team ids, as time cards' teamIds). Postgres data
+            sources only.
         sortBy:
           type: string
           enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
@@ -24290,6 +25828,12 @@ components:
               description: Null when the project has no linked account.
               allOf:
                 - $ref: '#/components/schemas/EntityRef'
+                - type: object
+                  properties:
+                    region:
+                      type: string
+                      nullable: true
+                      description: The account's region (e.g. "APAC"); null when none is recorded.
 
     ProjectDetails:
       description: >
@@ -26364,6 +27908,55 @@ components:
           type: integer
           description: The number of members.
 
+    MTTRReport:
+      type: object
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [0, 1, 3, 6, 12]
+          description: 0 when the report was asked for a day window.
+        windowDays:
+          type: integer
+          enum: [7]
+          description: Present only for a day window.
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+
+    MTTRReportBand:
+      type: object
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
+
     ChangeRequestApprovalDecisionPayload:
       type: object
       required: [decision]
@@ -26944,10 +28537,42 @@ components:
           description: Whether a hot fix is required.
         issueTypeLabel:
           type: string
-          description: GitHub label for the issue type.
+          description: >
+            GitHub label for the issue type: Type/Discussion (filed with Type/Incident and the
+            priority label), Type/Feature (filed with Type/Feature, no priority label) or
+            Type/Patch (legacy). Fields of the other type are ignored: a Feature Request's
+            priority, justification, reproducing steps, hotfix, regression and related internal
+            issues, and a Discussion's business use case and related Git issues. The dialog
+            sends updateLevel "-" with a Feature Request.
         priorityLevel:
           type: string
-          description: GitHub priority label for a Discussion. Sent as Priority/Critical(P1), Priority/High(P2), or Priority/Medium(P3). Bare Priority/Critical (etc.) is rewritten to the (Pn) form. Discussion also gets Type/Incident.
+          description: GitHub priority label for a Discussion, per the Internal Issue Handling Policy. Sent as Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). Bare Priority/Immediate (etc.) is rewritten to the (Pn) form; any other value is applied as sent. Discussion also gets Type/Incident.
+        priorityJustification:
+          type: string
+          description: >
+            Why a P0, P1 or P2 Discussion has that priority, free text. Written to the issue body as
+            "Priority Justification : <value>", on one line. Ignored for any other priority.
+        reproducingSteps:
+          type: string
+          description: Steps to reproduce, written to the issue body under "Reproducing Steps :".
+        hotFixReason:
+          type: string
+          description: >
+            Why a hotfix is required, one of the dialog's fixed options. Written under the
+            "Hotfix Required : Yes" line as "Hotfix Reason : <value>". Ignored unless
+            hotFixRequired is true. A value that is not an option is a 400.
+        relatedInternalIssues:
+          type: string
+          description: Related internal issues, written to the issue body under "Related Internal Issue(s) :".
+        businessUseCase:
+          type: string
+          description: The business use case of a Feature Request, written to the issue body under "Business Use Case :".
+        relatedGitIssues:
+          type: string
+          description: Related Git issues of a Feature Request, written to the issue body under "Related Git Issue(s) :".
+        onboardingInProgress:
+          type: boolean
+          description: The case's project is onboarding. Adds Onboarding/affected.
 
     CreateCaseGithubIssueResponse:
       type: object

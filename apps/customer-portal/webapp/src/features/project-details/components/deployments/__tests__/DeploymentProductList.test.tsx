@@ -110,6 +110,29 @@ describe("DeploymentProductList", () => {
     ).toBeInTheDocument();
   });
 
+  it("names the configured company in the products heading", () => {
+    const originalConfig = window.config;
+    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
+    vi.mocked(usePostDeploymentProductsSearchAll).mockReturnValue({
+      data: mockProducts,
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof usePostDeploymentProductsSearchAll>);
+    try {
+      renderWithProviders(
+        <DeploymentProductList
+          deploymentId="dep-123"
+          projectId="proj-1"
+          {...defaultSelectionProps}
+        />,
+      );
+      expect(screen.getByText("Acme Corp Products")).toBeInTheDocument();
+      expect(screen.queryByText("WSO2 Products")).not.toBeInTheDocument();
+    } finally {
+      window.config = originalConfig;
+    }
+  });
+
   it("should render product labels and descriptions", () => {
     vi.mocked(usePostDeploymentProductsSearchAll).mockReturnValue({
       data: mockProducts,
@@ -234,5 +257,94 @@ describe("DeploymentProductList", () => {
     fireEvent.click(addButton);
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  describe("selection for a service request", () => {
+    const categorisedProducts: DeploymentProductItem[] = [
+      { ...mockProducts[0], category: "ms" },
+      { ...mockProducts[1], category: undefined },
+    ];
+
+    beforeEach(() => {
+      vi.mocked(usePostDeploymentProductsSearchAll).mockReturnValue({
+        data: categorisedProducts,
+        isLoading: false,
+        isError: false,
+      } as unknown as ReturnType<typeof usePostDeploymentProductsSearchAll>);
+    });
+
+    it("shows no selection box when service requests cannot be raised here", () => {
+      renderWithProviders(
+        <DeploymentProductList
+          deploymentId="dep-123"
+          projectId="proj-1"
+          {...defaultSelectionProps}
+        />,
+      );
+
+      expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    });
+
+    it("lets only products in an allowed category be picked", () => {
+      const onToggleProductSelect = vi.fn();
+      renderWithProviders(
+        <DeploymentProductList
+          deploymentId="dep-123"
+          projectId="proj-1"
+          selectedProduct={null}
+          onToggleProductSelect={onToggleProductSelect}
+          serviceRequestSelection={{
+            deploymentAllowed: true,
+            productCategories: ["ms", "pc"],
+          }}
+        />,
+      );
+
+      const allowed = screen.getByRole("checkbox", {
+        name: "Select WSO2 API Manager for service request",
+      });
+      const leftOut = screen.getByRole("checkbox", {
+        name: "Select WSO2 Identity Server for service request",
+      });
+      expect(allowed).toBeEnabled();
+      expect(leftOut).toBeDisabled();
+
+      fireEvent.click(leftOut);
+      expect(onToggleProductSelect).not.toHaveBeenCalled();
+      fireEvent.click(allowed);
+      expect(onToggleProductSelect).toHaveBeenCalledWith("dep-123", "prod-1");
+    });
+
+    it("lets every product be picked when no category is required", () => {
+      renderWithProviders(
+        <DeploymentProductList
+          deploymentId="dep-123"
+          projectId="proj-1"
+          {...defaultSelectionProps}
+          serviceRequestSelection={{ deploymentAllowed: true }}
+        />,
+      );
+
+      for (const box of screen.getAllByRole("checkbox")) {
+        expect(box).toBeEnabled();
+      }
+    });
+
+    it("lets no product be picked in a deployment the rules leave out", () => {
+      renderWithProviders(
+        <DeploymentProductList
+          deploymentId="dep-123"
+          projectId="proj-1"
+          {...defaultSelectionProps}
+          serviceRequestSelection={{ deploymentAllowed: false }}
+        />,
+      );
+
+      const boxes = screen.getAllByRole("checkbox");
+      expect(boxes).toHaveLength(2);
+      for (const box of boxes) {
+        expect(box).toBeDisabled();
+      }
+    });
   });
 });

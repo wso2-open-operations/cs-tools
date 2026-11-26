@@ -70,10 +70,12 @@ Colombo is UTC+5:30 with no daylight saving.
 | `publish_scheduled_announcements` | `*/15 * * * *` | Always | Publish scheduled announcements that have come due |
 | `cloud_status_webhooks` | `*/5 * * * *` | `CLOUD_STATUS_ENABLED=true` | Post service-status transitions to the public status dashboards |
 | `availability_recalculation` | `0 3 * * *` | `AVAILABILITY_RECALC_ENABLED=true` | Trigger the service availability recompute |
+| `audit_log_maintenance` | `0 1 * * 1` | `AUDIT_LOG_MAINTENANCE_ENABLED=true` | Trigger the audit log upkeep: coming partitions, health, missing triggers |
 | `usage_rollup_daily` | `30 0 * * *` | `USAGE_ROLLUP_ENABLED=true` | Rebuild recent daily usage rows |
 | `usage_rollup_monthly` | `30 1 * * *` | `USAGE_ROLLUP_ENABLED=true` | Rebuild last and current month usage rows |
 | `rota_weekday_reminder` | `30 3 * * 0-4` | `EMAIL_BASE_URL` set (scheduled sends also need the Rota Access switch) | Remind the next working day's rota people, the day before (Sunday for Monday) |
 | `rota_weekend_notice` | `30 3 * * 1-4` | Same | Announce the coming weekend once it is fully marked |
+| `rota_weekday_mark_check` | `30 11 * * 0-3,6` | Same | Tell the rota admins, the evening before, about a weekday rotation not fully marked |
 | `rota_weekend_reminder` | `30 3 * * 5` | Same | Friday re-send of the weekend summary, with updates and cancellations |
 | `rota_manual_reminder` | `*/5 * * * *` | Same | Fulfil "Send now" and "Send a test to me" requests |
 | `case_autoclosure` | `30 2 * * *` | `AUTOCLOSURE_ENABLED=true` | Remind and close cases idle in Awaiting Info or Solution Proposed |
@@ -262,7 +264,7 @@ component holds no database credentials.
 
 ## 11. Rota reminders
 
-Four tasks email the people rostered on a Team Schedule rotation, with calendar
+Five tasks email the people rostered on a Team Schedule rotation, with calendar
 invitations for their window. They are registered whenever `EMAIL_BASE_URL` is set,
 but **nothing in this component's configuration turns them on**: scheduled sends
 follow the switches saved on the Rota Access card in the portal. A family that has
@@ -270,7 +272,8 @@ never saved the card gets no scheduled reminder.
 
 | Task | Default schedule (UTC) | Colombo | Announces |
 |---|---|---|---|
-| `rota_weekday_reminder` | `30 3 * * 0-4` | 09:00, Sun to Thu | The next working day's weekday rotations, the day before. Sunday announces Monday |
+| `rota_weekday_reminder` | `30 3 * * 0-4` | 09:00, Sun to Thu | The next working day's weekday rotations, the day before. Sunday announces Monday. The rota admins are copied |
+| `rota_weekday_mark_check` | `30 11 * * 0-3,6` | 17:00, Sat to Wed | The evening before each weekday reminder: tells the rota admins when a weekday rotation of the day it will announce has fewer people than it needs. Sends nothing when it is fully marked |
 | `rota_weekend_notice` | `30 3 * * 1-4` | 09:00, Mon to Thu | The coming weekend, once every shift meets its minimum (Monday when it already does). Until then the rota admins are asked each morning |
 | `rota_weekend_reminder` | `30 3 * * 5` | 09:00, Fri | The weekend again: summary, invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` | every tick | Requests queued by the card's "Send now" and "Send a test to me" |
@@ -282,8 +285,9 @@ never saved the card gets no scheduled reminder.
   - Settings saved on the card win: the weekday and weekend switches, invitation switches, per-rotation minimums and hours, copy lists. Nothing saved means no scheduled reminder, but Send now still goes out.
   - A weekend is announced only when every shift has its minimum people each day (`ROTA_REMINDER_WEEKEND_REQUIRED`). The notice is sent once and recorded; Friday compares its invitations with the recorded ones and cancels anybody taken off a window.
   - A window that has already started is not sent (a late retry).
+  - Weekday reminders are never held back for an incomplete rota. The evening before, `rota_weekday_mark_check` tells the rota admins what is short (`ROTA_REMINDER_WEEKDAY_REQUIRED`); the reminders then go to whoever is marked, Cc the rota admins (never guests of the invitation), so they can add or remove people afterwards.
 - **Failure and idempotency:** the run fails only when no email went out, which repeats nothing. When some windows went out and others failed, the run succeeds and the handler itself emails the task's alert audience a "partly failed" notice, because the handler keeps no record of weekday sends and a retry would re-send every window. A failed settings read fails the run, so a reminder is never sent with settings somebody turned off. A manual request claimed but never reported is claimable again after 2 hours, so a crash can send its emails twice.
-- **Config:** `ROTA_REMINDER_FAMILY`, `ROTA_REMINDER_WEEKDAY_SHIFTS`, `ROTA_REMINDER_WEEKEND_SHIFTS`, `ROTA_REMINDER_WEEKEND_REQUIRED`, `ROTA_REMINDER_WINDOWS`, `ROTA_REMINDER_TIME_ZONE`, `ROTA_REMINDER_INVITES_ENABLED` (needs `EMAIL_FROM_ADDRESS` as the organizer), `ROTA_REMINDER_SCHEDULE_URL`, `ROTA_REMINDER_COPY_TASK_RECIPIENTS`, `ROTA_REMINDER_REDIRECT_TO` (sends every reminder to a test inbox instead). A task's `SUB_CRON_RECIPIENTS` get its failure alerts, and are copied on emails only with the copy flag.
+- **Config:** `ROTA_REMINDER_FAMILY`, `ROTA_REMINDER_WEEKDAY_SHIFTS`, `ROTA_REMINDER_WEEKEND_SHIFTS`, `ROTA_REMINDER_WEEKEND_REQUIRED`, `ROTA_REMINDER_WEEKDAY_REQUIRED`, `ROTA_REMINDER_WINDOWS`, `ROTA_REMINDER_TIME_ZONE`, `ROTA_REMINDER_INVITES_ENABLED` (needs `EMAIL_FROM_ADDRESS` as the organizer), `ROTA_REMINDER_SCHEDULE_URL`, `ROTA_REMINDER_COPY_TASK_RECIPIENTS`, `ROTA_REMINDER_REDIRECT_TO` (sends every reminder to a test inbox instead). A task's `SUB_CRON_RECIPIENTS` get its failure alerts, and are copied on emails only with the copy flag.
 - **Detail:** `CLAUDE.md` "Rota reminders", `internal/rotareminder/`, `internal/teamschedule/`.
 
 ## 12. Case auto-closure

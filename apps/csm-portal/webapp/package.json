@@ -32,7 +32,7 @@
     "@sanity/eventsource": "5.0.4",
     "@tanstack/react-query": "5.90.20",
     "@types/markdown-it": "14.1.2",
-    "@wso2/oxygen-ui": "0.13.1",
+    "@wso2/oxygen-ui": "0.25.0",
     "@wso2/oxygen-ui-charts-react": "0.13.1",
     "@wso2/oxygen-ui-icons-react": "0.13.1",
     "dompurify": "3.4.16",

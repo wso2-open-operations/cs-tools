@@ -51,10 +51,15 @@ export default function DownloadProgressStatus({
       role="status"
       aria-live="polite"
       aria-atomic="true"
+      // Visually hidden. The sizes are strings: in `sx` a number up to 1 is a
+      // fraction, so `width: 1` would be 100% and push the page wider.
       sx={{
         position: "absolute",
-        width: 1,
-        height: 1,
+        width: "1px",
+        height: "1px",
+        margin: "-1px",
+        padding: 0,
+        border: 0,
         overflow: "hidden",
         clip: "rect(0 0 0 0)",
         whiteSpace: "nowrap",

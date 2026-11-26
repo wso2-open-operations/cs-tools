@@ -87,6 +87,10 @@ export interface LadderKeySpec {
   min?: number;
   max?: number;
   options?: { value: string; label: string }[];
+  /** For a pick from a few, the value the alert service runs when nothing is
+   *  set (it reports only a value that is), shown instead of "Not reported
+   *  yet". */
+  defaultValue?: string;
   /** What an empty list, text or map means, for people. */
   empty?: string;
   /** What 0 means, for a number where it is not "nobody". */
@@ -360,6 +364,20 @@ export const LADDER_KEYS: LadderKeySpec[] = [
     options: [
       { value: "pool", label: "A lead from the pool" },
       { value: "none", label: "Nobody" },
+    ],
+  },
+  {
+    key: "teams.unassignedLeads",
+    ladders: CRE,
+    group: "How it climbs",
+    label: "Case with no ABT team",
+    help:
+      "Who a case with no ABT team alerts before the heads. The shift's leads: every ABT lead through the IST day (the Australia lead too, 06:00-09:00 IST), the Americas leads at night; more than three are called once.",
+    editor: "enum",
+    defaultValue: "shift_leads",
+    options: [
+      { value: "shift_leads", label: "The shift's leads, then the heads (default)" },
+      { value: "rules", label: "The rule table (R3 and the others)" },
     ],
   },
   {
@@ -974,6 +992,7 @@ export const SHOWN_KEYS: Record<CaseAlertRoomLadder, readonly string[]> = {
     "trigger.priorities",
     "safety.maxCallsPerLadder",
     "safety.callWithoutVerifiedLeads",
+    "teams.unassignedLeads",
     "email.enabled",
     "email.teamLists",
     "email.creTeamList",

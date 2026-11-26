@@ -55,6 +55,14 @@ func TestBuildProjectSearchWhere_Filters(t *testing.T) {
 			" AND p.onboarding_production_readiness_completion_date <= $1::date", []any{"2026-05-01"}},
 		{"subRegion case-insensitive, trimmed", domain.SearchProjectsRequest{SubRegion: " na - west "},
 			" AND LOWER(TRIM(a.sub_region)) = LOWER($1)", []any{"na - west"}},
+		{"regions any of, lower-cased and trimmed", domain.SearchProjectsRequest{Regions: []string{" APAC ", "Emea"}},
+			" AND LOWER(TRIM(a.region)) = ANY($1::text[])", []any{[]string{"apac", "emea"}}},
+		{"onboardingOwnerIds any of", domain.SearchProjectsRequest{OnboardingOwnerIDs: []string{"11111111-1111-1111-1111-111111111111"}},
+			" AND p.onboarding_owner_id = ANY($1::uuid[])", []any{[]string{"11111111-1111-1111-1111-111111111111"}}},
+		{"onboardingOwnerEmails any of, lower-cased", domain.SearchProjectsRequest{OnboardingOwnerEmails: []string{" Owner@Example.com "}},
+			` AND p.onboarding_owner_id IN (SELECT ou.id FROM "user" ou WHERE LOWER(ou.email) = ANY($1::text[]))`, []any{[]string{"owner@example.com"}}},
+		{"onboardingOwnerTeamIds: the owner is a member of any", domain.SearchProjectsRequest{OnboardingOwnerTeamIDs: []string{"22222222-2222-2222-2222-222222222222"}},
+			" AND EXISTS (SELECT 1 FROM team_member tm WHERE tm.user_id = p.onboarding_owner_id AND tm.team_id = ANY($1::uuid[]))", []any{[]string{"22222222-2222-2222-2222-222222222222"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

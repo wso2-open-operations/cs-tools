@@ -1,0 +1,839 @@
+openapi: 3.0.1
+info:
+  title: Legacy Product API
+  version: 1.0.0
+  description: >
+    Read-only WSO2 product and EOL data (Support Matrix, Release Matrix,
+    product versions, Carbon platform history and kernel releases), served
+    from the CSM product catalogue, which is edited in the CSM Portal. This
+    is version 1 of the retired wso2-product-service's contract (paths, field
+    names and order, yyyy-M-d dates, Title-case status), so its consumers
+    move by changing only the base URL. Fronted by Choreo's API Manager
+    gateway (subscription + client credentials); this service performs no
+    inbound auth of its own.
+security:
+  - oauth2ClientCredentials: []
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /products:
+    get:
+      tags: [Legacy Product API]
+      summary: All live product listings (ProductDto).
+      description: >
+        One row per public listing (publicId). Ordered by release date, newest first, then id.
+      operationId: getProducts
+      parameters:
+        - $ref: '#/components/parameters/Inclusion'
+        - $ref: '#/components/parameters/Exclusion'
+      responses:
+        "200":
+          description: Listings.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+    post:
+      tags: [Legacy Product API]
+      summary: Not supported; the catalogue is read-only here.
+      description: >
+        Write endpoint of the retired wso2-product-service. The catalogue is edited in the CSM
+        Portal, so this always answers 405.
+      operationId: createProduct
+      responses:
+        "405":
+          $ref: '#/components/responses/ReadOnly'
+  /products/support-matrix:
+    get:
+      tags: [Legacy Product API]
+      summary: The wso2.com Support Matrix feed.
+      description: >
+        Listings shown on the Support Matrix (PublicProductDto: no isPublic/showInSupportMatrix).
+      operationId: getSupportMatrix
+      parameters:
+        - $ref: '#/components/parameters/Inclusion'
+        - $ref: '#/components/parameters/Exclusion'
+      responses:
+        "200":
+          description: Listings.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /products/release-matrix:
+    get:
+      tags: [Legacy Product API]
+      summary: The wso2.com Release Matrix feed.
+      description: >
+        Public listings (PublicProductDto).
+      operationId: getReleaseMatrix
+      parameters:
+        - $ref: '#/components/parameters/Inclusion'
+        - $ref: '#/components/parameters/Exclusion'
+      responses:
+        "200":
+          description: Listings.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /products/{id}:
+    get:
+      tags: [Legacy Product API]
+      summary: One listing by id (publicId).
+      operationId: getProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: The listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Invalid id or parameter (empty body).
+        "404":
+          description: Not found (empty body).
+    put:
+      tags: [Legacy Product API]
+      summary: Not supported; the catalogue is read-only here.
+      description: >
+        Write endpoint of the retired wso2-product-service. The catalogue is edited in the CSM
+        Portal, so this always answers 405.
+      operationId: updateProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "405":
+          $ref: '#/components/responses/ReadOnly'
+    delete:
+      tags: [Legacy Product API]
+      summary: Not supported; the catalogue is read-only here.
+      description: >
+        Write endpoint of the retired wso2-product-service. The catalogue is edited in the CSM
+        Portal, so this always answers 405.
+      operationId: deleteProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "405":
+          $ref: '#/components/responses/ReadOnly'
+  /searchProduct:
+    get:
+      tags: [Legacy Product API]
+      summary: Listings whose product name starts with key (case-insensitive).
+      operationId: searchProduct
+      parameters:
+        - name: key
+          in: query
+          required: true
+          description: Product name prefix.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Inclusion'
+        - $ref: '#/components/parameters/Exclusion'
+      responses:
+        "200":
+          description: Listings.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Required query parameter missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /getAllProductVersion:
+    get:
+      tags: [Legacy Product API]
+      summary: Every listing of one product name (case-insensitive).
+      operationId: getAllProductVersion
+      parameters:
+        - name: product
+          in: query
+          required: true
+          description: Exact product name.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Inclusion'
+        - $ref: '#/components/parameters/Exclusion'
+      responses:
+        "200":
+          description: Listings.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Required query parameter missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /productNameForAbbreviation:
+    get:
+      tags: [Legacy Product API]
+      summary: Map abbreviations to product names.
+      description: >
+        Every requested abbreviation is answered (null when unknown), in request order.
+      operationId: getProductNameForAbbreviation
+      parameters:
+        - name: abbrList
+          in: query
+          required: true
+          description: Comma-separated abbreviations.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Abbreviation to product name.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                  nullable: true
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Required query parameter missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /deploymentProfile:
+    get:
+      tags: [Legacy Product API]
+      summary: Deployment profiles of one listing.
+      description: >
+        Ids are strings.
+      operationId: getDeploymentProfile
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Profiles in fixed order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeploymentProfile'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Missing or invalid id (empty body when invalid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found (empty body).
+  /release-line:
+    get:
+      tags: [Legacy Product API]
+      summary: Live release lines.
+      description: >
+        releaseLineId is the numeric id from the retired service, null for a line created in CSM.
+      operationId: getReleaseLines
+      responses:
+        "200":
+          description: Release lines.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReleaseLine'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+    post:
+      tags: [Legacy Product API]
+      summary: Not supported; the catalogue is read-only here.
+      description: >
+        Write endpoint of the retired wso2-product-service. The catalogue is edited in the CSM
+        Portal, so this always answers 405.
+      operationId: createReleaseLine
+      responses:
+        "405":
+          $ref: '#/components/responses/ReadOnly'
+  /product-group:
+    get:
+      tags: [Legacy Product API]
+      summary: Product groups (always empty).
+      description: >
+        Product groups were not carried into CSM.
+      operationId: getProductGroups
+      responses:
+        "200":
+          description: An empty array.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 0
+                items:
+                  type: object
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+    post:
+      tags: [Legacy Product API]
+      summary: Not supported; the catalogue is read-only here.
+      description: >
+        Write endpoint of the retired wso2-product-service. The catalogue is edited in the CSM
+        Portal, so this always answers 405.
+      operationId: createProductGroup
+      responses:
+        "405":
+          $ref: '#/components/responses/ReadOnly'
+  /carbon-platform-history:
+    get:
+      tags: [Legacy Product API]
+      summary: Carbon platform history.
+      description: >
+        Ordered by (the M/d/yyyy release-date text, descending).
+      operationId: getCarbonPlatformHistory
+      parameters:
+        - name: productType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [api-manager, identity-server, esb]
+      responses:
+        "200":
+          description: Rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CarbonPlatformHistory'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Invalid id or parameter (empty body).
+  /carbon-platform-history/versions:
+    get:
+      tags: [Legacy Product API]
+      summary: Distinct carbon versions.
+      operationId: getCarbonVersions
+      responses:
+        "200":
+          description: Versions, ascending.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /carbon-platform-history/latest:
+    get:
+      tags: [Legacy Product API]
+      summary: First row of the /carbon-platform-history ordering.
+      operationId: getLatestCarbonPlatform
+      responses:
+        "200":
+          description: The row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistory'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "404":
+          description: Not found (empty body).
+  /carbon-platform-history/version/{version}:
+    get:
+      tags: [Legacy Product API]
+      summary: Rows of one carbon version.
+      operationId: getCarbonPlatformHistoryByVersion
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CarbonPlatformHistory'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Invalid id or parameter (empty body).
+  /carbon-platform-history/{id}:
+    get:
+      tags: [Legacy Product API]
+      summary: One carbon platform history row.
+      operationId: getCarbonPlatformHistoryById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: The row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistory'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Invalid id or parameter (empty body).
+        "404":
+          description: Not found (empty body).
+  /carbon-kernel-releases:
+    get:
+      tags: [Legacy Product API]
+      summary: Carbon kernel releases, newest first.
+      operationId: getCarbonKernelReleases
+      responses:
+        "200":
+          description: Releases.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CarbonKernelRelease'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /carbon-kernel-releases/platforms:
+    get:
+      tags: [Legacy Product API]
+      summary: Distinct carbon platforms, alphabetically.
+      operationId: getCarbonKernelPlatforms
+      responses:
+        "200":
+          description: Platforms.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /carbon-kernel-releases/latest-by-platform:
+    get:
+      tags: [Legacy Product API]
+      summary: Newest kernel release of each platform.
+      operationId: getLatestKernelByPlatform
+      responses:
+        "200":
+          description: Releases.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CarbonKernelRelease'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /carbon-kernel-releases/platform/{platform}:
+    get:
+      tags: [Legacy Product API]
+      summary: Kernel releases of one platform, newest first.
+      operationId: getCarbonKernelReleasesByPlatform
+      parameters:
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Releases.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CarbonKernelRelease'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Invalid id or parameter (empty body).
+  /carbon-kernel-releases/{id}:
+    get:
+      tags: [Legacy Product API]
+      summary: One kernel release.
+      operationId: getCarbonKernelReleaseById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: The release.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonKernelRelease'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/Internal'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          description: Invalid id or parameter (empty body).
+        "404":
+          description: Not found (empty body).
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          # Placeholder — fill in with the actual token endpoint for this service's
+          # Choreo-managed API once it's provisioned. Not a real/guessed URL.
+          tokenUrl: "<token_url>"
+          scopes: {}
+
+  parameters:
+    Inclusion:
+      name: inclusion
+      in: query
+      required: false
+      description: Comma-separated tags; keep only listings with one of them.
+      schema:
+        type: string
+    Exclusion:
+      name: exclusion
+      in: query
+      required: false
+      description: Comma-separated tags; drop listings with any of them.
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Unauthorized (returned by the API gateway for a missing or invalid caller token; this service never returns it)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Forbidden (returned by the API gateway; this service never returns it)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Internal:
+      description: InternalServerError (also any upstream failure other than unavailability, as the retired service answered its own database errors)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: ServiceUnavailable (upstream unreachable or timed out)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ReadOnly:
+      description: MethodNotAllowed (the catalogue is managed in the CSM Portal)
+      headers:
+        Allow:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Product:
+      type: object
+      description: >
+        ProductDto. The matrix feeds return PublicProductDto, which is the
+        same without isPublic and showInSupportMatrix. Dates are yyyy-M-d
+        (no zero padding). Keys are in alphabetical order.
+      properties:
+        abbreviation: {type: string, nullable: true}
+        active: {type: integer, enum: [1]}
+        carbonPlatform:
+          $ref: '#/components/schemas/CarbonPlatform'
+        currentStatusOfSupport:
+          type: string
+          nullable: true
+          enum: [Available, Extended, Deprecated, Discontinued]
+        deploymentProfile:
+          type: array
+          nullable: true
+          items: {type: string}
+        description: {type: string, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, nullable: true, example: "2027-4-10"}
+        id: {type: integer, format: int64}
+        isPublic: {type: boolean}
+        productGroup:
+          type: object
+          nullable: true
+          description: Always null.
+        productName: {type: string}
+        productVersion: {type: string}
+        releaseDate: {type: string, nullable: true, example: "2020-4-7"}
+        releaseLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseLine'
+        releaseLinks: {type: string, nullable: true}
+        showInSupportMatrix: {type: boolean}
+        status: {type: boolean}
+        supportEolAnnouncementDate: {type: string, nullable: true}
+        supportEolDate: {type: string, nullable: true}
+        tags:
+          type: array
+          nullable: true
+          items: {type: string}
+    CarbonPlatform:
+      type: object
+      properties:
+        platformRelease: {type: string, nullable: true}
+        platformVersion: {type: string, nullable: true}
+        carbonKernelVersion: {type: string, nullable: true}
+        releaseChunk: {type: string, nullable: true}
+        kernelPatchNo: {type: string, nullable: true}
+    ReleaseLine:
+      type: object
+      properties:
+        releaseLineId: {type: integer, format: int64, nullable: true}
+        releaseLine: {type: string}
+        releaseLineStartDate: {type: string, nullable: true}
+        releaseLineStatus: {type: string, nullable: true}
+    DeploymentProfile:
+      type: object
+      properties:
+        id: {type: string, example: "0"}
+        title: {type: string, example: All In One}
+    CarbonPlatformHistory:
+      type: object
+      properties:
+        id: {type: integer}
+        carbonVersion: {type: string, nullable: true}
+        releaseDate: {type: string, nullable: true}
+        productVersions:
+          type: object
+          description: One nullable string per Carbon-era product.
+          properties:
+            esbVersion: {type: string, nullable: true}
+            governanceRegistryVersion: {type: string, nullable: true}
+            applicationServerVersion: {type: string, nullable: true}
+            dataServicesServerVersion: {type: string, nullable: true}
+            identityServerVersion: {type: string, nullable: true}
+            businessProcessServerVersion: {type: string, nullable: true}
+            mashupServerVersion: {type: string, nullable: true}
+            gadgetServerVersion: {type: string, nullable: true}
+            businessActivityMonitorVersion: {type: string, nullable: true}
+            apiManagerVersion: {type: string, nullable: true}
+            businessRulesServerVersion: {type: string, nullable: true}
+            eventServerVersion: {type: string, nullable: true}
+            messageBrokerVersion: {type: string, nullable: true}
+            complexEventProcessorVersion: {type: string, nullable: true}
+            elasticLoadBalancerVersion: {type: string, nullable: true}
+            storageServerVersion: {type: string, nullable: true}
+            stratosVersion: {type: string, nullable: true}
+            cloudGatewayVersion: {type: string, nullable: true}
+            wsasVersion: {type: string, nullable: true}
+            appFactoryVersion: {type: string, nullable: true}
+            userEngagementServerVersion: {type: string, nullable: true}
+    CarbonKernelRelease:
+      type: object
+      properties:
+        id: {type: integer}
+        kernelRelease: {type: string, nullable: true}
+        releaseDate: {type: string, nullable: true}
+        carbonPlatform: {type: string, nullable: true}
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string

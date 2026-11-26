@@ -627,6 +627,7 @@ type mockEntityProjectClient struct {
 	getProjectFn            func(ctx context.Context, id string) ([]byte, error)
 	getProjectMetadataFn    func(ctx context.Context, id string) ([]byte, error)
 	searchProjectsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateProjectsFn     func(ctx context.Context, body []byte) ([]byte, error)
 	searchProjectContactsFn func(ctx context.Context, projectID string, body []byte) ([]byte, error)
 	getProjectContactFn     func(ctx context.Context, projectID, contactID string) ([]byte, error)
 	updateProjectFn         func(ctx context.Context, id string, body []byte) ([]byte, error)
@@ -656,6 +657,13 @@ func (m *mockEntityProjectClient) GetProjectMetadata(ctx context.Context, id str
 func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchProjectsFn != nil {
 		return m.searchProjectsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityProjectClient) AggregateProjects(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateProjectsFn != nil {
+		return m.aggregateProjectsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }

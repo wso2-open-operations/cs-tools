@@ -64,6 +64,9 @@ describe("useGetCsmCaseEscalations", () => {
       teamLeads: [
         { id: "u-2", userName: "lead", name: "Abt Lead", email: "lead@example.com" },
       ],
+      deescalators: [
+        { id: "u-3", userName: "named", name: "Named Person", email: "named@example.com" },
+      ],
     });
 
     const { result } = renderHook(() => useGetCsmCaseEscalations("case-1"), {
@@ -88,6 +91,7 @@ describe("useGetCsmCaseEscalations", () => {
         { id: "u-1", name: "Jane Doe", email: "jane.doe@example.com" },
       ],
       teamLeads: [{ id: "u-2", name: "Abt Lead", email: "lead@example.com" }],
+      deescalators: [{ id: "u-3", name: "Named Person", email: "named@example.com" }],
     });
   });
 
@@ -103,6 +107,7 @@ describe("useGetCsmCaseEscalations", () => {
       escalations: [],
       currentNotifiedUsers: [],
       teamLeads: [],
+      deescalators: [],
     });
   });
 

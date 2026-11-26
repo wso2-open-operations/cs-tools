@@ -23,8 +23,10 @@ import { useScheduleAssignmentsByMonth } from "../api/useTeamSchedule";
 import type { RotaAdminGrant, RotaFamily, RotaMarkerGrant, ScheduleTeam } from "../types";
 import { monthPieces } from "../utils/rota";
 import { teamDisplayName } from "../utils/teamDisplayName";
+import PublicHolidaysEditor from "./PublicHolidaysEditor";
 import RotaReminderSettings from "./RotaReminderSettings";
 import ScheduleSkeleton from "./ScheduleSkeleton";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 const FAMILIES: RotaFamily[] = ["CRE", "SRE", "SME"];
 
@@ -183,6 +185,8 @@ export default function RotaAccessTab({ teams: synced }: Props): JSX.Element {
       ) : null}
 
       {markerFamilies.includes("CRE") ? <RotaReminderSettings /> : null}
+      {/* Renders only for a portal or rota admin (the server's canEdit). */}
+      <PublicHolidaysEditor />
     </div>
   );
 }
@@ -265,7 +269,9 @@ function PersonSearch({
   const found = useSearchInternalUsersByName(q, q.length >= 2);
   const people = (found.data ?? []).filter((u) => u.id && !exclude.includes(u.id));
   const nameOf = (u: { firstName?: string; lastName?: string; email?: string }) =>
-    [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "";
+    joinStaffName(u.firstName, u.lastName) ||
+    u.email ||
+    "";
 
   return (
     <div className="ra-search">

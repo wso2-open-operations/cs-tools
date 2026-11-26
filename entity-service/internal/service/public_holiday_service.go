@@ -19,13 +19,18 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/holidays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
@@ -69,7 +74,34 @@ type PublicHolidayService interface {
 	RefreshInBackground() bool
 	// LastRefresh is the last finished run, nil before the first.
 	LastRefresh() *domain.PublicHolidayRefreshResult
+	// List is the stored holidays in a window of at most a year (internal
+	// staff), with the countries in use and whether the caller may edit.
+	List(ctx context.Context, req domain.ListPublicHolidaysRequest) (domain.PublicHolidaysListResponse, error)
+	// Add stores one country's holidays as manual rows (a portal admin or a
+	// rota admin of any family), then places the Public holiday tags.
+	Add(ctx context.Context, req domain.AddPublicHolidaysRequest) (domain.AddPublicHolidaysResponse, error)
+	// Remove deletes one stored day (same callers as Add), then places the
+	// tags again, which takes away the day's untouched tags.
+	Remove(ctx context.Context, country, date string) error
 }
+
+// HolidayEditorAuthorizer says whether the caller may add or remove public
+// holidays: a portal admin or a rota admin of any family. It is the schedule
+// service's own check (HolidayEditorCheck). Holidays are per country and
+// shared by every family, so a lead or a Rota Manager may not.
+type HolidayEditorAuthorizer func(ctx context.Context) error
+
+// Limits of the manual holiday editor.
+const (
+	// maxManualHolidays bounds one add: a country's year is about 30 days.
+	maxManualHolidays = 200
+	// maxHolidayCountryLen and maxHolidayTitleLen are counted in characters;
+	// the column holds 100 for the country.
+	maxHolidayCountryLen = 100
+	maxHolidayTitleLen   = 200
+	// maxHolidayListDays bounds one list read.
+	maxHolidayListDays = 366
+)
 
 type publicHolidayService struct {
 	repo      repository.PublicHolidayRepository
@@ -78,22 +110,35 @@ type publicHolidayService struct {
 	employees EmployeeLocations
 	now       func() time.Time
 
-	// placer, when set, places the coming weeks' Public holiday tags after
+	// placer, when set, places the coming Public holiday tags after
 	// every successful refresh (WithHolidayTagPlacer).
 	placer HolidayTagPlacer
+	// editor, when set, decides who may add or remove holidays
+	// (WithHolidayEditorCheck); unset, nobody may.
+	editor HolidayEditorAuthorizer
 
 	running sync.Mutex
 	mu      sync.Mutex
 	last    *domain.PublicHolidayRefreshResult
 }
 
-// WithHolidayTagPlacer makes every successful refresh place the coming weeks'
+// WithHolidayTagPlacer makes every successful refresh place the coming
 // Public holiday tags (CRE). Applied after construction so the constructor's
 // callers keep compiling; a service it does not recognise is returned
 // unchanged.
 func WithHolidayTagPlacer(svc PublicHolidayService, placer HolidayTagPlacer) PublicHolidayService {
 	if s, ok := svc.(*publicHolidayService); ok {
 		s.placer = placer
+	}
+	return svc
+}
+
+// WithHolidayEditorCheck sets who may add or remove holidays by hand. Without
+// it every add and remove is refused. A service it does not recognise is
+// returned unchanged.
+func WithHolidayEditorCheck(svc PublicHolidayService, editor HolidayEditorAuthorizer) PublicHolidayService {
+	if s, ok := svc.(*publicHolidayService); ok {
+		s.editor = editor
 	}
 	return svc
 }
@@ -349,6 +394,178 @@ func (s *publicHolidayService) LastRefresh() *domain.PublicHolidayRefreshResult 
 	}
 	cp := *s.last
 	return &cp
+}
+
+// List returns the stored holidays in the window, the countries the editor
+// offers and whether the caller may edit.
+func (s *publicHolidayService) List(ctx context.Context, req domain.ListPublicHolidaysRequest) (domain.PublicHolidaysListResponse, error) {
+	empty := domain.PublicHolidaysListResponse{Holidays: []domain.StoredPublicHoliday{}, Countries: []string{}}
+	if err := RequireInternalCaller(ctx, s.access, "the team schedule is only available to internal staff"); err != nil {
+		return empty, err
+	}
+	from, err := time.Parse(time.DateOnly, strings.TrimSpace(req.From))
+	if err != nil {
+		return empty, &apierror.ValidationError{Msg: "from must be a YYYY-MM-DD date"}
+	}
+	to, err := time.Parse(time.DateOnly, strings.TrimSpace(req.To))
+	if err != nil {
+		return empty, &apierror.ValidationError{Msg: "to must be a YYYY-MM-DD date"}
+	}
+	if to.Before(from) {
+		return empty, &apierror.ValidationError{Msg: "to must not be before from"}
+	}
+	if to.Sub(from) > (maxHolidayListDays-1)*24*time.Hour {
+		return empty, &apierror.ValidationError{Msg: fmt.Sprintf("the window is at most %d days", maxHolidayListDays)}
+	}
+	holidays, err := s.repo.StoredHolidays(ctx, strings.TrimSpace(req.Country), from, to)
+	if err != nil {
+		return empty, err
+	}
+	stored, err := s.repo.StoredCountries(ctx)
+	if err != nil {
+		return empty, err
+	}
+	set := map[string]bool{domain.PublicHolidayCountrySriLanka: true, domain.PublicHolidayCountryIndia: true}
+	for _, c := range stored {
+		set[c] = true
+	}
+	countries := make([]string, 0, len(set))
+	for c := range set {
+		countries = append(countries, c)
+	}
+	sort.Strings(countries)
+	return domain.PublicHolidaysListResponse{
+		Holidays:  holidays,
+		Countries: countries,
+		CanEdit:   s.editor != nil && s.editor(ctx) == nil,
+	}, nil
+}
+
+// requireEditor refuses a caller who may not add or remove holidays, and
+// returns the caller's email for updated_by.
+func (s *publicHolidayService) requireEditor(ctx context.Context) (string, error) {
+	if s.editor == nil {
+		return "", &apierror.ForbiddenError{Msg: "public holidays cannot be changed here"}
+	}
+	if err := s.editor(ctx); err != nil {
+		return "", err
+	}
+	return auth.IdentityFromContext(ctx).UserEmail, nil
+}
+
+// holidayCountry trims and checks a country name.
+func holidayCountry(raw string) (string, error) {
+	c := strings.TrimSpace(raw)
+	if c == "" {
+		return "", &apierror.ValidationError{Msg: "country is required"}
+	}
+	if utf8.RuneCountInString(c) > maxHolidayCountryLen {
+		return "", &apierror.ValidationError{Msg: fmt.Sprintf("country is at most %d characters", maxHolidayCountryLen)}
+	}
+	for _, r := range c {
+		if unicode.IsControl(r) || r == '/' {
+			return "", &apierror.ValidationError{Msg: "country must not contain a slash or a control character"}
+		}
+	}
+	return c, nil
+}
+
+// manualHolidayDate checks a holiday date: a real YYYY-MM-DD date from last
+// year to two years ahead, so a typo in the year is caught.
+func (s *publicHolidayService) manualHolidayDate(raw string) (string, error) {
+	d, err := time.Parse(time.DateOnly, strings.TrimSpace(raw))
+	if err != nil {
+		return "", &apierror.ValidationError{Msg: fmt.Sprintf("%q is not a YYYY-MM-DD date", raw)}
+	}
+	year := s.now().UTC().Year()
+	if d.Year() < year-1 || d.Year() > year+2 {
+		return "", &apierror.ValidationError{Msg: fmt.Sprintf("%s is outside %d to %d", d.Format(time.DateOnly), year-1, year+2)}
+	}
+	return d.Format(time.DateOnly), nil
+}
+
+// Add stores one country's holidays as manual rows, then places the tags.
+func (s *publicHolidayService) Add(ctx context.Context, req domain.AddPublicHolidaysRequest) (domain.AddPublicHolidaysResponse, error) {
+	actor, err := s.requireEditor(ctx)
+	if err != nil {
+		return domain.AddPublicHolidaysResponse{}, err
+	}
+	country, err := holidayCountry(req.Country)
+	if err != nil {
+		return domain.AddPublicHolidaysResponse{}, err
+	}
+	if len(req.Holidays) == 0 {
+		return domain.AddPublicHolidaysResponse{}, &apierror.ValidationError{Msg: "holidays is required"}
+	}
+	if len(req.Holidays) > maxManualHolidays {
+		return domain.AddPublicHolidaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("at most %d holidays at a time", maxManualHolidays)}
+	}
+	days := make([]domain.PublicHolidayDay, 0, len(req.Holidays))
+	for i, h := range req.Holidays {
+		date, err := s.manualHolidayDate(h.Date)
+		if err != nil {
+			return domain.AddPublicHolidaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("holiday %d: %s", i+1, err.Error())}
+		}
+		title := strings.TrimSpace(h.Title)
+		if title == "" {
+			return domain.AddPublicHolidaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("holiday %d (%s): a title is required", i+1, date)}
+		}
+		if utf8.RuneCountInString(title) > maxHolidayTitleLen {
+			return domain.AddPublicHolidaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("holiday %d (%s): the title is at most %d characters", i+1, date, maxHolidayTitleLen)}
+		}
+		days = append(days, domain.PublicHolidayDay{Country: country, Date: date, Title: title})
+	}
+	stored, err := s.repo.UpsertManualHolidays(ctx, country, days, actor, s.now().UTC())
+	if err != nil {
+		return domain.AddPublicHolidaysResponse{}, err
+	}
+	slog.InfoContext(ctx, "public holidays: added by hand", "country", country, "days", stored)
+	s.placeSoon(ctx)
+	return domain.AddPublicHolidaysResponse{Stored: stored}, nil
+}
+
+// Remove deletes one stored day, then places the tags again so the day's
+// untouched tags go with it.
+func (s *publicHolidayService) Remove(ctx context.Context, country, date string) error {
+	if _, err := s.requireEditor(ctx); err != nil {
+		return err
+	}
+	c, err := holidayCountry(country)
+	if err != nil {
+		return err
+	}
+	d, err := time.Parse(time.DateOnly, strings.TrimSpace(date))
+	if err != nil {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("%q is not a YYYY-MM-DD date", date)}
+	}
+	removed, err := s.repo.DeleteHoliday(ctx, c, d.Format(time.DateOnly))
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return &apierror.NotFoundError{Msg: fmt.Sprintf("no public holiday is stored for %s on %s", c, d.Format(time.DateOnly))}
+	}
+	slog.InfoContext(ctx, "public holidays: removed by hand", "country", c, "date", d.Format(time.DateOnly))
+	s.placeSoon(ctx)
+	return nil
+}
+
+// holidayPlacementTimeout bounds one placement started by a hand edit.
+const holidayPlacementTimeout = 2 * time.Minute
+
+// placeSoon places (and takes away) the coming holiday tags after a hand edit,
+// as the system, as the daily run does. It runs in the background, past the
+// request's own deadline, because placing walks every CRE member; a failure
+// is logged, the edit stands, and the next daily run places them.
+func (s *publicHolidayService) placeSoon(ctx context.Context) {
+	if s.placer == nil {
+		return
+	}
+	go func() {
+		pctx, cancel := context.WithTimeout(repository.WithSystemIdentity(context.WithoutCancel(ctx)), holidayPlacementTimeout)
+		defer cancel()
+		placeAfterRefresh(pctx, s.placer)
+	}()
 }
 
 // RunPublicHolidayRefresh refreshes once after firstAfter, then every

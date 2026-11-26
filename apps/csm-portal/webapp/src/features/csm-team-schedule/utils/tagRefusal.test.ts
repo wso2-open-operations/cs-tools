@@ -15,7 +15,25 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { addKindRefusal } from "./tagRefusal";
+import { addKindRefusal, deleteKindRefusal } from "./tagRefusal";
+
+describe("deleteKindRefusal", () => {
+  it("shows the server's own reason for a 403 or a 409", () => {
+    expect(
+      deleteKindRefusal({ status: 403, message: "this tag is shared by every family; only a rota admin or a portal admin can delete it" }),
+    ).toBe("This tag is shared by every family; only a rota admin or a portal admin can delete it.");
+    expect(deleteKindRefusal({ status: 409, message: "the tag is still used by 3 leave or allocation entries; remove those first" })).toBe(
+      "The tag is still used by 3 leave or allocation entries; remove those first.",
+    );
+  });
+
+  it("keeps a plain line when there is no reason to show", () => {
+    expect(deleteKindRefusal({ status: 409, message: "" })).toBe("That tag is still used on the rota. Remove those entries first.");
+    expect(deleteKindRefusal({ status: 403, message: "" })).toBe("You cannot delete this tag. A built-in tag can never be deleted.");
+    expect(deleteKindRefusal({ status: 500, message: "Failed to delete the tag." })).toBe("The tag was not deleted. Try again.");
+    expect(deleteKindRefusal(new Error("network"))).toBe("The tag was not deleted. Try again.");
+  });
+});
 
 describe("addKindRefusal", () => {
   it("shows the server's own reason for a refusal the lead can act on", () => {

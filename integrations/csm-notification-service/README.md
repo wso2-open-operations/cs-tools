@@ -73,9 +73,10 @@ validation boundary. Types and their reaction, from `dispatch.Dispatcher.Handle`
 | `case.acknowledged` | Chat alert only. |
 | `case.workaround_provided` | Completes the workaround SLA clock (no message). |
 | `case.escalated` | One email to the escalation's notification list. |
-| `incident.created` | Voice call to the payload's `callTo`, or `INCIDENT_DEFAULT_CALL_TO`; incident Chat card where `INCIDENT_CHAT_SPACES` has an entry. |
+| `incident.created` | Voice call to the payload's `callTo`, or `INCIDENT_DEFAULT_CALL_TO`; incident Chat card where `INCIDENT_CHAT_SPACES` has an entry; registers the incident's SLA clocks with the SLA engine. |
 | `incident.assigned` | "Incident Acknowledged." reply in the incident's Chat thread. |
-| `incident.acknowledged`, `incident.priority_elevated`, `incident.comment_added` | Ignored here; owned by the call-escalation ladder. |
+| `incident.priority_elevated` | Owned by the call-escalation ladder; here it only registers any SLA clock the raised priority started. |
+| `incident.acknowledged`, `incident.comment_added` | Ignored here; owned by the call-escalation ladder. |
 | `incident.special_ops_alert` | Pages the subject-matter expert through the SRE ladder engine, if enabled. |
 | `change_request.approval_requested`, `change_request.plan_date_notice` | One email; the payload's audience (internal or customer) picks the portal link. |
 | `outage.notification_due`, `outage.communication_due` | Outage email. |
@@ -307,15 +308,16 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `EMAIL_BASE_URL` | Yes, to send email | none | Base URL of the email service. | `https://email.example.com` |
 | `EMAIL_SCOPES` | No | none | Comma-separated OAuth2 scopes. | `scope-a,scope-b` |
 | `EMAIL_FROM_ADDRESS` | Yes unless `EMAIL_SENDING_ENABLED=false` | none | Fixed From address; startup exits if missing while sending is on. | `no-reply@example.com` |
-| `EMAIL_REPLY_TO` | No | built-in support address if unset; none if set to empty | Reply-To for onboarding emails. Comma-separated. | `support@example.com` |
+| `EMAIL_REPLY_TO` | No | the support address (`EMAIL_SUPPORT_ADDRESS`) if unset; none if set to empty | Reply-To for onboarding emails. Comma-separated. | `support@example.com` |
 | `EMAIL_LOGO_DARK_URL` | No | built-in logo if unset | Dark-coloured logo, shown on the light header of most emails. Must be a publicly fetchable `https` URL (mail clients do not load `data:` images). | `https://example.com/logo.png` |
-| `EMAIL_LOGO_WHITE_URL` | No | built-in white logo if unset | White-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-white.png` |
-| `EMAIL_FOOTER_ICON_URL` | No | built-in icon if unset | Small decorative icon next to the footer copyright line in the onboarding emails. | `https://example.com/footer-icon.png` |
-| `EMAIL_TEMPLATE_COMPANY_NAME` | No | `WSO2` | Company name in the footer disclaimer, the signoff, the `... LLC` copyright line, the onboarding emails' titles/headings/body copy, and the `[... Support]` email subject prefix. | `Acme` |
+| `EMAIL_LOGO_LIGHT_URL` | No | built-in light logo if unset | Light-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-light.png` |
+| `EMAIL_SUPPORT_ADDRESS` | No | `support@wso2.com` if unset | Support address in the onboarding emails' "contact us" line (the text and the `mailto:` link), and the default Reply-To for those emails. One plain address; an invalid value is ignored with a warning. | `support@example.com` |
+| `EMAIL_TEMPLATE_COMPANY_NAME` | No | `WSO2` | Company name in the footer disclaimer, the signoff, the `... LLC` copyright line, the onboarding emails' titles/headings/body copy, the `[... Support]` email subject prefix (change request subjects included), the plan-date notice's closing line, and the opening `... Support Alert.` of every paging call. | `Acme` |
 | `EMAIL_SENDING_ENABLED` | No | `true` | Killswitch for case.* email. `false` logs instead of sending, regardless of debug mode. Does not affect Chat or calls. | `false` |
 | `EMAIL_DEBUG_MODE` | No | off (exact `true` to enable) | Redirect case.* email to `EMAIL_DEBUG_RECIPIENTS`. Links are still resolved from the real recipients. | `true` |
 | `EMAIL_DEBUG_RECIPIENTS` | No | none | Comma-separated test addresses. With debug on and this empty, the email is skipped. | `qa@example.com` |
 | `DEFAULT_CSM_EMAIL_CC` | No | none | Comma-separated CC added to the CSM-portal-link group of case.* email only, never to the customer group and never in debug mode. | `team@example.com` |
+| `ACP_INTERNAL_EMAIL_DOMAINS` | No | `@wso2.com` | Comma-separated domains the "Back to Open state" email (`project.reactivated`) may go to; recipients outside them are dropped (it is an internal notice). The leading `@` is optional; an entry that is not a domain stops startup. | `@wso2.com,@example.org` |
 | `ACP_REACTIVATION_CC` | No | none | Comma-separated CC on the "Back to Open state" email (`project.reactivated`); never in debug mode. Every entry must be an email address, or the service refuses to start. When the email has no internal recipient, these addresses get it in To. Two deliveries of the same event arriving at once in one running service send one email even without Redis. Preventing a second email after a restart, a rebalance or a redelivery needs Redis (`REDIS_URL` / `REDIS_ADDR`); if Redis is unreachable the email is still sent (at worst one duplicate), and in `EMAIL_DEBUG_MODE` nothing is recorded. | `lifecycle@example.com,billing@example.com` |
 
 ### Google Chat
@@ -325,7 +327,7 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `GOOGLE_CHAT_SPACES` | unset (Chat alerts unavailable) | JSON array of `{"audience","webhookUrl"}`, one per space. Audience matching ignores whitespace but is case-sensitive. Meant now only for the standing, non-team audiences: `Incident Monitor`, `Onboarding`, `Americas`, `Evaluation` — a real team's own space should come from entity-service's `team.chat_webhook_url` instead (see `TEAM_CHAT_SPACES_REFRESH_INTERVAL` below); a team still listed here during migration still works, and wins over a same-named entity-service entry. A malformed value (or unknown JSON keys, such as the legacy product-keyed shape) logs an error and disables Chat. An audience with no entry is skipped. | `[{"audience":"Incident Monitor","webhookUrl":"<webhook-url>"}]` |
 | `INCIDENT_CHAT_SPACES` | unset (no incident cards) | JSON object, assignment group (matched case-insensitively) to webhook URL. | `{"Example SRE Group":"<webhook-url>"}` |
 | `INCIDENT_CHAT_FANOUT` | unset | JSON object, assignment group to the list of groups whose `INCIDENT_CHAT_SPACES` spaces get its cards. Names only. The call is placed once; a card that fails in one space is not retried. | `{"Default Group":["Group A","Group B"]}` |
-| `TEAM_CHAT_SPACES_REFRESH_INTERVAL` | `5m` | How often a team's own Chat webhook URL (entity-service's `GET /teams/chat-webhooks`) is re-fetched and merged into the routing table. Only read when `CUSTOMER_ENTITY_BASE_URL` is set; a failed refresh logs and keeps the previous set. | `1m` |
+| `TEAM_CHAT_SPACES_REFRESH_INTERVAL` | `5m` | How often a team's own Chat webhook URL (entity-service's `GET /teams/chat-webhooks`) is re-fetched and merged into the routing table — the same tick also refreshes the SLA engine's team group-email lookup (`GET /teams/group-emails`) when Redis is configured, used for the fixed Americas overnight-coverage team email (see "SLA breach-alerting engine" in `CLAUDE.md`). Only read when `CUSTOMER_ENTITY_BASE_URL` is set; a failed refresh logs and keeps the previous set. | `1m` |
 | `GOOGLE_CHAT_AUDIENCE_SPACES` | n/a | Removed; if set, a warning is logged and it is ignored. Use `GOOGLE_CHAT_SPACES`. | |
 
 ### Voice calls and SMS (Twilio)
@@ -408,6 +410,7 @@ the steps until the code or documentation is reconciled.
 | `REDIS_PASSWORD` | none | Password for `REDIS_ADDR`; ignored with `REDIS_URL`. | |
 | `SLA_TICK_INTERVAL` | `5m` | How often the wake-index is scanned. | `1m` |
 | `SLA_EMAIL_SENDING_ENABLED` | `true` | Killswitch for all SLA messages (breach Chat card). Events still publish and tiers still advance. | `false` |
+| `INCIDENT_SLA_ALERTS_ENABLED` | `false` | Turns on incident SLA clock tracking and its 50/75/100% alerts to the holding team's Chat space and group email. Only `true` (as `envBool` reads it: trimmed, any case) enables it; set the SRE and SME teams' `chat_webhook_url`/`group_email` rows first. Case SLA alerts are unaffected either way. | `true` |
 
 ### Call-escalation ladder
 

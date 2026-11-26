@@ -17,6 +17,7 @@
  */
 
 import type { RotaFamily, ScheduleAbsenceKind, ScheduleAssignment, ScheduleShift, ScheduleTier } from "../types";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 
 /**
@@ -322,11 +323,16 @@ export function shiftsByCode(shifts: ScheduleShift[]): Map<string, ScheduleShift
 export function initialsOf(name: string): string {
   // Words only: a numbering suffix ("Engineer 11") is not an initial, and
   // made every numbered account read "A1".
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  const words = stripStaffNameMarker(name).split(/\s+/).filter(Boolean);
   const parts = words.filter((w) => !/^\d+$/.test(w));
   if (parts.length === 0) return words.length ? words[0].slice(0, 2).toUpperCase() : "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  // Only ever the first two real words -- first name, last name -- never
+  // whatever comes after. More defensive than stripStaffNameMarker alone:
+  // it keeps the avatar clean against any OTHER trailing marker/icon this
+  // codebase doesn't yet know to recognize too, not just the ones matched
+  // above, since a third (or later) word is never looked at at all.
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 /**
@@ -500,26 +506,59 @@ export function isTierlessEscalation(a: ScheduleAssignment, shifts: Map<string, 
  * What a zone is called on a weekday or at the weekend.
  *
  * At the weekend TZ1 and TZ2 are one crew, carried under TZ1, and the
- * catalogue's window for it says so in its short code ("TZ1+2"). So the name
- * is read off the zone's own escalation window for that kind of day -- the
- * one that leaves the tier open -- rather than written down here, and a
- * weekday, or a zone with no such window, is simply its code.
+ * catalogue's window for it says so in its short code ("TZ1+2"). Once SaaS
+ * SRE's weekend is Day/Night, its two weekend windows (SRE_WE_DAY in TZ1,
+ * SRE_WE_NIGHT in TZ3) are short-coded "Day" and "Night", and those name the
+ * lanes instead. So the name is read off the zone's own escalation window for
+ * that kind of day -- the one that leaves the tier open -- rather than written
+ * down here, and a weekday, or a zone with no such window, is simply its code.
  */
+/** The zone's own weekend escalation window, the one that leaves the tier open. */
+function weekendWindowOf(
+  shifts: ScheduleShift[] | Map<string, ScheduleShift>,
+  zoneCode: string,
+): ScheduleShift | undefined {
+  const list = Array.isArray(shifts) ? shifts : [...shifts.values()];
+  return list.find(
+    (s) => s.isEscalation && !s.tier && s.zoneCode === zoneCode && s.dayScope === "WEEKEND",
+  );
+}
+
+/**
+ * The hover text of a weekend zone column whose name differs from the
+ * weekday's: why TZ1+2 is one column, or the hours of a Day / Night weekend
+ * window ("Day: Weekend Day, 06:00–18:00"). None when the name is the zone's.
+ */
+export function weekendZoneTitle(
+  shifts: ScheduleShift[] | Map<string, ScheduleShift>,
+  zoneCode: string,
+): string | undefined {
+  const name = zoneLabelOn(shifts, zoneCode, true);
+  if (name === zoneLabelOn(shifts, zoneCode, false)) return undefined;
+  const own = weekendWindowOf(shifts, zoneCode);
+  if (!own || !WEEKEND_CREW_NAMES.has(name)) return `${name}: TZ1 and TZ2 are one crew at the weekend`;
+  const hhmm = (m: number) =>
+    `${String(Math.floor((m % 1440) / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  return `${name}: ${own.label}, ${hhmm(own.startMinute)}–${hhmm(own.endMinute)}`;
+}
+
+/** Short codes a weekend window's crew is named by (SaaS SRE's Day/Night weekend). */
+const WEEKEND_CREW_NAMES = new Set(["Day", "Night"]);
+
 export function zoneLabelOn(
   shifts: ScheduleShift[] | Map<string, ScheduleShift>,
   zoneCode: string,
   weekend: boolean,
 ): string {
   if (!weekend) return zoneDisplayName(zoneCode);
-  const list = Array.isArray(shifts) ? shifts : [...shifts.values()];
-  const own = list.find(
-    (s) => s.isEscalation && !s.tier && s.zoneCode === zoneCode && s.dayScope === "WEEKEND",
-  );
-  // Only a short code that extends the zone's own ("TZ1" -> "TZ1+2") names
-  // the crew; anything else ("L1") is the chip, not a zone name.
-  return own?.shortCode && own.shortCode !== zoneCode && own.shortCode.startsWith(zoneCode)
-    ? own.shortCode
-    : zoneDisplayName(zoneCode);
+  const own = weekendWindowOf(shifts, zoneCode);
+  // Only a short code that extends the zone's own ("TZ1" -> "TZ1+2"), or a
+  // weekend crew's Day / Night, names the crew; anything else ("L1") is the
+  // chip, not a zone name.
+  const code = own?.shortCode;
+  const namesCrew =
+    !!code && ((code !== zoneCode && code.startsWith(zoneCode)) || WEEKEND_CREW_NAMES.has(code));
+  return namesCrew ? (code as string) : zoneDisplayName(zoneCode);
 }
 
 /**

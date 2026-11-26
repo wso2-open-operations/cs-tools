@@ -68,10 +68,18 @@ type UserService interface {
 	// resolving the caller from their own token the way PatchMe does -- an
 	// internal caller (RequireInternalCaller) acting on someone else's
 	// profile, e.g. a portal admin recording a newly-assigned team lead's
-	// paging number. Both fields are optional but at least one must be
-	// present. A ValidationError is returned for a malformed id, neither
-	// field present, or an over-long phone; a NotFoundError when no user has
+	// paging number. At least one of timeZone, phone or makeInternal must be
+	// present. A ValidationError is returned for a malformed id, none of the
+	// three present, or an over-long phone; a NotFoundError when no user has
 	// that id.
+	//
+	// req.MakeInternal true additionally grants the "internal" role and
+	// revokes the external-side role set (external/customer/partner/
+	// customer_admin/partner_admin) -- the only way to actually change
+	// user_type (trigger-derived, migration 0011) -- restricted further, to a
+	// @wso2.com target and to apps/csm-portal/backend as the caller
+	// (requireCSMPortalBackendCaller): a ForbiddenError for any other caller,
+	// a ValidationError for a non-@wso2.com target.
 	UpdateUser(ctx context.Context, userID string, req domain.UpdateUserRequest) (domain.PatchUserMeResponse, error)
 }
 
@@ -141,18 +149,6 @@ type CustomDashboardService interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// SystemDashboardService is the system dashboards the CSM portal backend
-// stores here (migration 0294): dashboards that belong to nobody and that
-// the backend overwrites by key on every startup. Postgres-only, and only the
-// CSM portal backend's own client credential may call it; no signed-in person
-// is involved.
-type SystemDashboardService interface {
-	List(ctx context.Context) (domain.SystemDashboardList, error)
-	Get(ctx context.Context, key string) (domain.SystemDashboard, error)
-	Save(ctx context.Context, key string, req domain.SaveSystemDashboardRequest) (domain.SystemDashboard, error)
-	Delete(ctx context.Context, key string) error
-}
-
 // CustomDashboardShareService shares the caller's saved dashboards with other
 // users, view only (CSM portal Shared Dashboards). Postgres-only. The caller is
 // always resolved from x-user-id-token. Only a dashboard's owner lists or
@@ -199,6 +195,29 @@ type PortalBannerService interface {
 	ListAdmin(ctx context.Context) (domain.PortalBannerList, error)
 	Create(ctx context.Context, req domain.SavePortalBannerRequest) (domain.PortalBanner, error)
 	Update(ctx context.Context, id string, req domain.SavePortalBannerRequest) (domain.PortalBanner, error)
+}
+
+// ProductCatalogService reads the product catalogue (products, versions with
+// their EOL and public-feed fields, release lines, Carbon reference data) and
+// applies a catalogue manager's edits.
+type ProductCatalogService interface {
+	GetProduct(ctx context.Context, id string) (domain.Product, error)
+	CreateProduct(ctx context.Context, payload json.RawMessage) (domain.Product, error)
+	UpdateProduct(ctx context.Context, id string, payload json.RawMessage) (domain.Product, error)
+
+	SearchAllProductVersions(ctx context.Context, req domain.SearchAllProductVersionsRequest) (domain.SearchProductVersionsResponse, error)
+	GetProductVersion(ctx context.Context, id string) (domain.ProductVersion, error)
+	CreateProductVersions(ctx context.Context, productID string, payload json.RawMessage) (domain.ProductVersionList, error)
+	UpdateProductVersion(ctx context.Context, id string, payload json.RawMessage) (domain.ProductVersionList, error)
+	RetireProductVersion(ctx context.Context, id string) (domain.ProductVersionList, error)
+
+	ListReleaseLines(ctx context.Context, includeRetired bool) (domain.ReleaseLineList, error)
+	CreateReleaseLine(ctx context.Context, payload json.RawMessage) (domain.ReleaseLine, error)
+	UpdateReleaseLine(ctx context.Context, id string, payload json.RawMessage) (domain.ReleaseLine, error)
+	RetireReleaseLine(ctx context.Context, id string) (domain.ReleaseLine, error)
+
+	ListCarbonPlatformHistory(ctx context.Context) (domain.CarbonPlatformHistoryList, error)
+	ListCarbonKernelReleases(ctx context.Context) (domain.CarbonKernelReleaseList, error)
 }
 
 // RunbookService manages the runbook catalog (Operations > Runbooks): numbered, named runbook links and their alert names.
@@ -355,9 +374,16 @@ type SLAStatusService interface {
 	// "active" -- unlike SearchActiveSLAStatuses, which only ever lists
 	// active rows. See domain.SLAClockState's own doc comment for why this
 	// distinction exists and who needs it. A ValidationError is returned
-	// for a malformed workItemId or an unrecognized target (must be
-	// "response"/"workaround"/"resolution", case-insensitive).
-	GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error)
+	// for a malformed workItemId, an unrecognized target (must be
+	// "response"/"workaround"/"resolution", case-insensitive), or a
+	// non-empty slaID that isn't a valid UUID.
+	//
+	// slaID, when non-empty, narrows the lookup to that exact "sla" row
+	// (its own id, as previously returned on this same field) instead of
+	// the ambiguous "most recently started row for this target" -- see
+	// repository.SLAStatusRepository.GetClockState's own doc comment for
+	// why that disambiguation exists.
+	GetClockState(ctx context.Context, workItemID, target, slaID string) (domain.SLAClockState, error)
 
 	// RequestRecalculation publishes TypeSLARecalculationRequested so
 	// csm-notification-service rebuilds its Redis-held SLA tracking from
@@ -839,14 +865,15 @@ type CaseService interface {
 	// case there simply falls back to the account's default watchers, same
 	// as an empty real result.
 	ProjectContactEmailsByRole(ctx context.Context, projectID, role string) ([]string, error)
-	// AccountDefaultWatcherEmails returns the account owning projectID's four
+	// AccountDefaultWatcherEmails returns the account owning projectID's
 	// named stakeholders' email addresses (technical owner, secondary
-	// technical owner, account manager, renewal account manager) -- see
-	// CaseRepository.AccountDefaultWatcherEmails' own doc comment for why
-	// these are resolved fresh at publish time rather than read from a
-	// persisted watch list. A project with no linked account, or no Postgres
-	// access at all (a pure ServiceNow data source with no pgFallback
-	// configured), returns an empty slice and no error.
+	// technical owner, account manager, renewal account manager, customer
+	// success manager) plus, conditionally, projectID's own onboarding
+	// owner -- see CaseRepository.AccountDefaultWatcherEmails' own doc
+	// comment for why these are resolved fresh at publish time rather than
+	// read from a persisted watch list. A project with no linked account,
+	// or no Postgres access at all (a pure ServiceNow data source with no
+	// pgFallback configured), returns an empty slice and no error.
 	AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error)
 	// AccountSRETeam returns the SRE team of the account owning projectID; "" with no error when there is none or no Postgres access.
 	AccountSRETeam(ctx context.Context, projectID string) (id, name string, err error)

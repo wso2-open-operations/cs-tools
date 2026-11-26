@@ -188,7 +188,13 @@ func (c *EntityClient) GetDurationPolicy(ctx context.Context) (map[string]map[st
 // RegisterClocks-equivalent state), decoded from the same wire response as
 // every other field on that type.
 type activeSLAClock struct {
-	CaseID    string     `json:"caseId"`
+	CaseID string `json:"caseId"`
+	// ID mirrors clockState.ID -- this exact "sla" row's own id, carried
+	// into ClockMeta.SLAID by reconcileClock so a clock rebuilt from this
+	// bulk fetch (Engine.Reconcile's startup sweep) can be re-checked by
+	// its specific row the same way one rebuilt via refreshAndReconcileClock
+	// already is.
+	ID        string     `json:"id,omitempty"`
 	ClockType string     `json:"clockType"`
 	IsPaused  bool       `json:"isPaused"`
 	StartedOn *time.Time `json:"startedOn"`
@@ -281,7 +287,12 @@ func (c *EntityClient) GetActiveCSMSLAClocks(ctx context.Context) ([]activeSLACl
 // all — see GetClockState's own doc comment for why that distinction
 // matters here specifically.
 type clockState struct {
-	Found       bool       `json:"found"`
+	Found bool `json:"found"`
+	// ID is this exact "sla" row's own id -- see GetClockState's own doc
+	// comment for how a caller that remembers it uses it to re-check this
+	// specific row later, rather than the ambiguous "most recently
+	// started" row for the (caseID, clockType) pair.
+	ID          string     `json:"id,omitempty"`
 	IsActive    bool       `json:"isActive"`
 	Stage       string     `json:"stage"`
 	HasBreached bool       `json:"hasBreached"`
@@ -355,6 +366,20 @@ type clockState struct {
 	// other, so the real CRE team is never dropped just because the
 	// project happens to be onboarding.
 	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
+	// AssignmentGroupName is an incident's assignment group as entity-service
+	// has it now (empty for a case, and from an entity-service that predates
+	// it): an incident's SLA alert routes by it, so a reassigned incident
+	// alerts its new group. Empty falls back to the registration-time group.
+	AssignmentGroupName string `json:"assignmentGroupName,omitempty"`
+	// AssignmentGroupTeamKey is the team whose id the incident's current
+	// group has, as entity-service reports it: an SME team after a specialist
+	// handoff (its group shares the team's id). Empty for any other group, a
+	// case, or an entity-service that predates it.
+	AssignmentGroupTeamKey string `json:"assignmentGroupTeamKey,omitempty"`
+	// incidentTeamEmails is set by sendIncidentBreachAlert, never decoded:
+	// an incident's SRE team group emails, which sendBreachEmails uses as its
+	// team recipients in place of TeamEmail/OnboardingTeamEmail.
+	incidentTeamEmails []string
 }
 
 // GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>
@@ -396,8 +421,20 @@ type clockState struct {
 // failure returns a zero clockState and the error; the call site's own doc
 // comment explains why that fails open (sends anyway) rather than
 // suppressing a possibly-real alert over a transient entity-service hiccup.
-func (c *EntityClient) GetClockState(ctx context.Context, caseID, clockType string) (clockState, error) {
+//
+// slaID, when non-empty, is entity-service's own "sla" row id (clockState.ID,
+// as a previous call against this same (caseID, clockType) returned it) —
+// forwarded as entity-service's own slaId query parameter, narrowing the
+// lookup to that exact row instead of its default, ambiguous "whichever
+// row is most recently started" answer. Pass "" to keep that default (used
+// by ReviseClocks/refreshAndReconcileClock, which are discovering
+// entity-service's current policy resolution, not re-checking one they
+// already track).
+func (c *EntityClient) GetClockState(ctx context.Context, caseID, clockType, slaID string) (clockState, error) {
 	path := fmt.Sprintf("/sla-status/clock-state?workItemId=%s&target=%s", url.QueryEscape(caseID), url.QueryEscape(clockType))
+	if slaID != "" {
+		path += "&slaId=" + url.QueryEscape(slaID)
+	}
 	respBody, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return clockState{}, fmt.Errorf("slaengine: get clock state (case %s, %s): %w", caseID, clockType, err)

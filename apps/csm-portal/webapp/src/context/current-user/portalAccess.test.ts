@@ -26,9 +26,11 @@ const NONE = {
   canWrite: false,
   canAddWorkNotes: false,
   canCreateUser: false,
+  canMakeUserInternal: false,
   canUpdateProjectClosureState: false,
   canUpdateProjectSuspensionOverride: false,
   canEditProjectOnboarding: false,
+  canManageProductCatalog: false,
   canUseSecurityCenter: false,
   canViewSecurityReportCases: false,
   canUsePlg: false,
@@ -50,6 +52,7 @@ const NONE = {
   // comment.
   canViewTeamSchedule: false,
   canViewSettings: false,
+  canViewSettingsSection: false,
   canViewWorkItemsStaffView: false,
   isAdmin: false,
   canViewSlaTab: false,
@@ -172,6 +175,7 @@ describe("getPortalAccess", () => {
       // Both are full access -- qualify for all three allow-list flags too.
       canViewTeamSchedule: true,
       canViewSettings: true,
+      canViewSettingsSection: true,
       canViewWorkItemsStaffView: true,
       canViewSlaTab: true,
     };
@@ -186,9 +190,11 @@ describe("getPortalAccess", () => {
     expect(getPortalAccess(["cs_engineer"])).toEqual({
       ...all,
       canCreateUser: false,
+      canMakeUserInternal: false,
       canUpdateProjectClosureState: false,
       canUpdateProjectSuspensionOverride: false,
       canEditProjectOnboarding: false,
+      canManageProductCatalog: false,
       canEscalate: true,
       canManagePlaybooks: false,
       canCreateAnnouncement: false,
@@ -198,9 +204,11 @@ describe("getPortalAccess", () => {
     expect(getPortalAccess(["admin"])).toEqual({
       ...all,
       canCreateUser: true,
+      canMakeUserInternal: true,
       canUpdateProjectClosureState: true,
       canUpdateProjectSuspensionOverride: true,
       canEditProjectOnboarding: true,
+      canManageProductCatalog: true,
       canEscalate: true,
       canManagePlaybooks: true,
       canCreateAnnouncement: true,
@@ -244,6 +252,21 @@ describe("getPortalAccess", () => {
       "dashboard_designer",
     ]) {
       expect(getPortalAccess([role]).canCreateUser).toBe(false);
+    }
+  });
+
+  it("only admin can make a user internal -- CS engineer does not share this one", () => {
+    expect(getPortalAccess(["admin"]).canMakeUserInternal).toBe(true);
+    for (const role of [
+      "cs_engineer",
+      "viewer",
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "timecard_approver",
+      "dashboard_designer",
+    ]) {
+      expect(getPortalAccess([role]).canMakeUserInternal).toBe(false);
     }
   });
 
@@ -300,6 +323,33 @@ describe("getPortalAccess", () => {
 
   it("onboarding_lead alone grants no portal access, only the onboarding edit", () => {
     expect(getPortalAccess(["onboarding_lead"]).hasAnyRole).toBe(false);
+  });
+
+  it("only product_catalog_manager and admin can edit the product catalogue -- CS engineer alone cannot", () => {
+    expect(getPortalAccess(["product_catalog_manager"]).canManageProductCatalog).toBe(true);
+    expect(getPortalAccess(["admin"]).canManageProductCatalog).toBe(true);
+    // The realistic holder: an engineer who also carries the manager role.
+    expect(
+      getPortalAccess(["cs_engineer", "product_catalog_manager"]).canManageProductCatalog,
+    ).toBe(true);
+    for (const role of [
+      "cs_engineer",
+      "viewer",
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "timecard_approver",
+      "dashboard_designer",
+      "onboarding_lead",
+      "security_team",
+    ]) {
+      expect(getPortalAccess([role]).canManageProductCatalog).toBe(false);
+    }
+    expect(getPortalAccess(undefined).canManageProductCatalog).toBe(false);
+  });
+
+  it("product_catalog_manager alone grants no portal access, only the catalogue edit", () => {
+    expect(getPortalAccess(["product_catalog_manager"]).hasAnyRole).toBe(false);
   });
 
   it("admin, CS engineer and escalator can escalate -- any internal engineer, as in ServiceNow", () => {
@@ -812,6 +862,29 @@ describe("getPortalAccess", () => {
 
     it("is false while roles are not loaded, so the controls fail closed", () => {
       expect(getPortalAccess(undefined).canViewSettings).toBe(false);
+    });
+  });
+
+  // The Settings section shell: canViewSettings holders plus catalogue
+  // managers, whose only Settings tab is Product catalogue.
+  describe("canViewSettingsSection", () => {
+    it("cs_engineer, admin and product_catalog_manager each hold it", () => {
+      expect(getPortalAccess(["cs_engineer"]).canViewSettingsSection).toBe(true);
+      expect(getPortalAccess(["admin"]).canViewSettingsSection).toBe(true);
+      expect(getPortalAccess(["product_catalog_manager"]).canViewSettingsSection).toBe(true);
+    });
+
+    it("a staff member who is also a catalogue manager holds it without canViewSettings", () => {
+      const access = getPortalAccess(["viewer", "product_catalog_manager"]);
+      expect(access.canViewSettingsSection).toBe(true);
+      expect(access.canViewSettings).toBe(false);
+    });
+
+    it("no other role grants it, and it fails closed while roles are not loaded", () => {
+      for (const role of ["viewer", "escalator", "timecard_approver", "dashboard_designer", "security_team"]) {
+        expect(getPortalAccess([role]).canViewSettingsSection).toBe(false);
+      }
+      expect(getPortalAccess(undefined).canViewSettingsSection).toBe(false);
     });
   });
 

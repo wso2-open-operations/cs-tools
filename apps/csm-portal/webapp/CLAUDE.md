@@ -50,6 +50,12 @@ permission (see `apps/csm-portal/backend`'s own `CLAUDE.md`, "PATCH /projects/{i
 requires PermAdmin") — hiding the pencil icon for a `cs_engineer` just avoids offering an action that
 would 403 for them.
 
+**Escalation access** (Settings > User management > Escalation access, `CsmEscalationAccessPage`) is admin only,
+gated on `usePortalAccess().isAdmin` (the nav node's `requires: "isAdmin"` hides the tile, the page also renders the
+403 page): an admin adds or removes the people who may de-escalate any case besides each case's ABT team leads. The
+backend enforces the same (`PermAdmin`). `CsmCaseDetailPage` shows De-escalate to a named person (`deescalators`) whatever their roles, and to a team lead
+(`teamLeads`) only with an escalation role (`canEscalate`), matching the backend (`useGetCsmCaseEscalations`), and the mutation hook refreshes those histories.
+
 **Skills** (`features/csm-skills`, `/skills`) has two more deliberate exceptions, both by explicit product
 decision and both on top of a real backend gate: the **Skill Manager** tab (`CsmSkillsPage.tsx`) is shown only
 when `useIsSkillManager` succeeds. That hook has no flag to read, so it calls `POST /skills/users/search` once
@@ -57,6 +63,27 @@ with `{pagination:{limit:1}}`, caches the answer for the session and treats a `4
 failure also hides the tab). And the All Skills tab's create/edit/(de)activate actions render only for
 `usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
 manager table are always sent to the backend, never done in the browser.
+
+**Product catalogue** (`features/csm-products`, Settings ▸ Product catalogue at `/admin/product-catalog`, tabs Products and Release lines; the old top-level `/products` links redirect there; the tab, its pages (`ProductCatalogRouteGuard`) and its help topic are shown only to `canManageProductCatalog`) is another deliberate exception, on top of a real backend
+gate: every edit control (Add product, Add product version and each product's Add version action, the Edit pencil,
+New release line, and the Retire action inside each edit dialog) renders only for `usePortalAccess().canManageProductCatalog` (`product_catalog_manager` or `admin`). The
+backend's `PermManageProductCatalog` refuses the catalogue write routes of the products API (`POST /products`,
+`POST /products/{id}/versions`, `PATCH`/`retire` on `/product-versions/{id}`, `/release-lines`) to anyone else, so for a
+reader each control would only ever 403. A save applies at once (there is no draft step): a PATCH carries only the
+changed keys (`utils/catalogChange.ts`), and the backend applies a version's listing-wide fields to every live
+deployment-profile row of the version (the rows sharing its `publicId`, or for an unpublished version the live rows
+with the same product and version), in one transaction, which the edit dialog spells out before saving. The edit
+dialog sends one PATCH with only the fields it changed (`buildVersionEditPayload`: support status and EOL dates up front, release date and publishing settings under a collapsed "Advanced"), and one retire call
+for the whole version; Add version creates every profile in one call. The API sends dates as RFC 3339 timestamps
+and the support status upper case; `utils/catalogWire.ts` turns them into the `YYYY-MM-DD` / lower-case shapes
+the feature works with, in the read hooks only. The Catalogue never lists cloud (SaaS)
+products or end-of-life products (every version retired or discontinued), nor retired or discontinued versions or
+retired release lines, so there is no Restore (`isListedProduct`, `listedVersions`, `utils/catalogProducts.ts`). Adding a version pre-fills
+its publishing settings from the product's latest live version (`listingFormFrom`), shown openly under "Publishing" (on a release-date tie the "All In One" row, then the lowest `publicId`, so a profile that
+is its own listing is not copied), and creates one row per deployment profile in a single
+`POST /products/{id}/versions` (`useAddCatalogVersion`); if the product's versions fail to load, the dialog warns
+instead of prefilling. A refusal's message is shown inside the
+dialog; a success closes it and goes to `useSuccessBanner`.
 
 **`AddUserDialog.tsx` only collects an email — there are no first/last name fields.** The backend
 (`apps/csm-portal/backend`'s own `CLAUDE.md`, "Creating a user") looks that email up in SCIM and fills
@@ -107,14 +134,15 @@ only ever renders inside `AddUserDialog`, which `CsmUsersPage.tsx`'s own `canCre
 keeps out of a non-admin's reach entirely (see the "Add User" exception at the top of this section) —
 no second, redundant permission check was added inside the dialog itself.
 
-**Granting a portal role to an already-existing user** (`UserProfilePage.tsx`'s "Grant role" button next
-to "CSM Platform roles", `GrantUserRoleDialog.tsx`) reuses `AddUserDialog.tsx`'s own "Portal roles"
-machinery (`useGetGrantableRoles`, `grantableRoleLabel`) against `POST /users/{id}/roles`
+**Granting a portal role to an already-existing user** (`UserProfilePage.tsx`'s pencil icon button next
+to "CSM Platform roles" — a plain `aria-label="Grant role"` icon button, `<Pencil size={14} />`, not a
+text-labeled `Button` any more — `GrantUserRoleDialog.tsx`) reuses `AddUserDialog.tsx`'s own "Portal
+roles" machinery (`useGetGrantableRoles`, `grantableRoleLabel`) against `POST /users/{id}/roles`
 (`usePostGrantUserRoles.ts`) instead of duplicating it — the backend's own `GrantableRole`/SCIM
 mechanism (see `apps/csm-portal/backend`'s `CLAUDE.md`) is shared between the two. Unlike `AddUserDialog`,
-this button is **shown unconditionally** rather than gated behind `usePortalAccess()` — the
-default "show the action, let the backend reject" norm from the top of this section, not a fourth
-deliberate hide-it exception: there's no reported reason yet to hide it from a non-admin the way
+this icon is **shown unconditionally** rather than gated behind `usePortalAccess()` — the
+default "show the action, let the backend reject" norm from the top of this section, not a deliberate
+hide-it exception: there's no reported reason yet to hide it from a non-admin the way
 `canCreateUser`/`canUpdateProjectClosureState` are. A role the target already holds
 (`user.csmPlatformRoles`) is rendered checked-and-disabled rather than left off the list, so an admin
 can see at a glance what's already granted instead of risking a duplicate grant. The backend reports
@@ -123,6 +151,34 @@ dialog reads the body to tell a partial failure from a full one), so a partial f
 failed role(s) still checked for a quick retry rather than clearing the whole form. This section only
 ever renders for a wso2.com-email target (`showCsmPlatformRoles`) — same gating as "CSM Platform roles"
 itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role in the first place.
+
+**Making an existing user internal** (`UserProfilePage.tsx`'s pencil icon button next to "Customer
+Portal roles"/"Platform roles", `aria-label="Make user internal"`, `MakeUserInternalDialog.tsx`) is a
+fourth deliberate hide-it exception, gated on `usePortalAccess().canMakeUserInternal` — `admin` only,
+same shape and same reasoning as `canCreateUser`/`canUpdateProjectClosureState`: the backend genuinely
+enforces it too (`makeInternal` on `PATCH /users/{id}` is narrowed to `PermAdmin` in-handler — see
+`apps/csm-portal/backend`'s own `CLAUDE.md`). Shown only for a `@wso2.com` target (`isWso2Email(user.email)`)
+that isn't already internal — there's nothing to do once a user already is, and a non-wso2.com address
+can never become internal regardless of who asks (entity-service's own enforcement, not this frontend's).
+The dialog is a plain confirm/cancel (no fields to fill): confirming calls `usePatchUser` (`PATCH
+/users/{id}` with `{makeInternal: true}` — the same hook/route the team-lead phone-number update
+already uses; a dedicated `POST /users/{id}/internalize` was the first design, folded into this existing
+endpoint once it was clear it could serve the same request), which grants the "internal" role and revokes
+the external-side role set (external/customer/partner/customer_admin/partner_admin) on the backend — the
+only way to actually change `userType`, which entity-service derives from role membership rather than a
+plain settable column (same `recompute_user_type` trigger `AddUserDialog.tsx`'s own "User type" selector
+already has to work around, see above). On success, invalidates the profile query so the "Customer
+Portal roles" chips refresh (Internal, External/Customer/Partner gone) without a manual reload.
+
+**`PermissionsCard` (the component that owns `makeInternalDialogOpen` and renders both
+`MakeUserInternalDialog`/`GrantUserRoleDialog`) is keyed by `user.id`** in `UserProfilePage.tsx` —
+found on review: the `people/:id` route doesn't remount on a param change alone, so without the key,
+navigating from one user's profile straight to another's (the cached-data case, no loading state in
+between) kept the previous user's dialog-open flag and mutation result. A success message could then
+read "`<other user's email>` is now internal" for a confirmation that only ever applied to the
+original user. Keying the component that owns the open state (not just the dialog itself) is what
+resets both together — keying only the dialog would leave the open flag set and have it reopen for
+the new user with no action taken.
 
 ## `visibleCaseTypes`'s eligibility flag must mirror the exact backend permission, not a related-but-narrower one
 
@@ -308,6 +364,8 @@ Two knock-on rules:
 ## Table conventions
 
 Every paginated data table backed by a real MUI `<Table>` (`ProductVulnerabilitiesTab.tsx`, `DirectoryEntityTable.tsx`, `ChangeRequestsTab.tsx`, `IncidentsTab.tsx`, `ProblemsTab.tsx`) should match this shape — a new one should too. (`ConversationsTab.tsx` used to be listed here too, but it's actually a hand-rolled CSS Grid like `CasesList.tsx` below, not a real `<Table>` — it just has no long-text column today, so the gotcha two paragraphs down doesn't currently apply to it.)
+
+**A column picker lists every column, the default ones included.** `IncidentsTab.tsx`'s picker used to cover only the optional columns, so the seven it always showed (Number, Subject, Caller, State, Priority, Opened, Updated) could never be removed. All of them are now in `INCIDENT_COLUMNS` (`incidentListColumns.ts`), the original seven are the default visible set, and `useColumnPreferences` still keeps at least one on. Its saved choice is under its own view id (`INCIDENT_COLUMNS_VIEW_ID`) because the earlier one held only the optional ids, which read as the full list would put the defaults after them. A table that adds a picker should put every column in it, not just the extra ones. The CSV export follows the same chosen columns (`cellText`, mirroring `renderCell`), so a new column needs a case in both.
 
 - **Wrapper**: `<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>` around `<TableContainer>`, not `<Paper variant="outlined">` (the two render visually differently; `Box` is the established one). `TablePagination` (when present) is a sibling of `TableContainer`, inside that same `Box`. `TableContainer`'s own built-in `overflow-x: auto` is what makes a wide table scroll horizontally instead of squishing its columns — don't strip or override it.
 - **`<Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>`**, with the header row as `<TableRow sx={{ bgcolor: "action.hover" }}>` — a plain `<TableRow>` header with no `sx` reads inconsistently against tables that do set it.
@@ -521,6 +579,8 @@ Both lists have a checkbox column (for `canWrite` only), a selection bar (`BulkS
   - State offers what every selected incident can move to (`bulkIncidentTargetStates`, the Edit dialog's table), never
     narrowed by one closed since it was picked (it is skipped). Resolved / Closed need a resolution code and notes,
     applied to all; the two can also be set alone.
+    Cancelled (terminal) confirms first with `CancelIncidentDialog`, as on the detail page (its action bar and Edit
+    save); New can't move to Cancelled, here or in the backend's `incidentNextStates`.
   - Subcategory follows the category being set, or the category every selected incident shares (else it is disabled
     with the reason). A new category needs a subcategory (the single Edit dialog's rule): a PATCH can't clear one, so
     on the ServiceNow paths the old category's subcategory would stay. Service offering is disabled until a service is

@@ -53,6 +53,11 @@ import {
   type ImagePasteRefusal,
   type InlineImageRoom,
 } from "@components/rich-text-editor/inlineImageLimits";
+import {
+  dropDataImagesMatchingFiles,
+  uploadPastedDataImages,
+  type ClipboardImageFile,
+} from "@components/rich-text-editor/pastedDataImages";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -366,11 +371,19 @@ function isImageOnlyHtml(html: string): boolean {
   return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
 }
 
-const PasteNormalizationPlugin = (): JSX.Element | null => {
+const PasteNormalizationPlugin = ({
+  onImageUpload,
+  onPasteError,
+}: {
+  onImageUpload?: ImageUploadHandler;
+  onPasteError?: (reason: ImagePasteRefusal) => void;
+}): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
   const [pendingPaste, setPendingPaste] = useState<{
     html: string;
     text: string;
+    /** The picture files the clipboard carries, which ClipboardImagePlugin stores. */
+    imageFiles: ClipboardImageFile[];
   } | null>(null);
 
   useEffect(() => {
@@ -393,6 +406,11 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
         const hasImageFile = Array.from(clipboardData.items ?? []).some((item) =>
           item.type.startsWith("image/"),
         );
+        const imageFiles = Array.from(clipboardData.items ?? []).flatMap((item) => {
+          if (!item.type.startsWith("image/")) return [];
+          const file = item.getAsFile();
+          return file ? [{ type: file.type, size: file.size }] : [];
+        });
         if (hasImageFile && isImageOnlyHtml(html)) {
           event.preventDefault();
           return true;
@@ -400,7 +418,7 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
         if (html.trim()) {
           event.preventDefault();
-          setPendingPaste({ html, text });
+          setPendingPaste({ html, text, imageFiles });
           return true;
         }
 
@@ -441,6 +459,14 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
     const dom = new DOMParser().parseFromString(pendingPaste.html, "text/html");
     unwrapNestedPreCodeElements(dom);
     collapseEmptyParagraphElements(dom);
+    // A picture the pasted HTML carries as base64 is uploaded like a pasted
+    // picture file (or dropped), never embedded in the comment.
+    // A picture that is also on the clipboard as a file is stored from that file;
+    // only its HTML copy is dropped. Other base64 images go to the uploader below.
+    dropDataImagesMatchingFiles(dom, pendingPaste.imageFiles);
+    uploadPastedDataImages(dom, inlineImagesInEditor(editor), onImageUpload, (reason) =>
+      onPasteError?.(reason),
+    );
 
     editor.update(
       () => {
@@ -452,7 +478,7 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
       { tag: PASTE_TAG },
     );
     setPendingPaste(null);
-  }, [editor, pendingPaste]);
+  }, [editor, pendingPaste, onImageUpload, onPasteError]);
 
   /**
    * "Remove Formatting" -- discards all structure and treats the paste
@@ -857,7 +883,7 @@ const Editor = ({
           <TablePlugin />
           <ImagesPlugin />
           <ClipboardImagePlugin onPasteError={onImageRefused} onImageUpload={onImageUpload} />
-          <PasteNormalizationPlugin />
+          <PasteNormalizationPlugin onImageUpload={onImageUpload} onPasteError={onImageRefused} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />

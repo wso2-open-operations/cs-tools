@@ -297,10 +297,11 @@ type CaseDetailsAssignedEngineer struct {
 // CaseWatchListUser is one entry of CaseDetails.WatchList, matching the
 // frontend's inline watchList item shape.
 type CaseWatchListUser struct {
-	ID       string `json:"id,omitempty"`
-	UserName string `json:"userName,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Email    string `json:"email,omitempty"`
+	IsInternal bool   `json:"isInternal"`
+	ID         string `json:"id,omitempty"`
+	UserName   string `json:"userName,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Email      string `json:"email,omitempty"`
 	// Locked is true when this watcher is one of the case's account's four
 	// named stakeholders (customer success manager, technical owner,
 	// secondary technical owner, account manager) -- entity-service always
@@ -330,35 +331,36 @@ type CaseWatchListUser struct {
 // they are internal CS-agent close/resolution notes, never meant for
 // the customer-facing view.
 type CaseDetails struct {
-	ID               string                       `json:"id"`
-	InternalID       string                       `json:"internalId"`
-	Number           string                       `json:"number"`
-	Title            string                       `json:"title"`
-	Description      string                       `json:"description"`
-	Product          *IDLabelRef                  `json:"product,omitempty"`
-	Account          *CaseDetailsAccount          `json:"account,omitempty"`
-	AssignedEngineer *CaseDetailsAssignedEngineer `json:"assignedEngineer,omitempty"`
-	Project          *IDLabelRef                  `json:"project,omitempty"`
-	Type             *IDLabelRef                  `json:"type,omitempty"`
-	DeployedProduct  *IDLabelRef                  `json:"deployedProduct,omitempty"`
-	RelatedCase      *IDLabelRef                  `json:"relatedCase,omitempty"`
-	Conversation     *IDLabelRef                  `json:"conversation,omitempty"`
-	IssueType        *IDLabelRef                  `json:"issueType,omitempty"`
-	EngagementType   *IDLabelRef                  `json:"engagementType,omitempty"`
-	Catalog          *IDLabelRef                  `json:"catalog,omitempty"`
-	CatalogItem      *IDLabelRef                  `json:"catalogItem,omitempty"`
-	ChangeRequests   []IDLabelRef                 `json:"changeRequests,omitempty"`
-	AssignedTeam     *IDLabelRef                  `json:"assignedTeam,omitempty"`
-	Deployment       *IDLabelRef                  `json:"deployment,omitempty"`
-	Severity         *IDLabelRef                  `json:"severity,omitempty"`
-	Status           *IDLabelRef                  `json:"status,omitempty"`
-	CreatedOn        time.Time                    `json:"createdOn"`
-	UpdatedOn        time.Time                    `json:"updatedOn"`
-	ClosedOn         *time.Time                   `json:"closedOn,omitempty"`
-	CreatedBy        string                       `json:"createdBy"`
-	ParentCase       *NumberRef                   `json:"parentCase,omitempty"`
-	ResolvedOn       *time.Time                   `json:"resolvedOn,omitempty"`
-	WatchList        []CaseWatchListUser          `json:"watchList,omitempty"`
+	CreatedByIsInternal bool                         `json:"createdByIsInternal"`
+	ID                  string                       `json:"id"`
+	InternalID          string                       `json:"internalId"`
+	Number              string                       `json:"number"`
+	Title               string                       `json:"title"`
+	Description         string                       `json:"description"`
+	Product             *IDLabelRef                  `json:"product,omitempty"`
+	Account             *CaseDetailsAccount          `json:"account,omitempty"`
+	AssignedEngineer    *CaseDetailsAssignedEngineer `json:"assignedEngineer,omitempty"`
+	Project             *IDLabelRef                  `json:"project,omitempty"`
+	Type                *IDLabelRef                  `json:"type,omitempty"`
+	DeployedProduct     *IDLabelRef                  `json:"deployedProduct,omitempty"`
+	RelatedCase         *IDLabelRef                  `json:"relatedCase,omitempty"`
+	Conversation        *IDLabelRef                  `json:"conversation,omitempty"`
+	IssueType           *IDLabelRef                  `json:"issueType,omitempty"`
+	EngagementType      *IDLabelRef                  `json:"engagementType,omitempty"`
+	Catalog             *IDLabelRef                  `json:"catalog,omitempty"`
+	CatalogItem         *IDLabelRef                  `json:"catalogItem,omitempty"`
+	ChangeRequests      []IDLabelRef                 `json:"changeRequests,omitempty"`
+	AssignedTeam        *IDLabelRef                  `json:"assignedTeam,omitempty"`
+	Deployment          *IDLabelRef                  `json:"deployment,omitempty"`
+	Severity            *IDLabelRef                  `json:"severity,omitempty"`
+	Status              *IDLabelRef                  `json:"status,omitempty"`
+	CreatedOn           time.Time                    `json:"createdOn"`
+	UpdatedOn           time.Time                    `json:"updatedOn"`
+	ClosedOn            *time.Time                   `json:"closedOn,omitempty"`
+	CreatedBy           string                       `json:"createdBy"`
+	ParentCase          *NumberRef                   `json:"parentCase,omitempty"`
+	ResolvedOn          *time.Time                   `json:"resolvedOn,omitempty"`
+	WatchList           []CaseWatchListUser          `json:"watchList,omitempty"`
 	// Exposed because the frontend's CaseDetails type declares them
 	// (features/support/types/cases.ts). AcknowledgedBy and
 	// EngagementPaymentType are decoded upstream but deliberately NOT exposed:
@@ -412,7 +414,7 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 	if len(c.WatchList) > 0 {
 		watchList = make([]CaseWatchListUser, 0, len(c.WatchList))
 		for _, w := range c.WatchList {
-			watchList = append(watchList, CaseWatchListUser{ID: w.ID, UserName: w.UserName, Name: w.Name, Email: w.Email, Locked: w.Locked})
+			watchList = append(watchList, CaseWatchListUser{ID: w.ID, UserName: w.UserName, Name: w.Name, Email: w.Email, Locked: w.Locked, IsInternal: w.User != nil && w.User.IsInternal})
 		}
 	}
 
@@ -443,6 +445,7 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 		UpdatedOn:           c.UpdatedOn,
 		ClosedOn:            c.ClosedOn,
 		CreatedBy:           c.CreatedByDetails.Name,
+		CreatedByIsInternal: c.CreatedByDetails.IsInternal,
 		ParentCase:          mapNumberRef(c.ParentCase),
 		ResolvedOn:          c.ResolvedOn,
 		WatchList:           watchList,
@@ -737,6 +740,11 @@ type CaseActivity struct {
 	SizeBytes          int               `json:"sizeBytes,omitempty"`
 	DownloadURL        string            `json:"downloadUrl,omitempty"`
 	Changes            []CaseFieldChange `json:"changes,omitempty"`
+	// CreatedByIsInternal is true when entity-service resolved the author to
+	// an INTERNAL-type user (WSO2 staff): the webapp badges a support
+	// engineer's comment avatar from it, with no per-comment user lookup.
+	// Absent means "not known to be internal", never "known external".
+	CreatedByIsInternal bool `json:"createdByIsInternal,omitempty"`
 }
 
 // SearchCaseActivitiesResponse is the portal's response for
@@ -815,16 +823,17 @@ func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseAc
 			// elsewhere) so an automation/integration-authored activity — no
 			// resolvable name or email — renders as "system" instead of an empty
 			// string indistinguishable from a genuinely unknown author.
-			CreatedBy:          userRefDisplayNameOrSystem(a.CreatedBy),
-			CreatedByFirstName: a.CreatedByFirstName,
-			CreatedByLastName:  a.CreatedByLastName,
-			CreatedByFullName:  userRefDisplayNameOrSystem(a.CreatedBy),
-			CommentType:        commentType,
-			FileName:           a.FileName,
-			ContentType:        a.ContentType,
-			SizeBytes:          a.SizeBytes,
-			DownloadURL:        a.DownloadURL,
-			Changes:            changes,
+			CreatedBy:           userRefDisplayNameOrSystem(a.CreatedBy),
+			CreatedByFirstName:  a.CreatedByFirstName,
+			CreatedByLastName:   a.CreatedByLastName,
+			CreatedByFullName:   userRefDisplayNameOrSystem(a.CreatedBy),
+			CommentType:         commentType,
+			FileName:            a.FileName,
+			ContentType:         a.ContentType,
+			SizeBytes:           a.SizeBytes,
+			DownloadURL:         a.DownloadURL,
+			Changes:             changes,
+			CreatedByIsInternal: a.CreatedBy != nil && a.CreatedBy.IsInternal,
 		})
 	}
 	return SearchCaseActivitiesResponse{

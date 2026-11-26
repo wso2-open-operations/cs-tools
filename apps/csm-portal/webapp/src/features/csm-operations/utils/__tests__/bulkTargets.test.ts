@@ -91,7 +91,8 @@ describe("isIncidentTerminal", () => {
 
 describe("bulkIncidentTargetStates", () => {
   it("offers the states every selected incident can move to", () => {
-    expect(bulkIncidentTargetStates(["NEW", "ON_HOLD"])).toEqual(["IN_PROGRESS", "CANCELLED"]);
+    expect(bulkIncidentTargetStates(["NEW", "ON_HOLD"])).toEqual(["IN_PROGRESS"]);
+    expect(bulkIncidentTargetStates(["IN_PROGRESS", "ON_HOLD"])).toEqual(["CANCELLED"]);
     expect(bulkIncidentTargetStates(["IN_PROGRESS"])).toEqual(["ON_HOLD", "RESOLVED", "CANCELLED"]);
   });
 

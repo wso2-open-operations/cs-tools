@@ -62,6 +62,20 @@ describe("readProjectFilters", () => {
     expect(f.endDateFrom).toBe("");
   });
 
+  it("reads regions and onboarding owners as plain lists, blanks dropped", () => {
+    const f = read("regions=APAC,%20EU%20,&onboardingOwnerIds=u-1,u-2&onboardingOwnerEmails=owner@example.com");
+    expect(f.regions).toEqual(["APAC", "EU"]);
+    expect(f.onboardingOwnerIds).toEqual(["u-1", "u-2"]);
+    expect(f.onboardingOwnerEmails).toEqual(["owner@example.com"]);
+  });
+
+  it("keeps a region holding a comma as one value through the URL", () => {
+    const f: ProjectFilters = { ...EMPTY_PROJECT_FILTERS, regions: ["Europe, Middle East", "APAC", "100%"] };
+    const params = writeProjectFilters(new URLSearchParams(), f);
+    expect(readProjectFilters(params).regions).toEqual(["Europe, Middle East", "APAC", "100%"]);
+    expect(read("regions=APAC,EU").regions).toEqual(["APAC", "EU"]);
+  });
+
   it("drops an end date before its start", () => {
     const f = read("goLivePlanDateFrom=2026-03-01&goLivePlanDateTo=2026-02-01");
     expect(f.goLivePlanDateFrom).toBe("2026-03-01");
@@ -75,6 +89,9 @@ describe("writeProjectFilters / projectFiltersToRequest round trip", () => {
     closureStates: ["Open", "Suspended"],
     closureStatus: "Restricted",
     excludeClosureStates: ["Suspended"],
+    regions: ["APAC", "EU"],
+    onboardingOwnerIds: ["11111111-1111-1111-1111-111111111111"],
+    onboardingOwnerEmails: ["owner@example.com"],
     endDateFrom: "2026-01-01",
     endDateTo: "2026-12-31",
     onboardingStartDateFrom: "2026-02-01",
@@ -101,6 +118,9 @@ describe("writeProjectFilters / projectFiltersToRequest round trip", () => {
     const params = writeProjectFilters(new URLSearchParams(), FULL);
     expect(params.get("onboardingStatus")).toBe("In-Progress,Completed");
     expect(params.get("closureStates")).toBe("Open,Suspended");
+    expect(params.get("regions")).toBe("APAC,EU");
+    expect(params.get("onboardingOwnerIds")).toBe("11111111-1111-1111-1111-111111111111");
+    expect(params.get("onboardingOwnerEmails")).toBe("owner@example.com");
     expect(params.get("goLivePlanDateFrom")).toBe("2026-03-01");
     expect(params.get("productionReadinessCompletionDateTo")).toBe("2026-06-30");
   });
@@ -131,6 +151,9 @@ describe("countActiveProjectFilters", () => {
         goLivePlanDateTo: "2026-03-31",
       }),
     ).toBe(3);
+    expect(
+      countActiveProjectFilters({ ...EMPTY_PROJECT_FILTERS, regions: ["APAC", "EU"], onboardingOwnerIds: ["u-1"] }),
+    ).toBe(2);
   });
 });
 
@@ -145,5 +168,25 @@ describe("buildProjectFilterChips", () => {
 
   it("leaves it to the builder row when the builder is open", () => {
     expect(buildProjectFilterChips(f, false)).toEqual([]);
+  });
+
+  it("chips the region and names the onboarding owners when their names are known", () => {
+    const g: ProjectFilters = { ...EMPTY_PROJECT_FILTERS, regions: ["APAC"], onboardingOwnerIds: ["u-1", "u-2"] };
+    const names = new Map([["u-1", "Jane Doe"], ["u-2", "John Roe"]]);
+    const chips = buildProjectFilterChips(g, true, (id) => names.get(id));
+    expect(chips.map((c) => c.label)).toEqual(["Region: APAC", "Onboarding owner: Jane Doe, John Roe"]);
+    expect(chips[1].onRemove(g).onboardingOwnerIds).toEqual([]);
+  });
+
+  it("counts the onboarding owners while a name is unknown", () => {
+    const g: ProjectFilters = { ...EMPTY_PROJECT_FILTERS, onboardingOwnerIds: ["u-1", "u-2"] };
+    expect(buildProjectFilterChips(g, true, () => undefined).map((c) => c.label)).toEqual([
+      "Onboarding owner: 2 selected",
+    ]);
+  });
+
+  it("always chips an owner email from a dashboard click-through (the builder has no row for it)", () => {
+    const g: ProjectFilters = { ...EMPTY_PROJECT_FILTERS, onboardingOwnerEmails: ["owner@example.com"] };
+    expect(buildProjectFilterChips(g, false).map((c) => c.label)).toEqual(["Onboarding owner: owner@example.com"]);
   });
 });

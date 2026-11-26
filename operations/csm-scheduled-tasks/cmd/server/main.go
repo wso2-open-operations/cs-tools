@@ -41,13 +41,19 @@ import (
 	"github.com/adhocore/gronx"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
+	acpnotify "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/auditlog"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagereport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/deprecatedusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/holidayreminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
@@ -64,6 +70,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/rotareminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
@@ -77,6 +85,25 @@ import (
 func main() {
 	loadDotEnv(".env")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	// Optional logo/company-name overrides for every email this component
+	// sends, across both notify packages (internal/notify's eight report/
+	// alert templates, internal/acp/notify's five ACP closure templates).
+	// EMAIL_LOGO_DARK_URL and EMAIL_TEMPLATE_COMPANY_NAME are the same names
+	// integrations/csm-notification-service uses, reusable verbatim across
+	// components; EMAIL_LOGO_LIGHT_URL is this component's own name for its
+	// equivalent of that service's EMAIL_LOGO_WHITE_URL. Unset keeps every
+	// built-in default. The two logo vars are deliberately separate, not
+	// shared, because each package's templates share one fixed header color
+	// that needs the opposite logo color to stay visible: internal/notify's
+	// eight templates all share a dark navy header (needs a light-colored
+	// logo), internal/acp/notify's five all share a light background (needs
+	// a dark-colored logo).
+	notify.SetLogoURL(os.Getenv("EMAIL_LOGO_LIGHT_URL"))
+	acpnotify.SetLogoURL(os.Getenv("EMAIL_LOGO_DARK_URL"))
+	companyName := os.Getenv("EMAIL_TEMPLATE_COMPANY_NAME")
+	notify.SetCompanyName(companyName)
+	acpnotify.SetCompanyName(companyName)
 
 	// An on-demand run (--run-now=<task>, see runnow.go) is parsed first, before
 	// anything is built: a bad argument must stop here, never fall through to the
@@ -201,6 +228,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The deprecated product usage report's own client: the same deployment
+	// and credentials, a distinct endpoint (GET
+	// /reports/deprecated-product-usage).
+	deprecatedUsageReportClient, err := deprecatedusagereport.NewClient(deprecatedusagereport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service deprecated-product-usage-report client", "err", err)
+		os.Exit(1)
+	}
+
 	// The query-hour client. Same deployment and credentials; its own
 	// client because a recompute walks every opportunity in service and
 	// every project linked to each, so it needs minutes rather than the
@@ -228,6 +270,34 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service product-regression-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The weekly SLA breach report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/sla-breaches).
+	slaBreachReportClient, err := slabreachreport.NewClient(slabreachreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service sla-breach-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The EOL product usage report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/eol-product-usage).
+	eolUsageReportClient, err := eolusagereport.NewClient(eolusagereport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service EOL-product-usage-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -273,6 +343,27 @@ func main() {
 		})
 		if err != nil {
 			slog.Error("failed to construct entity-service availability client", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	// The audit log upkeep's own client: the same deployment and credentials, one
+	// service-only endpoint. Off by default: entity-service needs
+	// CSM_AUDIT_LOG_ENABLED=true (else the endpoint answers 404), migration 0295
+	// applied and the database role granted EXECUTE on the audit functions first,
+	// or every daily run fails.
+	auditLogMaintenanceEnabled := envBool("AUDIT_LOG_MAINTENANCE_ENABLED", false)
+	var auditLogClient *auditlog.Client
+	if auditLogMaintenanceEnabled {
+		auditLogClient, err = auditlog.NewClient(auditlog.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service audit log client", "err", err)
 			os.Exit(1)
 		}
 	}
@@ -492,6 +583,9 @@ func main() {
 	const availabilityTaskName = "availability_recalculation"
 	availabilityTo, availabilityCc := recipientsFor(recipientOverrides, availabilityTaskName)
 
+	const auditLogMaintenanceTaskName = "audit_log_maintenance"
+	auditLogMaintenanceTo, auditLogMaintenanceCc := recipientsFor(recipientOverrides, auditLogMaintenanceTaskName)
+
 	const usageRollupDailyTaskName = "usage_rollup_daily"
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
 	const usageRollupMonthlyTaskName = "usage_rollup_monthly"
@@ -661,6 +755,120 @@ func main() {
 		})
 	}
 
+	// The monthly EOL product usage report: the customers still running a
+	// product version past its EOL date in an active Primary Production
+	// deployment, mailed on the first Monday of the month at 10:00 IST
+	// (04:30 UTC; the schedule fires every Monday and the handler sends only
+	// on the 1st to the 7th). To is its SUB_CRON_RECIPIENTS "to" (the CS
+	// leadership group) plus every listed account's manager and technical
+	// owner; with no "to" the task skips and succeeds. A month with no EOL
+	// usage still sends a short note to the configured to/cc.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the regression
+	// reports: failures go to ALERT_RECIPIENTS alone, never to the account
+	// managers on every retry. eolUsageTaskWithRecipients carries its
+	// audience to the EMAIL_BASE_URL check below for the same reason.
+	//
+	// EOL_USAGE_REPORT_PORTAL_BASE_URL optionally links account and project
+	// names to their CSM portal pages (<base>/customers/accounts/<id>); a
+	// non-https value refuses to start, as every URL here does. Unset, the
+	// report uses CSM_PORTAL_WEB_BASE_URL (worklogCaseLinkBase above, already
+	// checked), the portal URL every other report here links to.
+	eolUsagePortalBase := strings.TrimRight(os.Getenv("EOL_USAGE_REPORT_PORTAL_BASE_URL"), "/")
+	if eolUsagePortalBase != "" {
+		if err := httpsec.RequireSecureURL(eolUsagePortalBase); err != nil {
+			slog.Error("invalid EOL_USAGE_REPORT_PORTAL_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	eolUsagePortalBase = reportPortalBase(eolUsagePortalBase, worklogCaseLinkBase)
+	eolUsageTo, eolUsageCc := recipientsFor(recipientOverrides, eolusagescan.TaskName)
+	var eolUsageTaskWithRecipients []string
+	if len(eolUsageTo) > 0 {
+		eolUsageTaskWithRecipients = append(eolUsageTaskWithRecipients, eolusagescan.TaskName)
+	}
+	eolUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, eolusagescan.TaskName))
+	eolUsageSchedule := scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule)
+	// EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS (comma-separated, e.g.
+	// "wso2.com") limits the account managers and technical owners added to
+	// the report's To list to those email domains; unset adds every valid
+	// address (see eolusagescan.Options.AllowedRecipientDomains).
+	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled,
+		AllowedRecipientDomains: splitComma(os.Getenv("EOL_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS"))}
+	// A scheduled run (and its retries) takes its date from the period the
+	// engine claimed (schedule.PeriodFromContext); Anchor is the fallback for
+	// a run outside the engine, such as a tryout. A run-now below keeps the
+	// clock.
+	eolUsageScheduled := eolUsageOptions
+	eolUsageScheduled.Anchor = periodStart(eolUsageSchedule)
+	eolUsageTask := registry.Task{
+		Name:     eolusagescan.TaskName,
+		Schedule: eolUsageSchedule,
+		Handler:  eolusagescan.SendReport(eolUsageReportClient, eolUsageEmail, eolUsageTo, eolUsageCc, eolUsageScheduled),
+		// --recipients/--cc of a manual run-now only; see reportRunNow. A
+		// run-now sends whatever the date: it is asked for on purpose.
+		RunNowFlags: reportRunNowFlags,
+		RunNowNarrow: reportRunNow(eolUsageEmail, emailClient,
+			func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				opts := eolUsageOptions
+				opts.AnyDay = true
+				return eolusagescan.SendReport(eolUsageReportClient, email, orRecipients(eolUsageTo, rec), eolUsageCc, opts)
+			}),
+	}
+
+	// The weekly SLA breach reports: last week's breached clocks on the
+	// covered SLA definitions. There are TWO source reports, separate
+	// definitions with different stage and onboarding-status filters, so
+	// each variant is its own task and its own email.
+	//
+	// Default schedule 10:00 Monday India Standard Time, from the source
+	// scheduled report (Run Weekly, Mon, Time 10:00:00). Its Time zone
+	// field reads "-- None --", meaning the ServiceNow instance's own
+	// default; that default is IST, confirmed with the report's owner
+	// rather than assumed. These cron strings are UTC, so 10:00 IST is
+	// 30 4 * * 1. Audience, schedule and the debug divert all resolve by
+	// task name like every other report.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, for the same reason
+	// the regression reports leave them nil: the engine mails task.To on
+	// every failed attempt and retries a failed period every tick, and
+	// the audience here is leadership mail groups. Failures go to
+	// ALERT_RECIPIENTS alone; the tasks are carried to the EMAIL_BASE_URL
+	// check by name instead.
+	slaBreachDefinitions := slabreachscan.Definitions()
+	slaBreachCaseLinkBase := strings.TrimRight(os.Getenv("SLA_BREACH_REPORT_LINK_BASE_URL"), "/")
+	if slaBreachCaseLinkBase != "" {
+		if err := httpsec.RequireSecureURL(slaBreachCaseLinkBase); err != nil {
+			slog.Error("invalid SLA_BREACH_REPORT_LINK_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant(), slabreachscan.OnboardingVariant()} {
+		v = slabreachscan.ApplyStageOverride(v)
+		name := slabreachscan.TaskName(v)
+		to, cc := recipientsFor(recipientOverrides, name)
+		if len(to) > 0 {
+			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
+		}
+		v, to, cc := v, to, cc
+		regressionTasks = append(regressionTasks, registry.Task{
+			Name:     name,
+			Schedule: scheduleFor(scheduleOverrides, name, "30 4 * * 1"),
+			Handler: slabreachscan.SendReport(slaBreachReportClient,
+				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
+				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled, time.Time{}),
+			// --from-date/--to-date name the week, --recipients/--cc the
+			// audience, of a manual run-now only; see slaBreachRunNow.
+			RunNowFlags: slaBreachRunNowFlags,
+			RunNowNarrow: slaBreachRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, week time.Time, rec []string) func(ctx context.Context) error {
+					return slabreachscan.SendReport(slaBreachReportClient, email,
+						v, slaBreachDefinitions, orRecipients(to, rec), cc,
+						slaBreachCaseLinkBase, alertsEnabled, week)
+				}),
+		})
+	}
+
 	// The monthly time card report: each project in TIME_CARD_REPORT_PROJECT_KEYS
 	// gets last calendar month's approved effort per case, mailed to the
 	// project's contacts (one mail each, so customers never see one another's
@@ -681,6 +889,68 @@ func main() {
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
 
+	// The monthly deprecated product usage report: the customers running a
+	// product version whose support status is Deprecated in an active
+	// Primary Production deployment, mailed on the first Monday of the month
+	// at 10:00 IST (04:30 UTC; the schedule fires every Monday and the handler
+	// sends only when its run's Monday is the 1st to the 7th). To is its
+	// SUB_CRON_RECIPIENTS "to" (the CS leadership group) plus every listed
+	// account's manager and technical owner; with no "to" the task skips and
+	// succeeds. A month with no deprecated usage still sends a short note to
+	// the configured to/cc.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the regression
+	// reports: failures go to ALERT_RECIPIENTS alone, never to the account
+	// managers on every retry. That also hides its audience from the
+	// EMAIL_BASE_URL check further below, so it is checked here.
+	//
+	// DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL optionally links account and
+	// project names to their CSM portal pages (<base>/customers/accounts/<id>);
+	// a non-https value refuses to start, as every URL here does. Unset, the
+	// report uses CSM_PORTAL_WEB_BASE_URL (worklogCaseLinkBase, already checked).
+	deprecatedUsagePortalBase := strings.TrimRight(os.Getenv("DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL"), "/")
+	if deprecatedUsagePortalBase != "" {
+		if err := httpsec.RequireSecureURL(deprecatedUsagePortalBase); err != nil {
+			slog.Error("invalid DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	deprecatedUsagePortalBase = reportPortalBase(deprecatedUsagePortalBase, worklogCaseLinkBase)
+	deprecatedUsageTo, deprecatedUsageCc := recipientsFor(recipientOverrides, deprecatedusagescan.TaskName)
+	if alertsEnabled && emailBaseURL == "" && len(deprecatedUsageTo) > 0 {
+		slog.Error("the deprecated product usage report has recipients but EMAIL_BASE_URL is not set; refusing to start since the report could never be sent",
+			"task", deprecatedusagescan.TaskName)
+		os.Exit(1)
+	}
+	deprecatedUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, deprecatedusagescan.TaskName))
+	deprecatedUsageSchedule := scheduleFor(scheduleOverrides, deprecatedusagescan.TaskName, deprecatedusagescan.DefaultSchedule)
+	// DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS (comma-separated,
+	// e.g. "wso2.com") limits the account managers and technical owners
+	// added to the report's To list to those email domains; unset adds every
+	// valid address (see deprecatedusagescan.Options.AllowedRecipientDomains).
+	deprecatedUsageOptions := deprecatedusagescan.Options{PortalBaseURL: deprecatedUsagePortalBase, EmailsEnabled: alertsEnabled,
+		AllowedRecipientDomains: splitComma(os.Getenv("DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS"))}
+	// A scheduled run (and its retries) decides "first Monday" from the
+	// period the engine claimed (schedule.PeriodFromContext; Anchor is the
+	// fallback outside the engine, such as a tryout) and is dated the day it
+	// runs; a run-now below sends on any day.
+	deprecatedUsageScheduled := deprecatedUsageOptions
+	deprecatedUsageScheduled.Anchor = periodStart(deprecatedUsageSchedule)
+	deprecatedUsageTask := registry.Task{
+		Name:     deprecatedusagescan.TaskName,
+		Schedule: deprecatedUsageSchedule,
+		Handler:  deprecatedusagescan.SendReport(deprecatedUsageReportClient, deprecatedUsageEmail, deprecatedUsageTo, deprecatedUsageCc, deprecatedUsageScheduled),
+		// --recipients/--cc of a manual run-now only; see reportRunNow. A
+		// run-now sends whatever the date: it is asked for on purpose.
+		RunNowFlags: reportRunNowFlags,
+		RunNowNarrow: reportRunNow(deprecatedUsageEmail, emailClient,
+			func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				opts := deprecatedUsageOptions
+				opts.AnyDay = true
+				return deprecatedusagescan.SendReport(deprecatedUsageReportClient, email, orRecipients(deprecatedUsageTo, rec), deprecatedUsageCc, opts)
+			}),
+	}
+
 	const autoclosureTaskName = "case_autoclosure"
 	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
 
@@ -693,6 +963,8 @@ func main() {
 	rotaWeekendTo, rotaWeekendCc := recipientsFor(recipientOverrides, rotaWeekendTaskName)
 	const rotaWeekendReminderTaskName = "rota_weekend_reminder"
 	rotaWeekendReminderTo, rotaWeekendReminderCc := recipientsFor(recipientOverrides, rotaWeekendReminderTaskName)
+	const rotaMarkCheckTaskName = "rota_weekday_mark_check"
+	rotaMarkCheckTo, rotaMarkCheckCc := recipientsFor(recipientOverrides, rotaMarkCheckTaskName)
 	const rotaManualTaskName = "rota_manual_reminder"
 	rotaManualTo, rotaManualCc := recipientsFor(recipientOverrides, rotaManualTaskName)
 	const holidayReminderTaskName = "holiday_availability_reminder"
@@ -973,12 +1245,14 @@ func main() {
 					return timecardreport.SendReports(timeCardsClient, email, periodStart(timeCardSchedule), cfg, alertsEnabled)
 				}),
 		},
+		deprecatedUsageTask,
 		// The two outage emails (internal-stakeholder notification and SRE
 		// outage communication) used to be sub-crons here. They moved to
 		// entity-service's outage notice drainer and csm-notification-service,
 		// which send them seconds after the change rather than on this tick.
 	}
 	tasks = append(tasks, regressionTasks...)
+	tasks = append(tasks, eolUsageTask)
 
 	// Removes the files of work items closed for a long time (see above). Daily at
 	// 04:00, after the upload cleanup.
@@ -1050,6 +1324,21 @@ func main() {
 		})
 	}
 
+	// The audit log's weekly upkeep: creates the coming monthly partitions, checks
+	// the log's health and puts back missing audit triggers, all inside entity-service.
+	// Mondays at 01:00 UTC. It is safe to repeat, so a failed run is simply tried again.
+	// It fails, and so is mailed, when it found a health problem, repaired a trigger
+	// (its history had a gap) or could not repair one.
+	if auditLogMaintenanceEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     auditLogMaintenanceTaskName,
+			Schedule: scheduleFor(scheduleOverrides, auditLogMaintenanceTaskName, "0 1 * * 1"),
+			Handler:  auditlog.Maintenance(auditLogClient),
+			To:       auditLogMaintenanceTo,
+			Cc:       auditLogMaintenanceCc,
+		})
+	}
+
 	// Rebuilds the daily and monthly usage rows from the hourly and daily ones --
 	// the Go replacement for ServiceNow's UsageAggregator. The arithmetic is
 	// set-based SQL in entity-service (migration 0245); these tasks only trigger it.
@@ -1101,7 +1390,10 @@ func main() {
 	//     (on Monday when it is already marked); until then the rota admins
 	//     are asked every morning;
 	//   - rota_weekend_reminder, Fri: the weekend summary again, the
-	//     invitations as updates, and cancellations.
+	//     invitations as updates, and cancellations;
+	//   - rota_weekday_mark_check, Sat-Wed at 17:00 Colombo (scheduled
+	//     below): the evening before each weekday reminder, tells the rota
+	//     admins about a weekday rotation that is short of people.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
 	if rotaRemindersAvailable {
@@ -1122,6 +1414,10 @@ func main() {
 		}
 		weekendRequired := parseRequired("ROTA_REMINDER_WEEKEND_REQUIRED",
 			envString("ROTA_REMINDER_WEEKEND_REQUIRED", "CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1"))
+		// How many people each weekday rotation needs, checked by
+		// rota_weekday_mark_check the evening before the reminders.
+		weekdayRequired := parseRequired("ROTA_REMINDER_WEEKDAY_REQUIRED",
+			envString("ROTA_REMINDER_WEEKDAY_REQUIRED", "CRE_EVENING=7"))
 		// Each task's config carries its schedule's period (the run's rota
 		// days are counted from it, so a retry announces what the scheduled
 		// run would have) and the engine's failure audience for it (a run in
@@ -1147,24 +1443,25 @@ func main() {
 				copied = append(append(copied, to...), cc...)
 			}
 			return rotareminder.Config{
-				Family:         family,
-				Rotations:      rotations,
-				Copy:           copied,
-				RedirectTo:     splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
-				ScheduleURL:    scheduleURL,
-				Invites:        invites,
-				OrganizerEmail: organizer,
-				Required:       weekendRequired,
-				Support:        rotaSupport,
-				Windows:        rotaWindows,
-				Settings:       teamScheduleClient,
-				EmailsEnabled:  alertsEnabled,
-				Zone:           rotaZone,
-				Now:            time.Now,
-				Anchor:         periodStart(sched),
-				Task:           task,
-				AlertTo:        append(append([]string{}, to...), alertRecipients...),
-				AlertCc:        cc,
+				Family:          family,
+				Rotations:       rotations,
+				Copy:            copied,
+				RedirectTo:      splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
+				ScheduleURL:     scheduleURL,
+				Invites:         invites,
+				OrganizerEmail:  organizer,
+				Required:        weekendRequired,
+				WeekdayRequired: weekdayRequired,
+				Support:         rotaSupport,
+				Windows:         rotaWindows,
+				Settings:        teamScheduleClient,
+				EmailsEnabled:   alertsEnabled,
+				Zone:            rotaZone,
+				Now:             time.Now,
+				Anchor:          periodStart(sched),
+				Task:            task,
+				AlertTo:         append(append([]string{}, to...), alertRecipients...),
+				AlertCc:         cc,
 			}
 		}
 		weekdayRotations := parseRotations("ROTA_REMINDER_WEEKDAY_SHIFTS",
@@ -1177,14 +1474,31 @@ func main() {
 		// "Send now" requests are picked up at every run: the schedule is finer
 		// than the driver, so it is due at each tick.
 		rotaManualSchedule := scheduleFor(scheduleOverrides, rotaManualTaskName, "*/5 * * * *")
+		// 11:30 UTC = 17:00 Colombo, Saturday to Wednesday: the evening before
+		// each rota_weekday_reminder run (Sun-Thu), so the rota admins hear of
+		// an incomplete weekday rota with a working evening to fix it.
+		rotaMarkCheckSchedule := scheduleFor(scheduleOverrides, rotaMarkCheckTaskName, "30 11 * * 0-3,6")
+		// The weekday reminders, scheduled and "Send now", copy the rota admins.
+		withAdmins := func(cfg rotareminder.Config) rotareminder.Config {
+			cfg.Admins = teamScheduleClient
+			return cfg
+		}
 		tasks = append(tasks,
 			registry.Task{
 				Name:     rotaWeekdayTaskName,
 				Schedule: rotaWeekdaySchedule,
 				Handler: rotareminder.WeekdayReminder(teamScheduleClient, emailClient,
-					rotaConfig(rotaWeekdayTaskName, rotaWeekdaySchedule, weekdayRotations, rotaWeekdayTo, rotaWeekdayCc)),
+					withAdmins(rotaConfig(rotaWeekdayTaskName, rotaWeekdaySchedule, weekdayRotations, rotaWeekdayTo, rotaWeekdayCc))),
 				To: rotaWeekdayTo,
 				Cc: rotaWeekdayCc,
+			},
+			registry.Task{
+				Name:     rotaMarkCheckTaskName,
+				Schedule: rotaMarkCheckSchedule,
+				Handler: rotareminder.WeekdayMarkCheck(teamScheduleClient, teamScheduleClient, emailClient,
+					rotaConfig(rotaMarkCheckTaskName, rotaMarkCheckSchedule, weekdayRotations, rotaMarkCheckTo, rotaMarkCheckCc)),
+				To: rotaMarkCheckTo,
+				Cc: rotaMarkCheckCc,
 			},
 			registry.Task{
 				Name:     rotaWeekendTaskName,
@@ -1206,7 +1520,7 @@ func main() {
 				Name:     rotaManualTaskName,
 				Schedule: rotaManualSchedule,
 				Handler: rotareminder.ManualReminder(teamScheduleClient, teamScheduleClient, teamScheduleClient, emailClient,
-					rotaConfig(rotaManualTaskName, rotaManualSchedule, weekdayRotations, rotaManualTo, rotaManualCc),
+					withAdmins(rotaConfig(rotaManualTaskName, rotaManualSchedule, weekdayRotations, rotaManualTo, rotaManualCc)),
 					rotaConfig(rotaManualTaskName, rotaManualSchedule, weekendRotations, rotaManualTo, rotaManualCc)),
 				To: rotaManualTo,
 				Cc: rotaManualCc,
@@ -1354,12 +1668,14 @@ func main() {
 	// just the standing ALERT_RECIPIENTS audience. Skipped entirely when
 	// ALERTS_ENABLED=false — no email will ever be sent in that case, so an
 	// unset EMAIL_BASE_URL isn't a misconfiguration.
-	// The product regression reports keep their audience out of task.To (see
-	// their registration above), so it is checked here by name instead.
-	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
+	// The product regression reports and the EOL product usage report keep
+	// their audience out of task.To (see their registration above), so it is
+	// checked here by name instead.
+	reportTasksWithOwnRecipients := append(append([]string{}, regressionTasksWithRecipients...), eolUsageTaskWithRecipients...)
+	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(reportTasksWithOwnRecipients) > 0) {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
-			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+			"reportTasksWithOwnRecipients", reportTasksWithOwnRecipients)
 		os.Exit(1)
 	}
 
@@ -1897,6 +2213,17 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// reportPortalBase is a monthly usage report's CSM portal base URL: its own
+// setting (own, already trimmed and checked) when set, otherwise the shared
+// CSM_PORTAL_WEB_BASE_URL (shared, already trimmed and checked). Both empty
+// leaves account and project names as plain text.
+func reportPortalBase(own, shared string) string {
+	if own != "" {
+		return own
+	}
+	return shared
 }
 
 func splitComma(s string) []string {

@@ -54,6 +54,14 @@ type TeamRepository interface {
 	// chat_webhook_url (migration 0240), name order. A team with none is
 	// left out entirely -- there is nothing for a caller to route to.
 	ListChatWebhooks(ctx context.Context) ([]domain.TeamChatWebhook, error)
+	// ListGroupEmails returns every team that has a configured group_email
+	// (migration 0117), keyed by team.key (migration 0152 -- a stable,
+	// lower-case handle, unlike name, which csm-notification-service looks
+	// up a specific team by, e.g. "americas_cre_team" for its SLA-breach
+	// overnight-coverage email), key order. A team with none is left out
+	// entirely -- same "nothing for a caller to route to" posture as
+	// ListChatWebhooks.
+	ListGroupEmails(ctx context.Context) ([]domain.TeamGroupEmail, error)
 	// GetTeamDetail returns the one team's own id/name/type plus its
 	// chat_webhook_url (nil when unset). A NotFoundError is returned when no
 	// team has this id. Backs the generic GET /teams/{id}.
@@ -172,7 +180,7 @@ func (r *teamRepo) SearchTeams(ctx context.Context, searchQuery string, limit, o
 // ListChatWebhooks implements TeamRepository.
 func (r *teamRepo) ListChatWebhooks(ctx context.Context) ([]domain.TeamChatWebhook, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT name, chat_webhook_url FROM team
+		`SELECT name, chat_webhook_url, COALESCE(key, '') FROM team
 		 WHERE chat_webhook_url IS NOT NULL AND chat_webhook_url <> ''
 		 ORDER BY name`,
 	)
@@ -184,7 +192,7 @@ func (r *teamRepo) ListChatWebhooks(ctx context.Context) ([]domain.TeamChatWebho
 	webhooks := []domain.TeamChatWebhook{}
 	for rows.Next() {
 		var w domain.TeamChatWebhook
-		if err := rows.Scan(&w.Name, &w.ChatWebhookURL); err != nil {
+		if err := rows.Scan(&w.Name, &w.ChatWebhookURL, &w.Key); err != nil {
 			return nil, fmt.Errorf("scan team chat webhook: %w", err)
 		}
 		webhooks = append(webhooks, w)
@@ -193,6 +201,32 @@ func (r *teamRepo) ListChatWebhooks(ctx context.Context) ([]domain.TeamChatWebho
 		return nil, fmt.Errorf("iterate team chat webhooks: %w", err)
 	}
 	return webhooks, nil
+}
+
+// ListGroupEmails implements TeamRepository.
+func (r *teamRepo) ListGroupEmails(ctx context.Context) ([]domain.TeamGroupEmail, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT key, group_email FROM team
+		 WHERE group_email IS NOT NULL AND group_email <> ''
+		 ORDER BY key`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query team group emails: %w", err)
+	}
+	defer rows.Close()
+
+	emails := []domain.TeamGroupEmail{}
+	for rows.Next() {
+		var e domain.TeamGroupEmail
+		if err := rows.Scan(&e.Key, &e.GroupEmail); err != nil {
+			return nil, fmt.Errorf("scan team group email: %w", err)
+		}
+		emails = append(emails, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate team group emails: %w", err)
+	}
+	return emails, nil
 }
 
 // GetTeamDetail implements TeamRepository.

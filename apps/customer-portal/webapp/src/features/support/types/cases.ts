@@ -264,6 +264,7 @@ export type EscalationSearchResponse = {
 
 // Response type for detailed case information.
 export type CaseDetails = AuditMetadata & {
+  createdByIsInternal?: boolean;
   id: string;
   internalId: string;
   number: string | null;
@@ -299,6 +300,7 @@ export type CaseDetails = AuditMetadata & {
   findingsResolved: number | null;
   findingsTotal: number | null;
   watchList?: Array<{
+    isInternal?: boolean;
     id?: string;
     userName?: string;
     name?: string;
@@ -329,6 +331,10 @@ export type CaseComment = AuditMetadata & {
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   createdByFullName?: string | null;
+  /** True when the backend resolved the author to an internal-type user
+   * (WSO2 staff). Absent means "not known to be internal", never "known
+   * external". */
+  createdByIsInternal?: boolean;
   isEscalated: boolean;
   hasInlineAttachments?: boolean;
   inlineAttachments?: CaseCommentInlineAttachment[];
@@ -348,6 +354,9 @@ export type CaseActivity = {
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   createdByFullName?: string | null;
+  /** True when the backend resolved the actor to an internal-type user
+   * (WSO2 staff); carried onto the mapped comment for its avatar badge. */
+  createdByIsInternal?: boolean;
   type: string;
   commentType?: string;
   fileName?: string;

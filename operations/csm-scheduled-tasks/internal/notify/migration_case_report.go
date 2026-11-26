@@ -118,7 +118,7 @@ func migrationCaseLink(caseLinkBase string, row migrationreport.Row) string {
 		return escapeHTML(text)
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.ID)
-	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#0B1633;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
 
 // nonEmpty drops the blank strings so a missing owner leaves no stray

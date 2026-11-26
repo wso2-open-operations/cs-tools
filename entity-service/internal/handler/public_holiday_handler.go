@@ -49,6 +49,46 @@ func (h *PublicHolidayHandler) SearchPublicHolidays(w http.ResponseWriter, r *ht
 	writeScheduleJSON(w, http.StatusOK, resp)
 }
 
+// ListPublicHolidays handles GET /team-schedule/public-holidays?from=&to=&country=:
+// the stored days in a window (at most a year), where each came from, the
+// countries in use and whether the caller may edit.
+func (h *PublicHolidayHandler) ListPublicHolidays(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	resp, err := h.svc.List(r.Context(), domain.ListPublicHolidaysRequest{
+		From: q.Get("from"), To: q.Get("to"), Country: q.Get("country"),
+	})
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeScheduleJSON(w, http.StatusOK, resp)
+}
+
+// AddPublicHolidays handles POST /team-schedule/public-holidays: one
+// country's days stored as manual rows (a portal admin or a rota admin).
+func (h *PublicHolidayHandler) AddPublicHolidays(w http.ResponseWriter, r *http.Request) {
+	var req domain.AddPublicHolidaysRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.Add(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeScheduleJSON(w, http.StatusCreated, resp)
+}
+
+// DeletePublicHoliday handles DELETE /team-schedule/public-holidays/{country}/{date}:
+// removes one stored day, 204, or 404 when none is stored.
+func (h *PublicHolidayHandler) DeletePublicHoliday(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.Remove(r.Context(), r.PathValue("country"), r.PathValue("date")); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // publicHolidayRefreshResponse answers POST /team-schedule/public-holidays/refresh.
 type publicHolidayRefreshResponse struct {
 	Started     bool                               `json:"started"`

@@ -45,22 +45,42 @@ type SLAStatusRepository interface {
 	// applies no filtering at all.
 	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error)
 
-	// GetClockState returns the single most recently-started "sla" row for
-	// (workItemID, target) -- regardless of is_active -- so a caller can
-	// tell a genuinely resolved clock (a real row, in a terminal stage)
-	// apart from one that was simply never registered at all (no row
-	// found), which SearchActiveSLAStatuses's own is_active-filtered list
-	// can never distinguish between (both look like "not in the active
-	// list"). Added for csm-notification-service's own pre-alert
-	// verification -- see that repo's own CLAUDE.md, "SLA breach-alerting
-	// engine" -- which needs exactly that distinction to avoid either
-	// suppressing a genuine alert over an unrelated registration failure,
-	// or confirming the wrong clock incarnation after a severity revision.
+	// GetClockState returns one "sla" row for (workItemID, target) --
+	// regardless of is_active -- so a caller can tell a genuinely resolved
+	// clock (a real row, in a terminal stage) apart from one that was simply
+	// never registered at all (no row found), which SearchActiveSLAStatuses's
+	// own is_active-filtered list can never distinguish between (both look
+	// like "not in the active list"). Added for csm-notification-service's
+	// own pre-alert verification -- see that repo's own CLAUDE.md, "SLA
+	// breach-alerting engine" -- which needs exactly that distinction to
+	// avoid either suppressing a genuine alert over an unrelated
+	// registration failure, or confirming the wrong clock incarnation after
+	// a severity revision.
+	//
+	// slaID, when non-empty, narrows the lookup to that EXACT "sla" row
+	// (its own primary key, domain.SLAClockState.ID/SLAStatus.ID) instead of
+	// picking "whichever row is most recently started" -- the real fix for
+	// the known, deliberate limitation this method's own history carried:
+	// the per-policy registration guard lets two policies register clocks
+	// against the same (work_item, target) at once (confirmed live, not
+	// just a theoretical "Hosting case" example -- RESPONSE and RESOLUTION
+	// both routinely carry more than one policy per case in real data), and
+	// a caller that only ever asked by (work_item, target) had no way to
+	// tell which of the two a given wake entry it already holds was
+	// actually about. A slaID that matches no row for this (workItemID,
+	// target) at all reports Found=false, same as no row existing. Passing
+	// "" keeps the original, still-ambiguous "most recently started"
+	// behavior, for a caller that genuinely doesn't know (or is discovering,
+	// not verifying) which row it means -- see csm-notification-service's
+	// own ReviseClocks, which deliberately calls this with "" because it's
+	// finding out what entity-service's CURRENT policy resolution is, not
+	// re-checking a specific one it already tracked.
+	//
 	// target must be a real sla_policy_target_enum label ("RESPONSE"/
 	// "WORKAROUND"/"RESOLUTION"). domain.SLAClockState.Found is false, every
 	// other field at its zero value, when no row exists for this
 	// (workItemID, target) at all.
-	GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error)
+	GetClockState(ctx context.Context, workItemID, target, slaID string) (domain.SLAClockState, error)
 }
 
 type slaStatusRepo struct {
@@ -101,7 +121,7 @@ func NewSLAStatusRepository(db *Scoped) SLAStatusRepository {
 const activeSLAStatusCTE = `
 	WITH active_sla AS (
 		SELECT DISTINCT ON (s.work_item_id, sp.target)
-			s.work_item_id, sp.target, s.live_elapsed_percentage AS business_elapsed_percentage,
+			s.id AS sla_id, s.work_item_id, sp.target, s.live_elapsed_percentage AS business_elapsed_percentage,
 			s.live_has_breached AS has_breached, s.live_stage AS stage, s.start_on,
 			s.paused_on, s.pause_duration, sp.duration,
 			-- sp.duration, not s.duration: see migration 0272's own doc
@@ -222,7 +242,7 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	var durationSeconds int64
 	var businessPauseSeconds float64
 	err := row.Scan(
-		&s.CaseID, &target, &s.BusinessElapsedPercent, &s.HasBreached, &stage, &s.StartedOn,
+		&s.ID, &s.CaseID, &target, &s.BusinessElapsedPercent, &s.HasBreached, &stage, &s.StartedOn,
 		&s.PausedOn, &pauseDurationSeconds, &durationSeconds, &schedule, &businessPauseSeconds,
 		&caseNumber, &wso2CaseID, &caseTitle, &caseType, &engagementType,
 		&productName, &severity, &state, &teamName, &onboardingStatus, &isEvaluation,
@@ -401,7 +421,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 	dataArgs := []any{evaluationSubscriptionProjectTypeName}
 	dataFilterSQL := appendSLAStatusFilterSQL(filters, &dataArgs)
 	dataQuery := activeSLAStatusCTE + `
-		SELECT als.work_item_id::TEXT, als.target::TEXT, COALESCE(als.business_elapsed_percentage, 0), COALESCE(als.has_breached, FALSE), COALESCE(als.stage::TEXT, ''), als.start_on,
+		SELECT als.sla_id::TEXT, als.work_item_id::TEXT, als.target::TEXT, COALESCE(als.business_elapsed_percentage, 0), COALESCE(als.has_breached, FALSE), COALESCE(als.stage::TEXT, ''), als.start_on,
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM als.duration), 0)::BIGINT,
 		       als.schedule, COALESCE(EXTRACT(EPOCH FROM als.business_pause_duration), 0),
@@ -539,6 +559,15 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // AssigneeEmail, and the Stage/HasBreached/etc. clock state itself) is
 // completely unaffected by onboarding status.
 //
+// AssignmentGroupName is an INCIDENT's current assignment group (NULL, so
+// empty, for every other type -- the joins are restricted to incidents):
+// csm-notification-service resolves it to the incident's SRE team(s), whose
+// team.group_email/chat_webhook_url its incident SLA alert uses.
+// AssignmentGroupTeamKey is the team whose id that group has: an SME team's
+// escalation group shares its team's id (SpecialistHandoffGroupRepository.
+// EnsureTeamGroups), so an incident escalated to an SME team names it. TeamEmail/
+// TeamLeadName stay the account CRE team's for every type, as before.
+//
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
 // live_elapsed_percentage for every row: that view has no business-day
@@ -552,27 +581,29 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // of schedule -- reads the view's own value directly, which is already
 // correct for those (a PAUSED/terminal row's figure was already frozen
 // correctly, business-day-aware, at the moment it was written).
-func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
+func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, slaID string) (domain.SLAClockState, error) {
 	args := []any{workItemID, target, evaluationSubscriptionProjectTypeName, onboardingTeamKey, slaClockStateOnboardingStatuses}
 
-	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
-	// on this): the per-policy registration guard lets two policies
-	// register clocks against the same (work_item, target) at once, and
-	// this read still returns only one row, picked by ORDER BY/LIMIT 1
-	// below. Deliberately NOT given a stage filter to resolve that: this
-	// method's whole reason for existing (see its own doc comment) is
-	// returning the most recently-started row REGARDLESS of stage/
-	// is_active, so a caller can distinguish "cleanly resolved" from
-	// "never registered" from "superseded by a later incarnation" -- a
-	// CodeRabbit review already caught and fixed the bug an active-only
-	// filter causes here once. Excluding terminal stages now would
-	// reintroduce exactly that bug for the sake of a narrower, much rarer
-	// problem (two policies simultaneously open on one target); keying the
-	// read -- and csm-notification-service's own Redis clock -- by clock id
-	// or policy instead of target is the real fix, deliberately out of
-	// scope here.
+	// slaID narrows the read to that exact row -- the real fix for this
+	// method's own former "known, deliberate limitation": the per-policy
+	// registration guard lets two policies register clocks against the
+	// same (work_item, target) at once, and without a row id to disambiguate,
+	// this read could only ever pick one by ORDER BY/LIMIT 1 below, with no
+	// way for a caller to tell whether that was the SAME row a wake entry it
+	// already holds is about. Still deliberately NOT given a stage filter
+	// even with slaID set: this method's whole reason for existing (see its
+	// own doc comment) is returning the row REGARDLESS of stage/is_active,
+	// so a caller can distinguish "cleanly resolved" from "never
+	// registered" from "superseded by a later incarnation" -- a CodeRabbit
+	// review already caught and fixed the bug an active-only filter causes
+	// here once, and that reasoning is unchanged by slaID's addition.
+	slaIDFilter := ""
+	if slaID != "" {
+		args = append(args, slaID)
+		slaIDFilter = fmt.Sprintf(" AND s.id = $%d::uuid", len(args))
+	}
 	query := `
-		SELECT s.is_active, s.live_stage::TEXT, s.live_has_breached, s.start_on,
+		SELECT s.id::TEXT, s.is_active, s.live_stage::TEXT, s.live_has_breached, s.start_on,
 		       s.paused_on, EXTRACT(EPOCH FROM s.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
 		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
@@ -582,7 +613,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		       COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
 		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
-		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END,
+		       incident_group.name, incident_group_team.key
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -596,11 +628,13 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 			LIMIT 1
 		) lead_tm ON TRUE
 		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
+		LEFT JOIN "group" incident_group ON incident_group.id = wi.assignment_group_id AND wi.type = 'INCIDENT'
+		LEFT JOIN team incident_group_team ON incident_group_team.id = wi.assignment_group_id AND wi.type = 'INCIDENT'
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		LEFT JOIN project p ON p.id = wi.project_id
 		LEFT JOIN project_type pt ON pt.id = p.project_type_id
 		LEFT JOIN team onboarding_team ON onboarding_team.key = $4
-		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
+		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2` + slaIDFilter + `
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
 
@@ -616,14 +650,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail, assignmentGroupName, assignmentGroupTeamKey *string
 	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
-		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
+		&state.ID, &state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
-		&onboardingStatus, &isEvaluation, &onboardingTeamEmail,
+		&onboardingStatus, &isEvaluation, &onboardingTeamEmail, &assignmentGroupName, &assignmentGroupTeamKey,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -647,6 +681,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
 	state.IsEvaluationAccount = isEvaluation
 	state.OnboardingTeamEmail = stringOrEmpty(onboardingTeamEmail)
+	state.AssignmentGroupName = stringOrEmpty(assignmentGroupName)
+	state.AssignmentGroupTeamKey = stringOrEmpty(assignmentGroupTeamKey)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

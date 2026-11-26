@@ -65,11 +65,11 @@ export default function PortalAccessRequiredPage({
             to the customer portal. To gain access, please contact your account
             manager or reach out to{" "}
             <Link
-              href="mailto:support@wso2.com"
+              href="mailto:support@choreolabs.com"
               underline="hover"
               sx={{ fontWeight: 500 }}
             >
-              support@wso2.com
+              support@choreolabs.com
             </Link>
             .
           </Typography>

@@ -35,6 +35,10 @@ func (f *fakeProductRepo) SearchProducts(_ context.Context, req domain.SearchPro
 	return []domain.Product{}, 0, nil
 }
 
+func (f *fakeProductRepo) GetProduct(context.Context, string) (*domain.Product, error) {
+	return nil, nil
+}
+
 // TestProductService_SearchProducts_EmptyClassIsUnfiltered guards against
 // reintroducing the ServiceNow-only "product_model" default on the
 // Postgres-backed path: the products table already stores one row per

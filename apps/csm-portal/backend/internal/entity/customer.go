@@ -309,6 +309,13 @@ func (c *CustomerEntityClient) SearchProjects(ctx context.Context, body []byte) 
 	return c.do(ctx, http.MethodPost, "/projects/search", body)
 }
 
+// AggregateProjects calls POST /projects/aggregate on the entity service:
+// project counts per onboarding owner, onboarding status or region.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) AggregateProjects(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/projects/aggregate", body)
+}
+
 // SearchProjectContacts calls POST /projects/{id}/contacts/search on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error) {
@@ -722,6 +729,25 @@ func (c *CustomerEntityClient) GetGroup(ctx context.Context, id string) ([]byte,
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/groups/%s", url.PathEscape(id)), nil)
 }
 
+// GetMTTRReport calls GET /reports/mttr on the entity service: MTTR by
+// severity band over a trailing window: months ("1", "3", "6" or "12") or
+// days ("7"), exactly one of them set; creTeamIDs (CRE "group" ids), when non-empty, restricts to those teams.
+// Internal callers only, enforced by entity-service. Response is returned as
+// raw JSON.
+func (c *CustomerEntityClient) GetMTTRReport(ctx context.Context, months, days string, creTeamIDs []string) ([]byte, error) {
+	q := url.Values{}
+	if months != "" {
+		q.Set("months", months)
+	}
+	if days != "" {
+		q.Set("days", days)
+	}
+	for _, id := range creTeamIDs {
+		q.Add("creTeamId", id)
+	}
+	return c.do(ctx, http.MethodGet, "/reports/mttr?"+q.Encode(), nil)
+}
+
 // GetScheduleCatalogue calls GET /team-schedule/catalogue on the entity service.
 // The Team Schedule zones, windows and absence kinds, in one payload: a client
 // needs all three to draw a single day. Response is returned as raw JSON.
@@ -754,6 +780,31 @@ func (c *CustomerEntityClient) SearchScheduleEngagementAllocations(ctx context.C
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/team-schedule/public-holidays/search", body)
+}
+
+// ListPublicHolidays calls GET /team-schedule/public-holidays on the entity
+// service: the stored days in a window (of one country when country is not
+// empty), with their source, the countries in use and whether the caller may
+// edit. Response is returned as raw JSON.
+func (c *CustomerEntityClient) ListPublicHolidays(ctx context.Context, from, to, country string) ([]byte, error) {
+	q := url.Values{"from": {from}, "to": {to}}
+	if country != "" {
+		q.Set("country", country)
+	}
+	return c.do(ctx, http.MethodGet, "/team-schedule/public-holidays?"+q.Encode(), nil)
+}
+
+// AddPublicHolidays calls POST /team-schedule/public-holidays: one country's
+// days stored as manual rows. Response is returned as raw JSON.
+func (c *CustomerEntityClient) AddPublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/public-holidays", body)
+}
+
+// DeletePublicHoliday calls DELETE /team-schedule/public-holidays/{country}/{date},
+// both segments path-escaped (a country holds a space).
+func (c *CustomerEntityClient) DeletePublicHoliday(ctx context.Context, country, date string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete,
+		"/team-schedule/public-holidays/"+url.PathEscape(country)+"/"+url.PathEscape(date), nil)
 }
 
 // SearchHolidayAvailability calls POST /team-schedule/holiday-availability/search
@@ -1214,6 +1265,24 @@ func (c *CustomerEntityClient) GetPagingReadiness(ctx context.Context, days int)
 // role or marks a team's rota, and what the caller may change.
 func (c *CustomerEntityClient) GetRotaAccess(ctx context.Context) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, "/team-schedule/rota-access", nil)
+}
+
+// ListCaseDeescalators calls GET /case-escalation-access/deescalators on the
+// entity service: the people an admin named as allowed to de-escalate any
+// case. entity-service requires a CSM admin's user token. Response is returned
+// as raw JSON.
+func (c *CustomerEntityClient) ListCaseDeescalators(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/case-escalation-access/deescalators", nil)
+}
+
+// PutCaseDeescalator calls PUT /case-escalation-access/deescalators/{userId}.
+func (c *CustomerEntityClient) PutCaseDeescalator(ctx context.Context, userID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPut, "/case-escalation-access/deescalators/"+url.PathEscape(userID), nil)
+}
+
+// DeleteCaseDeescalator calls DELETE /case-escalation-access/deescalators/{userId}.
+func (c *CustomerEntityClient) DeleteCaseDeescalator(ctx context.Context, userID string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, "/case-escalation-access/deescalators/"+url.PathEscape(userID), nil)
 }
 
 // PutRotaAdmin calls PUT /team-schedule/rota-access/admins/{family}/{userId}.

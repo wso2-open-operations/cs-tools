@@ -36,25 +36,30 @@ const weekendKind = "weekend_notice"
 // SupportRota is another family's weekend turns, listed in the weekend summary
 // for information (Config.Support).
 type SupportRota struct {
-	// Family is the Team Schedule family read ("SRE").
+	// Family is the Team Schedule family read ("SRE"); the summary's column
+	// for it is "SRE Team".
 	Family string
-	// Title heads the block in the summary ("SRE Weekend Support").
-	Title string
-	// Rotations maps each shift code listed to its name in the Rotation
-	// Definitions table ("SRE_TZ3" -> "SRE Night (TZ3)"); a person's line
-	// shows the name up to its bracket. A code not here is not listed.
+	// Rotations maps each shift code listed to its name ("SRE_TZ3" -> "SRE
+	// Night (TZ3)"); the summary shows it up to its bracket. A code not here
+	// is not listed.
 	Rotations map[string]string
 }
 
 // SREWeekendSupport is the SRE rota the CRE weekend summary lists: the SaaS
-// weekend day turn and the TZ3 night. IaaS and PaaS are not listed.
+// weekend day turn and the night, on either weekend shape -- TZ1+2 / TZ3
+// (SRE_WE_TZ1, SRE_TZ3) or, once entity-service switches them on, Day / Night
+// (SRE_WE_DAY, SRE_WE_NIGHT). The summary shows only each turn's hours and
+// people with their tier ("Kim (L1)"), not these names: the column is already
+// the SRE team's. A code with a name here is what is read. IaaS and PaaS are
+// not listed.
 func SREWeekendSupport() SupportRota {
 	return SupportRota{
 		Family: "SRE",
-		Title:  "SRE Weekend Support",
 		Rotations: map[string]string{
-			"SRE_WE_TZ1": "SRE Weekend (TZ1 + TZ2)",
-			"SRE_TZ3":    "SRE Night (TZ3)",
+			"SRE_WE_TZ1":   "SRE Weekend (TZ1 + TZ2)",
+			"SRE_TZ3":      "SRE Night (TZ3)",
+			"SRE_WE_DAY":   "SRE Weekend (Day)",
+			"SRE_WE_NIGHT": "SRE Night (Weekend Night)",
 		},
 	}
 }

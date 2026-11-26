@@ -14,9 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { createTheme, ThemeProvider } from "@wso2/oxygen-ui";
+import { resolveTheme, THEME_OPTIONS } from "@config/themeConfig";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
 import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
@@ -56,31 +58,110 @@ afterEach(() => {
 });
 
 describe("SlaImpactTimeline", () => {
+  it.each(THEME_OPTIONS.flatMap(({ key }) => ["light", "dark"].map((mode) => ({ key, mode: mode as "light" | "dark" }))))("keeps selection visible in $key / $mode", ({ key, mode }) => {
+    const base = resolveTheme(key);
+    const schemes = (base as unknown as { colorSchemes?: Partial<Record<"light" | "dark", { palette: typeof base.palette }>> }).colorSchemes;
+    const palette = schemes?.[mode]?.palette ?? base.palette;
+    const theme = createTheme({ palette: { ...palette, mode } });
+    render(<ThemeProvider theme={theme}>
+      <SlaImpactTimeline entries={ENTRIES} openedAt="2026-07-01T09:00:00Z" isLoading={false} isError={false} onRetry={vi.fn()} />
+    </ThemeProvider>);
+    const timeline = screen.getByRole("group", { name: "Ownership timeline" });
+    const wso2 = within(timeline).getByRole("button", { name: /With Choreo Labs/ });
+    fireEvent.click(wso2);
+    expect(wso2).toHaveAttribute("aria-pressed", "true");
+    expect(wso2).toHaveStyle({ color: theme.palette.info.contrastText, height: "24px", borderRadius: "999px" });
+    expect(screen.getByText("Selected period")).toBeInTheDocument();
+    expect(document.querySelector(".lucide-chevron-down")).not.toBeNull();
+    const customer = within(timeline).getByRole("button", { name: /With customer/ });
+    fireEvent.click(customer);
+    expect(customer).toHaveStyle({ color: theme.palette.warning.contrastText, height: "24px", borderRadius: "999px" });
+    expect(wso2).toHaveAttribute("aria-pressed", "false");
+    expect(wso2).toHaveStyle({ height: "16px", borderRadius: "999px 0 0 999px" });
+    expect(timeline).toHaveStyle({ height: "28px", overflow: "visible" });
+    expect(customer).toHaveAccessibleDescription(/Selected period/);
+  });
+
   it("renders one focusable marker per event, named with title, values, actor and time", () => {
     renderTimeline();
-    const markers = screen.getAllByRole("button").filter((b) => b.getAttribute("aria-label"));
-    expect(markers).toHaveLength(2);
-    const state = screen.getByRole("button", { name: /Waiting on customer/ });
-    expect(state).toHaveAccessibleName(/State: Work in progress to Awaiting info/);
+    const group = screen.getByRole("group", { name: "SLA events, oldest to newest" });
+    const state = within(group).getByRole("button", { name: /Waiting on customer/ });
     expect(state).toHaveAccessibleName(/Jane Doe/);
     expect(state).toHaveAccessibleName(/2026/);
-    expect(screen.getByRole("button", { name: /Workaround provided/ })).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: /Workaround provided/ })).toBeInTheDocument();
     state.focus();
     expect(state).toHaveFocus();
   });
 
-  it("shows a legend for the three track colours", () => {
+  it("shows ownership summaries without a closed duration", () => {
     renderTimeline();
-    for (const label of ["WSO2 side", "Customer side", "Closed"]) {
+    for (const label of ["With Choreo Labs", "With customer"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Closed")).not.toBeInTheDocument();
+  });
+
+  it("opens the audit history on marker click instead of relying on hover", () => {
+    renderTimeline();
+    const group = screen.getByRole("group", { name: "SLA events, oldest to newest" });
+    fireEvent.click(within(group).getByRole("button", { name: /Waiting on customer/ }));
+    const dialog = screen.getByRole("dialog", { name: "SLA event history" });
+    expect(within(dialog).getAllByText("Jane Doe")[0]).toBeInTheDocument();
+    expect(within(dialog).getByText(/State: Work in progress/)).toBeInTheDocument();
+  });
+
+  it("shows duration and exact times when an ownership period is clicked", () => {
+    renderTimeline({ openedAt: "2026-07-01T09:00:00Z" });
+    fireEvent.click(within(screen.getByRole("group", { name: "Ownership timeline" })).getByRole("button", { name: /With Choreo Labs, 1h elapsed/ }));
+    expect(screen.getByText("With Choreo Labs · 1h elapsed")).toBeInTheDocument();
+  });
+
+  it("limits the main history to the latest three changes", () => {
+    renderTimeline({ entries: Array.from({ length: 5 }, (_, i) => ({ ...ENTRIES[1], id: `a${i}`, createdAt: `2026-07-0${i + 1}T10:00:00Z` })) });
+    expect(screen.getByText("Latest 3 of 5 · newest first")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View all 5 events" }));
+    expect(within(screen.getByRole("dialog")).getAllByText("Workaround provided")).toHaveLength(5);
+  });
+
+  it("opens the full history when a grouped marker is clicked", () => {
+    const close = (i: number) => ({ ...ENTRIES[1], id: `g${i}`, createdAt: `2026-07-02T10:00:0${i}Z` });
+    renderTimeline({ entries: [ENTRIES[0], close(1), close(2), close(3)] });
+    const group = screen.getByRole("group", { name: "SLA events, oldest to newest" });
+    fireEvent.click(within(group).getByRole("button", { name: /Workaround provided.*Workaround provided/ }));
+    const dialog = screen.getByRole("dialog", { name: "SLA event history" });
+    expect(within(dialog).getByText("4 events · newest first")).toBeInTheDocument();
+  });
+
+  it("picks up an event recorded after the timeline mounted", () => {
+    vi.useFakeTimers();
+    try {
+      const mountedAt = new Date("2026-07-05T10:00:00Z");
+      vi.setSystemTime(mountedAt);
+      const later: CaseAuditEntry = { ...ENTRIES[1], id: "later", createdAt: "2026-07-05T10:00:10Z" };
+      renderTimeline({ entries: [later], openedAt: "2026-07-01T09:00:00Z" });
+      expect(screen.getByText(/No SLA-affecting changes/)).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(30_000); });
+      expect(screen.getByText("Latest 1 of 1 · newest first")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
     }
   });
 
-  it("reveals the details in a tooltip on hover", async () => {
-    renderTimeline();
-    fireEvent.mouseOver(screen.getByRole("button", { name: /Waiting on customer/ }));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Customer side");
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Awaiting info");
+  it("hides the view-all button when every event is already shown", () => {
+    renderTimeline({ entries: ENTRIES });
+    expect(screen.getByText("Latest 2 of 2 · newest first")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /View all/ })).not.toBeInTheDocument();
+  });
+
+  it("shows breached SLA statuses without inventing times or placing them on the graph", () => {
+    renderTimeline({ slas: [
+      { id: "response", definition: "Response SLA", hasBreached: true },
+      { id: "resolution", definition: "Resolution SLA", hasBreached: true },
+    ] as never });
+    const statuses = screen.getByLabelText("Breached SLAs");
+    expect(within(statuses).getByText("Response SLA · Breached")).toBeInTheDocument();
+    expect(within(statuses).getByText("Resolution SLA · Breached")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "SLA breach markers" })).not.toBeInTheDocument();
   });
 
   it("shows a loading state", () => {

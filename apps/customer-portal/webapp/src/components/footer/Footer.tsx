@@ -15,10 +15,10 @@
 // under the License.
 
 import {
-  COMPANY_NAME,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
 } from "@features/project-hub/constants/appLayoutConstants";
+import { appearanceConfig } from "@config/appearanceConfig";
 import { Footer as FooterUI } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
@@ -39,7 +39,8 @@ export default function Footer(): JSX.Element {
       }}
     >
       <FooterUI.Copyright>
-        © {new Date().getFullYear()} {COMPANY_NAME}. All rights reserved.
+        © {new Date().getFullYear()} {appearanceConfig.companyName}. All rights
+        reserved.
       </FooterUI.Copyright>
       <FooterUI.Link href={TERMS_OF_SERVICE_URL}>
         Terms & Conditions

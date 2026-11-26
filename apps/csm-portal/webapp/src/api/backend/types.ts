@@ -243,6 +243,10 @@ export interface BeUserReference {
    * identifier such as an automation account (e.g. "system"). */
   email: string;
   name: string;
+  /** True when the person resolved to an INTERNAL-type user (WSO2 staff).
+   * Only set on comment authors; absent means "not known to be internal",
+   * never "known external". */
+  isInternal?: boolean;
 }
 
 /** A referenced entity carrying its display name (project, deployment, ...). */
@@ -841,6 +845,14 @@ export type BeCaseUpdatePayload =
       resolutionCode?: BeCaseResolutionCode;
       cause?: BeCaseCause;
       closeNotes?: string;
+      /**
+       * Optional free-text note on why a closed case is being reopened.
+       * Only meaningful when the case's current state is `closed` and the
+       * caller holds the admin role — every other caller gets a 403 for that
+       * transition regardless of this field. Write-only: never returned by
+       * this or any other endpoint, and never shown anywhere in the portal.
+       */
+      reopenReason?: string;
     })
   | (Omit<BeCaseUpdateNever, "severity"> & { severity: BeCaseSeverity })
   /**
@@ -1308,6 +1320,27 @@ export interface BeCaseEscalationSearchResponse {
   /** The leads of the case's account's CRE (ABT) team -- the only users who
    * may de-escalate the case. */
   teamLeads?: BeCaseEscalationNotifiedUser[];
+  /** Users an admin named as allowed to de-escalate any case, besides the
+   * team leads above. */
+  deescalators?: BeCaseEscalationNotifiedUser[];
+}
+
+/** One person an admin named as allowed to de-escalate any case
+ * (`GET /case-escalation-access/deescalators`). `active` is false when the
+ * holder is no longer active internal staff: listed so it can be removed, but
+ * it lets nobody de-escalate. */
+export interface BeCaseDeescalator {
+  userId: string;
+  name: string;
+  email: string;
+  grantedBy: string;
+  grantedOn: string;
+  active: boolean;
+}
+
+/** Response of `GET /case-escalation-access/deescalators`. */
+export interface BeCaseDeescalatorsResponse {
+  deescalators: BeCaseDeescalator[];
 }
 
 /**
@@ -2391,12 +2424,24 @@ export interface BeCreateCaseGithubIssuePayload {
   regression?: boolean;
   /** When true: appends "Hotfix Required : Yes" to the issue body. */
   hotFixRequired?: boolean;
-  /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
+  /** Issue-type label to apply on GitHub: "Type/Discussion" or "Type/Feature" (legacy "Type/Patch"). */
   issueTypeLabel?: string;
-  /** Priority label for Discussion: Priority/Critical(P1), Priority/High(P2), or Priority/Medium(P3). */
+  /** Priority label for Discussion: Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). */
   priorityLevel?: string;
+  /** Why the issue is P0, P1 or P2 (free text). Written to the issue body. */
+  priorityJustification?: string;
+  /** Steps to reproduce, written to the issue body. */
+  reproducingSteps?: string;
+  /** Why a hotfix is required (one of the dialog's fixed options). Sent only with hotFixRequired. */
+  hotFixReason?: string;
+  /** Related internal issue links or numbers, written to the issue body. */
+  relatedInternalIssues?: string;
   /** Project onboarding status is In-Progress. Adds Onboarding/affected. */
   onboardingInProgress?: boolean;
+  /** Feature Request: business use case, written to the issue body. */
+  businessUseCase?: string;
+  /** Feature Request: related Git issue links or numbers, written to the issue body. */
+  relatedGitIssues?: string;
 }
 
 /** `POST /cases/{id}/github-issues` response. */
@@ -3212,10 +3257,16 @@ export interface BeAssignTeamLeadPayload {
 
 /** `PATCH /users/{id}` request body — both fields optional, at least one
  * required. See `apps/csm-portal/backend`'s own CLAUDE.md: restricted to
- * cs_engineer/admin, for updating someone else's profile by id. */
+ * cs_engineer/admin, for updating someone else's profile by id.
+ *
+ * makeInternal is narrower: admin-only, and only for a @wso2.com target --
+ * true grants the "internal" role and revokes the external-side role set,
+ * the only way to actually change the backend's user_type. Combinable with
+ * timeZone/phone in the same call, or sent alone. */
 export interface BeUpdateUserPayload {
   timeZone?: string;
   phone?: string;
+  makeInternal?: boolean;
 }
 
 export interface BeTeamSearchResponse {
@@ -4467,7 +4518,8 @@ export type BeWidgetResourceType =
   | "incident_task"
   | "case_feedback"
   | "plg_organization"
-  | "plg_registration";
+  | "plg_registration"
+  | "mttr";
 
 /**
  * How a widget's resolved data should be rendered. `pie` and `bar` both
@@ -4562,8 +4614,12 @@ export interface BeDashboardGroupByConfig {
    * doesn't match) that calls `POST /cases/feedback/aggregate` with this
    * value and maps its bucketed response into the same per-slice
    * `PieSliceResult[]` shape every other pie/bar widget already renders. See
-   * {@link BeCaseFeedbackBucket} for what each value means. */
-  bucket?: BeCaseFeedbackBucket;
+   * {@link BeCaseFeedbackBucket} for what each value means.
+   *
+   * `"severity"` is the parallel case for `resourceType: "mttr"` — its one
+   * fixed bucket, resolved by `useMttrReportData` (`GET /reports/mttr`), not
+   * `useCaseFeedbackTrendData`. */
+  bucket?: BeCaseFeedbackBucket | "severity";
   /** Caps the number of returned buckets; anything beyond that rolls up
    * into the response's `othersCount`. Meaningless when `bucket` is set — a
    * date-bucketed aggregation has no "Others" folding. */
@@ -4700,6 +4756,31 @@ export interface BeFeedbackBucket {
 export interface BeCaseFeedbackAggregateResponse {
   buckets: BeFeedbackBucket[];
   totalRecords: number;
+}
+
+/** The MTTR severity bands `GET /reports/mttr` always returns, in this
+ * order -- see `useMttrReportData`. */
+export type BeMttrBand = "S1-S4" | "S1-S3" | "S0" | "S1" | "S2" | "S3" | "S4";
+
+/** One severity band's MTTR in a `GET /reports/mttr` response. */
+export interface BeMttrReportBand {
+  band: BeMttrBand;
+  caseCount: number;
+  avgResolutionHours: number;
+}
+
+/** `GET /reports/mttr` response: MTTR (mean time to resolution) by severity
+ * band, over a trailing window -- backs `resourceType: "mttr"`
+ * (`useMttrReportData`). */
+export interface BeMttrReport {
+  generatedOn: string;
+  /** 0 when the report was asked for a day window (`windowDays`). */
+  windowMonths: 0 | 1 | 3 | 6 | 12;
+  windowDays?: 7;
+  windowStart: string;
+  windowEnd: string;
+  creTeamIds: string[];
+  bands: BeMttrReportBand[];
 }
 
 /** Rendering hint for a {@link BeDashboardWidgetColumn}'s resolved value.

@@ -37,6 +37,7 @@ import {
 import {
   Activity,
   ArrowLeft,
+  ArrowUpRight,
   CheckSquare,
   Clock,
   Eye,
@@ -105,6 +106,7 @@ import CaseActionBar, {
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
 import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
 import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
+import ReopenCaseDialog from "@features/csm-cases/components/ReopenCaseDialog";
 import ChangeCaseTypeDialog, {
   type CaseTypeTransferSubmission,
 } from "@features/csm-cases/components/ChangeCaseTypeDialog";
@@ -129,7 +131,10 @@ import RequestUpdateDialog, {
   type RequestUpdateSavePayload,
 } from "@features/csm-cases/components/RequestUpdateDialog";
 import { useRequestCaseUpdate } from "@features/csm-cases/api/useRequestCaseUpdate";
-import { deriveCaseUpdateRequestCategory } from "@features/csm-cases/utils/caseUpdateRequests";
+import {
+  deriveCaseUpdateRequestCategory,
+  isMigrationEngagement,
+} from "@features/csm-cases/utils/caseUpdateRequests";
 import CreateTaskDialog from "@features/csm-cases/components/CreateTaskDialog";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import EscalateCaseDialog from "@features/csm-cases/components/EscalateCaseDialog";
@@ -224,6 +229,7 @@ import type {
   CsmCaseDetail,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
+import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
@@ -325,6 +331,7 @@ type CaseTabId =
   | "related"
   | "watchers"
   | "sla"
+  | "escalation"
   | "attachments"
   | "time"
   | "call-requests"
@@ -357,6 +364,7 @@ const TAB_DEFS: Array<{
   { id: "related", label: "Linked Items", icon: <LinkIcon size={16} /> },
   { id: "watchers", label: "Watchers", icon: <Eye size={16} /> },
   { id: "sla", label: "SLAs", icon: <Clock size={16} /> },
+  { id: "escalation", label: "Escalation", icon: <ArrowUpRight size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
@@ -670,7 +678,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // Skipped for announcements (undefined caseId disables the query) since
   // neither tab is shown there, and for a caller without canViewSlaTab, since
   // the tab itself is hidden for them.
-  const { data: slaList } = useGetWorkItemSlas(
+  const { data: slaList, isLoading: isSlasLoading, isError: isSlasError } = useGetWorkItemSlas(
     isAnnouncement || !canViewSlaTab ? undefined : caseId,
   );
   const {
@@ -740,25 +748,26 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
-  // De-escalating is restricted to the case's ABT team leads (the backend
-  // enforces the same check -- this is a client-side affordance only,
-  // matching every other role/permission check in this app). Matched by
-  // platform id first (currentUser.id against a lead's own id, the same
-  // identity space the backend's own check uses), falling back to a
-  // case-insensitive email match against the signed-in user's ID token claim
-  // when either id is unavailable -- mirrors the BFF's own
-  // callerIsCaseTeamLead exactly.
+  // De-escalating is for the case's ABT team leads (who also need an
+  // escalation role) and for the people an admin named in Settings >
+  // Escalation access (who need none). The backend enforces the same rule;
+  // this is a client-side affordance only. Matched by platform id first
+  // (currentUser.id against a listed person's own id, the identity space the
+  // backend's check uses), falling back to a case-insensitive email match
+  // against the signed-in user's ID token claim when either id is unavailable
+  // -- mirrors the BFF's own deescalationStanding.
   const callerId = currentUser?.id;
   const callerEmail = claims?.email?.toLowerCase();
-  const callerIsCaseTeamLead = (escalationHistory?.teamLeads ?? []).some(
-    (u) => {
-      if (callerId && u.id && callerId === u.id) return true;
-      if ((!callerId || !u.id) && callerEmail && u.email) {
-        return u.email.toLowerCase() === callerEmail;
-      }
-      return false;
-    },
-  );
+  const isCaller = (u: { id?: string | null; email?: string | null }): boolean => {
+    if (callerId && u.id && callerId === u.id) return true;
+    if ((!callerId || !u.id) && callerEmail && u.email) {
+      return u.email.toLowerCase() === callerEmail;
+    }
+    return false;
+  };
+  const callerIsCaseTeamLead = (escalationHistory?.teamLeads ?? []).some(isCaller);
+  // Named by an admin: may de-escalate without holding an escalation role.
+  const callerIsNamedDeescalator = (escalationHistory?.deescalators ?? []).some(isCaller);
   // Display name for comments authored in this session, resolved from the
   // signed-in user's ID token. Falls back to the email local part so a token
   // without name claims still attributes the comment to the right person.
@@ -860,6 +869,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     targetState: BeCaseState;
   } | null>(null);
   const [severityOpen, setSeverityOpen] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [changeCaseTypeOpen, setChangeCaseTypeOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
   // The card being edited, if any — mutually exclusive with logTimeOpen
@@ -919,6 +929,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setResolutionDialog(null);
     setNoPublicCommentConfirm(null);
     setSeverityOpen(false);
+    setReopenOpen(false);
     setChangeCaseTypeOpen(false);
     setLogTimeOpen(false);
     // Not just cosmetic: the edit dialog renders on editTimeCard alone, so a
@@ -1462,6 +1473,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Reopen case opens the reopen dialog; the PATCH happens in
+      // onReopenCase once a target state is confirmed. Only ever offered by
+      // CaseActionBar when isAdmin is true and the case is closed.
+      if (action.secondary === "reopen_case") {
+        setReopenOpen(true);
+        return;
+      }
+
       // Change case type opens the transfer dialog; the PATCH(es) happen in
       // onChangeCaseType once a target type is confirmed.
       if (action.secondary === "change_case_type") {
@@ -1799,6 +1818,43 @@ export default function CsmCaseDetailPage(): JSX.Element {
             });
           },
           onError: (err) => showError("Could not change the severity.", err),
+        },
+      );
+    },
+    [patchCase, showError],
+  );
+
+  // Reopens a closed case (admin-only, see ReopenCaseDialog/CaseActionBar's
+  // own doc comments). reason is sent only when non-empty -- the field is
+  // optional, and an empty string is not a meaningful reason to persist.
+  const onReopenCase = useCallback(
+    (target: CaseState, reason: string) => {
+      const payload: BeCaseUpdatePayload = reason
+        ? { state: target, reopenReason: reason }
+        : { state: target };
+      // Compared against caseViewTokenRef in the callbacks below, not caseId
+      // itself -- see onRequestUpdate's identical guard for why a plain
+      // caseId comparison can't distinguish this view's request from a
+      // still-pending one left over from an earlier visit to the same case
+      // (a response landing after navigating away must not show A's result
+      // or close B's dialog).
+      const submittedViewToken = caseViewTokenRef.current;
+      patchCase.mutate(
+        payload,
+        {
+          onSuccess: () => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            setReopenOpen(false);
+            setFeedback({
+              message: `Case reopened to ${stateLabel(target)}.`,
+              severity: "success",
+              sticky: true,
+            });
+          },
+          onError: (err) => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            showError("Could not reopen the case.", err);
+          },
         },
       );
     },
@@ -2697,6 +2753,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               onAcknowledge={onAcknowledge}
               isAcknowledging={isAcknowledging}
               commentsLoading={isCommentsLoading}
+              isAdmin={isAdmin}
             />
           </Box>
         )}
@@ -2794,6 +2851,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 ? c.watchers.length
                 : t.id === "sla"
                   ? slaList?.count
+                  : t.id === "escalation"
+                    ? escalationHistory?.escalations.length
                   : t.id === "attachments"
                     ? attachmentList.length
                     : t.id === "time"
@@ -3126,6 +3185,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRemove={isClosed || !canWrite ? undefined : (t) => onRemoveTag(t.id)}
             removingId={removeTag.isPending ? removeTag.variables : null}
           />
+        </Box>
+      )}
+
+      {activeTab === "escalation" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <EscalationWidget
             currentLevel={c.escalationLevel ?? null}
             history={escalationHistory?.escalations ?? []}
@@ -3140,9 +3204,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 : undefined
             }
             onDeescalate={
-              canEscalate &&
               canDeescalate(c.escalationLevel) &&
-              callerIsCaseTeamLead
+              ((canEscalate && callerIsCaseTeamLead) || callerIsNamedDeescalator)
                 ? () => setEscalationDialogAction("DEESCALATE")
                 : undefined
             }
@@ -3299,6 +3362,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRetry={() => void refetchActivities()}
             openedAt={c?.createdAt}
             currentState={c?.state}
+            closedAt={c?.closedAt}
+            slas={slaList?.slas}
+            isSlasLoading={isSlasLoading}
+            isSlasError={isSlasError}
           />
         </>
       )}
@@ -3440,6 +3507,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isChanging={patchCase.isPending}
           onClose={() => setSeverityOpen(false)}
           onChange={onChangeSeverity}
+        />
+      )}
+
+      {reopenOpen && (
+        <ReopenCaseDialog
+          isReopening={patchCase.isPending}
+          onClose={() => setReopenOpen(false)}
+          onReopen={onReopenCase}
         />
       )}
 
@@ -3644,8 +3719,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           error={githubIssueError}
           createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
-          defaultTitle={c.subject}
-          defaultDescription={c.description}
+          defaultMigration={isMigrationEngagement(c)}
           showRepoField={isCloudSupportSubscription(caseProject?.subscriptionType)}
           productName={c.productCatalogueName || c.product}
           onboardingInProgress={caseProject?.onboardingStatus === "In-Progress"}
@@ -3700,7 +3774,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   ) {
                     setGithubIssueError(err.message);
                   } else {
-                    showError("Could not create the Git issue.", err);
+                    showError("Could not raise the Git issue.", err);
                   }
                 },
               },

@@ -36,6 +36,7 @@ import { Crown, Monitor, Settings, Shield, Star, X } from "@wso2/oxygen-ui-icons
 import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@features/settings/utils/settings";
 import type { EditUserModalProps } from "@features/settings/types/settings";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 const EDITABLE_ROLES = [
   {
@@ -141,9 +142,9 @@ export default function EditUserModal({
     selectedRoles.has("security") !== initialRoles.has("security");
 
   const displayName = contact
-    ? contact.firstName && contact.lastName
-      ? `${contact.firstName} ${contact.lastName}`
-      : contact.firstName || contact.lastName || contact.email || NULL_PLACEHOLDER
+    ? joinStaffName(contact.firstName, contact.lastName) ||
+      contact.email ||
+      NULL_PLACEHOLDER
     : NULL_PLACEHOLDER;
 
   const isSystemUser = !!contact?.isCsIntegrationUser;

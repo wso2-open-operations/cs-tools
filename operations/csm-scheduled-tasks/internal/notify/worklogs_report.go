@@ -50,15 +50,24 @@ const (
 	statSubCell = `style="background-color:#ffffff; text-align:center; padding:2px 8px 7px; font-size:14px; color:#465868;"`
 )
 
-// pill is one labelled figure: the name above, the value below in WSO2
-// orange. ServiceNow used these for its per-team and per-type rows.
+// pill is one labelled figure: the name above, the value below in
+// navy. ServiceNow used these for its per-team and per-type rows.
 //
 // A pill is a pair of cells in a shared two-row table rather than a table
-// of its own -- that is what keeps every orange bar on one line when a
+// of its own -- that is what keeps every navy bar on one line when a
 // team name wraps, which "Americas CS Team - Integration" always does.
 type pillCell struct{ label, value string }
 
 // pillRow lays the pills out side by side at equal width.
+// valueTextOpen and valueTextClose keep the white figure white in Gmail's dark
+// mode, which otherwise recolours the text. The gradient clipped to the text
+// stays untouched; Outlook desktop ignores it, so it is skipped there and the
+// cell's own white colour applies.
+const (
+	valueTextOpen  = `<!--[if !mso]><!--><span style="background-image:linear-gradient(#ffffff,#ffffff); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent;"><!--<![endif]-->`
+	valueTextClose = `<!--[if !mso]><!--></span><!--<![endif]-->`
+)
+
 func pillRow(cells []pillCell) string {
 	if len(cells) == 0 {
 		return ""
@@ -69,8 +78,8 @@ func pillRow(cells []pillCell) string {
 			`<div style="background-color:#f1f3f5; border:1px solid #e8eaed; border-bottom:0; border-radius:6px 6px 0 0; text-align:center; padding:4px 6px; font-size:12px; color:#465868; word-wrap:break-word;">` +
 			escapeHTML(c.label) + `</div></td>`)
 		values.WriteString(`<td style="padding:0 4px 0 0; vertical-align:top;">` +
-			`<div style="background-color:#ff7101; border-radius:0 0 6px 6px; text-align:center; padding:4px 6px; font-size:13px; font-weight:700; color:#ffffff;">` +
-			escapeHTML(c.value) + `</div></td>`)
+			`<div style="background-color:#0B1633; background-image:linear-gradient(#0B1633,#0B1633); border-radius:0 0 6px 6px; text-align:center; padding:4px 6px; font-size:13px; font-weight:700; color:#ffffff;">` +
+			valueTextOpen + escapeHTML(c.value) + valueTextClose + `</div></td>`)
 	}
 	return `<table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout:fixed; margin:0 0 6px;"><tbody>` +
 		`<tr>` + labels.String() + `</tr><tr>` + values.String() + `</tr></tbody></table>`
@@ -114,7 +123,7 @@ func caseLink(caseLinkBase string, iss worklogreport.IssueRef) string {
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(iss.ID)
 	return `<a href="` + escapeHTML(href) +
-		`" style="color:#ff7300; text-decoration:none;">` + key + `</a>`
+		`" style="color:#0B1633; text-decoration:none;">` + key + `</a>`
 }
 
 func WorklogsReportSubject(r worklogreport.Report) string {

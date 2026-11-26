@@ -16,6 +16,7 @@
 
 import {
   Avatar,
+  Badge,
   Box,
   Button,
   Chip,
@@ -34,6 +35,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Bot, Lock, MoreVertical, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import TechnicalTeamBadge from "@components/TechnicalTeamBadge";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
 import UserRefLink from "@components/UserRefLink";
@@ -140,6 +142,11 @@ export default function CsmCaseCommentBubble({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isBot = comment.authorRole === "chatbot";
+  // `authorRole` defaults to engineer even for customer authors (see
+  // `uiCommentFromBe`), so the badge reads the backend's own resolution of the
+  // author's user type instead -- no per-comment user lookup from here.
+  const isTechnicalTeam = !isBot && !!comment.authorUser?.isInternal;
+  const technicalTeamBadge = <TechnicalTeamBadge />;
   // A chatbot (Novera) message body is Markdown, and so is the description of
   // a record raised from a GitHub issue; those are rendered to HTML first.
   // Every other comment body is rich-text HTML and goes through the
@@ -406,7 +413,7 @@ export default function CsmCaseCommentBubble({
   // text colour by the fill's luminance, and use a dark-enough grey for
   // customers (grey.500 also fails with either text colour).
   const avatarBg =
-    comment.authorRole === "wso2_engineer"
+    isTechnicalTeam
       ? theme.palette.primary.main
       : theme.palette.grey[700];
   const avatarFg = pickAccessibleText(avatarBg);
@@ -417,17 +424,24 @@ export default function CsmCaseCommentBubble({
       sx={{ display: "flex", gap: 1.5, alignItems: "flex-start", scrollMarginTop: 96 }}
     >
       {!compact && (
-        <Avatar
-          sx={{
-            bgcolor: avatarBg,
-            color: avatarFg,
-            width: 32,
-            height: 32,
-            fontSize: "0.85rem",
-          }}
+        <Badge
+          overlap="circular"
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          invisible={!isTechnicalTeam}
+          badgeContent={isTechnicalTeam ? technicalTeamBadge : undefined}
         >
-          {isBot ? <Bot size={16} /> : initialsOf(comment.authorName)}
-        </Avatar>
+          <Avatar
+            sx={{
+              bgcolor: avatarBg,
+              color: avatarFg,
+              width: 32,
+              height: 32,
+              fontSize: "0.85rem",
+            }}
+          >
+            {isBot ? <Bot size={16} /> : initialsOf(comment.authorName)}
+          </Avatar>
+        </Badge>
       )}
       <Paper
         variant="outlined"
@@ -468,6 +482,7 @@ export default function CsmCaseCommentBubble({
               userId={comment.authorUser?.id}
             />
           </Typography>
+          {compact && isTechnicalTeam && technicalTeamBadge}
           {!comment.synthetic && comment.authorRole !== "wso2_engineer" && (
             <Chip
               size="small"

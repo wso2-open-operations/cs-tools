@@ -27,7 +27,7 @@ import (
 // database connection, exercising the exact Scan destination order/types
 // the query in SearchActiveSLAStatuses uses.
 type fakeSLAStatusScanRow struct {
-	workItemID, target                string
+	id, workItemID, target            string
 	elapsedPercent                    float64
 	hasBreached                       bool
 	stage                             string
@@ -46,28 +46,29 @@ type fakeSLAStatusScanRow struct {
 }
 
 func (f fakeSLAStatusScanRow) Scan(dest ...any) error {
-	*dest[0].(*string) = f.workItemID
-	*dest[1].(*string) = f.target
-	*dest[2].(*float64) = f.elapsedPercent
-	*dest[3].(*bool) = f.hasBreached
-	*dest[4].(*string) = f.stage
-	*dest[5].(**time.Time) = f.startedOn
-	*dest[6].(**time.Time) = f.pausedOn
-	*dest[7].(**int64) = f.pauseDurationSeconds
-	*dest[8].(*int64) = f.durationSeconds
-	*dest[9].(*string) = f.schedule
-	*dest[10].(*float64) = f.businessPauseSeconds
-	*dest[11].(**string) = f.caseNumber
-	*dest[12].(**string) = f.wso2CaseID
-	*dest[13].(**string) = f.caseTitle
-	*dest[14].(*string) = f.fixedCaseType
-	*dest[15].(**string) = f.engagementType
-	*dest[16].(**string) = f.product
-	*dest[17].(*string) = strOrEmpty(f.severity)
-	*dest[18].(**string) = f.state
-	*dest[19].(**string) = f.team
-	*dest[20].(**string) = f.onboardingStatus
-	*dest[21].(*bool) = f.isEvaluation
+	*dest[0].(*string) = f.id
+	*dest[1].(*string) = f.workItemID
+	*dest[2].(*string) = f.target
+	*dest[3].(*float64) = f.elapsedPercent
+	*dest[4].(*bool) = f.hasBreached
+	*dest[5].(*string) = f.stage
+	*dest[6].(**time.Time) = f.startedOn
+	*dest[7].(**time.Time) = f.pausedOn
+	*dest[8].(**int64) = f.pauseDurationSeconds
+	*dest[9].(*int64) = f.durationSeconds
+	*dest[10].(*string) = f.schedule
+	*dest[11].(*float64) = f.businessPauseSeconds
+	*dest[12].(**string) = f.caseNumber
+	*dest[13].(**string) = f.wso2CaseID
+	*dest[14].(**string) = f.caseTitle
+	*dest[15].(*string) = f.fixedCaseType
+	*dest[16].(**string) = f.engagementType
+	*dest[17].(**string) = f.product
+	*dest[18].(*string) = strOrEmpty(f.severity)
+	*dest[19].(**string) = f.state
+	*dest[20].(**string) = f.team
+	*dest[21].(**string) = f.onboardingStatus
+	*dest[22].(*bool) = f.isEvaluation
 	return nil
 }
 

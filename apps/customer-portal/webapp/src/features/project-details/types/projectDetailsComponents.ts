@@ -125,10 +125,23 @@ export type ProjectDeploymentsProps = {
   showServiceRequest?: boolean;
 };
 
+/**
+ * Which products of one deployment can be picked for a service request, under
+ * the project's rules. Absent when service requests cannot be raised from the
+ * Deployments tab at all; then no product shows a selection box.
+ */
+export type ServiceRequestProductSelection = {
+  /** False when the project's rules keep this deployment out of service requests. */
+  deploymentAllowed: boolean;
+  /** Allowed product categories, or undefined when any category is allowed. */
+  productCategories?: string[];
+};
+
 export type DeploymentCardProps = {
   deployment: ProjectDeploymentItem;
   selectedProduct: SelectedDeploymentProduct | null;
   onToggleProductSelect: (deploymentId: string, productItemId: string) => void;
+  serviceRequestSelection?: ServiceRequestProductSelection;
 };
 
 export type DeploymentCardToolbarProps = {
@@ -155,6 +168,7 @@ export type DeploymentProductListProps = {
   projectId: string;
   selectedProduct: SelectedDeploymentProduct | null;
   onToggleProductSelect: (deploymentId: string, productItemId: string) => void;
+  serviceRequestSelection?: ServiceRequestProductSelection;
 };
 
 export type DeploymentProductItemRowProps = {
@@ -162,6 +176,10 @@ export type DeploymentProductItemRowProps = {
   deploymentId: string;
   isSelected: boolean;
   onToggleSelect: () => void;
+  /** Whether the row shows a selection box at all. */
+  showSelection: boolean;
+  /** Why the product cannot be picked for a service request, or null when it can. */
+  selectionBlockedReason: string | null;
   onEdit: () => void;
   onDelete: (item: DeploymentProductItem) => void;
   isDeleting: boolean;

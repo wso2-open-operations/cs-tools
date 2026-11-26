@@ -57,6 +57,8 @@ func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
 
+	dashboard.SetActive(loadDashboards())
+
 	// Reference data is resolved once, here, and then only ever read from
 	// memory: the team registry (key <-> display name <-> backing group id <->
 	// platform UUID) and the assignable-role allow-list are both derivable from
@@ -141,12 +143,8 @@ func main() {
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
 
-	// The dashboards API serves from the database; any mounted definition
-	// files are migrated into it first. Needs the entity client above.
-	dashboard.SetActive(loadDashboards(customerEntityClient))
-
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
-	// Optional: with the engineering entity service configured, "Open Git issue"
+	// Optional: with the engineering entity service configured, "Raise internal Git issue"
 	// (POST /cases/{id}/github-issues) files the issue through it rather than
 	// forwarding to the entity service. It authenticates as the same shared
 	// OAuth2 app as every other upstream; only its base URL and scopes are its
@@ -169,6 +167,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	caseEscalationAccessHandler := handler.NewCaseEscalationAccessHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -183,6 +182,7 @@ func main() {
 	itServiceHandler := handler.NewITServiceHandler(customerEntityClient)
 	serviceOfferingHandler := handler.NewServiceOfferingHandler(customerEntityClient)
 	groupHandler := handler.NewGroupHandler(customerEntityClient)
+	mttrReportHandler := handler.NewMTTRReportHandler(customerEntityClient)
 	referenceHandler := handler.NewReferenceHandler(dir)
 	// entity-service registers POST /teams/search only on the PostgreSQL data
 	// source, so a ServiceNow deployment keeps serving the registry alone.
@@ -484,7 +484,10 @@ func main() {
 	route("DELETE /comments/{id}", handler.PermUpdateDeleteComment, commentHandler.DeleteComment)
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
-	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
+	// PermView, not PermEscalate: somebody an admin named as allowed to
+	// de-escalate needs no escalation role. The handler checks PermEscalate
+	// itself for escalating and for a team lead's de-escalation.
+	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	// Stored attachments, forwarded to the entity service, which owns every
 	// access decision and holds the files in Azure Blob Storage. This backend holds
@@ -615,6 +618,12 @@ func main() {
 	// incident call-escalation ladder pages for this team -- see that repo's
 	// own CLAUDE.md.
 	route("POST /teams/{id}/lead", handler.PermAdmin, teamHandler.AssignLead)
+	// Admin-only: who may de-escalate any case besides the leads of the case's
+	// own ABT team (Admin > Escalation access). entity-service checks the
+	// caller's admin role again from their token.
+	route("GET /case-escalation-access/deescalators", handler.PermAdmin, caseEscalationAccessHandler.ListDeescalators)
+	route("PUT /case-escalation-access/deescalators/{userId}", handler.PermAdmin, caseEscalationAccessHandler.PutDeescalator)
+	route("DELETE /case-escalation-access/deescalators/{userId}", handler.PermAdmin, caseEscalationAccessHandler.DeleteDeescalator)
 	route("GET /accounts/{id}", handler.PermViewSharedEntity, accountHandler.GetAccount)
 	// Admin-only: CRE/SRE team is a temporary override of ServiceNow's own
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
@@ -625,6 +634,7 @@ func main() {
 	route("GET /projects/{id}", handler.PermViewSharedEntity, projectHandler.GetProject)
 	route("GET /projects/{id}/metadata", handler.PermView, projectHandler.GetProjectMetadata)
 	route("POST /projects/search", handler.PermViewSharedEntity, projectHandler.SearchProjects)
+	route("POST /projects/aggregate", handler.PermViewSharedEntity, projectHandler.AggregateProjects)
 	route("POST /announcements/audience/search", handler.PermView, announcementHandler.SearchCustomerAnnouncementAudience)
 	route("GET /announcements/audience/excluded-project-keys", handler.PermView, announcementHandler.GetExcludedProjectKeys)
 	routeAll("POST /announcement-requests", announcementRequestHandler.CreateAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
@@ -668,6 +678,25 @@ func main() {
 	route("POST /products/search", handler.PermView, productHandler.SearchProducts)
 	route("GET /products/github-repo", handler.PermView, productHandler.GetProductRepoMapping)
 	route("POST /products/{id}/versions/search", handler.PermView, productHandler.SearchProductVersions)
+	// Product catalogue (the data behind the public Support Matrix and Release
+	// Matrix), served by entity-service's products API under the same paths:
+	// reads are PermView; writes (applied at once) are PermManageProductCatalog,
+	// which entity-service re-checks.
+	productCatalogHandler := handler.NewProductCatalogHandler(customerEntityClient)
+	route("GET /products/{id}", handler.PermView, productCatalogHandler.GetProduct)
+	route("POST /products", handler.PermManageProductCatalog, productCatalogHandler.CreateProduct)
+	route("PATCH /products/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProduct)
+	route("POST /products/{id}/versions", handler.PermManageProductCatalog, productCatalogHandler.CreateProductVersions)
+	route("POST /product-versions/search", handler.PermView, productCatalogHandler.SearchAllProductVersions)
+	route("GET /product-versions/{id}", handler.PermView, productCatalogHandler.GetProductVersion)
+	route("PATCH /product-versions/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProductVersion)
+	route("POST /product-versions/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireProductVersion)
+	route("GET /release-lines", handler.PermView, productCatalogHandler.ListReleaseLines)
+	route("POST /release-lines", handler.PermManageProductCatalog, productCatalogHandler.CreateReleaseLine)
+	route("PATCH /release-lines/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateReleaseLine)
+	route("POST /release-lines/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireReleaseLine)
+	route("GET /carbon-platform-history", handler.PermView, productCatalogHandler.ListCarbonPlatformHistory)
+	route("GET /carbon-kernel-releases", handler.PermView, productCatalogHandler.ListCarbonKernelReleases)
 	route("POST /deployments", handler.PermWrite, deploymentHandler.PostDeployment)
 	route("POST /kb-articles", handler.PermWrite, kbArticleHandler.CreateKBArticle)
 	route("GET /kb-articles/{id}", handler.PermView, kbArticleHandler.GetKBArticle)
@@ -709,6 +738,9 @@ func main() {
 	// stage's assignment group. A "group" id (from the approvals response), not a
 	// team id; internal staff only (entity-service refuses anyone else).
 	route("GET /groups/{id}", handler.PermView, groupHandler.GetGroup)
+	// MTTR report: the dashboard builder's "mttr" resourceType, same read
+	// audience as the other aggregate widgets (e.g. /cases/feedback/aggregate).
+	route("GET /reports/mttr", handler.PermView, mttrReportHandler.GetMTTRReport)
 
 	// Customer engagement allocations: the list, one allocation, and the status
 	// updates written against it. Pure pass-through; entity-service restricts all
@@ -739,6 +771,11 @@ func main() {
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
 	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
 	route("POST /team-schedule/public-holidays/search", handler.PermView, scheduleHandler.SearchSchedulePublicHolidays)
+	// The holiday editor: anyone may read it; adding and removing a day is for a
+	// portal or rota admin, which entity-service decides (403 with its reason).
+	route("GET /team-schedule/public-holidays", handler.PermView, scheduleHandler.ListPublicHolidays)
+	route("POST /team-schedule/public-holidays", handler.PermWrite, scheduleHandler.AddPublicHolidays)
+	route("DELETE /team-schedule/public-holidays/{country}/{date}", handler.PermWrite, scheduleHandler.DeletePublicHoliday)
 	route("POST /team-schedule/holiday-availability/search", handler.PermView, scheduleHandler.SearchHolidayAvailability)
 	// Confirming a team's holiday availability (CRE): entity-service allows
 	// the team's lead, its rota manager, a CRE rota admin or an admin.
@@ -1072,50 +1109,7 @@ func main() {
 	slog.Info("CSM Portal Backend stopped")
 }
 
-// loadDashboards builds the registry the dashboards API serves, and exits the
-// process on any failure to read or validate the definition files.
-//
-// The database is the source of truth: the registry serves the system
-// dashboards stored through the entity service. Definition files are only a
-// migration source. When DASHBOARDS_DIR (or the deprecated DASHBOARDS_CONFIG)
-// is set, every definition, fully expanded (shared sections, presets and
-// all), is upserted at startup, overwriting what the database holds under the
-// same key (see dashboard.SystemKey), so while files are mounted they are
-// authoritative. When neither is set nothing is migrated and the registry
-// serves whatever the database already holds; removing the variables never
-// stops the service starting.
-//
-// Failure behaviour:
-//
-//   - A bad definition file, a duplicate id or two ids that map to the same
-//     key are misconfigured deploys and fatal, exactly as before.
-//   - A failed upsert (entity service down, rejected) is NOT fatal: each
-//     dashboard is retried a few times, then the failure is logged per
-//     dashboard and startup continues, serving what the database has. There
-//     is no in-memory fallback to the files. The whole migration is bounded by
-//     dashboard.SystemMigrationTimeout.
-//   - A failed read of the database at request time is an upstream error
-//     response, never an empty list.
-//
-// A dashboard list read from the database is cached for a few seconds
-// (invalidated right after the startup upsert); see dashboard.NewSystemRegistry.
-func loadDashboards(store dashboard.SystemStore) *dashboard.Registry {
-	src := loadDashboardSource()
-	registry, err := dashboard.NewSystemRegistry(store, src)
-	if err != nil {
-		slog.Error("invalid dashboard definitions", "err", err)
-		os.Exit(1)
-	}
-	if src != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), dashboard.SystemMigrationTimeout)
-		defer cancel()
-		registry.Migrate(ctx)
-	}
-	return registry
-}
-
-// loadDashboardSource builds the file-backed registry the system dashboards are
-// migrated from, and exits
+// loadDashboards builds the dashboard registry from configuration, and exits
 // the process on any failure. Every failure mode here is a misconfigured
 // deploy, and the alternative — starting up with dashboards silently missing
 // — is exactly the class of quiet failure this codebase keeps getting bitten
@@ -1153,19 +1147,12 @@ func loadDashboards(store dashboard.SystemStore) *dashboard.Registry {
 //	                       DASHBOARD_PRESETS_FILE: DASHBOARDS_DIR path only,
 //	                       unset is legal and means no shared sections.
 //
-// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and returns nil:
-// a deployment that has not configured any must still start and serve every
-// other endpoint, with the dashboards the database already holds.
-//
-// With DASHBOARDS_HOT_RELOAD on, each dashboards request re-reads the
-// directory and upserts only the definitions that changed since this process
-// last wrote them, then serves from the database. Local development only.
-func loadDashboardSource() *dashboard.Registry {
+// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and yields no
+// dashboards: a deployment that has not configured any must still start and
+// serve every other endpoint.
+func loadDashboards() *dashboard.Registry {
 	dir := strings.TrimSpace(os.Getenv("DASHBOARDS_DIR"))
 	if dir == "" {
-		if strings.TrimSpace(os.Getenv("DASHBOARDS_CONFIG")) == "" {
-			return nil
-		}
 		dashboards, err := dashboard.ParseDashboardsConfig(os.Getenv("DASHBOARDS_CONFIG"))
 		if err != nil {
 			slog.Error("invalid DASHBOARDS_CONFIG", "err", err)
@@ -1198,7 +1185,7 @@ func loadDashboardSource() *dashboard.Registry {
 		os.Exit(1)
 	}
 	if hotReload {
-		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request and changed ones upserted into the database. Intended for local development only",
+		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request. Intended for local development only",
 			"dir", dir)
 	}
 	slog.Info("loaded dashboard definitions", "dir", dir, "presetsFile", presetsFile, "count", len(registry.Dashboards()), "hotReload", hotReload)
@@ -1257,7 +1244,7 @@ func loadDirectory() *directory.Directory {
 //	AUTH_SUPPORT_ENGINEER_ROLES, AUTH_ADMIN_ROLES, AUTH_TIMECARD_APPROVER_ROLES,
 //	AUTH_DASHBOARD_DESIGNER_ROLES, AUTH_SALES_SOLUTIONS_ROLES,
 //	AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES,
-//	AUTH_SECURITY_TEAM_ROLES
+//	AUTH_PRODUCT_CATALOG_MANAGER_ROLES, AUTH_SECURITY_TEAM_ROLES
 //	    Each is a comma-separated list of role names; a caller whose token's
 //	    "roles" claim holds any one of them has that role.
 //
@@ -1268,7 +1255,8 @@ func loadDirectory() *directory.Directory {
 // nobody can use the portal.
 //
 // AUTH_SALES_SOLUTIONS_ROLES, AUTH_WORKNOTE_CREATOR_ROLES,
-// AUTH_COMMENT_UPDATER_ROLES and AUTH_ONBOARDING_LEAD_ROLES are unlike the rest:
+// AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES and
+// AUTH_PRODUCT_CATALOG_MANAGER_ROLES are unlike the rest:
 // leaving any of them unset
 // does not warn. sales_solutions is a normal, expected unconfigured state (CS
 // Portal alone still works fine) rather than a misconfiguration nobody can
@@ -1279,7 +1267,8 @@ func loadDirectory() *directory.Directory {
 // AccessConfig.WorknoteCreator's/CommentUpdater's own doc comments), so
 // leaving either empty is purely "this extra role isn't provisioned yet,"
 // never a state that locks anyone out. onboarding_lead is the same: admin
-// already holds PermManageOnboarding regardless.
+// already holds PermManageOnboarding regardless; and product_catalog_manager:
+// admin already holds PermManageProductCatalog regardless.
 func loadAccessConfig() handler.AccessConfig {
 	var unset []string
 	roles := func(name string) []string {
@@ -1312,14 +1301,16 @@ func loadAccessConfig() handler.AccessConfig {
 		// unset variable here a normal, no-op state.
 		SecurityTeam: roles("AUTH_SECURITY_TEAM_ROLES"),
 		// Unlike the roles above, an unset AUTH_SALES_SOLUTIONS_ROLES,
-		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES or
-		// AUTH_ONBOARDING_LEAD_ROLES is a normal, supported state (see this
-		// function's own doc comment for why each is), so all four deliberately bypass the roles() helper
+		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES,
+		// AUTH_ONBOARDING_LEAD_ROLES or AUTH_PRODUCT_CATALOG_MANAGER_ROLES is a
+		// normal, supported state (see this function's own doc comment for why
+		// each is), so all five deliberately bypass the roles() helper
 		// to avoid adding themselves to the unset-variable warning below.
-		SalesSolutions:  splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
-		WorknoteCreator: splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
-		CommentUpdater:  splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
-		OnboardingLead:  splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		SalesSolutions:        splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
+		WorknoteCreator:       splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
+		CommentUpdater:        splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
+		OnboardingLead:        splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		ProductCatalogManager: splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 	}
 	if len(unset) > 0 {
 		slog.Warn("access-control role variables are unset, so no token role grants them", "variables", unset)

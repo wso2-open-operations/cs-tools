@@ -55,5 +55,21 @@ describe("SettingsRegistryTokens", () => {
     fireEvent.click(screen.getByRole("button", { name: /generate user token/i }));
     expect(screen.getByText("generate-modal")).toBeInTheDocument();
   });
+
+  it("names the configured company's container registry in the description", () => {
+    const originalConfig = window.config;
+    try {
+      const { unmount } = render(<SettingsRegistryTokens projectId="p-1" isAdmin />);
+      expect(screen.getByText(/Manage tokens for the WSO2 container registry\./)).toBeInTheDocument();
+      unmount();
+
+      window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
+      render(<SettingsRegistryTokens projectId="p-1" isAdmin />);
+      expect(screen.getByText(/Manage tokens for the Acme Corp container registry\./)).toBeInTheDocument();
+      expect(screen.queryByText(/WSO2 container registry/)).not.toBeInTheDocument();
+    } finally {
+      window.config = originalConfig;
+    }
+  });
 });
 

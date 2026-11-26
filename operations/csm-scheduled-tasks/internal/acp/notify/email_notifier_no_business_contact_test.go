@@ -98,10 +98,10 @@ func TestEmailNotifier_Send_NoBusinessContactMatchesRealTemplate(t *testing.T) {
 	if !strings.Contains(got, "End Date: <strong>2029-08-31</strong>") {
 		t.Error("htmlBody missing the structured End Date field row")
 	}
-	if !strings.Contains(got, wso2LogoURL) {
-		t.Error("htmlBody missing the WSO2 logo")
+	if !strings.Contains(got, defaultLogoURL) {
+		t.Error("htmlBody missing the logo")
 	}
-	if !strings.Contains(got, "This automated message was sent by WSO2's support system. Please do not reply to this email.") {
+	if !strings.Contains(got, "This automated message was sent by Choreo Labs's support system. Please do not reply to this email.") {
 		t.Error("htmlBody missing the standard footer disclaimer")
 	}
 }

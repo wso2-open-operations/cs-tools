@@ -49,6 +49,18 @@ export function appName(): string {
   return optionalString(window.config?.CSM_PORTAL_APP_NAME) ?? DEFAULT_APP_NAME;
 }
 
+/** Company named in the sidebar footer's copyright line when unconfigured. */
+export const DEFAULT_COMPANY_NAME = "WSO2 LLC";
+
+/**
+ * Company named in the sidebar footer's copyright line, from
+ * `window.config.CSM_PORTAL_COMPANY_NAME`. Defaults to
+ * {@link DEFAULT_COMPANY_NAME} when unset. Read at call time, like `appName`.
+ */
+export function companyName(): string {
+  return optionalString(window.config?.CSM_PORTAL_COMPANY_NAME) ?? DEFAULT_COMPANY_NAME;
+}
+
 /**
  * Logo for the light colour scheme (also the light-mode tab icon), from
  * `window.config.CSM_PORTAL_LOGO_LIGHT_MODE_URL`. Defaults to
