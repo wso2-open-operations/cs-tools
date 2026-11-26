@@ -339,7 +339,15 @@ describe("RotaReminderSettings", () => {
     expect(lastBody()).toMatchObject({ weekendCopyTo: ["head@x.test", "someone@wso2.com"] });
   });
 
-  it.each(["someone@example.com", "someone@wso2.com.evil.test", "someone@wso2", "someone@"])(
+  it.each([
+    "someone@example.com",
+    "someone@wso2.com.evil.test",
+    "someone@wso2",
+    "someone@",
+    // A comma separates list entries: offering one would save as two chips.
+    "first,last@wso2.com",
+    "one@wso2.com,two@wso2.com",
+  ])(
     "does not offer %s: only a whole @wso2.com or @choreolabs.com address can be typed in",
     (typed) => {
       render(<RotaReminderSettings />);

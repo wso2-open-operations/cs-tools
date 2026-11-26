@@ -23,9 +23,11 @@ import type { RotaFamily } from "../types";
 const MAX_OPTIONS = 8;
 
 /** The domains an address outside the family may be typed in from. */
-export const CC_ADDRESS_DOMAINS = ["wso2.com", "choreolabs.com"];
+const CC_ADDRESS_DOMAINS =["wso2.com", "choreolabs.com"];
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// No comma either: the list is comma- or newline-separated (listOf), so a typed
+// "first,last@wso2.com" would be stored as two chips and fail to save.
+const EMAIL = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
 
 /** A whole address in one of CC_ADDRESS_DOMAINS, lower-cased, or null. */
 function typedAddress(text: string): string | null {
