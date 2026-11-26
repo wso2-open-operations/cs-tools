@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -346,6 +347,30 @@ func main() {
 // alertConsumerStopTimeout bounds how long shutdown waits for the alerts in flight to be stored and settled.
 const alertConsumerStopTimeout = 60 * time.Second
 
+// alertSchemaRetry is how often the consumer checks again for the alert table and sequence before it starts receiving.
+const alertSchemaRetry = 30 * time.Second
+
+// waitForAlertSchema blocks until the pool can reach alert_seq and alert, logging where it looked each time; false means ctx ended first.
+func waitForAlertSchema(ctx context.Context, pool *pgxpool.Pool) bool {
+	for {
+		schema, err := repository.CheckAlertSchema(ctx, pool)
+		switch {
+		case err != nil:
+			slog.ErrorContext(ctx, "alert consumer: could not check the alert table, not receiving yet", "retryIn", alertSchemaRetry, "err", err)
+		case schema.Problem() != "":
+			slog.ErrorContext(ctx, "alert consumer: alert store not reachable, not receiving yet; apply migrations 0306 and 100029 where this connection looks", "problem", schema.Problem(), "where", schema.Where(), "retryIn", alertSchemaRetry)
+		default:
+			log.Printf("alert consumer: storing alerts in %s", schema.Where())
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(alertSchemaRetry):
+		}
+	}
+}
+
 // startAlertConsumer starts the alert consumer on every configured cloud when it is enabled and returns the function that stops it.
 func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	if !cfg.AlertConsumerEnabled() || pool == nil {
@@ -412,9 +437,13 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		// No message is received until the store is reachable, so a missing migration leaves alerts queued instead of dead-lettering them.
+		if !waitForAlertSchema(ctx, pool) {
+			return
+		}
+		log.Printf("alert consumer running with %d workers (ALERTING_VERSION %s)", cfg.AlertConsumerConcurrency, cfg.AlertingVersion)
 		consumer.Run(ctx)
 	}()
-	log.Printf("alert consumer running with %d workers (ALERTING_VERSION %s)", cfg.AlertConsumerConcurrency, cfg.AlertingVersion)
 
 	return func() {
 		cancel()
