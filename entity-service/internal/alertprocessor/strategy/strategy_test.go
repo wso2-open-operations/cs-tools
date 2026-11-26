@@ -43,10 +43,6 @@ func openGroup() *Group {
 	return &Group{IncidentID: "inc-1", FirstSeenOn: firstSeen, LastSeenOn: firstSeen, AlertCount: 1}
 }
 
-func rule(field, value string) domain.AlertMuteRule {
-	return domain.AlertMuteRule{Number: "AMR0000001", Conditions: []domain.AlertMuteRuleCondition{{Field: field, Value: value}}}
-}
-
 func TestDefault(t *testing.T) {
 	chain := Default(5 * time.Minute)
 	tests := map[string]struct {
@@ -59,34 +55,10 @@ func TestDefault(t *testing.T) {
 		"closed incident opens a new one":    {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: false}, Open},
 		"resolving alert on open incident":   {Input{Event: alert("OK", time.Hour), Group: openGroup(), IncidentOpen: true}, Resolve},
 		"resolving alert with no incident":   {Input{Event: alert("clear", 0)}, Ignore},
-		"mute rule stops a new incident":     {Input{Event: alert("critical", 0), MuteRules: []domain.AlertMuteRule{rule("environment", "production")}}, Mute},
-		"mute rule never hides a duplicate": {Input{Event: alert("critical", time.Minute), Group: openGroup(), IncidentOpen: true,
-			MuteRules: []domain.AlertMuteRule{rule("service", "client-prod-alert-integration")}}, Duplicate},
-		"non-matching mute rule": {Input{Event: alert("critical", 0), MuteRules: []domain.AlertMuteRule{rule("service", "other")}}, Open},
 	}
 	for name, tt := range tests {
 		if got := chain.Decide(tt.in).Outcome; got != tt.want {
 			t.Errorf("%s: outcome = %s, want %s", name, got, tt.want)
-		}
-	}
-}
-
-func TestRuleMatches(t *testing.T) {
-	e := alert("Warning", 0)
-	tests := map[string]struct {
-		rule domain.AlertMuteRule
-		want bool
-	}{
-		"case-insensitive":          {rule("SEVERITY", " warning "), true},
-		"environment by group":      {rule("environment", "live"), true},
-		"unknown field never mutes": {rule("region", "eu"), false},
-		"no conditions never mutes": {domain.AlertMuteRule{}, false},
-		"every condition must match": {domain.AlertMuteRule{Conditions: []domain.AlertMuteRuleCondition{
-			{Field: "source", Value: "elasticsearch"}, {Field: "service", Value: "other"}}}, false},
-	}
-	for name, tt := range tests {
-		if got := RuleMatches(tt.rule, e); got != tt.want {
-			t.Errorf("%s: matches = %v, want %v", name, got, tt.want)
 		}
 	}
 }
@@ -100,13 +72,13 @@ func (a always) Decide(Input) (Decision, bool) { return Decision{Outcome: a.outc
 func TestChainBeforeAndAfter(t *testing.T) {
 	in := Input{Event: alert("critical", 0)}
 	core := Default(time.Minute)
-	if d := core.Before(always{Mute}).Decide(in); d.Outcome != Mute || d.Strategy != "always" {
+	if d := core.Before(always{Ignore}).Decide(in); d.Outcome != Ignore || d.Strategy != "always" {
 		t.Fatalf("Before: decision = %+v, want the plugged-in strategy first", d)
 	}
-	if d := core.After(always{Mute}).Decide(in); d.Outcome != Mute || d.Strategy != "always" {
+	if d := core.After(always{Ignore}).Decide(in); d.Outcome != Ignore || d.Strategy != "always" {
 		t.Fatalf("After: decision = %+v, want the plugged-in strategy once core passed", d)
 	}
-	if d := core.Decide(in); d.Outcome != Open || len(core) != 3 {
+	if d := core.Decide(in); d.Outcome != Open || len(core) != 2 {
 		t.Fatalf("core changed by Before/After: %+v, %d strategies", d, len(core))
 	}
 }

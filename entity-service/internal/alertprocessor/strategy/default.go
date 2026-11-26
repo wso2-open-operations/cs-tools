@@ -18,7 +18,7 @@ package strategy
 
 import "time"
 
-// Default is the standard chain: resolve, then fold duplicates into the open incident, then mute, then open.
+// Default is the standard chain: resolve, then fold duplicates into the open incident, then open.
 func Default(dedupWindow time.Duration) Chain {
-	return Chain{ResolveStrategy{}, DedupStrategy{Window: dedupWindow}, MuteStrategy{}}
+	return Chain{ResolveStrategy{}, DedupStrategy{Window: dedupWindow}}
 }

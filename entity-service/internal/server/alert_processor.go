@@ -31,7 +31,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/subscriber"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -67,7 +66,6 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 	producer := eventbus.NewProducer(bus)
 	publisher := &relay.Relay{Queue: queue, Publisher: producer, Interval: alertRelayInterval, Batch: alertRelayBatch}
 
-	muteRules := repository.NewAlertMuteRuleRepository(scoped)
 	processor := &alertprocessor.Processor{
 		Store: repository.NewAlertGroups(scoped),
 		Sink: sink.Incident{
@@ -76,9 +74,6 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 			Notes:            repository.NewIncidentNotes(scoped),
 			CallerID:         cfg.AlertProcessorCallerID,
 			DefaultServiceID: cfg.IncidentDefaultServiceID,
-		},
-		MuteRules: func(ctx context.Context, now time.Time) ([]domain.AlertMuteRule, error) {
-			return muteRules.Active(ctx, now)
 		},
 		// RIA and other ways of grouping join with Chain.Before or Chain.After.
 		Chain:    strategy.Default(cfg.AlertDedupWindow),

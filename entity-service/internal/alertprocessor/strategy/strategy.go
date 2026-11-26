@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // Outcome is what happens to one alert.
@@ -34,8 +33,6 @@ const (
 	Duplicate Outcome = "duplicate"
 	// Resolve adds a resolving alert to its fingerprint's open incident as an OK note.
 	Resolve Outcome = "resolve"
-	// Mute drops an alert an active mute rule covers.
-	Mute Outcome = "mute"
 	// Ignore drops an alert that needs nothing, such as a resolving alert with no open incident.
 	Ignore Outcome = "ignore"
 )
@@ -59,7 +56,6 @@ type Input struct {
 	Group *Group
 	// IncidentOpen reports whether Group's incident is still open.
 	IncidentOpen bool
-	MuteRules    []domain.AlertMuteRule
 }
 
 // HasOpenIncident reports whether the alert's fingerprint has an incident to fold into.

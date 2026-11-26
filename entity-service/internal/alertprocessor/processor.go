@@ -29,10 +29,9 @@ import (
 
 // Processor decides each alert.created event with its strategy chain and, when Apply is set, carries the decision out. All its state is the alert table: an alert linked to an incident is done, and a fingerprint's group is read from its linked alerts.
 type Processor struct {
-	Store     Store
-	Sink      Sink
-	MuteRules MuteRules
-	Chain     strategy.Chain
+	Store Store
+	Sink  Sink
+	Chain strategy.Chain
 	// Lookback is how far back an alert looks for an earlier alert of its fingerprint whose incident was created but never linked.
 	Lookback time.Duration
 	// Apply writes incidents and notes; off, decisions are only logged (ALERTING_VERSION hybrid).
@@ -119,7 +118,7 @@ func (p *Processor) linkUnrecorded(ctx context.Context, tx GroupTx, e event.Even
 	return nil
 }
 
-// input gathers what the strategies look at: the group, whether its incident is open, and the active mute rules.
+// input gathers what the strategies look at: the group and whether its incident is open.
 func (p *Processor) input(ctx context.Context, tx GroupTx, e event.Event) (strategy.Input, error) {
 	in := strategy.Input{Event: e}
 	group, err := tx.Group(ctx)
@@ -132,11 +131,5 @@ func (p *Processor) input(ctx context.Context, tx GroupTx, e event.Event) (strat
 			return strategy.Input{}, err
 		}
 	}
-	// Muting fails open: without the rules, an alert still pages rather than being silenced by mistake.
-	rules, err := p.MuteRules(ctx, e.ReceivedOn)
-	if err != nil {
-		slog.WarnContext(ctx, "alert processor: mute rules unavailable, muting nothing", "alertId", e.AlertID, "err", err)
-	}
-	in.MuteRules = rules
 	return in, nil
 }

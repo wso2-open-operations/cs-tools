@@ -22,10 +22,9 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// The processor depends only on these ports; the repository, sink and mute rule adapters implement them.
+// The processor depends only on these ports; the repository and sink adapters implement them.
 
 // Store reads a fingerprint's group from its alerts and links each alert to its incident.
 type Store interface {
@@ -55,6 +54,3 @@ type Sink interface {
 	// Fold records an alert added to the incident, as a Duplicate or OK work note.
 	Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error
 }
-
-// MuteRules returns the mute rules active at now.
-type MuteRules func(ctx context.Context, now time.Time) ([]domain.AlertMuteRule, error)

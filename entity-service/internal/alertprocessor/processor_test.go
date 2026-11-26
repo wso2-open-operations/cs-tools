@@ -27,7 +27,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // storedAlert is one row of the fake alert table.
@@ -153,10 +152,8 @@ func (s *fakeSink) Fold(_ context.Context, id string, outcome strategy.Outcome, 
 	return nil
 }
 
-func noRules(context.Context, time.Time) ([]domain.AlertMuteRule, error) { return nil, nil }
-
 func newProcessor(store *fakeStore, sink *fakeSink, apply bool) *Processor {
-	return &Processor{Store: store, Sink: sink, MuteRules: noRules, Chain: strategy.Default(5 * time.Minute), Lookback: 5 * time.Minute, Apply: apply}
+	return &Processor{Store: store, Sink: sink, Chain: strategy.Default(5 * time.Minute), Lookback: 5 * time.Minute, Apply: apply}
 }
 
 var firstSeen = time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
@@ -281,19 +278,5 @@ func TestProcessorLaterAlertOpensWhenTheEarlierOpenCreatedNothing(t *testing.T) 
 	}
 	if len(sink.opened) != 1 || sink.opened[0] != "A2" || store.linkOf("A2") != "inc-A2" {
 		t.Fatalf("opened %v, A2 linked to %q; want A2 to open the incident", sink.opened, store.linkOf("A2"))
-	}
-}
-
-func TestProcessorMuteRulesFailOpen(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
-	p.MuteRules = func(context.Context, time.Time) ([]domain.AlertMuteRule, error) {
-		return nil, errors.New("unavailable")
-	}
-	if err := p.Handle(context.Background(), store.add(alert("A1", "critical", 0))); err != nil {
-		t.Fatal(err)
-	}
-	if len(sink.opened) != 1 {
-		t.Fatalf("opened %v, want the alert to page when mute rules cannot be read", sink.opened)
 	}
 }
