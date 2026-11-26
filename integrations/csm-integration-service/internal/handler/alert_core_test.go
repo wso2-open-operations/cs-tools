@@ -168,3 +168,55 @@ func TestAlertCore_RuleIDsAreLowerCased(t *testing.T) {
 		t.Errorf("forwarded id %q ids %q, want lower-case %q", gotID, gotQ.Get("ids"), lower)
 	}
 }
+
+func TestAlertCore_MutedIncidentsValidatesPaging(t *testing.T) {
+	called := false
+	h := NewAlertCoreHandler(&mockAlertCoreClient{mutedIncidentsFn: func(context.Context, string, url.Values) ([]byte, error) {
+		called = true
+		return []byte(`{}`), nil
+	}})
+	base := "/alert-mute-rules/" + testRuleID + "/muted-incidents"
+	for query, want := range map[string]string{
+		"?limit=abc":  errMsgInvalidLimit,
+		"?limit=0":    errMsgInvalidLimit,
+		"?limit=101":  errMsgInvalidLimit,
+		"?offset=-1":  errMsgInvalidOffset,
+		"?offset=1.5": errMsgInvalidOffset,
+	} {
+		w := serveAlertCore(h, base+query)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, want)
+	}
+	if called {
+		t.Fatal("alert-core called for invalid paging")
+	}
+	for _, query := range []string{"", "?limit=", "?limit=1&offset=0", "?limit=100"} {
+		assertStatus(t, serveAlertCore(h, base+query), http.StatusOK)
+	}
+}
+
+func TestAlertCore_FieldValuesValidatesParams(t *testing.T) {
+	called := false
+	h := NewAlertCoreHandler(&mockAlertCoreClient{fieldValuesFn: func(context.Context, url.Values) ([]byte, error) {
+		called = true
+		return []byte(`{}`), nil
+	}})
+	for target, want := range map[string]string{
+		"/alert-field-values":                                             errMsgInvalidField,
+		"/alert-field-values?field=unknown":                               errMsgInvalidField,
+		"/alert-field-values?field=Service":                               errMsgInvalidField,
+		"/alert-field-values?field=service&q=" + strings.Repeat("a", 256): errMsgQueryTooLong,
+		"/alert-field-values?field=service&limit=0":                       errMsgInvalidLimit,
+		"/alert-field-values?field=service&limit=x":                       errMsgInvalidLimit,
+	} {
+		w := serveAlertCore(h, target)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, want)
+	}
+	if called {
+		t.Fatal("alert-core called for invalid field-value params")
+	}
+	// 255 characters, counted as characters not bytes ("é" is two bytes).
+	ok := "/alert-field-values?field=unique_identifier&q=" + url.QueryEscape(strings.Repeat("é", 255))
+	assertStatus(t, serveAlertCore(h, ok), http.StatusOK)
+}

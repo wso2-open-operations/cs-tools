@@ -19,9 +19,12 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // alertCoreClient abstracts sre-alert-core-service's read API used by
@@ -37,9 +40,22 @@ const (
 	errMsgFieldValuesNotConfigured = "Alert value suggestions are not configured."
 	errMsgIDsRequired              = "The 'ids' query parameter is required."
 	errMsgTooManyIDs               = "At most 100 ids."
-	// maxMutedCountIDs matches alert-core's own cap.
-	maxMutedCountIDs = 100
+	errMsgInvalidLimit             = "'limit' must be an integer between 1 and 100."
+	errMsgInvalidOffset            = "'offset' must be a non-negative integer."
+	errMsgInvalidField             = "'field' must be one of service, environment, source, metric_name, category, severity or unique_identifier."
+	errMsgQueryTooLong             = "'q' must be at most 255 characters."
+	// maxMutedCountIDs, maxAlertCoreLimit and maxFieldValuesQuery match alert-core's own caps.
+	maxMutedCountIDs    = 100
+	maxAlertCoreLimit   = 100
+	maxFieldValuesQuery = 255
 )
+
+// alertFieldValueFields are the alert fields alert-core lists values for, the
+// fields an alert mute rule condition can name.
+var alertFieldValueFields = map[string]bool{
+	"service": true, "environment": true, "source": true, "metric_name": true,
+	"category": true, "severity": true, "unique_identifier": true,
+}
 
 // AlertCoreHandler exposes sre-alert-core-service's read API to M2M callers (the
 // CSM portal): which incidents each alert mute rule muted, and the values real
@@ -67,7 +83,16 @@ func (h *AlertCoreHandler) MutedIncidents(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
-	result, err := h.core.MutedIncidents(r.Context(), id, pick(r.URL.Query(), "limit", "offset"))
+	q := pick(r.URL.Query(), "limit", "offset")
+	if !intInRange(q, "limit", 1, maxAlertCoreLimit) {
+		writeError(w, http.StatusBadRequest, errMsgInvalidLimit)
+		return
+	}
+	if !intInRange(q, "offset", 0, math.MaxInt32) {
+		writeError(w, http.StatusBadRequest, errMsgInvalidOffset)
+		return
+	}
+	result, err := h.core.MutedIncidents(r.Context(), id, q)
 	h.respond(w, r, result, err, "MutedIncidents", "Failed to list muted alerts.")
 }
 
@@ -105,7 +130,20 @@ func (h *AlertCoreHandler) FieldValues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, errMsgFieldValuesNotConfigured)
 		return
 	}
-	result, err := h.core.FieldValues(r.Context(), pick(r.URL.Query(), "field", "q", "limit"))
+	q := pick(r.URL.Query(), "field", "q", "limit")
+	if !alertFieldValueFields[q.Get("field")] {
+		writeError(w, http.StatusBadRequest, errMsgInvalidField)
+		return
+	}
+	if utf8.RuneCountInString(q.Get("q")) > maxFieldValuesQuery {
+		writeError(w, http.StatusBadRequest, errMsgQueryTooLong)
+		return
+	}
+	if !intInRange(q, "limit", 1, maxAlertCoreLimit) {
+		writeError(w, http.StatusBadRequest, errMsgInvalidLimit)
+		return
+	}
+	result, err := h.core.FieldValues(r.Context(), q)
 	h.respond(w, r, result, err, "FieldValues", "Failed to list alert field values.")
 }
 
@@ -116,6 +154,17 @@ func (h *AlertCoreHandler) respond(w http.ResponseWriter, r *http.Request, resul
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// intInRange reports whether query parameter name is absent or empty (alert-core
+// then applies its default) or a base-10 integer within [lo, hi].
+func intInRange(q url.Values, name string, lo, hi int) bool {
+	raw := q.Get(name)
+	if raw == "" {
+		return true
+	}
+	v, err := strconv.Atoi(raw)
+	return err == nil && v >= lo && v <= hi
 }
 
 // pick copies only the named query parameters (their first value), so nothing
