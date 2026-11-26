@@ -40,7 +40,7 @@ type Alert struct {
 	SourceAccount string `json:"source_account,omitempty"`
 }
 
-// Fingerprint must match sre-alert-core-service's model.Fingerprint; alerts-core uses it to claim one incident's alerts together.
+// Fingerprint is the key the alert processor folds alerts into incidents by; it matches sre-alert-core-service's, so both fold the same alerts together.
 func Fingerprint(a Alert) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{a.Source, a.Service, a.MetricName, a.Environment, a.UniqueIdentifier}, "|")))
 	return hex.EncodeToString(sum[:])

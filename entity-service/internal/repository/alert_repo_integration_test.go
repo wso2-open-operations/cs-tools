@@ -58,7 +58,6 @@ func integrationAlert(id, messageID string, index int) domain.NewAlert {
 		ID:           id,
 		Source:       "azure",
 		Alert:        json.RawMessage(`{"service":"svc-a","metric_name":"cpu"}`),
-		Fingerprint:  "fp-1",
 		Tier:         domain.AlertTierPriority,
 		MessageID:    messageID,
 		MessageIndex: index,
@@ -68,7 +67,7 @@ func integrationAlert(id, messageID string, index int) domain.NewAlert {
 
 func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
-	repo := NewAlertRepository(NewScoped(pool))
+	repo := NewAlertRepository(NewScoped(pool), true)
 	ctx := WithSystemIdentity(context.Background())
 
 	ids, err := repo.ReserveAlertIDs(ctx, 4)
@@ -94,12 +93,12 @@ func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testin
 	}
 
 	var rows int
-	var processed *time.Time
-	if err := NewScoped(pool).QueryRow(ctx, `SELECT count(*), max(processed_on) FROM alert WHERE message_id = 'it-alert-1'`).Scan(&rows, &processed); err != nil {
+	var linked *string
+	if err := NewScoped(pool).QueryRow(ctx, `SELECT count(*), max(incident_id::text) FROM alert WHERE message_id = 'it-alert-1'`).Scan(&rows, &linked); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if rows != 2 || processed != nil {
-		t.Fatalf("rows = %d processed = %v, want 2 unprocessed rows", rows, processed)
+	if rows != 2 || linked != nil {
+		t.Fatalf("rows = %d incident = %v, want 2 rows not yet in an incident", rows, linked)
 	}
 }
 
@@ -113,7 +112,7 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 	if bypassesRLS {
 		t.Skip("ENTITY_TEST_DATABASE_URL connects as a role that bypasses row-level security; use an ordinary role to run this test")
 	}
-	repo := NewAlertRepository(NewScoped(pool))
+	repo := NewAlertRepository(NewScoped(pool), true)
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 1)
 	if err != nil {
@@ -135,7 +134,7 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 
 func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
-	repo := NewAlertRepository(NewScoped(pool))
+	repo := NewAlertRepository(NewScoped(pool), true)
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 3)
 	if err != nil {
@@ -185,7 +184,7 @@ func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 
 func TestAlertRepositoryIntegration_RefusesWhatCanNeverBeStored(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
-	repo := NewAlertRepository(NewScoped(pool))
+	repo := NewAlertRepository(NewScoped(pool), true)
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 2)
 	if err != nil {

@@ -826,6 +826,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// Released by closePublishers.
 	var salesforceWritePublisher service.EventPublisherService
 	var stopSalesforceWriteConsumers func()
+	stopAlertProcessor := func() {}
 	if db != nil && cfg.HasPortalMembershipWrites() && salesEntityClient != nil {
 		writeDeps := service.MembershipWriteDeps{
 			Memberships: repository.NewProjectMembershipRepository(repository.NewScoped(db)),
@@ -1718,6 +1719,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.SLADataSource == config.SLADataSourceServiceNow && cfg.DataSource != config.DataSourceServiceNow {
 		activeIncidentSvc = service.WithSLASearchDelegate(activeIncidentSvc, service.NewServiceNowIncidentMirrorService(serviceNowIntegrationServiceClient))
 	}
+	// The alert processor creates incidents in-process through the same service the POST /incidents route uses.
+	stopAlertProcessor = startAlertProcessor(cfg, db, activeIncidentSvc)
 	// Which Special Ops team a handoff goes to, and which GitHub repository
 	// its internal issue goes to, is configuration. A value that does not
 	// parse would silently offer no handoff anywhere; refuse to start instead.
@@ -3092,6 +3095,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// gone away. Cancelling its context also cancels the re-run's own
 	// context (retryOne derives from it), so the wait is short.
 	closePublishers := func() {
+		// The alert processor first: an event in flight finishes before the incident service's publishers go.
+		stopAlertProcessor()
 		stopIngestRetry()
 		ingestRetryWG.Wait()
 		// The deferred-write consumers first: a write in flight finishes

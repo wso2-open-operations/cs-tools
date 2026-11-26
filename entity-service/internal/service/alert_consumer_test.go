@@ -254,9 +254,6 @@ func TestAlertConsumerProcess_StoresAlertLikeIngestion(t *testing.T) {
 	if stored.UniqueIdentifier != row.ID {
 		t.Fatalf("unique_identifier = %q, want the alert's own id when the source sent none", stored.UniqueIdentifier)
 	}
-	if row.Fingerprint != model.Fingerprint(stored) {
-		t.Fatal("fingerprint was not computed from the stored alert")
-	}
 	if want := time.Date(2026, 11, 13, 10, 0, 0, 123456700, time.UTC); !row.ReceivedOn.Equal(want) {
 		t.Fatalf("received_on = %s, want the gateway's %s", row.ReceivedOn, want)
 	}
@@ -381,7 +378,7 @@ func TestAlertConsumerProcess_StoresAMessageItCannotNormaliseAsAnErrorRow(t *tes
 			if string(row.RawBody) != string(tc.message.Body) || row.ContentType != "text/plain" {
 				t.Fatalf("raw body %q and content type %q, want the message's", row.RawBody, row.ContentType)
 			}
-			if row.Alert != nil || row.Fingerprint != "" || row.Tier != domain.AlertTierPriority || row.ReceivedOn.IsZero() {
+			if row.Alert != nil || row.Tier != domain.AlertTierPriority || row.ReceivedOn.IsZero() {
 				t.Fatalf("row = %+v, want no alert or fingerprint, with the tier and received time", row)
 			}
 		})

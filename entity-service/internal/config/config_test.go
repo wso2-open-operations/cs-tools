@@ -1947,6 +1947,44 @@ func TestSQSRegionFromQueueURL(t *testing.T) {
 	}
 }
 
+func alertProcessorConfig() Config {
+	c := alertConsumerConfig()
+	c.AlertingVersion = AlertingVersionV2
+	c.AlertProcessorEnabled = true
+	c.AlertProcessorCallerID = "00000000-0000-4000-8000-000000000001"
+	c.EventHubBroker, c.EventHubConnectionString = "ns.servicebus.windows.net:9093", "Endpoint=sb://ns/;SharedAccessKeyName=k;SharedAccessKey=v"
+	c.AlertEventHubTopic, c.AlertProcessorConsumerGroup = "alert-events", "entity-service-alert-processor"
+	c.SREEventHubTopic = "sre-events"
+	c.AlertDedupWindow = 5 * time.Minute
+	return c
+}
+
+func TestConfig_Validate_AlertProcessor(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(c *Config)
+		wantErr bool
+	}{
+		{name: "v2 with the processor", change: func(*Config) {}},
+		{name: "hybrid with the processor needs no caller", change: func(c *Config) { c.AlertingVersion, c.AlertProcessorCallerID = AlertingVersionHybrid, "" }},
+		{name: "v2 without the processor", change: func(c *Config) { c.AlertProcessorEnabled = false }, wantErr: true},
+		{name: "v2 without a caller", change: func(c *Config) { c.AlertProcessorCallerID = "" }, wantErr: true},
+		{name: "v2 with a caller that is not a uuid", change: func(c *Config) { c.AlertProcessorCallerID = "bot" }, wantErr: true},
+		{name: "no event hub", change: func(c *Config) { c.EventHubBroker = "" }, wantErr: true},
+		{name: "the sre-events topic", change: func(c *Config) { c.AlertEventHubTopic = "sre-events" }, wantErr: true},
+		{name: "no dedup window", change: func(c *Config) { c.AlertDedupWindow = 0 }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := alertProcessorConfig()
+			tt.change(&c)
+			if err := c.validateAlertConsumer(); tt.wantErr != (err != nil) {
+				t.Fatalf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestConfig_AlertingVersion(t *testing.T) {
 	tests := []struct {
 		version    AlertingVersion
@@ -1954,7 +1992,7 @@ func TestConfig_AlertingVersion(t *testing.T) {
 		wantErr    bool
 	}{
 		{version: AlertingVersionV1, consumerOn: false},
-		// v2 is refused until the alert processor creates incidents, so alerts are never stored with nobody paged.
+		// v2 without the alert processor is refused, because nothing would turn stored alerts into incidents.
 		{version: AlertingVersionV2, consumerOn: true, wantErr: true},
 		{version: AlertingVersionHybrid, consumerOn: true},
 		{version: "v3", wantErr: true},
