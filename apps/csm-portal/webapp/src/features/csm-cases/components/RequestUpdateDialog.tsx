@@ -150,8 +150,8 @@ export default function RequestUpdateDialog({
               >
                 Custom message
               </Typography>
-              {/* No `onImageUpload`: this route posts the comment in one
-                  request, with no step that uploads images first. */}
+              {/* No `onImageUpload`: a reminder is text, so the dialog uploads
+                  no pictures before posting. */}
               <Editor
                 value={customMessage}
                 onChange={setCustomMessage}
