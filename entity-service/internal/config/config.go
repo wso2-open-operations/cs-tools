@@ -717,12 +717,8 @@ type Config struct {
 
 	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, hybrid v1 plus the queue consumer storing alerts only, and v2, refused until the alert processor creates incidents.
 	AlertingVersion AlertingVersion
-	// AlertServiceBusNamespace is the Azure Service Bus namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_NAMESPACE); empty leaves Azure out.
-	AlertServiceBusNamespace string
-	// AlertServiceBusTenantID, AlertServiceBusClientID and AlertServiceBusClientSecret are the Entra ID application that receives from the queues.
-	AlertServiceBusTenantID     string
-	AlertServiceBusClientID     string
-	AlertServiceBusClientSecret string
+	// AlertServiceBusConnectionString is a shared access policy's connection string for the namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_CONNECTION_STRING); empty leaves Azure out.
+	AlertServiceBusConnectionString string
 	// AlertServiceBusPriorityQueues and AlertServiceBusStandardQueues are the Service Bus queue names of each tier (ALERT_SERVICEBUS_PRIORITY_QUEUES, ALERT_SERVICEBUS_STANDARD_QUEUES, comma separated).
 	AlertServiceBusPriorityQueues []string
 	AlertServiceBusStandardQueues []string
@@ -1090,10 +1086,7 @@ func Load() *Config {
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
 		IncidentReportPollInterval:                    envDuration("INCIDENT_REPORT_POLL_INTERVAL", 5*time.Second),
 		AlertingVersion:                               AlertingVersion(strings.ToLower(getEnvOrDefault("ALERTING_VERSION", string(AlertingVersionV1)))),
-		AlertServiceBusNamespace:                      strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_NAMESPACE")),
-		AlertServiceBusTenantID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_TENANT_ID")),
-		AlertServiceBusClientID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CLIENT_ID")),
-		AlertServiceBusClientSecret:                   os.Getenv("ALERT_SERVICEBUS_CLIENT_SECRET"),
+		AlertServiceBusConnectionString:               strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CONNECTION_STRING")),
 		AlertServiceBusPriorityQueues:                 queueList("ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
 		AlertServiceBusStandardQueues:                 queueList("ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
@@ -1976,7 +1969,7 @@ func (c *Config) AlertConsumerEnabled() bool {
 
 // HasAlertServiceBus reports whether the alert consumer receives from Azure Service Bus.
 func (c *Config) HasAlertServiceBus() bool {
-	return c.AlertServiceBusNamespace != "" || c.AlertServiceBusTenantID != "" || c.AlertServiceBusClientID != "" || c.AlertServiceBusClientSecret != ""
+	return c.AlertServiceBusConnectionString != ""
 }
 
 // HasAlertSQS reports whether the alert consumer receives from AWS SQS.
@@ -2053,11 +2046,8 @@ func (c *Config) validateAlertConsumer() error {
 	return nil
 }
 
-// validateAlertServiceBus rejects a partial Azure Service Bus configuration.
+// validateAlertServiceBus rejects an Azure Service Bus configuration without queues or with a queue listed twice.
 func (c *Config) validateAlertServiceBus() error {
-	if c.AlertServiceBusNamespace == "" || c.AlertServiceBusTenantID == "" || c.AlertServiceBusClientID == "" || c.AlertServiceBusClientSecret == "" {
-		return fmt.Errorf("ALERT_SERVICEBUS_NAMESPACE, ALERT_SERVICEBUS_TENANT_ID, ALERT_SERVICEBUS_CLIENT_ID and ALERT_SERVICEBUS_CLIENT_SECRET must be set together")
-	}
 	if len(c.AlertServiceBusPriorityQueues) == 0 || len(c.AlertServiceBusStandardQueues) == 0 {
 		return fmt.Errorf("ALERT_SERVICEBUS_PRIORITY_QUEUES and ALERT_SERVICEBUS_STANDARD_QUEUES each need at least one queue")
 	}
