@@ -32,17 +32,34 @@ function openErrorMessage(err: Error): string {
   return "The link couldn't be opened. Try again in a moment.";
 }
 
+/** Where an opened custom dashboard link goes: My Dashboards when it is the caller's own, else Shared Dashboards. */
+function customDashboardPath(dashboardId: string, own: boolean): string {
+  return `/dashboard/${own ? "my" : "shared"}/${encodeURIComponent(dashboardId)}`;
+}
+
+interface OpenDashboardLinkPageProps {
+  /** The hook that opens the link; the custom dashboards' when left out. Fixed for the page's life. */
+  useOpenLink?: typeof useOpenDashboardLink;
+  /** Where the opened dashboard is; the custom dashboards' pages when left out. */
+  dashboardPath?: (dashboardId: string, own: boolean) => string;
+}
+
 /**
  * A dashboard's link (`/dashboard/shared/link/:linkId`): opens it once
  * (`POST /dashboards/shared/link`, the id in the body) and replaces this page
  * with the dashboard, under My Dashboards when it is the caller's own, else
  * under Shared Dashboards, where it now is. A link that is off or unknown says
  * so, with a way to the Shared Dashboards list. The link id is never shown.
+ * An advanced dashboard's link passes its own hook and pages
+ * (OpenCodeDashboardLinkPage).
  */
-export default function OpenDashboardLinkPage(): JSX.Element {
+export default function OpenDashboardLinkPage({
+  useOpenLink = useOpenDashboardLink,
+  dashboardPath = customDashboardPath,
+}: OpenDashboardLinkPageProps): JSX.Element {
   const { linkId = "" } = useParams<{ linkId: string }>();
   const navigate = useNavigate();
-  const { mutateAsync } = useOpenDashboardLink();
+  const { mutateAsync } = useOpenLink();
   const [answer, setAnswer] = useState<
     ({ linkId: string } & ({ opened: OpenedDashboardLink } | { error: Error })) | null
   >(null);
@@ -73,8 +90,7 @@ export default function OpenDashboardLinkPage(): JSX.Element {
 
   if (result && "opened" in result) {
     const { dashboardId, own } = result.opened;
-    const to = `/dashboard/${own ? "my" : "shared"}/${encodeURIComponent(dashboardId)}`;
-    return <Navigate to={to} replace />;
+    return <Navigate to={dashboardPath(dashboardId, own)} replace />;
   }
 
   if (result && "error" in result) {

@@ -24,6 +24,11 @@ export interface DashboardSwitcherEntry {
   name: string;
   /** Shown under the name in the menu (e.g. "Shared by Jane Doe"), and searched too. */
   secondary?: string;
+  /**
+   * A heading the entry sits under (e.g. "Advanced"), shown once before the
+   * first entry of a run of the same group. Entries without one have none.
+   */
+  group?: string;
 }
 
 interface DashboardSwitcherProps {
@@ -40,6 +45,7 @@ interface DashboardSwitcherProps {
  * keys stay in it (not the menu's jump-to-letter), except Escape, which
  * closes. Entries that do not match stay in the list, hidden and disabled, so
  * the selected one is always an option. The closed field shows the name only.
+ * A group heading shows while at least one of its entries matches.
  */
 export default function DashboardSwitcher({ entries, selectedId, onSelect }: DashboardSwitcherProps): JSX.Element {
   const [search, setSearch] = useState("");
@@ -91,7 +97,22 @@ export default function DashboardSwitcher({ entries, selectedId, onSelect }: Das
             </Typography>
           </MenuItem>
         )}
-        {entries.map((e) => (
+        {/* Select reads each child's value, so headings and entries are one flat list (no Fragments). */}
+        {entries.flatMap((e, i) => [
+          ...(e.group && e.group !== entries[i - 1]?.group
+            ? [
+                <ListSubheader
+                  key={`group:${e.group}:${e.id}`}
+                  sx={{
+                    lineHeight: 2,
+                    bgcolor: "background.paper",
+                    ...(entries.some((g) => g.group === e.group && matches(g)) ? {} : { display: "none" }),
+                  }}
+                >
+                  {e.group}
+                </ListSubheader>,
+              ]
+            : []),
           <MenuItem
             key={e.id}
             value={e.id}
@@ -106,8 +127,8 @@ export default function DashboardSwitcher({ entries, selectedId, onSelect }: Das
                 {e.secondary}
               </Typography>
             )}
-          </MenuItem>
-        ))}
+          </MenuItem>,
+        ])}
       </Select>
     </FormControl>
   );

@@ -24,6 +24,8 @@ const generateMock = vi.fn();
 const saveMock = vi.fn();
 const showSuccess = vi.fn();
 let savePending = false;
+// Whether the signed-in user may open the advanced (code) generate page.
+let canGoAdvanced = false;
 
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
@@ -43,6 +45,9 @@ vi.mock("@features/csm-custom-dashboards/api/useCustomDashboards", () => ({
   usePutCustomDashboard: () => ({ mutateAsync: saveMock, isPending: savePending }),
 }));
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({ useSuccessBanner: () => ({ showSuccess }) }));
+vi.mock("@features/csm-custom-dashboards/utils/advancedDashboardAccess", () => ({
+  useCanGenerateAdvancedDashboards: () => canGoAdvanced,
+}));
 // The preview's widgets fetch their own data; the grid is not under test here.
 vi.mock("@features/csm-dashboard/components/DashboardWidgetGrid", () => ({
   default: ({ widgets }: { widgets: unknown[] }) => <div>{widgets.length} widgets</div>,
@@ -66,6 +71,7 @@ function renderPage(initialDashboard?: BeDashboard) {
       <Routes>
         <Route path="/dashboard/my/new" element={<GenerateDashboardPage initialDashboard={initialDashboard} />} />
         <Route path="/dashboard/my" element={<div>Opened</div>} />
+        <Route path="/dashboard/my/new-code" element={<div>Advanced page</div>} />
         <Route path="/dashboard/my/:dashboardId" element={<OpenedDashboard />} />
       </Routes>
     </MemoryRouter>,
@@ -396,5 +402,47 @@ describe("GenerateDashboardPage: the chat", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard" }));
 
     expect(await screen.findByText("Opened")).toBeInTheDocument();
+  });
+});
+
+describe("GenerateDashboardPage: Generate Advanced Dashboard", () => {
+  beforeEach(() => {
+    generateMock.mockReset();
+    canGoAdvanced = false;
+  });
+
+  it("is not offered to a user who may not use it", () => {
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Generate Advanced Dashboard" })).not.toBeInTheDocument();
+  });
+
+  it("opens the advanced page straight away when there is nothing to lose", () => {
+    canGoAdvanced = true;
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Generate Advanced Dashboard" }));
+    expect(screen.queryByText("Discard this dashboard?")).not.toBeInTheDocument();
+    expect(screen.getByText("Advanced page")).toBeInTheDocument();
+  });
+
+  it("asks before dropping a draft, then opens the advanced page, not the page Back leads to", async () => {
+    canGoAdvanced = true;
+    generateMock.mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." });
+    renderPage();
+    await sendMessage("My cases", "Here it is.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to My Dashboards" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Generate Advanced Dashboard" }));
+    expect(screen.getByText("Discard this dashboard?")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard" }));
+
+    expect(await screen.findByText("Advanced page")).toBeInTheDocument();
+  });
+
+  it("is not offered while editing a saved dashboard", () => {
+    canGoAdvanced = true;
+    renderPage(dashboard("My Cases"));
+    expect(screen.queryByRole("button", { name: "Generate Advanced Dashboard" })).not.toBeInTheDocument();
   });
 });
