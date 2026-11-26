@@ -10,7 +10,7 @@ component with a Claude client, the Anthropic SDK and the model credentials: the
 | Here | In the CSM portal backend |
 |---|---|
 | The Claude client (gateway base URL, API key, model, timeout, retries) | Authentication and permissions of the end user (`PermWrite` for generation) |
-| The catalogue the model reads (built into the binary) | The route the webapp calls (`/dashboards/generate`) |
+| The catalogues the model reads (built into the binary) | The routes the webapp calls (`/dashboards/generate`, `/dashboards/generate-code`) |
 | Building the prompt (catalogue + the team list the backend sends + prompt + current draft) | Validating what the model wrote (`dashboard.ParseGenerated`, the per-type rules) |
 | The call, its timeout, and reading the answer (the JSON objects, a decline, a refusal, a truncation) | The team registry and the team key -> id / name swap; saving and sharing |
 | Mapping those outcomes to a stable error vocabulary | The sample generators used when this service is not configured |
@@ -24,6 +24,7 @@ the registry itself, so it is configured in one place.
 |---|---|
 | `GET /health` | liveness, always 200 |
 | `POST /ai/dashboards/generate` | the JSON dashboard generator (`internal/dashboards`, `internal/handler`) |
+| `POST /ai/dashboards/generate-code` | the code approach, phase 2 (`internal/dashboards/code.go`); **registered only when `DASHBOARD_GENERATE_CODE_ENABLED` is exactly `true`** |
 
 ### `POST /ai/dashboards/generate`
 
@@ -54,6 +55,29 @@ the backend maps the code to its own status and user-facing text:
 | 504 | `timeout` | the model call ran out of time (`CLAUDE_TIMEOUT`) |
 | 429 | `usage_limit` | the gateway answered 429 (a request, token or spend limit on the AI side), also after the SDK's one retry; the user is told the AI's usage limit was reached, not that it could not be reached |
 | 502 | `model_call_failed` | any other call failure, an overloaded gateway (529 / 503) included; a gateway 401/403 is this service's key problem, never passed on |
+
+### `POST /ai/dashboards/generate-code`
+
+**Off by default.** The model writes the dashboard as JavaScript (`async function render(portal, root)`)
+that the webapp runs in a Web Worker inside a sandboxed frame, with no network and no page to navigate
+(see the webapp's `CLAUDE.md`); it is not released yet. The code catalogue's section 2 says what that
+worker offers and which names the webapp refuses; keep it in step with the webapp's `code-dashboard-sandbox/`. `newMux` (`cmd/server/routes.go`)
+registers this route only when `DASHBOARD_GENERATE_CODE_ENABLED` is exactly `true` (`codeGenerationEnabled`:
+`1`, `TRUE`, `yes` are off); off, the path answers 404 and `main.go` builds no code generator. The start log
+has `codeGeneration`. The CSM portal backend (`POST /dashboards/generate-code`) and webapp (the
+`/dashboard/my/new-code` page and its button) read the same name, so the three are turned on together; with
+only some on, the feature fails (the backend's call here gets a 404).
+
+Body `{prompt, current?, teams?, playbookAnswers?}`: the prompt (as above), the source being edited (at most 60,000 characters,
+`CodeMaxLength`; absent or "" on a first message) and the team list, checked as on `/generate` (`checkTeams`)
+and appended to the code catalogue as the same Teams section (`teams.WithTeams`), then the PLG playbook answer fields
+(`playbookAnswers`, `checkPlaybookAnswers`, `playbooks.WithPlaybookAnswers`), as on `/generate`. The reply checks are all here, because they only read the code catalogue's output contract (one
+fenced block, the last one wins, it must define `function render(`, at most 60,000 characters; a reply with
+no block that starts with `CANNOT:` is the model declining). The prose before the block starts with a
+`Name: …` line, the name the webapp's Save dialog suggests (`codeName`: the first such line, quotes and bold
+dropped, at most 255 characters, the saved-name limit); it is left out of the chat sentence, and a reply
+without one is still usable, with no `name`; on a decline a Name line is dropped. A reply is capped at 10,000 output tokens
+(`codeMaxTokens`). 200 is `{source, reply, name?, usage}` or `{declined, usage}`; errors and codes are the table above.
 
 ## Model settings
 
@@ -91,6 +115,7 @@ Every model call writes one line, `dashboard generate: token usage` (`logUsage` 
 | `cacheCreationInputTokens`, `cacheReadInputTokens` | input written to / read from the prompt cache: the system prompt, on a call that found no cache / within its lifetime |
 | `outputTokens` | the reply's |
 | `durationMs` | the model call alone, the SDK's retry included |
+| `approach` | `code` on a `generate-code` call's line (`logUsage`'s extra fields); absent on the JSON route's |
 
 The line goes to the service's log (stderr), like every other line, so in Choreo it is under the
 component's Observability -> Logs; search for `token usage`, or a `userID`. No file is written: a
@@ -107,7 +132,8 @@ expires writes it at 1.25 times. Generation happens in short sessions (a prompt,
 5-minute lifetime fits: a 1-hour cache would cost 2 times at the start of nearly every session. Anything
 that changes per request must stay after the system prompt (the prompt and the draft are in the user
 message), or no call would find the cache. A deployment's input is `inputTokens` plus the two cache counts
-of the token usage line; a warm call shows most of it in `cacheReadInputTokens`.
+of the token usage line; a warm call shows most of it in `cacheReadInputTokens`. The code generator marks
+its system prompt (the code catalogue, the Teams and PLG playbook answers sections) the same way.
 
 ## Catalogue
 
@@ -149,6 +175,12 @@ The Teams section is not in the file: the backend sends the team list with each 
 "PLG playbook answers" section: the backend reads the playbooks with each request and `internal/playbooks`
 appends their tasks and answer codes after the Teams section, so the catalogue's section 5e names no code
 of its own beyond an example; the backend checks every code the model writes against the same list.
+
+**The code catalogue** (`internal/catalogue/code_catalogue.md`, `catalogue.NewCode()`) is the code
+approach's, embedded the same way and read only when the code generator is built. Its section 4 lists the
+only `portal.*` functions the code may call, and its section 5 the filters, groupings and sort fields; they
+must match what the webapp's bridge answers (`useCodeDashboardPortal.ts`) and what the backend's
+`/cases/aggregate` and `/cases/search` accept, or the model is taught calls that fail in the frame.
 
 ## Conventions
 

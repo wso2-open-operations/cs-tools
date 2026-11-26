@@ -74,17 +74,27 @@ type dashboardGenerator interface {
 	Generate(ctx context.Context, req dashboards.Request) (dashboards.Result, error)
 }
 
-// DashboardHandler serves POST /ai/dashboards/generate.
+// codeGenerator is dashboards.CodeGenerator.
+type codeGenerator interface {
+	Generate(ctx context.Context, prompt, current string, registry []teams.Team, answers []playbooks.Field) (dashboards.CodeResult, error)
+}
+
+// DashboardHandler serves POST /ai/dashboards/generate and
+// /ai/dashboards/generate-code.
 type DashboardHandler struct {
-	generator dashboardGenerator // nil when no API key is configured
+	generator     dashboardGenerator // nil when no API key is configured
+	codeGenerator codeGenerator      // nil without a key or with the code approach off
 }
 
 // NewDashboardHandler returns the handler; a nil generator answers 503
-// not_configured.
-func NewDashboardHandler(generator *dashboards.Generator) *DashboardHandler {
+// not_configured on its route.
+func NewDashboardHandler(generator *dashboards.Generator, code *dashboards.CodeGenerator) *DashboardHandler {
 	h := &DashboardHandler{}
 	if generator != nil {
 		h.generator = generator
+	}
+	if code != nil {
+		h.codeGenerator = code
 	}
 	return h
 }
@@ -162,6 +172,82 @@ func (h *DashboardHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// generateCodeRequest is the body of POST /ai/dashboards/generate-code.
+// Current is the source being edited, absent or "" on a first message.
+// Teams and PlaybookAnswers are as for Generate.
+type generateCodeRequest struct {
+	Prompt          string            `json:"prompt"`
+	Current         string            `json:"current,omitempty"`
+	Teams           []teams.Team      `json:"teams,omitempty"`
+	PlaybookAnswers []playbooks.Field `json:"playbookAnswers,omitempty"`
+}
+
+// generateCodeResponse is a 200: either the model's decline sentence, or the
+// code to run, the chat sentence to show with it and the name the model
+// suggests saving it under (left out when it gave none).
+type generateCodeResponse struct {
+	Declined string `json:"declined,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Reply    string `json:"reply,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Usage    usage  `json:"usage"`
+}
+
+// GenerateCode makes one model call for one chat message of the code
+// approach. Statuses and codes are Generate's ("unusable" also covers a
+// reply with no usable code block):
+//
+//   - 200 {"source", "reply", "name"?} or {"declined": "<the model's sentence>"}
+//   - 400 invalid_request         the body, prompt, teams, playbook answers, or
+//     a current source over dashboards.CodeMaxLength characters
+func (h *DashboardHandler) GenerateCode(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if h.codeGenerator == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeNotConfigured, "model calls are not configured")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	var body generateCodeRequest
+	msg := decodeOne(r.Body, &body)
+	prompt := strings.TrimSpace(body.Prompt)
+	switch {
+	case msg != "":
+	case prompt == "":
+		msg = "prompt is required"
+	case utf8.RuneCountInString(prompt) > promptMaxLength:
+		msg = "prompt is over 2000 characters"
+	case utf8.RuneCountInString(body.Current) > dashboards.CodeMaxLength:
+		msg = "current is over 60000 characters"
+	default:
+		msg = checkTeams(body.Teams)
+		if msg == "" {
+			msg = checkPlaybookAnswers(body.PlaybookAnswers)
+		}
+	}
+	if msg != "" {
+		slog.InfoContext(ctx, "dashboard generate-code: invalid request", "reason", msg)
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, msg)
+		return
+	}
+	res, err := h.codeGenerator.Generate(ctx, prompt, body.Current, body.Teams, body.PlaybookAnswers)
+	if err != nil {
+		writeGenerateError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, generateCodeResponse{
+		Declined: res.Declined,
+		Source:   res.Source,
+		Reply:    res.Reply,
+		Name:     res.Name,
+		Usage: usage{
+			InputTokens:              res.InputTokens,
+			CacheCreationInputTokens: res.CacheCreationInputTokens,
+			CacheReadInputTokens:     res.CacheReadInputTokens,
+			OutputTokens:             res.OutputTokens,
+		},
+	})
+}
+
 // decodeOne decodes exactly one JSON object with no unknown fields into v; a
 // non-empty message says what is wrong.
 func decodeOne(body io.Reader, v any) string {
@@ -201,29 +287,39 @@ func decodeGenerateRequest(w http.ResponseWriter, r *http.Request) (dashboards.R
 		}
 		draft = json.RawMessage(d)
 	}
-	if len(body.Teams) > maxTeams {
-		return dashboards.Request{}, "too many teams"
-	}
-	for _, t := range body.Teams {
-		if strings.TrimSpace(t.Key) == "" || strings.TrimSpace(t.Name) == "" || strings.TrimSpace(t.Field) == "" {
-			return dashboards.Request{}, "every team needs a key, a name and a field"
-		}
-		if t.Field != "creTeam" && t.Field != "sreTeam" {
-			return dashboards.Request{}, "a team's field must be creTeam or sreTeam"
-		}
-		switch t.Family {
-		case "", "cre-abt", "cre", "sre-abt", "sre":
-		default:
-			return dashboards.Request{}, "a team's family must be cre-abt, cre, sre-abt or sre"
-		}
-		if strings.ContainsAny(t.Key+t.Name+t.Family+t.Field, "|\n\r`") {
-			return dashboards.Request{}, "a team's key, name, family or field holds a character the Teams table cannot hold"
-		}
+	if msg := checkTeams(body.Teams); msg != "" {
+		return dashboards.Request{}, msg
 	}
 	if msg := checkPlaybookAnswers(body.PlaybookAnswers); msg != "" {
 		return dashboards.Request{}, msg
 	}
 	return dashboards.Request{Prompt: prompt, Draft: draft, Teams: body.Teams, PlaybookAnswers: body.PlaybookAnswers}, ""
+}
+
+// checkTeams checks the team list ("" when it is fine): within the cap,
+// every key, name and field present, a known field and family, and nothing
+// the Teams table cannot hold.
+func checkTeams(list []teams.Team) string {
+	if len(list) > maxTeams {
+		return "too many teams"
+	}
+	for _, t := range list {
+		if strings.TrimSpace(t.Key) == "" || strings.TrimSpace(t.Name) == "" || strings.TrimSpace(t.Field) == "" {
+			return "every team needs a key, a name and a field"
+		}
+		if t.Field != "creTeam" && t.Field != "sreTeam" {
+			return "a team's field must be creTeam or sreTeam"
+		}
+		switch t.Family {
+		case "", "cre-abt", "cre", "sre-abt", "sre":
+		default:
+			return "a team's family must be cre-abt, cre, sre-abt or sre"
+		}
+		if strings.ContainsAny(t.Key+t.Name+t.Family+t.Field, "|\n\r`") {
+			return "a team's key, name, family or field holds a character the Teams table cannot hold"
+		}
+	}
+	return ""
 }
 
 // checkPlaybookAnswers checks the playbook answer fields the way the team

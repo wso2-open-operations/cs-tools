@@ -27,11 +27,17 @@ import (
 
 // status sends method path through the service's routes. The handler has no
 // generator (no key), so a registered AI route answers 503 not_configured
-// and an unregistered one 404.
+// and an unregistered one 404. The code route is off.
 func status(t *testing.T, method, path string) int {
 	t.Helper()
+	return statusWithCode(t, false, method, path)
+}
+
+// statusWithCode is status with the code route on or off.
+func statusWithCode(t *testing.T, codeGeneration bool, method, path string) int {
+	t.Helper()
 	rec := httptest.NewRecorder()
-	newMux(handler.NewDashboardHandler(nil)).
+	newMux(handler.NewDashboardHandler(nil, nil), codeGeneration).
 		ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(`{"prompt":"p"}`)))
 	return rec.Code
 }
@@ -45,5 +51,19 @@ func TestRoutes(t *testing.T) {
 	}
 	if got := status(t, http.MethodPost, "/ai/dashboards/unknown"); got != http.StatusNotFound {
 		t.Errorf("an unregistered path = %d, want 404", got)
+	}
+}
+
+func TestTheCodeRouteExistsOnlyWhenTurnedOn(t *testing.T) {
+	if got := statusWithCode(t, false, http.MethodPost, "/ai/dashboards/generate-code"); got != http.StatusNotFound {
+		t.Errorf("off: generate-code = %d, want 404 (not registered)", got)
+	}
+	if got := statusWithCode(t, true, http.MethodPost, "/ai/dashboards/generate-code"); got != http.StatusServiceUnavailable {
+		t.Errorf("on: generate-code = %d, want 503 from the handler (registered, no key)", got)
+	}
+	for _, on := range []bool{false, true} {
+		if got := statusWithCode(t, on, http.MethodPost, "/ai/dashboards/generate"); got != http.StatusServiceUnavailable {
+			t.Errorf("code route %v: generate = %d, want 503 from the handler", on, got)
+		}
 	}
 }

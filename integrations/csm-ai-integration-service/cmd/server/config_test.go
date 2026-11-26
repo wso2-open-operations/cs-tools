@@ -130,6 +130,18 @@ func TestLoadConfigIgnoresTheOldCatalogueVariables(t *testing.T) {
 	}
 }
 
+func TestCodeGenerationIsOnOnlyForExactlyTrue(t *testing.T) {
+	for raw, want := range map[string]bool{"": false, "true": true, " true\n": true, "TRUE": false, "1": false, "yes": false, "false": false} {
+		c, err := loadConfig(env(map[string]string{"DASHBOARD_GENERATE_CODE_ENABLED": raw}))
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if c.CodeGenerationEnabled != want {
+			t.Errorf("DASHBOARD_GENERATE_CODE_ENABLED=%q: enabled %v, want %v", raw, c.CodeGenerationEnabled, want)
+		}
+	}
+}
+
 func TestShutdownWaitsForAnInFlightModelCall(t *testing.T) {
 	for model, want := range map[time.Duration]time.Duration{
 		45 * time.Second: 60 * time.Second,

@@ -31,6 +31,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/dashboards"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/playbooks"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/teams"
 )
 
 type fakeGenerator struct {
@@ -164,7 +165,7 @@ func draftOfSize(n int) string {
 }
 
 func TestGenerateWithoutAKeyIsNotConfigured(t *testing.T) {
-	status, out := post(t, NewDashboardHandler(nil), `{"prompt":"p"}`)
+	status, out := post(t, NewDashboardHandler(nil, nil), `{"prompt":"p"}`)
 	if status != http.StatusServiceUnavailable || out["code"] != CodeNotConfigured {
 		t.Errorf("status %d body %v, want 503 not_configured", status, out)
 	}
@@ -230,6 +231,144 @@ func TestGenerateAcceptsEveryKnownFamilyAndNone(t *testing.T) {
 		body := `{"prompt":"p","teams":[{"key":"r","name":"Rigel","family":"` + family + `","field":"sreTeam"}]}`
 		if status, out := post(t, &DashboardHandler{generator: gen}, body); status != http.StatusOK {
 			t.Errorf("family %q: status %d body %v, want 200", family, status, out)
+		}
+	}
+}
+
+type fakeCodeGenerator struct {
+	res             dashboards.CodeResult
+	err             error
+	prompt, current string
+	teams           []teams.Team
+	answers         []playbooks.Field
+	calls           int
+}
+
+func (f *fakeCodeGenerator) Generate(_ context.Context, prompt, current string, registry []teams.Team, answers []playbooks.Field) (dashboards.CodeResult, error) {
+	f.calls++
+	f.prompt, f.current, f.teams, f.answers = prompt, current, registry, answers
+	return f.res, f.err
+}
+
+func postCode(t *testing.T, h *DashboardHandler, body string) (int, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.GenerateCode(rec, httptest.NewRequest(http.MethodPost, "/ai/dashboards/generate-code", strings.NewReader(body)))
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("response %q is not JSON: %v", rec.Body.String(), err)
+	}
+	return rec.Code, out
+}
+
+func TestGenerateCodeReturnsTheSourceAndReply(t *testing.T) {
+	gen := &fakeCodeGenerator{res: dashboards.CodeResult{Source: "async function render() {}\n", Reply: "Done.",
+		InputTokens: 7, CacheCreationInputTokens: 5, CacheReadInputTokens: 9, OutputTokens: 3}}
+	status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, `{"prompt":" Add a list ","current":"function render(){}"}`)
+	if status != http.StatusOK || out["source"] != "async function render() {}\n" || out["reply"] != "Done." || out["declined"] != nil {
+		t.Fatalf("status %d body %v", status, out)
+	}
+	want := map[string]any{"inputTokens": float64(7), "cacheCreationInputTokens": float64(5), "cacheReadInputTokens": float64(9), "outputTokens": float64(3)}
+	if !reflect.DeepEqual(out["usage"], want) {
+		t.Errorf("usage = %v, want %v", out["usage"], want)
+	}
+	if gen.prompt != "Add a list" || gen.current != "function render(){}" || gen.teams != nil {
+		t.Errorf("generator got %q, %q, %v", gen.prompt, gen.current, gen.teams)
+	}
+}
+
+func TestGenerateCodeReturnsTheSuggestedName(t *testing.T) {
+	gen := &fakeCodeGenerator{res: dashboards.CodeResult{Source: "x", Reply: "ok", Name: "Cases by Severity"}}
+	status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, `{"prompt":"cases"}`)
+	if status != http.StatusOK || out["name"] != "Cases by Severity" {
+		t.Fatalf("status %d body %v", status, out)
+	}
+	gen = &fakeCodeGenerator{res: dashboards.CodeResult{Source: "x", Reply: "ok"}}
+	if _, out := postCode(t, &DashboardHandler{codeGenerator: gen}, `{"prompt":"cases"}`); out["name"] != nil {
+		t.Errorf("name = %v, want it left out when the model gave none", out["name"])
+	}
+}
+
+func TestGenerateCodePassesThePlaybookAnswers(t *testing.T) {
+	gen := &fakeCodeGenerator{res: dashboards.CodeResult{Source: "x", Reply: "ok"}}
+	body := `{"prompt":"p","playbookAnswers":[{"code":"OUTCOME","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"MONITOR","label":"Monitor"}]}]}`
+	if status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, body); status != http.StatusOK {
+		t.Fatalf("status %d body %v", status, out)
+	}
+	want := []playbooks.Field{{Code: "OUTCOME", Name: "Outcome", ValueType: "SINGLE_SELECT", Options: []playbooks.Option{{Code: "MONITOR", Label: "Monitor"}}}}
+	if !reflect.DeepEqual(gen.answers, want) {
+		t.Errorf("answers = %+v, want %+v", gen.answers, want)
+	}
+}
+
+func TestGenerateCodePassesTheTeams(t *testing.T) {
+	gen := &fakeCodeGenerator{res: dashboards.CodeResult{Source: "x", Reply: "ok"}}
+	body := `{"prompt":"p","teams":[{"key":"rigel","name":"Rigel","family":"cre-abt","field":"creTeam"},{"key":"apollo","name":"Apollo","family":"sre-abt","field":"sreTeam"}]}`
+	if status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, body); status != http.StatusOK {
+		t.Fatalf("status %d body %v", status, out)
+	}
+	want := []teams.Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}, {Key: "apollo", Name: "Apollo", Family: "sre-abt", Field: "sreTeam"}}
+	if !reflect.DeepEqual(gen.teams, want) {
+		t.Errorf("teams = %+v, want %+v", gen.teams, want)
+	}
+}
+
+func TestGenerateCodeReturnsTheDecline(t *testing.T) {
+	gen := &fakeCodeGenerator{res: dashboards.CodeResult{Declined: "Not expressible."}}
+	status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, `{"prompt":"p"}`)
+	if status != http.StatusOK || out["declined"] != "Not expressible." || out["source"] != nil {
+		t.Errorf("status %d body %v, want 200 with the decline only", status, out)
+	}
+}
+
+func TestGenerateCodeRejectsABadRequestWithoutACall(t *testing.T) {
+	for name, body := range map[string]string{
+		"not JSON":               `x`,
+		"unknown field":          `{"prompt":"p","draft":{}}`,
+		"empty prompt":           `{"prompt":"  "}`,
+		"long prompt":            `{"prompt":"` + strings.Repeat("a", promptMaxLength+1) + `"}`,
+		"long current":           `{"prompt":"p","current":"` + strings.Repeat("é", dashboards.CodeMaxLength+1) + `"}`,
+		"too many teams":         `{"prompt":"p","teams":[` + strings.TrimSuffix(strings.Repeat(`{"key":"r","name":"R","field":"creTeam"},`, maxTeams+1), ",") + `]}`,
+		"a team with no key":     `{"prompt":"p","teams":[{"key":" ","name":"Rigel","field":"creTeam"}]}`,
+		"a team's field":         `{"prompt":"p","teams":[{"key":"r","name":"Rigel","field":"team"}]}`,
+		"a team's family":        `{"prompt":"p","teams":[{"key":"r","name":"Rigel","family":"abt","field":"creTeam"}]}`,
+		"a pipe in a team name":  `{"prompt":"p","teams":[{"key":"r","name":"Ri|gel","field":"creTeam"}]}`,
+		"a playbook answer type": `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"BOOLEAN","options":[{"code":"A","label":"A"}]}]}`,
+		"a pipe in an answer":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"Yes|No"}]}]}`,
+	} {
+		gen := &fakeCodeGenerator{}
+		status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, body)
+		if status != http.StatusBadRequest || out["code"] != CodeInvalidRequest || gen.calls != 0 {
+			t.Errorf("%s: status %d body %v calls %d, want 400 and no call", name, status, out, gen.calls)
+		}
+	}
+}
+
+func TestGenerateCodeAcceptsACurrentSourceAtTheCap(t *testing.T) {
+	gen := &fakeCodeGenerator{res: dashboards.CodeResult{Source: "x", Reply: "ok"}}
+	body := `{"prompt":"p","current":"` + strings.Repeat("é", dashboards.CodeMaxLength) + `"}`
+	if status, out := postCode(t, &DashboardHandler{codeGenerator: gen}, body); status != http.StatusOK || gen.calls != 1 {
+		t.Errorf("status %d body %v calls %d, want 200 and one call", status, out, gen.calls)
+	}
+}
+
+func TestGenerateCodeErrorsAndNotConfigured(t *testing.T) {
+	if status, out := postCode(t, NewDashboardHandler(nil, nil), `{"prompt":"p"}`); status != http.StatusServiceUnavailable || out["code"] != CodeNotConfigured {
+		t.Errorf("no key: status %d body %v", status, out)
+	}
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{fmt.Errorf("%w: no code block", dashboards.ErrUnusable), http.StatusBadGateway, CodeUnusable},
+		{dashboards.ErrTruncated, http.StatusBadGateway, CodeTruncated},
+		{dashboards.ErrRefused, http.StatusUnprocessableEntity, CodeRefused},
+		{fmt.Errorf("%w: %w", dashboards.ErrCall, dashboards.ErrUsageLimit), http.StatusTooManyRequests, CodeUsageLimit},
+	} {
+		status, out := postCode(t, &DashboardHandler{codeGenerator: &fakeCodeGenerator{err: tc.err}}, `{"prompt":"p"}`)
+		if status != tc.status || out["code"] != tc.code {
+			t.Errorf("%v: status %d body %v, want %d %s", tc.err, status, out, tc.status, tc.code)
 		}
 	}
 }

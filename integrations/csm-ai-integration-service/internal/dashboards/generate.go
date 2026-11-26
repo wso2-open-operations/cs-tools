@@ -199,15 +199,16 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 // outcome, since every reply spends tokens; a failed call has none to report.
 // The correlation id and the portal user's id come from ctx (see
 // middleware.ConfigureLogger). The line never holds the prompt or the reply.
-// durationMs is the model call alone, the SDK's retry included.
-func logUsage(ctx context.Context, model, outcome string, stopReason anthropic.StopReason, usage anthropic.Usage, took time.Duration) {
-	slog.InfoContext(ctx, "dashboard generate: token usage",
+// durationMs is the model call alone, the SDK's retry included. extra is
+// added to the line (the code approach adds "approach", "code").
+func logUsage(ctx context.Context, model, outcome string, stopReason anthropic.StopReason, usage anthropic.Usage, took time.Duration, extra ...any) {
+	slog.InfoContext(ctx, "dashboard generate: token usage", append([]any{
 		"model", model, "outcome", outcome, "stopReason", stopReason,
 		"inputTokens", usage.InputTokens,
 		"cacheCreationInputTokens", usage.CacheCreationInputTokens,
 		"cacheReadInputTokens", usage.CacheReadInputTokens,
 		"outputTokens", usage.OutputTokens,
-		"durationMs", took.Milliseconds())
+		"durationMs", took.Milliseconds()}, extra...)...)
 }
 
 // messageText is the text of a model reply, its text blocks joined.

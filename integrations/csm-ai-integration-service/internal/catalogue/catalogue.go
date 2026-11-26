@@ -14,15 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package catalogue holds the catalogue the model is given as its system
-// prompt: catalogue.md, for a dashboard definition (POST
-// /ai/dashboards/generate). It tells the model what it may use, and is the
-// only thing about the portal the model sees besides the user's prompt, the
-// draft being edited and the team list.
+// Package catalogue holds the catalogues the model is given as its system
+// prompt: catalogue.md for a dashboard definition (POST
+// /ai/dashboards/generate) and code_catalogue.md for a dashboard written as
+// JavaScript (POST /ai/dashboards/generate-code). Each tells the model what it
+// may use, and is the only thing about the portal the model sees besides the
+// user's prompt, the draft being edited and the team list.
 //
-// It ships inside the binary (embedded at build time), so it is changed and
+// Both ship inside the binary (embedded at build time), so they are changed and
 // reviewed like code, and a new catalogue reaches a deployment with the next
-// build. Nothing at run time replaces it.
+// build. Nothing at run time replaces them.
 package catalogue
 
 import _ "embed"
@@ -30,8 +31,14 @@ import _ "embed"
 //go:embed catalogue.md
 var dashboardEmbedded string
 
+//go:embed code_catalogue.md
+var codeEmbedded string
+
 // DashboardEmbedded returns the dashboard catalogue built into the binary.
 func DashboardEmbedded() string { return dashboardEmbedded }
+
+// CodeEmbedded returns the code catalogue built into the binary.
+func CodeEmbedded() string { return codeEmbedded }
 
 // Source is the catalogue's text.
 type Source struct {
@@ -40,6 +47,9 @@ type Source struct {
 
 // NewDashboard is the dashboard catalogue: the copy built into the binary.
 func NewDashboard() Source { return Source{text: dashboardEmbedded} }
+
+// NewCode is the code catalogue: the copy built into the binary.
+func NewCode() Source { return Source{text: codeEmbedded} }
 
 // Text returns the catalogue.
 func (s Source) Text() string { return s.text }
