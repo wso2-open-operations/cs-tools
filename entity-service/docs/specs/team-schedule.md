@@ -82,6 +82,65 @@ runs as on a weekday: `SRE_TZ3` is `day_scope = 'ANY'`, and TZ3 is its own
 weekend zone. An older database's weekend TZ2 window (`SRE_WE_TZ2`, standing in
 for TZ3) is folded into `SRE_TZ3` by 0154, turns included.
 
+**Weekend Day/Night (0306, then a switch-on migration).** SaaS SRE's weekends
+move to two shifts: **Day**, 06:00–18:00 (`SRE_WE_DAY`, zone TZ1, per team) and
+**Night**, 18:00–06:00 (`SRE_WE_NIGHT`, zone TZ3, `shared_across_teams`, one
+crew for the rota). Weekdays keep TZ1, TZ2 and TZ3; Friday's TZ3 still runs to
+06:00 Saturday, and Sunday's Night ends at 06:00 Monday. The windows stay in the
+zones the weekend already used, so roster columns and lanes and the pager's
+shared night crew (zone TZ3) are unchanged. The crews are the same people the
+TZ1+2 / TZ3 weekend had; only their hours move.
+
+- **0306** seeds both windows `is_active = FALSE`. Nothing offers, generates or
+  pages them, and "Generate month" keeps writing TZ1+2 / TZ3 weekends.
+- **The switch-on** is a separate migration added in the week before the first
+  Day/Night weekend (after Monday 06:00, before Saturday 06:00 IST). One
+  transaction, `lock_timeout = '5s'`, re-runnable: `SRE_WE_DAY` and
+  `SRE_WE_NIGHT` `is_active = TRUE`, `SRE_WE_TZ1` `is_active = FALSE`, and
+  `SRE_TZ3.day_scope = 'WEEKDAY'`. The used-shift guard allows all of it (no
+  hours, zone or tier change).
+- **The generator follows the catalogue** (`saasShiftWindows`): weekends are
+  Day/Night once both new windows are served, else TZ1+2 / TZ3. There is no
+  cutover date in code; the switch-on migration is the switch. Its replace list
+  keeps `SRE_WE_TZ1` and `SRE_TZ3`, so the leads' regeneration of every month
+  from the cutover Saturday on clears the generator's old weekend turns.
+  Hand-placed turns (MANUAL, SWAP, MOVE) are never touched; move them by hand.
+  The week before, list them read-only for the leads (`<cutover>` = the first
+  Day/Night Saturday). An old weekend `SRE_TZ3` left in place is still paged
+  21:00–06:00 beside the Night crew; an old `SRE_WE_TZ1` is not (retired):
+
+  ```sql
+  SELECT a.rota_date, a.team_key, u.email, s.code, a.tier, a.source
+    FROM team_schedule_assignment a
+    JOIN team_schedule_shift s ON s.id = a.shift_id
+    JOIN "user" u ON u.id = a.user_id
+   WHERE a.rota_date >= '<cutover>'
+     AND extract(isodow FROM a.rota_date) >= 6
+     AND s.code IN ('SRE_WE_TZ1', 'SRE_TZ3')
+     AND a.created_by IS DISTINCT FROM 'rota-generator:SRE_SAAS'
+   ORDER BY a.rota_date, a.team_key, s.code, a.tier;
+  ```
+
+  The switch-on migration's body (tested against a local database: the
+  used-shift guard lets it through with turns on both old windows, and a
+  second run changes nothing):
+
+  ```sql
+  BEGIN;
+  SET LOCAL lock_timeout = '5s';
+  UPDATE team_schedule_shift SET is_active = TRUE, updated_on = NOW(), updated_by = 'migration'
+   WHERE code IN ('SRE_WE_DAY', 'SRE_WE_NIGHT') AND NOT is_active;
+  UPDATE team_schedule_shift SET is_active = FALSE, updated_on = NOW(), updated_by = 'migration'
+   WHERE code = 'SRE_WE_TZ1' AND is_active;
+  UPDATE team_schedule_shift SET day_scope = 'WEEKDAY', updated_on = NOW(), updated_by = 'migration'
+   WHERE code = 'SRE_TZ3' AND day_scope <> 'WEEKDAY';
+  COMMIT;
+  ```
+- **History.** Past weekend turns keep their windows and zones (TZ1, TZ3), so
+  the views still draw them; the weekend lanes take the Day / Night names. Once
+  `SRE_TZ3` is weekday-only, an old weekend `SRE_TZ3` row is no longer weekend
+  crew to the worklog's weekend report (`day_scope IN ('WEEKEND','ANY')`).
+
 **TZ3 is the SaaS night cover, one crew for every team.** Each night has one
 TZ3 L1, L2 and L3 for the whole `SRE_SAAS` rota, whichever of Apollo or Artemis
 each person is on. The pager calls the incident's own team's holder of a tier
@@ -707,7 +766,8 @@ download the template from the environment you import into):
 |---|---|
 | L1 | `SRE_TZ1_L1` / `SRE_TZ2_L1` (no tier), or `SRE_TZ1` / `SRE_TZ2` / `SRE_TZ3` with `"tier": "L1"` |
 | L2, L3 | `SRE_TZ1` / `SRE_TZ2` / `SRE_TZ3` with `"tier": "L2"` / `"L3"` |
-| TZ1 Weekend TZ1 | `SRE_WE_TZ1` with a tier (the weekend TZ1+2 crew) |
+| TZ1 Weekend TZ1 | `SRE_WE_TZ1` with a tier (the weekend TZ1+2 crew), until the Day/Night switch |
+| Weekend Day / Weekend Night | `SRE_WE_DAY` / `SRE_WE_NIGHT` with a tier, once switched on (Night is one crew for the rota) |
 | TZ3 escalation | `SRE_TZ3` with a tier |
 | SUP regular hours | `SRE_TZ1_REGULAR`, `SRE_TZ2_REGULAR`, `SRE_TZ3_REGULAR` (no tier) |
 | AL, HD-AM, HD-PM, LL, SAB | `ANNUAL_LEAVE`, `HALF_DAY_LEAVE_MORNING`, `HALF_DAY_LEAVE_EVENING`, `LIEU_LEAVE`, `SABBATICAL_LEAVE` |
@@ -761,7 +821,8 @@ download the template from the environment you import into):
 - **`excludeAbsent` on the rota search.** `POST /team-schedule/assignments/search` takes `excludeAbsent: true` to leave out anyone away on the assignment's rota day: leave, excluded from the rota, or an allocation that moves them to another team (a span that moves somebody to another team does not count against that team's shifts). An allocation that moves nobody (Allo-INT, Allo-EXT, ENG, ...) does not count, since it does not hide a turn on the same day (`reminderAbsenceOn` in `schedule_repo.go`). `/team-schedule/on-duty` (both its modes) still counts every allocation (`absenceOn`), so for a person with such an allocation on a turn day the reminder and the pager differ until the on-duty rule is changed too. Off by default: the rota views draw leave over the rota. No schema change. Its caller is csm-scheduled-tasks' rota reminders (`rota_weekday_reminder`, `rota_weekend_notice`); an entity-service without the field refuses it (unknown field, 400), so deploy entity-service first.
 
 - **0199–0200 rotas.** The SME family; `team_schedule_rota`; `zone.rota_id` (TZ1–TZ3 on `SRE_SAAS`); the zone-family check widened from SRE to SRE or SME; IaaS and seven SME rotas, each with a Day and a Night zone and window; the `sme_rota_admin` role. Nothing is removed, renamed or re-typed, but existing objects do change: 0199 adds a value to `team_schedule_shift_family_enum`; 0200 adds the nullable column `team_schedule_zone.rota_id` and sets it on the existing TZ1–TZ3 rows, and replaces the zone-family CHECK with a wider one (every existing row satisfies it). IaaS's two windows are seeded inactive until the new webapp is deployed.
-- **0223 shared windows.** `team_schedule_shift.shared_across_teams` (BOOLEAN, default FALSE), TRUE for `SRE_TZ3` only: its tiers are one crew for the whole SaaS rota. `POST /team-schedule/assignments/apply` refuses (409, naming the holder) an SRE tier somebody else already holds on that zone and day -- per team, or across the rota on a shared window. Additive only; no constraint is added, since data written before it may already hold two people on one tier.
+- **0306 weekend Day/Night.** `SRE_WE_DAY` and `SRE_WE_NIGHT` (`shared_across_teams`), inserted inactive; see §2. Data only, re-runnable.
+- **0223 shared windows.** `team_schedule_shift.shared_across_teams` (BOOLEAN, default FALSE), TRUE for `SRE_TZ3` only (and `SRE_WE_NIGHT` since 0306): its tiers are one crew for the whole SaaS rota. `POST /team-schedule/assignments/apply` refuses (409, naming the holder) an SRE tier somebody else already holds on that zone and day -- per team, or across the rota on a shared window. Additive only; no constraint is added, since data written before it may already hold two people on one tier.
 - **0152–0155** replace `000088`–`000107`, which were written in the old
   up/down format. They reproduce the schema and catalogue that chain ended in
   exactly (compared with `pg_dump` against a server built from the old chain).

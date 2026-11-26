@@ -782,6 +782,31 @@ func (c *CustomerEntityClient) SearchSchedulePublicHolidays(ctx context.Context,
 	return c.do(ctx, http.MethodPost, "/team-schedule/public-holidays/search", body)
 }
 
+// ListPublicHolidays calls GET /team-schedule/public-holidays on the entity
+// service: the stored days in a window (of one country when country is not
+// empty), with their source, the countries in use and whether the caller may
+// edit. Response is returned as raw JSON.
+func (c *CustomerEntityClient) ListPublicHolidays(ctx context.Context, from, to, country string) ([]byte, error) {
+	q := url.Values{"from": {from}, "to": {to}}
+	if country != "" {
+		q.Set("country", country)
+	}
+	return c.do(ctx, http.MethodGet, "/team-schedule/public-holidays?"+q.Encode(), nil)
+}
+
+// AddPublicHolidays calls POST /team-schedule/public-holidays: one country's
+// days stored as manual rows. Response is returned as raw JSON.
+func (c *CustomerEntityClient) AddPublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/public-holidays", body)
+}
+
+// DeletePublicHoliday calls DELETE /team-schedule/public-holidays/{country}/{date},
+// both segments path-escaped (a country holds a space).
+func (c *CustomerEntityClient) DeletePublicHoliday(ctx context.Context, country, date string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete,
+		"/team-schedule/public-holidays/"+url.PathEscape(country)+"/"+url.PathEscape(date), nil)
+}
+
 // SearchHolidayAvailability calls POST /team-schedule/holiday-availability/search
 // on the entity service: each CRE team's availability on each public holiday
 // in a window. Response is returned as raw JSON.

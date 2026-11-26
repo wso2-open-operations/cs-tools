@@ -3106,6 +3106,14 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen and reopenReason are only supported for the Postgres data source"}
 	}
 
+	// AddWatchers/RemoveWatchers apply against the stored list inside one
+	// database transaction; the ServiceNow case API only replaces its whole
+	// watch list, so a delta here would be a read-then-write with the very race
+	// the fields exist to avoid. Refused rather than emulated: send watchList.
+	if len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0 {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "addWatchers and removeWatchers are only supported for the Postgres data source"}
+	}
+
 	hasResolutionFields := req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil
 
 	// exclusiveCount covers the role-gated fields with complex side effects

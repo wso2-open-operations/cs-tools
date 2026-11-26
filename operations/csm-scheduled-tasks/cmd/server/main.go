@@ -765,7 +765,9 @@ func main() {
 	//
 	// EOL_USAGE_REPORT_PORTAL_BASE_URL optionally links account and project
 	// names to their CSM portal pages (<base>/customers/accounts/<id>); a
-	// non-https value refuses to start, as every URL here does.
+	// non-https value refuses to start, as every URL here does. Unset, the
+	// report uses CSM_PORTAL_WEB_BASE_URL (worklogCaseLinkBase above, already
+	// checked), the portal URL every other report here links to.
 	eolUsagePortalBase := strings.TrimRight(os.Getenv("EOL_USAGE_REPORT_PORTAL_BASE_URL"), "/")
 	if eolUsagePortalBase != "" {
 		if err := httpsec.RequireSecureURL(eolUsagePortalBase); err != nil {
@@ -773,6 +775,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	eolUsagePortalBase = reportPortalBase(eolUsagePortalBase, worklogCaseLinkBase)
 	eolUsageTo, eolUsageCc := recipientsFor(recipientOverrides, eolusagescan.TaskName)
 	var eolUsageTaskWithRecipients []string
 	if len(eolUsageTo) > 0 {
@@ -897,7 +900,8 @@ func main() {
 	//
 	// DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL optionally links account and
 	// project names to their CSM portal pages (<base>/customers/accounts/<id>);
-	// a non-https value refuses to start, as every URL here does.
+	// a non-https value refuses to start, as every URL here does. Unset, the
+	// report uses CSM_PORTAL_WEB_BASE_URL (worklogCaseLinkBase, already checked).
 	deprecatedUsagePortalBase := strings.TrimRight(os.Getenv("DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL"), "/")
 	if deprecatedUsagePortalBase != "" {
 		if err := httpsec.RequireSecureURL(deprecatedUsagePortalBase); err != nil {
@@ -905,6 +909,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	deprecatedUsagePortalBase = reportPortalBase(deprecatedUsagePortalBase, worklogCaseLinkBase)
 	deprecatedUsageTo, deprecatedUsageCc := recipientsFor(recipientOverrides, deprecatedusagescan.TaskName)
 	if alertsEnabled && emailBaseURL == "" && len(deprecatedUsageTo) > 0 {
 		slog.Error("the deprecated product usage report has recipients but EMAIL_BASE_URL is not set; refusing to start since the report could never be sent",
@@ -2157,6 +2162,17 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// reportPortalBase is a monthly usage report's CSM portal base URL: its own
+// setting (own, already trimmed and checked) when set, otherwise the shared
+// CSM_PORTAL_WEB_BASE_URL (shared, already trimmed and checked). Both empty
+// leaves account and project names as plain text.
+func reportPortalBase(own, shared string) string {
+	if own != "" {
+		return own
+	}
+	return shared
 }
 
 func splitComma(s string) []string {

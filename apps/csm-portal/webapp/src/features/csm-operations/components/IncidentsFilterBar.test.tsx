@@ -15,7 +15,7 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type * as React from "react";
 import { DEFAULT_INCIDENT_FILTERS } from "@features/csm-operations/utils/incidents";
@@ -32,8 +32,9 @@ vi.mock("@features/csm-operations/api/useIncidentProductNameOptions", () => ({
   useIncidentProductNameOptions: () => useIncidentProductNameOptionsMock(),
 }));
 
-// The SRE Team control's options come from the shared team registry query —
-// stub it out too, same rationale as the product options above.
+// The Assignment group control lists the SRE teams from the shared team
+// registry query first — stub it out too, same rationale as the product options
+// above.
 const useTeamsMock = vi.fn(() => ({
   data: [
     { id: "apollo", name: "Apollo SRE Team", family: "sre-abt", sreGroupId: "team-apollo" },
@@ -61,12 +62,14 @@ vi.mock("@features/csm-users/api/useUserNamesById", () => ({
 }));
 // The extra incident assignment groups (security operations) come from their
 // own narrowed group search; tests steer its result per case.
-const useSearchIncidentExtraGroupsMock = vi.fn(
-  (): { data: Array<{ id: string; name: string; active: boolean }> | undefined; isError: boolean } => ({
-    data: [{ id: "group-soc", name: "Security Operations", active: true }],
-    isError: false,
-  }),
-);
+const defaultExtraGroups = (): {
+  data: Array<{ id: string; name: string; active: boolean }> | undefined;
+  isError: boolean;
+} => ({
+  data: [{ id: "group-soc", name: "Security Operations", active: true }],
+  isError: false,
+});
+const useSearchIncidentExtraGroupsMock = vi.fn(defaultExtraGroups);
 vi.mock("@api/useSearchGroups", () => ({
   useSearchIncidentExtraGroups: () => useSearchIncidentExtraGroupsMock(),
   useSearchGroups: () => ({
@@ -77,6 +80,20 @@ vi.mock("@api/useSearchGroups", () => ({
 }));
 vi.mock("@features/csm-dashboard/api/useTeams", () => ({
   useTeams: () => useTeamsMock(),
+}));
+// The selected groups' names are looked up by id (GET /groups/{id}); the
+// option list itself is the real hook over the mocks above. Its module also
+// imports the API client, which reads runtime config at load.
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ get: vi.fn(), post: vi.fn() }),
+}));
+const useIncidentFilterGroupLabelsMock = vi.fn((ids: string[]): Record<string, string> => {
+  void ids;
+  return {};
+});
+vi.mock("@features/csm-operations/api/useSearchIncidentFilterGroups", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@features/csm-operations/api/useSearchIncidentFilterGroups")>()),
+  useIncidentFilterGroupLabels: (ids: string[]) => useIncidentFilterGroupLabelsMock(ids),
 }));
 vi.mock("@features/saved-filter-views/useSavedFilterViews", () => ({
   useSavedFilterViews: () => ({
@@ -114,6 +131,13 @@ function renderFilterBar(
 }
 
 describe("IncidentsFilterBar", () => {
+  // The picker calls the extra-group search on every render, so a test steers
+  // it with mockImplementation and this puts the default back.
+  beforeEach(() => {
+    useSearchIncidentExtraGroupsMock.mockImplementation(defaultExtraGroups);
+    useIncidentFilterGroupLabelsMock.mockImplementation(() => ({}));
+  });
+
   it("labels both created-date bounds as UTC, so a picked day isn't mistaken for local time", () => {
     renderFilterBar();
     expect(screen.getAllByText(/created from \(utc\)/i).length).toBeGreaterThan(0);
@@ -177,70 +201,63 @@ describe("IncidentsFilterBar", () => {
     expect(screen.queryByRole("button", { name: /clear filters/i })).not.toBeInTheDocument();
   });
 
-  it("offers only sre-abt-family teams as SRE Team options, keyed by sreGroupId", () => {
+  /** Open the Assignment group picker and return its options' labels, in order. */
+  function openAssignmentGroups(): string[] {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Assignment group" }));
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  }
+
+  it("lists the SRE teams, then the extra incident group, then any other group, keyed by group id", () => {
     const { onChange } = renderFilterBar();
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
-    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
+    expect(openAssignmentGroups()).toEqual(["Apollo SRE Team", "Security Operations", "CAB Approval"]);
+    // Only the sre-abt family's teams are pinned (the CRE teams are the cases list's).
     expect(screen.queryByRole("option", { name: "Atlas CRE Team" })).not.toBeInTheDocument();
-    // Not every group: the list is the SRE teams, the way the cases list lists its CRE teams.
-    expect(screen.queryByRole("option", { name: "CAB Approval" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("option", { name: "Apollo SRE Team" }));
-
-    expect(onChange).toHaveBeenCalledWith({
-      ...DEFAULT_INCIDENT_FILTERS,
-      sreTeamIds: ["team-apollo"],
-    });
+    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["team-apollo"] });
   });
 
-  it("appends the extra incident group after the teams as an SRE Team option", () => {
+  it("filters by a group that is neither an SRE team nor an extra incident group", () => {
     const { onChange } = renderFilterBar();
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
-    const names = screen.getAllByRole("option").map((o) => o.textContent);
-    expect(names.indexOf("Security Operations")).toBe(names.indexOf("Apollo SRE Team") + 1);
+    openAssignmentGroups();
+    fireEvent.click(screen.getByRole("option", { name: "CAB Approval" }));
 
-    fireEvent.click(screen.getByRole("option", { name: "Security Operations" }));
-    expect(onChange).toHaveBeenCalledWith({
-      ...DEFAULT_INCIDENT_FILTERS,
-      sreTeamIds: ["group-soc"],
-    });
+    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["group-cab"] });
   });
 
   it("does not list an extra group twice when a team already carries its id", () => {
-    useSearchIncidentExtraGroupsMock.mockReturnValueOnce({
+    useSearchIncidentExtraGroupsMock.mockImplementation(() => ({
       data: [{ id: "team-apollo", name: "Apollo Group", active: true }],
       isError: false,
-    });
+    }));
     renderFilterBar();
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
-    expect(screen.getAllByRole("option", { name: /apollo/i })).toHaveLength(1);
-    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
+    expect(openAssignmentGroups()).toEqual(["Apollo SRE Team", "CAB Approval"]);
   });
 
-  it("shows only the teams when the extra-group request returns nothing", () => {
-    useSearchIncidentExtraGroupsMock.mockReturnValueOnce({ data: [], isError: false });
+  it("still lists the teams and other groups when the extra-group request fails", () => {
+    useSearchIncidentExtraGroupsMock.mockImplementation(() => ({ data: undefined, isError: true }));
     renderFilterBar();
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
-    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Security Operations" })).not.toBeInTheDocument();
+    expect(openAssignmentGroups()).toEqual(["Apollo SRE Team", "CAB Approval"]);
   });
 
-  it("still shows the teams when the extra-group request fails", () => {
-    useSearchIncidentExtraGroupsMock.mockReturnValueOnce({ data: undefined, isError: true });
-    renderFilterBar();
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
-    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Security Operations" })).not.toBeInTheDocument();
+  it("renders the label of a selected SRE team or extra group while the picker is closed", () => {
+    renderFilterBar({ filters: { ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["team-apollo", "group-soc"] } });
+    expect(screen.getAllByText("Apollo SRE Team, Security Operations").length).toBeGreaterThan(0);
   });
 
-  it("renders the label of a selected extra group while the picker is closed", () => {
-    renderFilterBar({ filters: { ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["group-soc"] } });
-    expect(screen.getAllByText("Security Operations").length).toBeGreaterThan(0);
+  it("names a restored group that is not pinned by looking it up, not by its id", () => {
+    useIncidentFilterGroupLabelsMock.mockImplementation(
+      (ids): Record<string, string> => (ids.includes("group-choreo") ? { "group-choreo": "Choreo SRE Team" } : {}),
+    );
+    renderFilterBar({ filters: { ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["group-choreo"] } });
+
+    expect(useIncidentFilterGroupLabelsMock).toHaveBeenLastCalledWith(["group-choreo"]);
+    expect(screen.getAllByText("Choreo SRE Team").length).toBeGreaterThan(0);
+    expect(screen.queryByText("group-choreo")).not.toBeInTheDocument();
   });
 
   it("calls onReset when Clear filters is clicked", () => {
@@ -251,7 +268,7 @@ describe("IncidentsFilterBar", () => {
     expect(onReset).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps State, SRE Team and Service quick, with Category, Assignee and Updated only under Advanced", () => {
+  it("keeps State, Assignment group and Service quick, with Category, Assignee and Updated only under Advanced", () => {
     const onChange = vi.fn();
     render(
       <IncidentsFilterBar
@@ -262,7 +279,7 @@ describe("IncidentsFilterBar", () => {
         onFiltersToggle={vi.fn()}
       />,
     );
-    for (const label of ["State", "SRE Team", "Service", "Priority"]) {
+    for (const label of ["State", "Assignment group", "Service", "Priority"]) {
       expect(screen.getAllByLabelText(label).length).toBeGreaterThan(0);
     }
     expect(screen.queryByLabelText("Category")).not.toBeInTheDocument();

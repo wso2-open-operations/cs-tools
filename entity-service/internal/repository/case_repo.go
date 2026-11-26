@@ -574,6 +574,19 @@ type CaseRepository interface {
 	// caseID does not exist; a ValidationError if any userID does not
 	// exist.
 	SetCaseWatchList(ctx context.Context, caseID string, userIDs []string, callerEmail string) ([]domain.WatchListUser, time.Time, error)
+	// ChangeCaseWatchers adds addIDs to and removes removeIDs from the case's
+	// watch list in one transaction, against whatever is stored at that moment
+	// (a delta, unlike SetCaseWatchList's replace, so it cannot drop a watcher
+	// a concurrent writer added). Adding an existing watcher and removing a
+	// non-watcher are no-ops. Bumps updated_on/updated_by like SetCaseWatchList
+	// and returns the resulting watch list and the new updated_on. NotFoundError
+	// if caseID does not exist; ValidationError if an added user does not exist.
+	ChangeCaseWatchers(ctx context.Context, caseID string, addIDs, removeIDs []string, callerEmail string) ([]domain.WatchListUser, time.Time, error)
+	// CaseWatcherUserIDs returns the user ids stored as the case's watchers,
+	// all of them: unlike the resolved watch list it leaves out neither the
+	// stored watchers a portal hides nor the account's default stakeholders,
+	// which are never stored. It is what a ServiceNow whole-list mirror must send.
+	CaseWatcherUserIDs(ctx context.Context, caseID string) ([]string, error)
 	// AddCaseWatcherIfAbsent inserts one work_item_watcher row for
 	// (caseID, userID) unless one already exists -- a targeted add, unlike
 	// SetCaseWatchList's full delete+insert replace, so it can run from a
@@ -4303,6 +4316,74 @@ func (r *caseRepo) SetCaseWatchList(ctx context.Context, caseID string, userIDs 
 		return nil, time.Time{}, err
 	}
 	return watchers, updatedOn, nil
+}
+
+// ChangeCaseWatchers implements CaseRepository.
+func (r *caseRepo) ChangeCaseWatchers(ctx context.Context, caseID string, addIDs, removeIDs []string, callerEmail string) ([]domain.WatchListUser, time.Time, error) {
+	var updatedOn time.Time
+	var watchers []domain.WatchListUser
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if err := r.vis.rejectHiddenChangeRequest(ctx, tx, caseID, "case not found"); err != nil {
+			return err
+		}
+		// The row lock on work_item serialises this against another watch-list
+		// writer on the same case, and the touch is what a reader sees as the
+		// case having changed.
+		if err := tx.QueryRow(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1 RETURNING updated_on`, caseID, callerEmail).Scan(&updatedOn); err != nil {
+			return fmt.Errorf("touch work_item for watch list change: %w", err)
+		}
+
+		if len(removeIDs) > 0 {
+			if _, err := tx.Exec(ctx,
+				`DELETE FROM work_item_watcher WHERE work_item_id = $1 AND user_id = ANY($2::uuid[])`,
+				caseID, removeIDs,
+			); err != nil {
+				return fmt.Errorf("remove case watchers: %w", err)
+			}
+		}
+		for _, userID := range addIDs {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO work_item_watcher (id, work_item_id, user_id) VALUES (gen_random_uuid(), $1, $2)
+				 ON CONFLICT (work_item_id, user_id) DO NOTHING`,
+				caseID, userID,
+			); err != nil {
+				if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
+					return &apierror.ValidationError{Msg: "one or more addWatchers user IDs do not exist"}
+				}
+				return fmt.Errorf("insert case watcher: %w", err)
+			}
+		}
+
+		var txErr error
+		watchers, txErr = fetchCaseWatchers(ctx, tx, caseID)
+		return txErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, time.Time{}, &apierror.NotFoundError{Msg: "case not found"}
+	}
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	return watchers, updatedOn, nil
+}
+
+// CaseWatcherUserIDs implements CaseRepository.
+func (r *caseRepo) CaseWatcherUserIDs(ctx context.Context, caseID string) ([]string, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT user_id::text FROM work_item_watcher WHERE work_item_id = $1 ORDER BY user_id`, caseID)
+	if err != nil {
+		return nil, fmt.Errorf("query case watcher ids: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan case watcher id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // AddCaseWatcherIfAbsent implements CaseRepository.

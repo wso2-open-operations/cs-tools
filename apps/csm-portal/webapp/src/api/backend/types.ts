@@ -807,6 +807,8 @@ interface BeCaseUpdateNever {
   workState?: never;
   assigneeEmail?: never;
   watchList?: never;
+  addWatchers?: never;
+  removeWatchers?: never;
   parentId?: never;
   subject?: never;
   description?: never;
@@ -910,6 +912,15 @@ export type BeCaseUpdatePayload =
    * see {@link BeUpdateIncidentPayload}).
    */
   | (Omit<BeCaseUpdateNever, "watchList"> & { watchList: string[] })
+  /**
+   * Add one or more users to the watch list (platform user UUIDs), applied by
+   * the backend against the list stored at that moment — unlike `watchList`,
+   * it cannot drop a watcher someone else added since this page loaded.
+   * PostgreSQL data source only. Still exactly one field per request.
+   */
+  | (Omit<BeCaseUpdateNever, "addWatchers"> & { addWatchers: string[] })
+  /** Remove users from the watch list; the counterpart of `addWatchers`. */
+  | (Omit<BeCaseUpdateNever, "removeWatchers"> & { removeWatchers: string[] })
   /**
    * UUID of another case, incident, change request, or problem to link this
    * case to as its parent (ServiceNow only, the hierarchical
@@ -2424,11 +2435,11 @@ export interface BeCreateCaseGithubIssuePayload {
   regression?: boolean;
   /** When true: appends "Hotfix Required : Yes" to the issue body. */
   hotFixRequired?: boolean;
-  /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
+  /** Issue-type label to apply on GitHub: "Type/Patch", "Type/Discussion" or "Type/Feature". */
   issueTypeLabel?: string;
   /** Priority label for Discussion: Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). */
   priorityLevel?: string;
-  /** Why the issue is P0 or P1 (free text). Written to the issue body. */
+  /** Why the issue is P0, P1 or P2 (free text). Written to the issue body. */
   priorityJustification?: string;
   /** Steps to reproduce, written to the issue body. */
   reproducingSteps?: string;
@@ -2438,6 +2449,10 @@ export interface BeCreateCaseGithubIssuePayload {
   relatedInternalIssues?: string;
   /** Project onboarding status is In-Progress. Adds Onboarding/affected. */
   onboardingInProgress?: boolean;
+  /** Feature Request: business use case, written to the issue body. */
+  businessUseCase?: string;
+  /** Feature Request: related Git issue links or numbers, written to the issue body. */
+  relatedGitIssues?: string;
 }
 
 /** `POST /cases/{id}/github-issues` response. */
@@ -3801,11 +3816,22 @@ export interface BeUpdateIncidentPayload {
   assignmentGroupId?: string | null;
   assignedEngineerId?: string | null;
   /**
-   * Full replacement watch list, as platform user UUIDs — not a delta. An
-   * explicitly empty array is meaningful and clears the watch list; omitting
-   * the key leaves it unchanged.
+   * Full replacement watch list, as platform user UUIDs. An explicitly empty
+   * array is meaningful and clears the watch list; omitting the key leaves it
+   * unchanged. It overwrites whatever is stored, so a page working from a stale
+   * copy drops watchers added since: prefer `addWatchers` / `removeWatchers`.
+   * Not combinable with them.
    */
   watchList?: string[];
+  /**
+   * Users to add to the watch list (platform user UUIDs), applied by the backend
+   * against the list stored at that moment, so concurrent changes are kept.
+   * PostgreSQL data source only. May be sent with `removeWatchers` and other
+   * fields.
+   */
+  addWatchers?: string[];
+  /** Users to remove from the watch list; the counterpart of `addWatchers`. */
+  removeWatchers?: string[];
   workNotes?: string | null;
   additionalComments?: string | null;
   parentId?: string | null;

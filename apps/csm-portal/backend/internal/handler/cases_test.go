@@ -3547,6 +3547,39 @@ func TestPatchCaseBestCaseFixEta(t *testing.T) {
 	}
 }
 
+// addWatchers / removeWatchers are single-field pass-through PATCH variants: the
+// entity service applies them against the watch list stored at that moment, so
+// this backend must forward them untouched (and never turn them into a whole
+// watchList, which would replace the list and drop a concurrent watcher).
+func TestPatchCaseWatchDelta_ForwardsVerbatim(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	for name, reqBody := range map[string]string{
+		"add":    `{"addWatchers":["22222222-2222-2222-2222-222222222222"]}`,
+		"remove": `{"removeWatchers":["22222222-2222-2222-2222-222222222222"]}`,
+		"both":   `{"addWatchers":["22222222-2222-2222-2222-222222222222"],"removeWatchers":["33333333-3333-3333-3333-333333333333"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var capturedBody []byte
+			client := &mockEntityCaseClient{
+				patchCaseFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+					capturedBody = body
+					return []byte(`{"message":"Case updated successfully","case":{"id":"` + testCaseID + `"}}`), nil
+				},
+			}
+			h := NewCaseHandler(client)
+			r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(reqBody)))
+			r.SetPathValue("id", testCaseID)
+			w := httptest.NewRecorder()
+			h.PatchCase(w, r)
+
+			assertStatus(t, w, http.StatusOK)
+			if string(capturedBody) != reqBody {
+				t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+			}
+		})
+	}
+}
+
 func TestPatchCaseMostLikelyFixEta(t *testing.T) {
 	// mostLikelyFixEta is a pure pass-through single-field PATCH variant, same
 	// shape as the existing fixEta test.

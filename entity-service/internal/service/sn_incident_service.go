@@ -1528,6 +1528,13 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 		return domain.UpdateIncidentResponse{}, err
 	}
 
+	// ServiceNow's update only replaces its whole watch list, so a delta here would
+	// be a read-then-write with the race the fields exist to avoid: refused, not
+	// emulated. Send watchList on this data source.
+	if len(req.AddWatchers) > 0 || len(req.RemoveWatchers) > 0 {
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "addWatchers and removeWatchers are only supported for the Postgres data source"}
+	}
+
 	hasUpdate := req.Subject != nil || req.Priority != nil || req.State != nil || req.Category != nil ||
 		req.Subcategory != nil || req.ContactType != nil || req.Impact != nil || req.Urgency != nil ||
 		req.ResolutionCode != nil || req.ParentID != nil || req.ParentIncidentID != nil ||

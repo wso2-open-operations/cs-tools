@@ -24,7 +24,7 @@ const KEY = ["team-schedule", "holiday-availability"] as const;
 
 /**
  * Each CRE team's availability on each public holiday from `from` to `to`
- * (CRE only; the server places the Public holiday tags three weeks ahead).
+ * (CRE only; the server places the Public holiday tags as soon as a holiday is stored).
  */
 export function useHolidayAvailability(from: string, to: string, enabled = true): UseQueryResult<HolidayAvailabilityResponse> {
   const api = useBackendApi();

@@ -84,9 +84,9 @@ func TestDeprecatedProductUsageReportIntegration(t *testing.T) {
 		($1::uuid, 'dep-am', 'dep-am@example.com', 'Ann', 'Manager', NOW(), NOW()),
 		($2::uuid, 'dep-to', 'dep-to@example.com', 'Tom', 'Owner', NOW(), NOW())`, depID(1), depID(2))
 	exec(`INSERT INTO "group" (id, name, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'DEP IT Team', `+audit+`)`, depID(3))
-	exec(`INSERT INTO account (id, number, name, region, cre_team_id, account_manager_id, technical_owner_id, created_on, created_by, updated_on, updated_by) VALUES
-		($1::uuid, 'DEPIT-A', 'DEP IT Account', 'APAC', $3::uuid, $4::uuid, $5::uuid, `+audit+`),
-		($2::uuid, 'DEPIT-B', 'DEP IT No Region', NULL, NULL, NULL, NULL, `+audit+`)`, depID(10), depID(11), depID(3), depID(1), depID(2))
+	exec(`INSERT INTO account (id, number, name, region, cre_team_id, account_manager_id, technical_owner_id, life_cycle, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, 'DEPIT-A', 'DEP IT Account', 'APAC', $3::uuid, $4::uuid, $5::uuid, 'Customer', `+audit+`),
+		($2::uuid, 'DEPIT-B', 'DEP IT No Region', NULL, NULL, NULL, NULL, 'Customer', `+audit+`)`, depID(10), depID(11), depID(3), depID(1), depID(2))
 	exec(`INSERT INTO project (id, account_id, name, key, created_on, created_by, updated_on, updated_by) VALUES
 		($1::uuid, $3::uuid, 'DEP IT Project', 'DEPITPROJ', `+audit+`),
 		($2::uuid, $4::uuid, 'DEP IT Other', 'DEPITOTHER', `+audit+`)`, depID(20), depID(21), depID(10), depID(11))
@@ -162,9 +162,9 @@ func TestDeprecatedProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
 		}
 	}
 	// 60: a current account; 61: an account deleted in Salesforce.
-	exec(`INSERT INTO account (id, number, name, region, deleted_on, created_on, created_by, updated_on, updated_by) VALUES
-		($1::uuid, 'DEPIT-C', 'DEP IT Current', 'EMEA', NULL, `+audit+`),
-		($2::uuid, 'DEPIT-D', 'DEP IT Deleted', 'EMEA', NOW(), `+audit+`)`, depID(60), depID(61))
+	exec(`INSERT INTO account (id, number, name, region, deleted_on, life_cycle, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, 'DEPIT-C', 'DEP IT Current', 'EMEA', NULL, 'Customer', `+audit+`),
+		($2::uuid, 'DEPIT-D', 'DEP IT Deleted', 'EMEA', NOW(), 'Customer', `+audit+`)`, depID(60), depID(61))
 	// Projects: 62 open, 63 inactive, 64 closed by WSO2, 65 suspended (still a
 	// customer), 66 the deleted account's.
 	exec(`INSERT INTO project (id, account_id, name, key, is_active, wso2_closure_state, created_on, created_by, updated_on, updated_by) VALUES
@@ -201,5 +201,57 @@ func TestDeprecatedProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
 	want := []string{"DEPITOPEN", "DEPITSUSP"}
 	if len(keys) != len(want) || keys[0] != want[0] || keys[1] != want[1] {
 		t.Fatalf("projects = %v, want %v", keys, want)
+	}
+}
+
+// Only customer accounts are listed: an account whose Salesforce life cycle
+// is anything but exactly 'Customer' (lost, possibly lost, prospect, partner,
+// none, or "customer" in another case or with surrounding space) is left out even though its Primary Production deployment runs
+// a Deprecated version and is marked active.
+func TestDeprecatedProductUsageReportListsOnlyCustomerAccounts(t *testing.T) {
+	pool := depPool(t)
+	ctx := context.Background()
+	depCleanup(t, pool)
+	t.Cleanup(func() { depCleanup(t, pool) })
+
+	const audit = `NOW(), 'it', NOW(), 'it'`
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	lifeCycles := []any{"Customer", "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner", nil, "customer", " Customer "}
+	exec(`INSERT INTO product (id, name, category, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'DEP IT Product', 'SOFTWARE', `+audit+`)`, depID(1))
+	exec(`INSERT INTO product_version (id, product_id, version, support_eol_date, current_support_status, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, $2::uuid, '1.0.0', NULL, 'DEPRECATED', `+audit+`)`, depID(2), depID(1))
+	// Account 10+i (life cycle i), project 20+i, deployment 30+i, deployed product 40+i.
+	for i, lc := range lifeCycles {
+		n := string(rune('0' + i))
+		exec(`INSERT INTO account (id, number, name, region, life_cycle, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2, $3, 'APAC', $4, `+audit+`)`, depID(10+i), "DEPIT-LC"+n, "DEP IT Life Cycle "+n, lc)
+		exec(`INSERT INTO project (id, account_id, name, key, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2::uuid, $3, $4, `+audit+`)`, depID(20+i), depID(10+i), "DEP IT LC Project "+n, "DEPITLC"+n)
+		exec(`INSERT INTO deployment (id, project_id, name, number, type, is_active, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2::uuid, 'pp', $3, 'PRIMARY_PRODUCTION', TRUE, `+audit+`)`, depID(30+i), depID(20+i), "DEPIT-LCD"+n)
+		exec(`INSERT INTO deployed_product (id, number, deployment_id, version_id, active, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2, $3::uuid, $4::uuid, TRUE, `+audit+`)`, depID(40+i), "DEPIT-LCQ"+n, depID(30+i), depID(2))
+	}
+
+	repo := repository.NewDeprecatedProductUsageReportRepository(repository.NewScoped(pool))
+	rows, err := repo.ListDeprecatedUsage(repository.WithSystemIdentity(ctx))
+	if err != nil {
+		t.Fatalf("ListDeprecatedUsage: %v", err)
+	}
+	var listed []string
+	for _, r := range rows {
+		for i := range lifeCycles {
+			if r.AccountID == depID(10+i) {
+				listed = append(listed, r.AccountName)
+			}
+		}
+	}
+	if len(listed) != 1 || listed[0] != "DEP IT Life Cycle 0" {
+		t.Fatalf("listed %v, want only the Customer account", listed)
 	}
 }

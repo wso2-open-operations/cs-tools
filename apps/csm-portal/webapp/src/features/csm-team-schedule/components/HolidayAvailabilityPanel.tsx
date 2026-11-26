@@ -21,7 +21,7 @@ import { useHolidayAvailability, useHolidayConfirmation } from "../api/useHolida
 import { useDeleteAbsence } from "../api/useTeamSchedule";
 import type { HolidayAvailability, HolidayAvailabilityMember, HolidayAvailabilityStatus } from "../types";
 
-/** How far ahead the panel looks: the server places the tags three weeks ahead. */
+/** How far ahead the panel looks: past the 14-day notice. The tags themselves are placed as soon as a holiday is stored. */
 export const HOLIDAY_LOOKAHEAD_DAYS = 21;
 
 /** Formats a Date as a local YYYY-MM-DD calendar day. */
@@ -156,7 +156,7 @@ function HolidayTeamRow({ h }: { h: HolidayAvailability }): JSX.Element {
 
 /**
  * Working on a public holiday (CRE). A member is off on a public holiday of
- * their country: the server tags them "Public holiday" three weeks ahead,
+ * their country: the server tags them "Public holiday" as soon as the holiday is stored,
  * which takes the day off their timesheet and them off the rota. The team's
  * lead or rota manager makes somebody available by removing the tag (here,
  * or on the roster), then confirms the team; the reminders stop once every

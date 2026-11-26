@@ -15,6 +15,8 @@
 // under the License.
 
 import { Link } from "react-router-dom";
+import { usePortalAccess } from "@src/access/usePortalAccess";
+import { isMoreItemVisible } from "./moreItems";
 import { List, ListItemButton, ListItemIcon, ListItemText, Stack } from "@wso2/oxygen-ui";
 import {
   Briefcase,
@@ -52,10 +54,11 @@ const MORE_ITEMS: MoreItem[] = [
 ];
 
 export default function MorePage() {
+  const { access } = usePortalAccess();
   return (
     <Stack gap={2}>
       <List disablePadding>
-        {MORE_ITEMS.map((item) => (
+        {MORE_ITEMS.filter((item) => isMoreItemVisible(item.path, access)).map((item) => (
           <ListItemButton key={item.path} component={Link} to={item.path} sx={{ borderRadius: 1 }}>
             <ListItemIcon sx={{ minWidth: 40 }}>
               <item.icon size={20} />

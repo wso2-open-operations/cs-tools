@@ -142,8 +142,8 @@ func definition(rotation, members, local, utc, role, note string) string {
 }
 
 // sreGroup is one support rotation inside a row's support cell.
-func sreGroup(rotation, hours string, names ...string) string {
-	return strings.Join(names, "<br/>") + smallText(rotation+", "+hours)
+func sreGroup(hours string, names ...string) string {
+	return strings.Join(names, "<br/>") + smallText(hours)
 }
 
 // syncNote is the note under a long general-support window shared by several.
@@ -850,10 +850,10 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 		">CRE Team</th>",
 		">SRE Team</th></tr>",
 		// Each SRE turn sits in the CRE window its hours overlap most.
-		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup("SRE Weekend", lkHours, "Kim (L1)", "Lee (L2)")),
-			windowRow("Americas Weekend", americasHours, []string{"Ivy", "Jay (on-call)"}, sreGroup("SRE Night", "09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
-		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup("SRE Weekend", lkHours, "Kim (L1)", "Oli (L2)")),
-			windowRow("Americas Weekend", americasHours, []string{"Ivy"}, sreGroup("SRE Night", "09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup(lkHours, "Kim (L1)", "Lee (L2)")),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy", "Jay (on-call)"}, sreGroup("09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup(lkHours, "Kim (L1)", "Oli (L2)")),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy"}, sreGroup("09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
 	} {
 		if !strings.Contains(summary.body, want) {
 			t.Errorf("summary lacks %q:\n%s", want, summary.body)
@@ -870,9 +870,9 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 			t.Errorf("an SRE person got %q", m.subject)
 		}
 	}
-	// The definitions are the CRE windows only, and there is no SRE label row
-	// or disclaimer.
-	for _, unwanted := range []string{"SRE Weekend (TZ1", "SRE Night (TZ3)", "SRE Weekend Support", "for information", "no calendar invitation"} {
+	// The definitions are the CRE windows only, and there is no SRE label row,
+	// rotation name or disclaimer: the SRE column shows hours and tiers only.
+	for _, unwanted := range []string{"SRE Weekend", "SRE Night", "for information", "no calendar invitation"} {
 		if strings.Contains(summary.body, unwanted) {
 			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
 		}
@@ -983,4 +983,58 @@ func TestWindowTextNamesBothDaysAcrossMidnight(t *testing.T) {
 	if got, want := windowText(start, start.Add(3*time.Hour), colombo), "08:00–11:00 IST"; got != want {
 		t.Errorf("same-day windowText = %q, want %q", got, want)
 	}
+}
+
+// After the SaaS weekend moves to Day/Night (SRE_WE_DAY 06:00-18:00, SRE_WE_NIGHT
+// 18:00-06:00 IST) the summary lists those turns the same way, under the same
+// group names, with their own hours.
+func TestWeekendNotice_ListsTheSREDayNightWeekendTurns(t *testing.T) {
+	var sre []teamschedule.Assignment
+	for _, a := range sreWeekend() {
+		switch a.ShiftCode {
+		case "SRE_WE_TZ1":
+			a.ShiftCode = "SRE_WE_DAY"
+			a = assignmentAt(a, "06:00", "18:00", false)
+		case "SRE_TZ3":
+			a.ShiftCode = "SRE_WE_NIGHT"
+			a = assignmentAt(a, "18:00", "06:00", true)
+		}
+		sre = append(sre, a)
+	}
+	rota := &fakeRota{assignments: fullWeekend(), other: map[string][]teamschedule.Assignment{"SRE": sre}}
+	mail := &fakeEmail{}
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
+	cfg.Support = SREWeekendSupport()
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation")
+	for _, want := range []string{
+		sreGroup("06:00 AM &#8211; 06:00 PM IST", "Kim (L1)", "Lee (L2)"),
+		sreGroup("06:00 AM &#8211; 06:00 PM IST", "Kim (L1)", "Oli (L2)"),
+		sreGroup("06:00 PM &#8211; 06:00 AM IST", "Max (L1)"),
+	} {
+		if !strings.Contains(summary.body, want) {
+			t.Errorf("summary lacks %q:\n%s", want, summary.body)
+		}
+	}
+	for _, unwanted := range []string{"Pat", "(Day)", "(Weekend Night)", "SRE Weekend", "SRE Night"} {
+		if strings.Contains(summary.body, unwanted) {
+			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
+		}
+	}
+}
+
+// assignmentAt moves a to the window [from, to) IST on its own rota day,
+// with to on the next day when overnight.
+func assignmentAt(a teamschedule.Assignment, from, to string, overnight bool) teamschedule.Assignment {
+	day := a.RotaDate
+	next := day
+	if overnight {
+		d, _ := time.Parse("2006-01-02", day)
+		next = d.AddDate(0, 0, 1).Format("2006-01-02")
+	}
+	b := assignment(a.Engineer.Name, a.Engineer.Email, a.TeamKey, a.ShiftCode, day, day+" "+from, next+" "+to)
+	b.Tier = a.Tier
+	return b
 }

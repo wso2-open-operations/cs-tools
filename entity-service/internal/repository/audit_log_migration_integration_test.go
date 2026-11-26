@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -312,8 +313,8 @@ func TestAuditMigration_SalesforceSlaAndNoteTablesAreAudited(t *testing.T) {
 	}
 }
 
-// Migration 0304: an INSERT is not audited, an UPDATE and a DELETE are. Counts
-// what each statement adds, since the append-only log keeps rows from earlier runs.
+// An INSERT is not audited, an UPDATE and a DELETE are (a delete as one row, see
+// migration 0307). Counts what each statement adds, since the append-only log keeps rows from earlier runs.
 func TestAuditMigration_InsertsAreNotAudited(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	const table = "zz_audit_test_noinsert"
@@ -342,8 +343,8 @@ func TestAuditMigration_InsertsAreNotAudited(t *testing.T) {
 	}
 
 	auditExec(t, pool, "DELETE FROM "+table+" WHERE id = 1")
-	if n := count("DELETE") - deletesBefore; n != 3 {
-		t.Errorf("a delete wrote %d audit rows, want 3 (one per column)", n)
+	if n := count("DELETE") - deletesBefore; n != 1 {
+		t.Errorf("a delete wrote %d audit rows, want 1 (the whole row)", n)
 	}
 }
 
@@ -559,10 +560,19 @@ func TestAuditMigration_UpdatedOnAndUpdatedByAreNeverLogged(t *testing.T) {
 		t.Errorf("a stamps-only update wrote %d audit rows, want 0", n)
 	}
 
-	// A delete logs every non-NULL column except the stamps.
+	// A delete logs one row holding every non-NULL column except the stamps.
 	auditExec(t, pool, "DELETE FROM "+table+" WHERE id = 1")
-	if got := fields("DELETE"); got != "id,note" {
-		t.Errorf("delete logged %q, want id,note", got)
+	if got := fields("DELETE"); got != "__row__" {
+		t.Errorf("delete logged %q, want the single __row__", got)
+	}
+	var deletedColumns string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT string_agg(k, ',' ORDER BY k) FROM csm_audit_log, jsonb_object_keys(old_value) AS k
+		  WHERE table_name = $1 AND action = 'DELETE'`, table).Scan(&deletedColumns); err != nil {
+		t.Fatalf("read the deleted row: %v", err)
+	}
+	if deletedColumns != "id,note" {
+		t.Errorf("the deleted row holds %q, want id,note", deletedColumns)
 	}
 }
 
@@ -651,4 +661,162 @@ func TestAuditMigration_TriggerFunctionIsNotExecutableByPublic(t *testing.T) {
 	if n := auditCount(t, pool, "SELECT count(*) FROM pg_proc WHERE oid = 'audit_log_row_change'::regproc AND proacl IS NOT NULL"); n != 1 {
 		t.Errorf("audit_log_row_change still has the default (PUBLIC) privileges")
 	}
+}
+
+// A log row that cannot be written must not undo the business change: the update
+// and the delete both go through. Each failed row change raises one WARNING naming
+// the table, the record and every column of that change, and never a value. The
+// fault is selective: a CHECK (NOT VALID, so rows already there are left alone)
+// lets the first field's log row in and rejects a later one, so the test also
+// proves a change that fails part way leaves no log rows at all. It is added and
+// rolled back inside one transaction so no other test sees it.
+func TestAuditMigration_AFailingLogInsertDoesNotBlockTheWrite(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	auditTestTable(t, pool, "audit_failopen_t")
+	auditExec(t, pool, "CREATE TABLE audit_failopen_t (id INT PRIMARY KEY, v TEXT, w TEXT, updated_on TIMESTAMPTZ)")
+	auditExec(t, pool, "INSERT INTO audit_failopen_t VALUES (1, 'a', 'x', now()), (2, 'b', NULL, now())")
+	auditExec(t, pool, "SELECT register_audit(current_schema(), 'audit_failopen_t')")
+
+	ctx := context.Background()
+	cfg, err := pgx.ParseConfig(os.Getenv("ENTITY_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	cfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { warnings = append(warnings, n.Message) }
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// jsonb walks keys shortest first, then by name: the update logs v then w, so w
+	// is the one refused after v was written. A delete is one row, so it is refused
+	// whole.
+	if _, err := tx.Exec(ctx, `ALTER TABLE csm_audit_log ADD CONSTRAINT audit_failopen_block CHECK (
+	    table_name <> 'audit_failopen_t'
+	    OR NOT ((action = 'UPDATE' AND field_name = 'w') OR action = 'DELETE')) NOT VALID`); err != nil {
+		t.Fatalf("force a later log insert to fail: %v", err)
+	}
+	const rowsSQL = "SELECT count(*) FROM csm_audit_log WHERE table_name = 'audit_failopen_t'"
+	var rowsBefore int
+	if err := tx.QueryRow(ctx, rowsSQL).Scan(&rowsBefore); err != nil {
+		t.Fatal(err)
+	}
+	rowsNow := func() int {
+		t.Helper()
+		var n int
+		if err := tx.QueryRow(ctx, rowsSQL).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	tag, err := tx.Exec(ctx, "UPDATE audit_failopen_t SET v = 'secret-new', w = 'y', updated_on = now() WHERE id = 1")
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("update with a failing log insert: rows=%d err=%v, want it to succeed", tag.RowsAffected(), err)
+	}
+	tag, err = tx.Exec(ctx, "DELETE FROM audit_failopen_t WHERE id = 2")
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("delete with a failing log insert: rows=%d err=%v, want it to succeed", tag.RowsAffected(), err)
+	}
+	var v string
+	if err := tx.QueryRow(ctx, "SELECT v FROM audit_failopen_t WHERE id = 1").Scan(&v); err != nil || v != "secret-new" {
+		t.Errorf("row 1 = %q, err %v; the business change should have been kept", v, err)
+	}
+	var remaining int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM audit_failopen_t WHERE id = 2").Scan(&remaining); err != nil || remaining != 0 {
+		t.Errorf("row 2 still there (%d), err %v; the delete should have been kept", remaining, err)
+	}
+	if n := rowsNow(); n != rowsBefore {
+		t.Errorf("the failed changes left %d log row(s) behind, want none: a change is never half logged", n-rowsBefore)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(warnings) != 2 {
+		t.Fatalf("got %d warnings %q, want one per row change", len(warnings), warnings)
+	}
+	// The updated_on change is not logged, so it is not named; the two real ones are.
+	for _, want := range []string{"could not log UPDATE on", "audit_failopen_t record 1 columns [v, w]"} {
+		if !strings.Contains(warnings[0], want) {
+			t.Errorf("update warning %q lacks %q", warnings[0], want)
+		}
+	}
+	// A delete names the columns that held a value; the NULL one is left out.
+	if !strings.Contains(warnings[1], "could not log DELETE on") || !strings.Contains(warnings[1], "audit_failopen_t record 2 columns [id, v]") {
+		t.Errorf("delete warning %q should name the table, record 2 and columns [id, v]", warnings[1])
+	}
+	for _, w := range warnings {
+		for _, value := range []string{"secret-new", "'a'", "'b'"} {
+			if strings.Contains(w, value) {
+				t.Errorf("warning %q leaks the value %s", w, value)
+			}
+		}
+	}
+
+	// With the failure gone, the same change is logged as usual. The log is
+	// append-only and keeps rows from earlier runs, so compare counts.
+	before := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = 'audit_failopen_t' AND field_name = 'v'")
+	auditExec(t, pool, "UPDATE audit_failopen_t SET v = 'again' WHERE id = 1")
+	if n := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = 'audit_failopen_t' AND field_name = 'v'"); n != before+1 {
+		t.Errorf("logged rows after the failure was removed went from %d to %d, want one more", before, n)
+	}
+}
+
+// A delete is logged as one row for the whole record: field __row__, the old row
+// as a JSON object in old_value, no new_value. NULL and excluded columns and the
+// update stamps are left out, a masked column reads [hidden], and a value over the
+// size limit reads [value too large] without hiding the other columns.
+func TestAuditMigration_ADeleteIsLoggedAsOneRow(t *testing.T) {
+	pool := newAuditMigrationTestPool(t)
+	table := "zz_audit_test_delete_row_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	auditTestTable(t, pool, table)
+	auditExec(t, pool, "CREATE TABLE "+table+` (id int PRIMARY KEY, note text, secret text, skipped text,
+	    big text, empty text, updated_by text)`)
+	auditExec(t, pool, "SELECT register_audit('"+auditSchema(t, pool)+"', '"+table+"', NULL, ARRAY['skipped'], ARRAY['secret'])")
+	auditExec(t, pool, "INSERT INTO "+table+" VALUES (7, 'kept', 'hunter2', 'excluded', repeat('x', 9000), NULL, 'someone')")
+	auditExec(t, pool, "DELETE FROM "+table+" WHERE id = 7")
+
+	rows := auditCount(t, pool, "SELECT count(*) FROM csm_audit_log WHERE table_name = $1", table)
+	if rows != 1 {
+		t.Fatalf("a delete wrote %d audit rows, want 1", rows)
+	}
+	var recordID, field, action string
+	var newValueIsNull bool
+	if err := pool.QueryRow(context.Background(),
+		"SELECT record_id, field_name, action, new_value IS NULL FROM csm_audit_log WHERE table_name = $1", table).
+		Scan(&recordID, &field, &action, &newValueIsNull); err != nil {
+		t.Fatal(err)
+	}
+	if recordID != "7" || field != "__row__" || action != "DELETE" || !newValueIsNull {
+		t.Errorf("row = (%q, %q, %q, new_value null %v), want (7, __row__, DELETE, true)", recordID, field, action, newValueIsNull)
+	}
+	check := func(key, want string) {
+		t.Helper()
+		var got *string
+		if err := pool.QueryRow(context.Background(),
+			"SELECT old_value ->> $2 FROM csm_audit_log WHERE table_name = $1", table, key).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case want == "" && got != nil:
+			t.Errorf("the deleted row holds %s = %q, want it left out", key, *got)
+		case want != "" && (got == nil || *got != want):
+			t.Errorf("the deleted row holds %s = %v, want %q", key, got, want)
+		}
+	}
+	check("id", "7")
+	check("note", "kept")
+	check("secret", "[hidden]")
+	check("big", "[value too large]")
+	check("skipped", "")    // excluded by the registration
+	check("empty", "")      // NULL
+	check("updated_by", "") // never logged
 }

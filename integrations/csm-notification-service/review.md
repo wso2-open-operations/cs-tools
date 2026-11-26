@@ -18,6 +18,14 @@ review catches it too.
       summaries only.
 - [ ] No raw upstream error body echoed to a log — a Google Chat error response can echo back part
       of the submitted card (title/text) verbatim; log ids and status codes, never the error body.
+      That includes the fallback branch for errors that are not `*apierror.Error`: an OAuth token
+      error's text carries the token endpoint's response body too, so log its type, not `err`.
+- [ ] A case-only fallback keyed on a blank `clockState` field (e.g. `TeamEmail == ""` meaning
+      "no ABT") checks `CaseType` and excludes incidents: `sendIncidentBreachAlert` blanks
+      `TeamEmail`/`TeamLeadName` on purpose, so without that check it fires on every incident
+      (caught when rebasing the CRE head fallback onto main's incident SLA alerts). Incident-side
+      fallbacks are out of scope here (an empty `AssignmentGroupName` keeping the
+      registration-time group is intended).
 - [ ] New behavior has a test exercising it, not just a happy-path smoke test — this service has
       an unusually high density of named regression tests for exactly this reason (real,
       live-observed duplicate-send/race bugs each got one).
@@ -30,6 +38,8 @@ review catches it too.
 - [ ] No real name/email/URL/org-specific identifier copied from a screenshot, pasted log, or API
       response into code, tests, docs, or commit/PR text — use a generic placeholder.
 - [ ] No ticket/issue number or repo name cited in a code comment — explain the why directly.
+- [ ] Every new `.go` file, tests included, starts with the Apache license header the other files
+      carry — the CRE head fallback added three without it and a reviewer caught it.
 
 ## API design and naming
 

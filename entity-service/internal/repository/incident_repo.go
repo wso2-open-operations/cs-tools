@@ -332,6 +332,10 @@ type IncidentLifecycleUpdate struct {
 	IncidentReport      *string
 	Environment         **string  // non-nil outer, nil inner clears it
 	WatchList           *[]string // replaces the whole list, as ServiceNow does; empty clears it
+	// AddWatchers/RemoveWatchers (user ids) change the list by delta against
+	// what is stored when the transaction runs; never combined with WatchList.
+	AddWatchers    []string
+	RemoveWatchers []string
 
 	// PriorityFor is ServiceNow's priority lookup (impact x urgency). When
 	// Impact or Urgency is set, priority is recomputed from the new value and
@@ -675,6 +679,20 @@ var incidentAggregateColumns = map[string]string{
 	"businessService": "inc.service_id::TEXT",
 }
 
+// incidentAggregateBucket is one aggregate row as a bucket, labelled in lower
+// case. A state bucket keeps the domain state as its key (NEW, IN_PROGRESS,
+// ...): that is the value incident search's "state" filter takes, so a
+// dashboard slice opened with its own key finds its incidents. Every other key
+// is lower case like its label.
+func incidentAggregateBucket(groupBy, key string, count int) domain.AggregateBucket {
+	if groupBy == "state" {
+		key = *incidentStateFromEnum(&key)
+		return domain.AggregateBucket{Key: key, Label: strings.ToLower(key), Count: count}
+	}
+	lowerKey := strings.ToLower(key)
+	return domain.AggregateBucket{Key: lowerKey, Label: lowerKey, Count: count}
+}
+
 // AggregateIncidents implements IncidentRepository.
 //
 // crvis: internal callers only: /incidents routes are wrapped by internalOnly (server/routes.go); the change_request join only names the linked change request
@@ -706,11 +724,7 @@ func (r *incidentRepo) AggregateIncidents(ctx context.Context, req domain.Search
 		if err := rows.Scan(&key, &count); err != nil {
 			return domain.AggregateResponse{}, fmt.Errorf("scan incident bucket: %w", err)
 		}
-		if groupBy == "state" {
-			key = *incidentStateFromEnum(&key)
-		}
-		lowerKey := strings.ToLower(key)
-		buckets = append(buckets, domain.AggregateBucket{Key: lowerKey, Label: lowerKey, Count: count})
+		buckets = append(buckets, incidentAggregateBucket(groupBy, key, count))
 		totalRecords += count
 	}
 	if err := rows.Err(); err != nil {
@@ -1650,6 +1664,11 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 			return err
 		}
 	}
+	if len(u.AddWatchers) > 0 || len(u.RemoveWatchers) > 0 {
+		if err := changeIncidentWatchers(ctx, tx, id, u.AddWatchers, u.RemoveWatchers); err != nil {
+			return err
+		}
+	}
 	// After the incident's own write, as ServiceNow's cascade is an after rule.
 	if u.State != nil && *u.State != currentState {
 		return cascadeIncidentTaskClosure(ctx, tx, id, number, *u.State, actorEmail)
@@ -1775,6 +1794,45 @@ func replaceIncidentWatchers(ctx context.Context, tx pgx.Tx, incidentID string, 
 		); err != nil {
 			return fmt.Errorf("update incident: add watcher: %w", err)
 		}
+	}
+	return nil
+}
+
+// changeIncidentWatchers adds addIDs to and removes removeIDs from the
+// incident's watch list (user ids) without touching anyone else's row, so it is
+// safe against a concurrent change to the list, unlike replaceIncidentWatchers.
+// Re-adding a watcher and removing a non-watcher are no-ops; an added id that
+// is not a user is a validation error. The caller has checked the ids are UUIDs.
+func changeIncidentWatchers(ctx context.Context, tx pgx.Tx, incidentID string, addIDs, removeIDs []string) error {
+	if len(removeIDs) > 0 {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM work_item_watcher WHERE work_item_id = $1 AND user_id = ANY($2::uuid[])`,
+			incidentID, removeIDs,
+		); err != nil {
+			return fmt.Errorf("update incident: remove watchers: %w", err)
+		}
+	}
+	if len(addIDs) == 0 {
+		return nil
+	}
+	unique := make(map[string]struct{}, len(addIDs))
+	for _, id := range addIDs {
+		unique[strings.ToLower(id)] = struct{}{}
+	}
+	var known int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM "user" WHERE id = ANY($1::uuid[])`, addIDs).Scan(&known); err != nil {
+		return fmt.Errorf("update incident: check watchers: %w", err)
+	}
+	if known != len(unique) {
+		return &apierror.ValidationError{Msg: "addWatchers contains a user that does not exist"}
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO work_item_watcher (id, work_item_id, user_id)
+		SELECT gen_random_uuid(), $1, u.id FROM "user" u WHERE u.id = ANY($2::uuid[])
+		ON CONFLICT (work_item_id, user_id) DO NOTHING`,
+		incidentID, addIDs,
+	); err != nil {
+		return fmt.Errorf("update incident: add watchers: %w", err)
 	}
 	return nil
 }

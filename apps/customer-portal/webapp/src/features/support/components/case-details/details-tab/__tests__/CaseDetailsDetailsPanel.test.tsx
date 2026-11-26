@@ -125,12 +125,30 @@ describe("CaseDetailsDetailsPanel", () => {
     fireEvent.click(customerChip.querySelector(".MuiChip-deleteIcon")!);
     expect(screen.getByText("Mandatory Staff")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Only the removal is sent. The locked stakeholder is not named at all, so
+    // it can't be dropped, and anyone a colleague added meanwhile is untouched.
     expect(patchCase).toHaveBeenCalledWith(
-      { watchList: ["staff@example.com"] }, expect.anything(),
+      { removeWatchers: ["amy@example.com"] }, expect.anything(),
+    );
+  });
+
+  it("sends only the added watcher, never the whole list", () => {
+    patchCase.mockClear();
+    renderDetailsPanel({ caseId: "case-001", data: {
+      ...mockCaseDetails,
+      watchList: [{ name: "Staff Ⓦ", email: "staff@example.com", isInternal: true }],
+    } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Watch List" }));
+    fireEvent.click(screen.getByRole("option", { name: /Amy Customer/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(patchCase).toHaveBeenCalledWith(
+      { addWatchers: ["amy@example.com"] }, expect.anything(),
     );
   });
 
   it("uses one editor for internal and external watchers and allows either to be removed and re-added", () => {
+    patchCase.mockClear();
     renderDetailsPanel({ caseId: "case-001", data: {
       ...mockCaseDetails,
       watchList: [
@@ -146,10 +164,8 @@ describe("CaseDetailsDetailsPanel", () => {
     fireEvent.mouseDown(input);
     fireEvent.click(screen.getByRole("option", { name: /Staff/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(patchCase).toHaveBeenCalledWith(
-      expect.objectContaining({ watchList: expect.arrayContaining(["staff@example.com", "amy@example.com"]) }),
-      expect.anything(),
-    );
+    // Removed and re-added is no change at all: nothing is sent.
+    expect(patchCase).not.toHaveBeenCalled();
   });
 
   it.each([true, false])("cleans the creator name and badges only backend-confirmed internal creators (%s)", (createdByIsInternal) => {

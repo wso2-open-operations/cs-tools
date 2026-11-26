@@ -96,8 +96,8 @@ vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
 }));
 // The real WatchersWidget's list arithmetic and its case-vs-incident rules are
 // covered in CaseDetailWidgets.test.tsx. Here it's a probe: it reports the
-// props the page hands it and gives a test two buttons to fire `onReplace`
-// with, so these tests assert what the *page* does with the finished list.
+// props the page hands it and gives a test two buttons to fire `onChange`
+// with, so these tests assert what the *page* does with the one-user change.
 vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
   // A probe, not a stub: whether the page hands this a real onDownload or
   // leaves it undefined is exactly what regressed once before (the page
@@ -113,12 +113,12 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
   WatchersWidget: ({
     entityKind,
     watchers,
-    onReplace,
+    onChange,
     isSaving,
   }: {
     entityKind: string;
     watchers: Array<{ id: string; name: string }>;
-    onReplace?: (nextWatcherIds: string[], action: "add" | "remove") => void;
+    onChange?: (change: { userId: string; action: "add" | "remove" }) => void;
     isSaving?: boolean;
   }) => (
     <div data-testid="watchers-widget" data-entity-kind={entityKind}>
@@ -128,18 +128,16 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
       <button
         type="button"
         disabled={isSaving}
-        onClick={() =>
-          onReplace?.([...watchers.map((w) => w.id), NEW_WATCHER_ID], "add")
-        }
+        onClick={() => onChange?.({ userId: NEW_WATCHER_ID, action: "add" })}
       >
         stub add watcher
       </button>
       <button
         type="button"
         disabled={isSaving}
-        onClick={() => onReplace?.([], "remove")}
+        onClick={() => onChange?.({ userId: watchers[0].id, action: "remove" })}
       >
-        stub clear watch list
+        stub remove last watcher
       </button>
     </div>
   ),
@@ -523,24 +521,24 @@ describe("CsmIncidentDetailPage — Watchers tab is editable", () => {
     );
   });
 
-  it("PATCHes the whole replacement list on an add, keeping the existing watcher", () => {
+  it("PATCHes only the added user, never a whole list that could drop a concurrent watcher", () => {
     openWatchers();
     fireEvent.click(screen.getByRole("button", { name: /stub add watcher/i }));
 
     expect(patchMutateMock).toHaveBeenCalledWith(
-      { id: "inc-1", patch: { watchList: [WATCHER_ID, NEW_WATCHER_ID] } },
+      { id: "inc-1", patch: { addWatchers: [NEW_WATCHER_ID] } },
       expect.anything(),
     );
   });
 
-  it("sends an explicitly empty list to clear an incident's watch list", () => {
+  it("PATCHes only the removed user, which can be the incident's last watcher", () => {
     openWatchers();
     fireEvent.click(
-      screen.getByRole("button", { name: /stub clear watch list/i }),
+      screen.getByRole("button", { name: /stub remove last watcher/i }),
     );
 
     expect(patchMutateMock).toHaveBeenCalledWith(
-      { id: "inc-1", patch: { watchList: [] } },
+      { id: "inc-1", patch: { removeWatchers: [WATCHER_ID] } },
       expect.anything(),
     );
   });

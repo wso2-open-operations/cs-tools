@@ -752,12 +752,19 @@ type CreateCaseResponse struct {
 // PATCH /cases/{id}. This is entity-service's raw contract — the portal only
 // exposes a customer-safe subset of these fields; see dto.UpdateCaseRequest
 // and dto.BuildEntityUpdateCaseRequest for which ones and why.
+//
+// AddWatchers/RemoveWatchers change the watch list by delta (platform user
+// ids): entity-service applies them against the list stored at that moment, so
+// they cannot drop a watcher added since the caller loaded the case, as a
+// WatchList replace can. Exclusive with every other field; Postgres only.
 type UpdateCaseRequest struct {
 	ID                 string     `json:"-"`
 	State              *string    `json:"state,omitempty"`
 	Severity           *string    `json:"severity,omitempty"`
 	WorkState          *string    `json:"workState,omitempty"`
 	WatchList          []string   `json:"watchList,omitempty"`
+	AddWatchers        []string   `json:"addWatchers,omitempty"`
+	RemoveWatchers     []string   `json:"removeWatchers,omitempty"`
 	AssigneeEmail      *string    `json:"assigneeEmail,omitempty"`
 	ResolutionCode     *string    `json:"resolutionCode,omitempty"`
 	Cause              *string    `json:"cause,omitempty"`

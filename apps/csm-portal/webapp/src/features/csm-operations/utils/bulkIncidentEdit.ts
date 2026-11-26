@@ -17,7 +17,12 @@
 import { isIncidentTerminal } from "@features/csm-operations/utils/incidents";
 import type { BeUpdateIncidentPayload } from "@api/backend/types";
 
-/** How a bulk edit changes each incident's watch list. The API only replaces the whole list. */
+/**
+ * How a bulk edit changes each incident's watch list. Add and remove are sent as
+ * a delta (`addWatchers` / `removeWatchers`), which the backend applies against
+ * each incident's own stored list, so nothing is read first and a concurrent
+ * change is kept; replace sends the whole list.
+ */
 export type BulkWatchListMode = "add" | "remove" | "replace";
 
 export const BULK_WATCH_LIST_MODES: ReadonlyArray<{ value: BulkWatchListMode; label: string }> = [
@@ -29,8 +34,8 @@ export const BULK_WATCH_LIST_MODES: ReadonlyArray<{ value: BulkWatchListMode; la
 /**
  * The one change a bulk edit applies to every selected incident: `patch` holds
  * only the fields set in the dialog (each incident keeps its own value for the
- * rest); the watch list is described apart, because adding or removing people
- * needs each incident's own list.
+ * rest); the watch list is described apart because it is sent in one of three
+ * shapes by `mode`.
  */
 export interface BulkIncidentEdit {
   patch: BeUpdateIncidentPayload;
@@ -40,35 +45,17 @@ export interface BulkIncidentEdit {
 /** What is sent to one incident, or why nothing is. */
 export type BulkIncidentPlan = { patch: BeUpdateIncidentPayload } | { skip: string };
 
-/** Whether a watch list change needs each incident's current watchers. */
-export function bulkWatchListNeedsCurrent(edit: BulkIncidentEdit): boolean {
-  return !!edit.watchList && edit.watchList.mode !== "replace";
-}
-
-/** The watch list after `mode` is applied to `current`, in a stable order. */
-export function nextWatchList(current: string[], mode: BulkWatchListMode, userIds: string[]): string[] {
-  if (mode === "replace") return [...new Set(userIds)];
-  if (mode === "add") return [...new Set([...current, ...userIds])];
-  const removed = new Set(userIds);
-  return current.filter((id) => !removed.has(id));
-}
-
-const sameMembers = (a: string[], b: string[]): boolean =>
-  a.length === b.length && a.every((id) => b.includes(id));
-
 /**
  * The PATCH for one incident in a bulk edit. A closed or cancelled incident is
- * never edited; an incident is never made its own parent; adding or removing
- * watchers starts from the incident's own list (`currentWatchers`, `undefined`
- * when it could not be read: the watch list is then left alone and said so),
- * and a list that would not change is not sent. The backend stays the
+ * never edited; an incident is never made its own parent. Adding or removing
+ * watchers names only the people concerned, so an incident that already has (or
+ * lacks) them is simply unchanged by the backend. The backend stays the
  * authority for everything else (e.g. who may close an incident): what it
  * refuses for one incident is reported for that one.
  */
 export function bulkIncidentPlan(
   incident: { id?: string | null; state?: string | null },
   edit: BulkIncidentEdit,
-  currentWatchers?: string[],
 ): BulkIncidentPlan {
   if (isIncidentTerminal(incident.state)) return { skip: "Closed or cancelled: it can't be edited." };
   if (edit.patch.parentId && edit.patch.parentId === incident.id) {
@@ -76,14 +63,12 @@ export function bulkIncidentPlan(
   }
   const patch: BeUpdateIncidentPayload = { ...edit.patch };
   if (edit.watchList) {
-    if (edit.watchList.mode !== "replace" && currentWatchers === undefined) {
-      return { skip: "Couldn't read its watch list, so it was not changed. Try again." };
-    }
-    const current = currentWatchers ?? [];
-    const next = nextWatchList(current, edit.watchList.mode, edit.watchList.userIds);
-    if (edit.watchList.mode === "replace" || !sameMembers(current, next)) patch.watchList = next;
+    const userIds = [...new Set(edit.watchList.userIds)];
+    if (edit.watchList.mode === "add") patch.addWatchers = userIds;
+    else if (edit.watchList.mode === "remove") patch.removeWatchers = userIds;
+    else patch.watchList = userIds;
   }
-  if (Object.keys(patch).length === 0) return { skip: "Nothing to change: its watch list already is as asked." };
+  if (Object.keys(patch).length === 0) return { skip: "Nothing to change." };
   return { patch };
 }
 

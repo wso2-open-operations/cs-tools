@@ -28,14 +28,14 @@ import type { BeCreateCaseGithubIssuePayload } from "@api/backend/types";
 // kind of issue, so a case filed with any other spelling is not excluded from
 // them.
 
-/** The issue type a Patch issue carries (`issueTypeLabel`). The dialog now
- * files every issue as a Discussion; kept for older payloads. */
+/** The issue type a Patch issue carries (`issueTypeLabel`). The dialog files
+ * Patches, Discussions and Feature Requests. */
 export const GITHUB_PATCH_ISSUE_TYPE = "Type/Patch";
 
 /** Applied to a case a Patch Git issue is filed from. */
 export const GITHUB_PATCH_ISSUE_CASE_TAG = "patch";
 
-/** Applied to a case any other Git issue (a Discussion) is filed from. */
+/** Applied to a case any other Git issue (a Discussion or a Feature Request) is filed from. */
 export const GITHUB_ISSUE_CASE_TAG = "s_dip";
 
 /** Added when the issue is filed as a regression. */

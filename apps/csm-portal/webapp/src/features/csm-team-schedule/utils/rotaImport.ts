@@ -31,7 +31,7 @@ export const ROTA_IMPORT_TEMPLATE = {
     { email: "user1@example.com", teamKey: "apollo", shiftCode: "SRE_TZ1_L1", from: "2026-11-02", to: "2026-11-06" },
     { email: "user2@example.com", teamKey: "apollo", shiftCode: "SRE_TZ1", tier: "L2", from: "2026-11-02", to: "2026-11-06" },
     { email: "user3@example.com", teamKey: "artemis", shiftCode: "SRE_TZ3", tier: "L1", from: "2026-11-02", to: "2026-11-08" },
-    { email: "user4@example.com", teamKey: "apollo", shiftCode: "SRE_WE_TZ1", tier: "L1", from: "2026-11-07", to: "2026-11-08" },
+    { email: "user4@example.com", teamKey: "apollo", shiftCode: "SRE_WE_DAY", tier: "L1", from: "2026-11-07", to: "2026-11-08" },
   ],
   absences: [
     { email: "user2@example.com", teamKey: "apollo", kindCode: "ANNUAL_LEAVE", from: "2026-11-16", to: "2026-11-20" },

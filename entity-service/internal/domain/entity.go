@@ -3947,6 +3947,17 @@ type UpdateCaseRequest struct {
 	// absent field and an explicitly empty list are distinguishable: nil leaves
 	// the watch list untouched, while an empty list clears it.
 	WatchList *[]string `json:"watchList"`
+	// AddWatchers and RemoveWatchers change the watch list by delta, as platform
+	// user UUIDs, instead of replacing it: the server applies them in one
+	// transaction against whatever list is stored at that moment, so a caller
+	// working from a stale copy cannot drop a watcher someone else added after
+	// it loaded the case (WatchList can, as it is a full replacement). Adding
+	// someone already watching and removing someone not watching are no-ops.
+	// Same exclusivity as WatchList (not combinable with it or any other field);
+	// the two may be sent together but must not name the same user. Supported
+	// for the PostgreSQL data source only.
+	AddWatchers    []string `json:"addWatchers"`
+	RemoveWatchers []string `json:"removeWatchers"`
 	// AssigneeEmail uses json.RawMessage to preserve three states: nil/empty = omit,
 	// "null" = clear (unassign), `"value"` = set -- mirroring
 	// UpdateAttachmentRequest.Description, since a plain *string cannot tell an omitted
@@ -7251,6 +7262,17 @@ type UpdateIncidentRequest struct {
 	AdditionalComments  *string                 `json:"additionalComments,omitempty"`
 	WorkNotes           *string                 `json:"workNotes,omitempty"`
 	WatchList           *[]string               `json:"watchList,omitempty"`
+	// AddWatchers and RemoveWatchers change the watch list by delta (platform
+	// user UUIDs) instead of replacing it: they are applied in the update's own
+	// transaction against the list stored at that moment, so a caller working
+	// from a stale copy cannot drop a watcher someone else added since it
+	// loaded the incident (WatchList can, as it replaces the whole list).
+	// Adding someone already watching and removing someone not watching are
+	// no-ops, and removing the last watcher is allowed. They may be sent
+	// together, and with the record's other fields, but not with WatchList,
+	// and a user may not be in both. PostgreSQL data source only.
+	AddWatchers    []string `json:"addWatchers,omitempty"`
+	RemoveWatchers []string `json:"removeWatchers,omitempty"`
 	// Environment: see CreateIncidentRequest.Environment doc comment. Double
 	// pointer distinguishes "omitted" (nil) from an explicit `null` clear
 	// (non-nil outer, nil inner) from a new value (non-nil, non-nil) -- a

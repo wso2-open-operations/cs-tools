@@ -601,6 +601,13 @@ func MapCaseCreate(r entity.CreateCaseResponse) CaseCreateResponse {
 // enforces that itself (see its own UpdateCase doc comment), this layer
 // just passes them through unvalidated.
 //
+// AddWatchers/RemoveWatchers (emails) change the watch list by delta and are
+// the way the portal edits it: the backend applies them against the list stored
+// at that moment, so a watcher a colleague added after this page loaded is kept
+// (WatchList replaces the whole list and drops it). Removing someone is the only
+// way to take the last watcher off. Exactly one of stateKey, watchList, or
+// addWatchers/removeWatchers (sent alone or together) counts as the primary field.
+//
 // WatchList cannot be used to clear every watcher via an explicit empty
 // array — this is a genuine end-to-end platform limitation, not something
 // fixable in this dto layer: entity-service's own ServiceNow implementation
@@ -614,6 +621,8 @@ func MapCaseCreate(r entity.CreateCaseResponse) CaseCreateResponse {
 type UpdateCaseRequest struct {
 	StateKey       *int     `json:"stateKey,omitempty"`
 	WatchList      []string `json:"watchList,omitempty"`
+	AddWatchers    []string `json:"addWatchers,omitempty"`
+	RemoveWatchers []string `json:"removeWatchers,omitempty"`
 	ResolutionCode *string  `json:"resolutionCode,omitempty"`
 	Cause          *string  `json:"cause,omitempty"`
 	CloseNotes     *string  `json:"closeNotes,omitempty"`

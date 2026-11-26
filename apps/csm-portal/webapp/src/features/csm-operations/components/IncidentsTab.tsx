@@ -63,7 +63,6 @@ import {
   type IncidentFilters,
 } from "@features/csm-operations/utils/incidents";
 import {
-  mapWithConcurrency,
   runBulkUpdate,
   type BulkFailure,
   type BulkResult,
@@ -71,11 +70,9 @@ import {
 import {
   assignIncidentToMePlan,
   bulkIncidentPlan,
-  bulkWatchListNeedsCurrent,
   type BulkIncidentPlan,
 } from "@features/csm-operations/utils/bulkIncidentEdit";
 import { refreshIncidentRecord } from "@features/csm-operations/api/usePatchIncident";
-import { incidentDetailQuery } from "@features/csm-operations/api/useGetIncident";
 import { useRowSelection } from "@features/csm-operations/hooks/useRowSelection";
 import BulkSelectionBar from "@features/csm-operations/components/BulkSelectionBar";
 import BulkResultAlert from "@features/csm-operations/components/BulkResultAlert";
@@ -304,31 +301,23 @@ export default function IncidentsTab(): JSX.Element {
    * One bulk action over the selection, from each incident as the list shows
    * it now (a selected incident on the current page is its refetched row). One
    * closed or cancelled since it was picked is skipped with the reason. Adding
-   * people to (or removing them from) the watch list needs each incident's own
-   * list, so its detail is read first (`readWatchers`). After the run the dialog
-   * is closed first, then each incident is refreshed the way a single edit
-   * refreshes it (detail, tasks, the flows' follow-up).
+   * people to (or removing them from) the watch list is sent as a delta, so no
+   * incident's list is read first. After the run the dialog is closed first,
+   * then each incident is refreshed the way a single edit refreshes it
+   * (detail, tasks, the flows' follow-up).
    */
   const runBulk = async (
-    planFor: (incident: BeIncident, currentWatchers?: string[]) => BulkIncidentPlan,
+    planFor: (incident: BeIncident) => BulkIncidentPlan,
     verb: string,
-    readWatchers = false,
   ): Promise<void> => {
     setBulkBusy(true);
     const rows = selection.selected;
     try {
-      const watchers = readWatchers
-        ? await mapWithConcurrency(rows, async (row) => {
-            // Read now, never from the cache: the list sent back replaces the whole watch list.
-            const detail = await queryClient.fetchQuery({ ...incidentDetailQuery(api, row.id!), staleTime: 0 });
-            return detail ? (detail.watchList ?? []).map((w) => w.id) : undefined;
-          })
-        : [];
       const skipped: BulkFailure[] = [];
       const toSend: Array<{ id: string; number?: string; patch: BeUpdateIncidentPayload }> = [];
-      rows.forEach((row, i) => {
+      rows.forEach((row) => {
         const number = row.number || row.id!;
-        const plan = planFor(row, readWatchers ? watchers[i] : undefined);
+        const plan = planFor(row);
         if ("skip" in plan) skipped.push({ id: row.id!, number, message: plan.skip });
         else toSend.push({ id: row.id!, number: row.number ?? undefined, patch: plan.patch });
       });
@@ -480,11 +469,7 @@ export default function IncidentsTab(): JSX.Element {
           isApplying={bulkBusy}
           onClose={() => setBulkEditOpen(false)}
           onApply={(edit) =>
-            void runBulk(
-              (incident, currentWatchers) => bulkIncidentPlan(incident, edit, currentWatchers),
-              "Updated",
-              bulkWatchListNeedsCurrent(edit),
-            )
+            void runBulk((incident) => bulkIncidentPlan(incident, edit), "Updated")
           }
         />
       )}

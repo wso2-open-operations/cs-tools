@@ -15,10 +15,15 @@
 // under the License.
 
 import Settings from "@components/settings/Settings";
+import { NoPortalAccess } from "@components/common/NoPortalAccess";
+import { usePortalAccess } from "@src/access/usePortalAccess";
 
-// Reached from More > Settings, mirroring the webapp's /admin route. Settings itself is
-// self-contained (components/settings/Settings.tsx) — this page is just its mount point, so it
-// stays trivial to move elsewhere again later.
+// Reached from More > Settings, mirroring the webapp's /admin route. The page is the
+// administration user list, so it follows canViewSettings. canViewSettingsSection is the
+// wider shell flag and does not open this page: a catalogue manager who is not a CS
+// engineer must not start the user-list query.
 export default function SettingsPage() {
+  const { access } = usePortalAccess();
+  if (!access.canViewSettings) return <NoPortalAccess />;
   return <Settings />;
 }

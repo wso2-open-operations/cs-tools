@@ -22,6 +22,20 @@ import type { RotaFamily } from "../types";
 /** The most suggestions shown at once. */
 const MAX_OPTIONS = 8;
 
+/** The domains an address outside the family may be typed in from. */
+const CC_ADDRESS_DOMAINS =["wso2.com", "choreolabs.com"];
+
+// No comma either: the list is comma- or newline-separated (listOf), so a typed
+// "first,last@wso2.com" would be stored as two chips and fail to save.
+const EMAIL = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+
+/** A whole address in one of CC_ADDRESS_DOMAINS, lower-cased, or null. */
+function typedAddress(text: string): string | null {
+  const a = text.trim().toLowerCase();
+  if (!EMAIL.test(a)) return null;
+  return CC_ADDRESS_DOMAINS.includes(a.slice(a.lastIndexOf("@") + 1)) ? a : null;
+}
+
 /** The addresses in a newline-separated list, as the form keeps them. */
 function listOf(value: string): string[] {
   return value
@@ -44,11 +58,13 @@ interface Props {
 }
 
 /**
- * Picks the people copied on a rota reminder from the family's own members:
- * a chip per person, and a search box that suggests members by name or email.
- * Nothing can be typed in that is not a member. An address saved before the
- * picker existed, or of somebody who has since left, keeps its chip, marked,
- * so it can be removed but is never lost without anybody seeing it.
+ * Picks the people copied on a rota reminder: a chip per person, and a search
+ * box that suggests the family's members by name or email. Somebody outside
+ * the family can be added by typing their whole address, but only in one of
+ * CC_ADDRESS_DOMAINS: it is offered as "Add <address>" and picked like a
+ * member. An address that is not a member (typed in, saved before the picker
+ * existed, or of somebody who has since left) keeps its chip, marked, so it
+ * can be removed but is never lost without anybody seeing it.
  */
 export default function RotaCcPicker({ id, value, onChange, people, family, describedBy }: Props): JSX.Element {
   const [query, setQuery] = useState("");
@@ -59,10 +75,15 @@ export default function RotaCcPicker({ id, value, onChange, people, family, desc
   const byEmail = new Map(people.map((p) => [p.email.toLowerCase(), p]));
 
   const q = query.trim().toLowerCase();
-  const options = people
+  const members = people
     .filter((p) => !chosenSet.has(p.email.toLowerCase()))
     .filter((p) => !q || p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
     .slice(0, MAX_OPTIONS);
+  // A whole address in an allowed domain that is not a member, nor already
+  // chosen, is offered after the members as "Add <address>".
+  const typed = typedAddress(query);
+  const addable = typed && !chosenSet.has(typed) && !byEmail.has(typed) ? typed : null;
+  const options: CcPerson[] = addable ? [...members, { name: addable, email: addable }] : members;
   const listId = `${id}-list`;
   const showList = open && options.length > 0;
 
@@ -126,7 +147,7 @@ export default function RotaCcPicker({ id, value, onChange, people, family, desc
           type="text"
           role="combobox"
           autoComplete="off"
-          placeholder={`Search ${family} members by name or email`}
+          placeholder={`Search ${family} members, or type a ${CC_ADDRESS_DOMAINS.map((d) => `@${d}`).join(" or ")} address`}
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
@@ -158,15 +179,22 @@ export default function RotaCcPicker({ id, value, onChange, people, family, desc
                   pick(p);
                 }}
               >
-                <span className="rcc-name">{p.name}</span>
-                <span className="rcc-mail">{p.email}</span>
+                {p.email === addable ? (
+                  <span className="rcc-name">Add {p.email}</span>
+                ) : (
+                  <>
+                    <span className="rcc-name">{p.name}</span>
+                    <span className="rcc-mail">{p.email}</span>
+                  </>
+                )}
               </li>
             ))}
           </ul>
         ) : null}
         {open && q && options.length === 0 ? (
           <p className="rcc-none" role="status">
-            No {family} member matches “{query.trim()}”.
+            No {family} member matches “{query.trim()}”. Type a whole{" "}
+            {CC_ADDRESS_DOMAINS.map((d) => `@${d}`).join(" or ")} address to add someone else.
           </p>
         ) : null}
       </div>

@@ -1342,22 +1342,28 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			repository.NewHolidayAvailabilityRepository(db), publicHolidayRepo, accessSvc,
 			service.RotaWriterCheck(scheduleSvc), rotaZone)
 		holidayAvailabilityHandler = handler.NewHolidayAvailabilityHandler(holidayAvailabilitySvc)
-		publicHolidaySvc := service.WithHolidayTagPlacer(
-			service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
-			holidayAvailabilitySvc)
+		// Portal and rota admins may also add holidays by hand
+		// (migration 0293), the only source where no calendar is configured.
+		publicHolidaySvc := service.WithHolidayEditorCheck(
+			service.WithHolidayTagPlacer(
+				service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
+				holidayAvailabilitySvc),
+			service.HolidayEditorCheck(scheduleSvc))
 		publicHolidayHandler = handler.NewPublicHolidayHandler(publicHolidaySvc)
+		// First run shortly after start, then daily, always: with no calendar
+		// or employee service the run fetches nothing but still places the
+		// coming weeks' Public holiday tags for the holidays added by hand.
+		// Stopped with the other background workers by closePublishers.
+		ingestRetryWG.Add(1)
+		go func() {
+			defer ingestRetryWG.Done()
+			service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
+		}()
 		if holidayCalendar != nil || employeeLocations != nil {
-			// First run shortly after start, then daily. Stopped with the
-			// other background workers by closePublishers.
-			ingestRetryWG.Add(1)
-			go func() {
-				defer ingestRetryWG.Done()
-				service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
-			}()
 			slog.Info("team schedule public holidays: daily refresh enabled",
 				"calendar", holidayCalendar != nil, "employeeLocations", employeeLocations != nil)
 		} else {
-			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; no refresh runs, the roster shows only stored holidays")
+			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; holidays come only from the portal (added by hand), and the daily run only places their tags")
 		}
 		engagementAllocationViewHandler = handler.NewEngagementAllocationViewHandler(
 			service.NewEngagementAllocationViewService(repository.NewEngagementAllocationViewRepository(db), accessSvc),
@@ -2292,6 +2298,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if publicHolidayHandler != nil {
 		mux.HandleFunc("POST /team-schedule/public-holidays/search", publicHolidayHandler.SearchPublicHolidays)
+		mux.HandleFunc("GET /team-schedule/public-holidays", publicHolidayHandler.ListPublicHolidays)
+		mux.HandleFunc("POST /team-schedule/public-holidays", publicHolidayHandler.AddPublicHolidays)
+		mux.HandleFunc("DELETE /team-schedule/public-holidays/{country}/{date}", publicHolidayHandler.DeletePublicHoliday)
 		mux.HandleFunc("POST /team-schedule/public-holidays/refresh", serviceOnly(accessSvc, publicHolidayHandler.RefreshPublicHolidays))
 	}
 	if holidayAvailabilityHandler != nil {

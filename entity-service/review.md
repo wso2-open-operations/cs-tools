@@ -138,3 +138,7 @@ failure class turns up during review that isn't on this list, add it here in the
       whatever acts on its output exists; `ALERTING_VERSION=v2` once stored alerts that nothing turned into incidents.
 - [ ] A SQL parameter whose only uses are in `CASE` branches or next to `NULL` has an explicit cast (`$4::timestamptz`);
       Postgres infers `text` and the statement fails at runtime, which a unit test with a fake repository never shows.
+- [ ] A cleanup that reads rows, acts on them, then deletes by a broader predicate does not delete
+      rows committed in between (Read Committed gives each statement a new snapshot) — the holiday
+      tag cleanup forgot a placement whose tag it never saw, orphaning the tag; a writer acting on
+      data read earlier rechecks it (and locks it) in its own transaction.

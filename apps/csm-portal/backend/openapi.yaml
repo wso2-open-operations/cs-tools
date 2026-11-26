@@ -17318,6 +17318,171 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays:
+    get:
+      summary: The stored public holidays, for the holiday editor.
+      operationId: listTeamSchedulePublicHolidays
+      description: >
+        Every stored day in the window (at most 366 days), of one country when
+        `country` is given, with where it came from (CALENDAR: the daily
+        refresh; MANUAL: added in the portal), the countries in use and whether
+        the caller may add or remove holidays. Forwarded to the entity service;
+        a 400 keeps its reason.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: country, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, countries, canEdit]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      type: object
+                      required: [country, date, title, source]
+                      properties:
+                        country: { type: string }
+                        date: { type: string, format: date }
+                        title: { type: string }
+                        source: { type: string, enum: [CALENDAR, MANUAL] }
+                        updatedBy: { type: string }
+                  countries: { type: array, items: { type: string } }
+                  canEdit: { type: boolean }
+        "400":
+          description: "Bad request: the message says what is wrong with the window."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add one country's public holidays by hand.
+      operationId: addTeamSchedulePublicHolidays
+      description: >
+        A portal admin or a rota admin of any family (the entity service
+        decides; a 403 keeps its reason). Up to 200 days, each stored as a
+        manual row that the daily refresh never deletes or retitles. A 400
+        names the day that is wrong. The coming weeks' Public holiday tags are
+        placed right after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [country, holidays]
+              properties:
+                country: { type: string, maxLength: 100 }
+                holidays:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [date, title]
+                    properties:
+                      date: { type: string, format: date }
+                      title: { type: string, maxLength: 200 }
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stored]
+                properties:
+                  stored: { type: integer }
+        "400":
+          description: "Bad request: the message names the day that is wrong."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays/{country}/{date}:
+    delete:
+      summary: Remove one stored public holiday.
+      operationId: deleteTeamSchedulePublicHoliday
+      description: >
+        A portal admin or a rota admin of any family. Removes the day whether
+        it came from the calendar or by hand; its untouched Public holiday tags
+        go with it.
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: only a portal admin or a rota admin can change the public holidays."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No such day is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/public-holidays/search:
     post:
       summary: Public holidays of the given engineers over a date window.
@@ -21453,7 +21618,7 @@ components:
               tier:
                 type: string
                 enum: [L1, L2, L3]
-                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
+                description: Required on an escalation window that does not fix one (SRE_TZ1, SRE_TZ2, SRE_TZ3, the weekend SRE_WE_TZ1, SRE_WE_DAY and SRE_WE_NIGHT, IaaS Day/Night); not allowed on regular hours; a window that fixes a tier takes only that one.
               from: {type: string, format: date, description: Inside the period.}
               to: {type: string, format: date, description: Inside the period.}
               note: {type: string}
@@ -22585,7 +22750,9 @@ components:
         `acknowledge`, `type`, `subject`, `description`, `deploymentId`, `deployedProductId`,
         `relatedCaseId`, `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or
         `worstCaseFixEta` must be provided. `watchList`, `assigneeEmail`, and `parentId` are
-        supported only for the ServiceNow data source.
+        supported only for the ServiceNow data source. `addWatchers` / `removeWatchers` (one
+        exclusive field, sent alone or together) change the watch list by delta and are
+        supported only for the PostgreSQL data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
         `type` transfers the case to another type, ServiceNow only. Its companion fields carry
@@ -22599,6 +22766,9 @@ components:
         - required: [severity]
         - required: [workState]
         - required: [watchList]
+        - anyOf:
+            - required: [addWatchers]
+            - required: [removeWatchers]
         - required: [assigneeEmail]
         - required: [parentId]
         - required: [acknowledge]
@@ -22667,7 +22837,27 @@ components:
           items:
             type: string
             format: email
-          description: List of email addresses to set as the case watch list (ServiceNow only).
+          description: |
+            List of email addresses to set as the case watch list (ServiceNow only). Replaces the
+            whole list, so a caller with a stale copy drops watchers added since; to add or remove
+            people use `addWatchers` / `removeWatchers`.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to add to the watch list. Applied against the list stored at that
+            moment, so watchers others added meanwhile are kept; already watching is a no-op.
+            PostgreSQL data source only. Cannot be combined with another field.
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to remove from the watch list (not watching is a no-op). A user in
+            both `addWatchers` and `removeWatchers` is a 400.
         assigneeEmail:
           type: string
           format: email
@@ -28909,14 +29099,22 @@ components:
           description: Whether a hot fix is required.
         issueTypeLabel:
           type: string
-          description: GitHub label for the issue type.
+          description: >
+            GitHub label for the issue type: Type/Discussion (filed with Type/Incident and the
+            priority label), Type/Feature (filed with Type/Feature, no priority label) or
+            Type/Patch (filed with Type/Patch and patch, no priority label). Fields of the other
+            types are ignored: a Feature Request's priority, justification, reproducing steps,
+            hotfix, regression and related internal issues; a Patch's priority, justification,
+            related internal issues, business use case and related Git issues; and a
+            Discussion's business use case and related Git issues. The dialog
+            sends updateLevel "-" with a Feature Request.
         priorityLevel:
           type: string
           description: GitHub priority label for a Discussion, per the Internal Issue Handling Policy. Sent as Priority/Immediate(P0), Priority/High(P1), Priority/Medium(P2) or Priority/Low(P3). Bare Priority/Immediate (etc.) is rewritten to the (Pn) form; any other value is applied as sent. Discussion also gets Type/Incident.
         priorityJustification:
           type: string
           description: >
-            Why a P0 or P1 Discussion has that priority, free text. Written to the issue body as
+            Why a P0, P1 or P2 Discussion has that priority, free text. Written to the issue body as
             "Priority Justification : <value>", on one line. Ignored for any other priority.
         reproducingSteps:
           type: string
@@ -28930,6 +29128,12 @@ components:
         relatedInternalIssues:
           type: string
           description: Related internal issues, written to the issue body under "Related Internal Issue(s) :".
+        businessUseCase:
+          type: string
+          description: The business use case of a Feature Request, written to the issue body under "Business Use Case :".
+        relatedGitIssues:
+          type: string
+          description: Related Git issues of a Feature Request, written to the issue body under "Related Git Issue(s) :".
         onboardingInProgress:
           type: boolean
           description: The case's project is onboarding. Adds Onboarding/affected.
@@ -30308,6 +30512,24 @@ components:
           items:
             type: string
             format: uuid
+          description: |
+            The full watch list, replacing whatever is stored (so a stale caller overwrites watchers
+            added since). Prefer `addWatchers` / `removeWatchers`.
+        addWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Platform user ids to add to the watch list, applied against the list stored at that
+            moment so concurrent changes are kept. PostgreSQL data source only. May be combined with
+            `removeWatchers` and other fields, not with `watchList`.
+        removeWatchers:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Platform user ids to remove from the watch list (not watching is a no-op).
 
     UpdateIncidentResponse:
       type: object

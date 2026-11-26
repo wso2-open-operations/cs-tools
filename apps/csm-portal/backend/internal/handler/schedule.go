@@ -38,6 +38,9 @@ type entityScheduleClient interface {
 	SearchScheduleAbsences(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error)
 	SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error)
+	ListPublicHolidays(ctx context.Context, from, to, country string) ([]byte, error)
+	AddPublicHolidays(ctx context.Context, body []byte) ([]byte, error)
+	DeletePublicHoliday(ctx context.Context, country, date string) ([]byte, error)
 	SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error)
 	ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error)
 	WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error)
@@ -213,6 +216,69 @@ func (h *ScheduleHandler) SearchSchedulePublicHolidays(w http.ResponseWriter, r 
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// ListPublicHolidays handles GET /team-schedule/public-holidays?from&to&country:
+// the stored days for the holiday editor, with their source, the countries in
+// use and whether the caller may edit. Proxied unchanged; a 400 keeps
+// entity-service's reason (the window).
+func (h *ScheduleHandler) ListPublicHolidays(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	q := r.URL.Query()
+	result, err := h.entity.ListPublicHolidays(r.Context(), q.Get("from"), q.Get("to"), strings.TrimSpace(q.Get("country")))
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity ListPublicHolidays failed", "userID", user.UserID, "err", err)
+		mapScheduleRefusalError(w, err, "Failed to load public holidays.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// AddPublicHolidays handles POST /team-schedule/public-holidays: a portal or
+// rota admin adding one country's holidays by hand. entity-service decides who
+// may (403) and checks every day; its 400 names the day that is wrong, so the
+// editor can show it (mapScheduleRefusalError, as for adding a tag).
+func (h *ScheduleHandler) AddPublicHolidays(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.entity.AddPublicHolidays(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AddPublicHolidays failed", "userID", userID, "err", err)
+		mapScheduleRefusalError(w, err, "Failed to add the public holidays.")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// DeletePublicHoliday handles DELETE /team-schedule/public-holidays/{country}/{date}:
+// a portal or rota admin removing one stored day.
+func (h *ScheduleHandler) DeletePublicHoliday(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	country, date := strings.TrimSpace(r.PathValue("country")), r.PathValue("date")
+	if country == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if _, err := time.Parse(time.DateOnly, date); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if _, err := h.entity.DeletePublicHoliday(r.Context(), country, date); err != nil {
+		slog.ErrorContext(r.Context(), "entity DeletePublicHoliday failed", "userID", user.UserID, "err", err)
+		mapScheduleRefusalError(w, err, "Failed to remove the public holiday.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // SearchHolidayAvailability handles

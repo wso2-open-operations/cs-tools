@@ -1926,18 +1926,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [patchCase, showError],
   );
 
-  // Watchers are edited inline in the Watchers tab. There is no
-  // add-one/remove-one endpoint: `PATCH /cases/{id}` takes the *whole*
-  // `watchList` as user UUIDs and replaces what is stored. WatchersWidget
-  // computes that replacement list (add and remove alike) and hands it over
-  // finished, so this page only forwards it — see WatchersWidget's doc
-  // comment for why the last watcher on a case can't be removed. Supported by
-  // one data source only; the backend rejects it on the others and the error
-  // surfaces via showError.
-  const onReplaceWatchers = useCallback(
-    (nextWatcherIds: string[], action: "add" | "remove") => {
+  // Watchers are edited inline in the Watchers tab. Each add or remove goes
+  // as a delta (`addWatchers` / `removeWatchers`), which the backend applies
+  // against the list stored at that moment: sending the whole `watchList`
+  // instead would overwrite a watcher another engineer added after this page
+  // loaded. PostgreSQL data source only; the backend rejects it on the others
+  // and the error surfaces via showError.
+  const onChangeWatchers = useCallback(
+    ({ userId, action }: { userId: string; action: "add" | "remove" }) => {
       patchCase.mutate(
-        { watchList: nextWatcherIds },
+        action === "add" ? { addWatchers: [userId] } : { removeWatchers: [userId] },
         {
           onSuccess: () =>
             setFeedback({
@@ -3308,7 +3306,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           <WatchersWidget
             entityKind="case"
             watchers={c.watchers}
-            onReplace={canWrite ? onReplaceWatchers : undefined}
+            onChange={canWrite ? onChangeWatchers : undefined}
             isSaving={patchCase.isPending}
             onRefresh={() => void refetchCaseDetail()}
             isRefreshing={isFetchingCaseDetail}

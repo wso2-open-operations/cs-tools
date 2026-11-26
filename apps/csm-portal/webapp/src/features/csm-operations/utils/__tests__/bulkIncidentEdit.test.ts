@@ -18,26 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignIncidentToMePlan,
   bulkIncidentPlan,
-  bulkWatchListNeedsCurrent,
-  nextWatchList,
 } from "@features/csm-operations/utils/bulkIncidentEdit";
-
-describe("nextWatchList", () => {
-  it("adds people without duplicates, removes only the named ones, or replaces the list", () => {
-    expect(nextWatchList(["a", "b"], "add", ["b", "c"])).toEqual(["a", "b", "c"]);
-    expect(nextWatchList(["a", "b", "c"], "remove", ["b", "x"])).toEqual(["a", "c"]);
-    expect(nextWatchList(["a"], "replace", ["c", "c", "d"])).toEqual(["c", "d"]);
-  });
-});
-
-describe("bulkWatchListNeedsCurrent", () => {
-  it("reads each incident's list only to add or remove people", () => {
-    expect(bulkWatchListNeedsCurrent({ patch: {}, watchList: { mode: "add", userIds: ["a"] } })).toBe(true);
-    expect(bulkWatchListNeedsCurrent({ patch: {}, watchList: { mode: "remove", userIds: ["a"] } })).toBe(true);
-    expect(bulkWatchListNeedsCurrent({ patch: {}, watchList: { mode: "replace", userIds: ["a"] } })).toBe(false);
-    expect(bulkWatchListNeedsCurrent({ patch: { state: "ON_HOLD" } })).toBe(false);
-  });
-});
 
 describe("bulkIncidentPlan", () => {
   const open = { id: "inc-1", state: "IN_PROGRESS" };
@@ -48,32 +29,27 @@ describe("bulkIncidentPlan", () => {
     });
   });
 
-  it("merges people into the incident's own watch list", () => {
-    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "add", userIds: ["u2"] } }, ["u1"])).toEqual({
-      patch: { watchList: ["u1", "u2"] },
+  it("adds and removes people as a delta, never a whole list that could drop a concurrent watcher", () => {
+    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "add", userIds: ["u2", "u2"] } })).toEqual({
+      patch: { addWatchers: ["u2"] },
     });
-    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "remove", userIds: ["u1"] } }, ["u1", "u3"])).toEqual({
-      patch: { watchList: ["u3"] },
-    });
-  });
-
-  it("does not send a watch list that would not change, and skips the incident when nothing else is set", () => {
-    expect(bulkIncidentPlan(open, { patch: { state: "ON_HOLD" }, watchList: { mode: "add", userIds: ["u1"] } }, ["u1"])).toEqual({
-      patch: { state: "ON_HOLD" },
-    });
-    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "add", userIds: ["u1"] } }, ["u1"])).toEqual({
-      skip: "Nothing to change: its watch list already is as asked.",
+    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "remove", userIds: ["u1"] } })).toEqual({
+      patch: { removeWatchers: ["u1"] },
     });
   });
 
-  it("leaves the watch list alone when it could not be read, rather than guess", () => {
+  it("sends a watch list delta together with the other fields", () => {
     expect(bulkIncidentPlan(open, { patch: { state: "ON_HOLD" }, watchList: { mode: "add", userIds: ["u1"] } })).toEqual({
-      skip: "Couldn't read its watch list, so it was not changed. Try again.",
+      patch: { state: "ON_HOLD", addWatchers: ["u1"] },
     });
   });
 
-  it("replaces the watch list without reading it", () => {
-    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "replace", userIds: ["u9"] } })).toEqual({
+  it("skips an incident when there is nothing to send", () => {
+    expect(bulkIncidentPlan(open, { patch: {} })).toEqual({ skip: "Nothing to change." });
+  });
+
+  it("replaces the watch list with the whole list", () => {
+    expect(bulkIncidentPlan(open, { patch: {}, watchList: { mode: "replace", userIds: ["u9", "u9"] } })).toEqual({
       patch: { watchList: ["u9"] },
     });
   });

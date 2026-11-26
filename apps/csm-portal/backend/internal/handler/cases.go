@@ -1280,7 +1280,8 @@ func (h *CaseHandler) forwardTagSearch(w http.ResponseWriter, r *http.Request, u
 }
 
 // PatchCase handles PATCH /cases/{id}.
-// Accepts state, severity, workState, watchList, assigneeEmail, or acknowledge and forwards
+// Accepts state, severity, workState, watchList, addWatchers/removeWatchers (the
+// stale-safe way to edit the watch list), assigneeEmail, or acknowledge and forwards
 // to the entity service. The body is forwarded verbatim, so fields with no local guard (like
 // acknowledge, whose first-write-wins semantics and role gate both live upstream) need no
 // handling here — only state and workState are pre-validated, because their guards depend on

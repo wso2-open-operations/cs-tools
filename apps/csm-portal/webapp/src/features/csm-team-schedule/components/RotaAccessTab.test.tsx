@@ -50,6 +50,8 @@ vi.mock("../api/useTeamSchedule", () => ({
 }));
 // The reminder settings card has its own tests; here only whether it is shown.
 vi.mock("./RotaReminderSettings", () => ({ default: () => <div>reminder settings card</div> }));
+// The holiday editor has its own tests and reads its own canEdit.
+vi.mock("./PublicHolidaysEditor", () => ({ default: () => null }));
 
 const ME = "11111111-1111-4111-8111-111111111111";
 const ANA = "22222222-2222-4222-8222-222222222222";

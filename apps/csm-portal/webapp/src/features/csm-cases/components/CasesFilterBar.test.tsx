@@ -717,7 +717,7 @@ describe("CasesFilterBar — 'Onboarding status' control", () => {
     postMock.mockReset();
   });
 
-  it("offers all 4 fixed projectOnboardingStatus choices", () => {
+  it("offers all 7 real projectOnboardingStatus choices", () => {
     renderBar({ ...DEFAULT_CASES_FILTERS });
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Onboarding status" }));
@@ -725,6 +725,9 @@ describe("CasesFilterBar — 'Onboarding status' control", () => {
     expect(screen.getByRole("option", { name: "Not started" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Completed" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Not applicable" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "On hold" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Expired" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Cancelled" })).toBeInTheDocument();
   });
 
   // The control edits the real `onboardingStatuses` (`in`) field directly —

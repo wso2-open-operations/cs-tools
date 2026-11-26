@@ -275,3 +275,213 @@ func TestHolidayAvailabilityRepository_PlaceReadConfirmRemind(t *testing.T) {
 		t.Errorf("the lead's PH tag still there: %d, %v", left, err)
 	}
 }
+
+// TestHolidayAvailabilityRepository_RemovedHolidayRace covers a placement run
+// that read its holidays before one was removed: it must not tag the removed
+// day, and a tag committed while the cleanup runs must not lose its record
+// (the next cleanup could then never find it, and the person would stay off
+// the rota).
+func TestHolidayAvailabilityRepository_RemovedHolidayRace(t *testing.T) {
+	pool := phPool(t)
+	ctx := context.Background()
+	day := time.Now().AddDate(0, 0, 10)
+	for day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+		day = day.AddDate(0, 0, 1)
+	}
+	d := day.Format(time.DateOnly)
+	seedHolidayTeam(t, pool, d)
+	repo := repository.NewHolidayAvailabilityRepository(pool)
+
+	place := func(user string) bool {
+		t.Helper()
+		ok, err := repo.PlaceHolidayTag(ctx, domain.HolidayTagPlacement{UserID: user, TeamKey: phTeamKey, Date: d, Country: phCountry, Title: "Test Day"})
+		if err != nil {
+			t.Fatalf("place %s: %v", user, err)
+		}
+		return ok
+	}
+	phTags := func(user string) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM team_schedule_absence a JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+			WHERE a.user_id = $1 AND k.code = 'PH'`, user).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	placedRecord := func(user string) bool {
+		t.Helper()
+		var ok bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM team_schedule_holiday_tag_placed
+			WHERE user_id = $1::uuid AND holiday_date = $2::date)`, user, d).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	if !place(phLeadID) {
+		t.Fatal("the lead was not tagged")
+	}
+	var leadTag string
+	if err := pool.QueryRow(ctx, `SELECT absence_id::text FROM team_schedule_holiday_tag_placed
+		WHERE user_id = $1::uuid AND holiday_date = $2::date`, phLeadID, d).Scan(&leadTag); err != nil {
+		t.Fatal(err)
+	}
+
+	// The holiday is removed. A run that read it earlier now tries the member.
+	if _, err := pool.Exec(ctx, `DELETE FROM team_schedule_public_holiday WHERE country = $1`, phCountry); err != nil {
+		t.Fatal(err)
+	}
+	if place(phMemberID) || phTags(phMemberID) != 0 || placedRecord(phMemberID) {
+		t.Fatal("a removed holiday was tagged")
+	}
+
+	// Hold the lead's tag so the cleanup waits on it (its read locks the tags
+	// it will remove) after its snapshot was taken; commit a member tag in that
+	// gap, as an older run that passed its checks before the removal would.
+	hold, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = hold.Rollback(ctx) }()
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM team_schedule_absence WHERE id = $1::uuid FOR UPDATE`, leadTag); err != nil {
+		t.Fatal(err)
+	}
+	var holdPID int
+	if err := hold.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holdPID); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		removed int
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := repo.RemoveCancelledHolidayTags(ctx, d)
+		done <- result{n, err}
+	}()
+	// Wait until a session is blocked by the hold itself (the cleanup, the
+	// only one that touches the held tag), not on any lock in the database.
+	waiting := false
+	for i := 0; i < 100 && !waiting; i++ {
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE $1::int = ANY(pg_blocking_pids(pid)))`, holdPID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if !waiting {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !waiting {
+		t.Fatal("the cleanup never waited on the held tag")
+	}
+	if _, err := pool.Exec(ctx, `
+		WITH tag AS (
+		  INSERT INTO team_schedule_absence (created_by, updated_by, user_id, team_key, kind_id, starts_on, ends_on, note)
+		  SELECT $1, $1, $2::uuid, $3, id, $4::date, $4::date, 'Test Day — public holiday in test'
+		    FROM team_schedule_absence_kind WHERE code = $5
+		  RETURNING id)
+		INSERT INTO team_schedule_holiday_tag_placed (user_id, holiday_date, country, team_key, absence_id, title)
+		SELECT $2::uuid, $4::date, $6, $3, id, 'Test Day' FROM tag`,
+		domain.HolidayTagActor, phMemberID, phTeamKey, d, domain.HolidayTagKindCode, phCountry); err != nil {
+		t.Fatal(err)
+	}
+	_ = hold.Rollback(ctx)
+	first := <-done
+	if first.err != nil || first.removed != 1 {
+		t.Fatalf("first cleanup removed %d, %v; want the lead's tag", first.removed, first.err)
+	}
+	if phTags(phMemberID) != 1 || !placedRecord(phMemberID) {
+		t.Fatal("the tag committed during the cleanup lost its record")
+	}
+
+	second, err := repo.RemoveCancelledHolidayTags(ctx, d)
+	if err != nil || second != 1 {
+		t.Fatalf("second cleanup removed %d, %v; want the member's tag", second, err)
+	}
+	if phTags(phMemberID) != 0 || placedRecord(phMemberID) || phTags(phLeadID) != 0 {
+		t.Error("a removed holiday's tag or record is still there")
+	}
+}
+
+// TestHolidayAvailabilityRepository_RemoveMisplacedHolidayTags covers tags
+// placed for a country that is no longer the person's: the untouched ones go
+// and every such placement is forgotten, so the person's own country can be
+// placed; a tag somebody edited stays, and an empty member map removes nothing.
+func TestHolidayAvailabilityRepository_RemoveMisplacedHolidayTags(t *testing.T) {
+	pool := phPool(t)
+	ctx := context.Background()
+	day := time.Now().AddDate(0, 0, 12)
+	for day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+		day = day.AddDate(0, 0, 1)
+	}
+	d := day.Format(time.DateOnly)
+	seedHolidayTeam(t, pool, d)
+	repo := repository.NewHolidayAvailabilityRepository(pool)
+
+	for _, user := range []string{phLeadID, phMemberID} {
+		ok, err := repo.PlaceHolidayTag(ctx, domain.HolidayTagPlacement{UserID: user, TeamKey: phTeamKey, Date: d, Country: phCountry, Title: "Test Day"})
+		if err != nil || !ok {
+			t.Fatalf("place %s: %v, %v", user, ok, err)
+		}
+	}
+	// The lead's tag was edited by somebody: it is theirs now.
+	if _, err := pool.Exec(ctx, `UPDATE team_schedule_absence SET updated_by = $1
+		WHERE user_id = $2 AND starts_on = $3::date`, phActor, phLeadID, d); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := repo.RemoveMisplacedHolidayTags(ctx, d, nil); err != nil || n != 0 {
+		t.Fatalf("an empty member map removed %d, %v; want nothing", n, err)
+	}
+	// Everybody else keeps the country they were placed for, so the shared
+	// database's other tags are left alone.
+	countryByUser := map[string]string{}
+	others, err := pool.Query(ctx, `SELECT DISTINCT ON (user_id) user_id::text, country
+		FROM team_schedule_holiday_tag_placed WHERE NOT (user_id = ANY($1::uuid[]))`, []string{phLeadID, phMemberID, phOnLeaveID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for others.Next() {
+		var id, c string
+		if err := others.Scan(&id, &c); err != nil {
+			t.Fatal(err)
+		}
+		countryByUser[id] = c
+	}
+	others.Close()
+	if err := others.Err(); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := "Elsewhere (test)"
+	countryByUser[phLeadID] = elsewhere
+	countryByUser[phMemberID] = elsewhere
+	n, err := repo.RemoveMisplacedHolidayTags(ctx, d, countryByUser)
+	if err != nil || n != 1 {
+		t.Fatalf("removed %d, %v; want the member's one untouched tag", n, err)
+	}
+	tags := func(user string) int {
+		t.Helper()
+		var c int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM team_schedule_absence a JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+			WHERE a.user_id = $1 AND k.code = 'PH'`, user).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if tags(phMemberID) != 0 {
+		t.Error("the member's misplaced tag is still there")
+	}
+	if tags(phLeadID) != 1 {
+		t.Error("the lead's edited tag was removed")
+	}
+	rows, err := repo.PlacedBetween(ctx, d, d, []string{phTeamKey})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("placements %+v, %v; want both forgotten (the lead's edited tag is theirs now)", rows, err)
+	}
+	// Forgotten, so the member's own country is placed again.
+	ok, err := repo.PlaceHolidayTag(ctx, domain.HolidayTagPlacement{UserID: phMemberID, TeamKey: phTeamKey, Date: d, Country: phCountry, Title: "Test Day"})
+	if err != nil || !ok {
+		t.Fatalf("placing again after the cleanup: %v, %v", ok, err)
+	}
+}

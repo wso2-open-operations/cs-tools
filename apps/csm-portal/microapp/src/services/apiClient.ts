@@ -33,6 +33,16 @@ let failedQueue: {
 // Holds the refresh token promise
 let refreshTokenPromise: Promise<string | null> | null = null;
 
+/**
+ * What a caller should see when a 401's forced refresh fails. No session comes
+ * back as a string from the native bridge; that must stay the original HTTP
+ * error, so a gate can recognize the 401. Any other refresh failure is kept,
+ * so a network blip is still retryable rather than reported as "no access".
+ */
+export function errorAfterFailedRefresh(requestError: unknown, refreshError: unknown): unknown {
+  return typeof refreshError === "string" ? requestError : refreshError;
+}
+
 // axios instance
 const apiClient = axios.create({
   baseURL: BACKEND_URL,
@@ -145,7 +155,11 @@ apiClient.interceptors.response.use(
             return apiClient(originalRequest);
           })
           .catch((err) => {
-            return Promise.reject(err);
+            // This request was waiting on another request's refresh. A missing
+            // session still rejects with a string, and this request's own 401
+            // has to reach the gate. The same rule as the request that started
+            // the refresh.
+            return Promise.reject(errorAfterFailedRefresh(error, err));
           });
       }
 
@@ -167,7 +181,9 @@ apiClient.interceptors.response.use(
         Logger.error("Token refresh failed", refreshError);
         processQueue(refreshError, null);
         console.error("Token refresh failed:", refreshError);
-        return Promise.reject(refreshError);
+        // A missing session rejects with a string. Keep the original 401 so the
+        // access gate can tell "not signed in" from a later network failure.
+        return Promise.reject(errorAfterFailedRefresh(error, refreshError));
       } finally {
         isRefreshing = false;
       }

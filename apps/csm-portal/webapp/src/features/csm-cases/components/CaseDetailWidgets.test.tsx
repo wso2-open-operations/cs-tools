@@ -459,6 +459,43 @@ describe("WatchersWidget", () => {
     );
   });
 
+  it("with onChange, adds by sending only the new user so a concurrent watcher is never dropped", () => {
+    const onChange = vi.fn();
+    const onReplace = vi.fn();
+    renderWithRouter(
+      <WatchersWidget
+        entityKind="case"
+        watchers={WATCHERS}
+        onChange={onChange}
+        onReplace={onReplace}
+      />,
+    );
+    fireEvent.click(openWatcherPicker()[0]);
+    expect(onChange).toHaveBeenCalledWith({ userId: CANDIDATE_ID, action: "add" });
+    expect(onReplace).not.toHaveBeenCalled();
+  });
+
+  it("with onChange, removes by naming only that user", () => {
+    const onChange = vi.fn();
+    renderWithRouter(
+      <WatchersWidget entityKind="case" watchers={WATCHERS} onChange={onChange} />,
+    );
+    fireEvent.click(removeButton("Jane Doe"));
+    expect(onChange).toHaveBeenCalledWith({ userId: WATCHER_ONE_ID, action: "remove" });
+  });
+
+  it("with onChange, the last watcher of a case can be removed (a delta can empty the list)", () => {
+    const onChange = vi.fn();
+    renderWithRouter(
+      <WatchersWidget entityKind="case" watchers={ONE_WATCHER} onChange={onChange} />,
+    );
+    const btn = screen.getByRole("button", { name: /remove .* from the watch list/i });
+    expect(btn).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(btn);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].action).toBe("remove");
+  });
+
   it("keeps people who are already watching out of the picker", () => {
     renderWithRouter(
       <WatchersWidget entityKind="case" watchers={WATCHERS} onReplace={vi.fn()} />,

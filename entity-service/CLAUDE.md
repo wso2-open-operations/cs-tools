@@ -154,7 +154,23 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
   One run at a time per process. It upserts the current and next year for every country in
   use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
-  transient answer never wipes a year. Re-running is safe.
+  transient answer never wipes a year. Re-running is safe. The daily run starts **always**,
+  calendar configured or not: with neither `HOLIDAY_CALENDAR_*` nor `HR_ENTITY_*` it fetches
+  nothing but still places the Public holiday tags for the stored (manual) days.
+- **Added by hand** (migration 0293, `team_schedule_public_holiday.source` = `CALENDAR` /
+  `MANUAL`, `updated_by`): where no calendar is configured (prod today) this is the only
+  source. `GET /team-schedule/public-holidays?from&to&country` (internal staff, at most 366
+  days) lists the stored days with their source, the countries (stored ones plus Sri Lanka
+  and India) and `canEdit`; `POST /team-schedule/public-holidays {country, holidays:[{date,
+  title}]}` (up to 200 days, last year to two years ahead) stores them as MANUAL, a day
+  already stored taking the new title; `DELETE /team-schedule/public-holidays/{country}/{date}`
+  removes any stored day (404 when none). Writes are for a portal admin or a rota admin of
+  any family (`HolidayEditorCheck`, `schedule_holiday_editor.go`); a lead or Rota Manager may
+  not, because a holiday is per country and shared by every family. Each write places the
+  tags again in the background (`placeSoon`, past the request deadline), which also takes
+  away a removed day's untouched tags. **The refresh replaces only CALENDAR rows**
+  (`ReplaceCountryRange`): it never deletes a manual day or retitles one, so a calendar
+  configured later cannot wipe what was added by hand.
 - **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
   roster works while the services are down. A holiday is not leave and moves no shift.
 - **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
@@ -163,8 +179,11 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
   - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
     places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
     colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
-    on every member of a rostered CRE team (management left out) for each weekday holiday of
-    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    on every member of a rostered CRE team (management left out) for each coming weekday holiday
+    of their country, however far ahead (two years at most, a guard against a mistyped year), so
+    the roster shows a holiday's tags as soon as it is stored; a past day is never tagged. Leave
+    marked later over a tagged day cuts the tag out (`ApplyAbsence`), so an early tag blocks
+    nobody, and since the placement is recorded the tag does not come back. Like every tag it takes the day off the timesheet (the
     worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
     Alerts does not call them. A lead or rota manager makes somebody available by removing the
     tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
@@ -173,7 +192,18 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     placement and is kept after the tag is removed, so a removed tag is never placed again. A
     day the person already has any tag on (leave wins) is skipped and tried again the next day.
     A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
-    touched (still one day, created and updated by the actor) and forgets the placements.
+    touched (still one day, created and updated by the actor) and forgets the placements. So does
+    a tag whose country is no longer the person's (location changed, the India team became known)
+    or whose person left CRE (`RemoveMisplacedHolidayTags`, every run); their own country's holiday
+    is then placed. An empty member read removes nothing.
+    **Removal versus a run already placing:** `PlaceHolidayTag` tags only a day still stored and
+    holds that holiday row `FOR SHARE` until the tag commits, so a removal (by hand or by the
+    calendar) waits for it and the cleanup it starts sees the tag; and the cleanup never
+    forgets a placement whose tag is still standing untouched (one committed after its read),
+    so the next run removes that tag instead of leaving it with no record. A tag the cleanup
+    removes has its placement forgotten by its tag id in the same transaction, so a holiday
+    stored again meanwhile cannot leave a placement with no tag. Both are covered by
+    `TestHolidayAvailabilityRepository_RemovedHolidayRace`.
   - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
     its person available (no tag that day) **and** the team is confirmed
     (`team_schedule_holiday_confirmation`, one row per team and day). Confirm
@@ -201,12 +231,13 @@ Migration `0295_audit_log_foundation.sql` adds the field-level audit log: `csm_a
 
 ### What is logged
 
-- **Updates and deletes only.** Every audit trigger is `AFTER UPDATE OR DELETE`, `audit_config` included. An update logs each changed field (old and new value); a delete logs every non-NULL column.
+- **Updates and deletes only.** Every audit trigger is `AFTER UPDATE OR DELETE`, `audit_config` included. An update logs each changed field (old and new value). A delete logs one row per record (migration `0307`): `field_name` is `__row__` and `old_value` holds the whole old row as a JSON object, so the record can still be read after it is gone. NULL, excluded and `updated_on` / `updated_by` columns are left out of it, a masked column reads `[hidden]`, and a value over 8192 bytes reads `[value too large]`, each column on its own so one large field does not hide the rest.
 - **`updated_on` and `updated_by` are never logged**, on any table. `audit_log_row_change` always leaves them out: each log row already has the actor and the time, and jobs that rewrite them on every run (the Salesforce ingest) would only add noise. An update that changes only those two logs nothing.
 - **Who added or changed a row is the row's own columns** (`created_by`, `created_on`, `updated_by`, `updated_on`), not the log. An audited table must carry them or an equivalent: `work_item`'s cover the 14 type tables that share its id, `case_attachment` has `uploaded_by`, `plg_note_revision` has `edited_by` / `edited_on`.
 - **Adding the columns to a table that lacks them** goes in a migration of its own, as `0304` did: nullable, `created_on DEFAULT now()`, `created_by DEFAULT audit_actor()`, and a `BEFORE UPDATE` trigger `csm_stamp_update` (`audit_stamp_update()`) that sets `updated_on` / `updated_by`. It is an ordinary trigger, so it does not fire under `session_replication_role = replica`; the audit trigger does.
 - **`created_by` is mandatory on `role`, `team`, `team_member`, `"user"` and `user_role`** (`0305`): `NOT NULL` with `DEFAULT audit_actor()`, so an insert that leaves it out is stamped instead of failing. A table that still holds a NULL stops the migration, naming the table and the row count.
 - **Who is the actor.** The trigger reads `app.audit_actor`, then `app.viewer_email`, then the database role. `repository.WithSystemIdentity` clears the viewer, so it keeps the person in `SearchScope.AuditActor`, and `queueIdentity` / `setCallerIdentity` set `app.audit_actor` with `app.viewer_email`. `ResolveScope` fills `AuditActor` for staff on any portal and for an `M2M_CLIENT_IDS` service that forwards a user token. A job with no request has no person, so its rows name the database role.
+- **A failing log insert does not fail the business write** (migration `0306`, which replaces the function `0295` installed; `0295` is not edited because prod had already applied it). `audit_log_row_change` runs its work in a block with an `EXCEPTION WHEN OTHERS` handler (a subtransaction per audited row change), so an error while logging (disk full, a damaged log table, a fault in the function) becomes one WARNING per row change, `audit: could not log UPDATE on public.user record <record id> columns [first_name, last_name]: <error> (SQLSTATE <code>)`, and the update or delete goes through. It names the table, the record (the audit key) and every column that was to be logged, never a value; it carries no actor, as an email is personal data. If working those out fails too, they read `(unknown)`. That change's log rows are all skipped, never half written. The cost is silent gaps in the history, so alert on that WARNING in the database log, on disk space and on `audit_partition_health()`. Measured on 10,000 audited updates, the handler adds no visible time. A transaction that logs more than 64 row changes holds more than 64 subtransaction ids; PostgreSQL then slows other sessions' snapshots until it ends (not measured here), so keep bulk jobs to short transactions. A missed month is not such an error: its rows go to the catch-all partition.
 - The `INSERT` branch in `audit_log_row_change` and `'INSERT'` in the action check are unused but kept: a database with older INSERT triggers keeps working while it is converted.
 
 ### Tables that are audited
@@ -261,7 +292,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
   SELECT member::regrole FROM pg_auth_members WHERE roleid = 'csm_audit_reader'::regrole;
   ```
 
-- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
+- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), apply `0306` (the fail-open trigger) and then `0307` (a delete as one row), in the schema that holds the audit log (`make migrate` runs both for a database that is behind and skips one already recorded in `csm_migration_applied_migration`; a database that ran the dist script by hand may not have them recorded), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
 
   ```sql
   DO $$
@@ -308,6 +339,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
 - `exclude_from_audit` on a registered table also drops its trigger, as `unregister_audit` does.
 - Every partition carries its own `csm_audit_log_no_truncate` guard, because a statement trigger on the parent does not reach them. `audit_create_partitions` adds it to each new month.
 - Everything lives in the schema the migration runs in (`current_schema()`), so the audit log works in `public` or in a `DB_SCHEMA`. The `SECURITY DEFINER` functions are installed through `DO` blocks that fill the schema into their search path and table names (`__SCHEMA__` / `__SCHEMA_LIT__`). A new function that touches the audit tables must be added the same way, never with `public` written in. Inside `format()` pass the schema as an argument (`%I`), never inside the format string. Their search path ends with `pg_temp`, so a caller's temp table cannot stand in for `audit_config`.
+- A migration that replaces an audit function (`0306`, `0307`) must run in the schema that holds the audit log: from a session whose `search_path` points elsewhere (`public` when the log is in `DB_SCHEMA`) it would install a second, unused copy, or fail with "permission denied for schema public". `0307` checks first and stops with a message naming the schema; run `SET search_path TO <schema>;` before it.
 - The new-table warning (an event trigger, needs superuser) watches that schema only.
 
 ### Tests
@@ -4779,6 +4811,24 @@ changed.
   LOW/S4 severity also flips the case's time cards non-billable, inside the
   same transaction as the attach — see "Event Hub publishing" above
   (`recomputeTimeCardsBillable`) for the full design and the race it fixes.
+- **Watch list by delta** (`AddWatchers` / `RemoveWatchers` on `PATCH /cases/{id}`,
+  `updateCaseWatchDelta`, `CaseRepository.ChangeCaseWatchers`): `WatchList` replaces the
+  whole list (`SetCaseWatchList` deletes every row, then inserts), so a caller holding a stale
+  copy silently drops a watcher added meanwhile. The delta fields run in one transaction against
+  what is stored then: `DELETE ... user_id = ANY(...)`, then `INSERT ... ON CONFLICT DO NOTHING`
+  (re-adding and removing a non-watcher are no-ops). One exclusive field, so not combinable with
+  `watchList` or anything else; the same user in both lists, or a non-UUID, is a 400. Only
+  newly added users get the project-contact check, as in the replace branch. The ServiceNow data
+  source refuses them (its API only replaces the list; emulating a delta would bring the race back),
+  and a dual-write mirror sends every stored watcher id (`CaseWatcherUserIDs`, read when the write runs, so
+  concurrent changes cannot land out of order; not the response list, which hides some stored rows). Both portals use
+  these for add/remove; `watchList` stays for create-time and bulk replace.
+  **Incidents have the same fields** on `PATCH /incidents/{id}` (`UpdateIncidentRequest.AddWatchers` /
+  `RemoveWatchers`, `changeIncidentWatchers`): there they are record fields of the update's own
+  transaction, so they combine with the other fields and with each other but not with `watchList`.
+  The add side checks every id is a user (400 otherwise) and inserts with `ON CONFLICT DO NOTHING`;
+  the remove side is a `DELETE ... user_id = ANY(...)`. The ServiceNow data source refuses them, and a
+  dual-write mirror sends the resulting persisted list as `watchList`, since ServiceNow only replaces.
 - **Case watch list** (`work_item_watcher`, migration 0042):
   `UpdateCase`'s `WatchList` field, previously rejected outright on this
   data source, now has its own branch (`updateCaseWatchList`) — split out
@@ -12427,6 +12477,11 @@ product version past its EOL date in Primary Production. Internal callers only; 
 - **Rows** (`eol_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an active
   `PRIMARY_PRODUCTION` deployment whose version's `support_eol_date` is before `asOf` (default today in Asia/Colombo),
   listed once per (project, product version) however many such deployments run it.
+- **Only customer accounts are listed:** `account.life_cycle = 'Customer'` exactly (Salesforce's account status; the
+  rule Customer Health uses). "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner" and a NULL life cycle
+  (e.g. internal accounts) are left out even when their deployments are still marked active, which is common for lost
+  customers whose deployment records were never closed. `lost_date` and `deactivation_date` are not used: `lost_date`
+  is unset on some lost accounts and some customers have a `deactivation_date`.
 - **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
   active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed: they
   are still customers. `deployed_product.life_cycle_stage_status` is deliberately not used: every active product in
@@ -12457,6 +12512,11 @@ differs.
   deprecated version whose EOL date has passed is also in the EOL product usage report, on purpose: it is both
   deprecated and past its EOL date. `asOf` (default today in
   Asia/Colombo) is only the report date shown; the status is the current one.
+- **Only customer accounts are listed:** `account.life_cycle = 'Customer'` exactly (Salesforce's account status; the
+  rule Customer Health uses). "Lost Customer", "Possibly Lost Customer", "Prospect", "Partner" and a NULL life cycle
+  (e.g. internal accounts) are left out even when their deployments are still marked active, which is common for lost
+  customers whose deployment records were never closed. `lost_date` and `deactivation_date` are not used: `lost_date`
+  is unset on some lost accounts and some customers have a `deactivation_date`.
 - **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
   active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed.
   `deployed_product.life_cycle_stage_status` is deliberately not used.
@@ -12476,8 +12536,10 @@ Tests: `deprecated_product_usage_report_service_test.go` (unit),
 **Change the two report queries together.** `listDeprecatedUsageSQL` is the EOL report's query
 (`eol_product_usage_report_repo.go`) with only the version predicate changed (`current_support_status = 'DEPRECATED'`
 instead of the EOL date). The rules for customers who have left (deleted account, inactive or closed project, NULL read
-as active), the Primary Production filter, the one-row-per-project-and-version rule and the grouping are the same in
-both. A change to any of them belongs in both repositories (and their integration tests) in the same change.
+as active), the Customer-only life-cycle rule, the Primary Production filter, the one-row-per-project-and-version
+rule and the grouping are the same in both.
+A change to any of them belongs in both repositories (and their integration tests) in the same change. The life-cycle
+value is one constant, `reportAccountLifeCycleCustomer`, passed to both queries as a bind parameter.
 
 ## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
 

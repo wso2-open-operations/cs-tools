@@ -15,7 +15,7 @@
 // under the License.
 
 import { useEffect, useRef, useState } from "react";
-import { Badge, Chip, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { Badge, IconButton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { adminUsers } from "@src/services/adminUsers";
@@ -33,31 +33,27 @@ import { EMPTY_USERS_FILTERS, countActiveUsersFilters, toUserSearchFilters, type
 // Permissions tabs, only Users built) rather than personal profile editing. Deliberately
 // self-contained — it owns its own tab state, search/filters, and data fetching — so it's a
 // drop-in that can move to a different page later without threading state through props.
+//
+// WIP tabs (Roles/Groups/Permissions) are hidden until their backend endpoints exist. Their
+// config stays in ADMIN_TABS, so dropping `wip` from one there brings it back.
+const VISIBLE_TABS = ADMIN_TABS.filter((t) => !t.wip);
+
 export default function Settings() {
   const [tab, setTab] = useState<AdminTabId>("users");
-  const activeTab = ADMIN_TABS.find((t) => t.id === tab) ?? ADMIN_TABS[0];
+  const activeTab = VISIBLE_TABS.find((t) => t.id === tab) ?? VISIBLE_TABS[0];
 
   return (
     <Stack gap={2}>
       <Typography variant="h5">Settings</Typography>
 
-      <Tabs variant="scrollable" value={tab} onChange={(_, value: AdminTabId) => setTab(value)}>
-        {ADMIN_TABS.map((t) => (
-          <Tab
-            key={t.id}
-            value={t.id}
-            disableRipple
-            label={
-              <Stack direction="row" alignItems="center" gap={0.75}>
-                {t.label}
-                {t.wip && (
-                  <Chip size="small" label="WIP" color="warning" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
-                )}
-              </Stack>
-            }
-          />
-        ))}
-      </Tabs>
+      {/* A lone tab is noise, so the strip only shows once there is something to switch to. */}
+      {VISIBLE_TABS.length > 1 && (
+        <Tabs variant="scrollable" value={activeTab.id} onChange={(_, value: AdminTabId) => setTab(value)}>
+          {VISIBLE_TABS.map((t) => (
+            <Tab key={t.id} value={t.id} disableRipple label={t.label} />
+          ))}
+        </Tabs>
+      )}
 
       {activeTab.id === "users" ? (
         <UsersTab />
