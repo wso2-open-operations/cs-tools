@@ -16,6 +16,7 @@
 
 import { Box } from "@wso2/oxygen-ui";
 import { Outlet } from "react-router-dom";
+import { AccessGate } from "./AccessGate";
 import { TabBar } from "./TabBar";
 import { TopBar } from "./TopBar";
 
@@ -28,7 +29,9 @@ export default function MainLayout() {
       <TopBar />
 
       <Box component="main" flexGrow={1} p={2} pb={15}>
-        <Outlet />
+        <AccessGate>
+          <Outlet />
+        </AccessGate>
       </Box>
       <TabBar />
     </>
