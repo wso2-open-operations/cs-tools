@@ -655,11 +655,12 @@ func TestAuditMigration_TriggerFunctionIsNotExecutableByPublic(t *testing.T) {
 }
 
 // A log row that cannot be written must not undo the business change: the update
-// and the delete both go through, and nothing is logged for them. Each failed row
-// change raises one WARNING naming the table, the record and every column of that
-// change, and never a value. The failure is forced with a CHECK that no new log
-// row passes (NOT VALID, so rows already there are left alone), added and rolled
-// back inside one transaction so no other test sees it.
+// and the delete both go through. Each failed row change raises one WARNING naming
+// the table, the record and every column of that change, and never a value. The
+// fault is selective: a CHECK (NOT VALID, so rows already there are left alone)
+// lets the first field's log row in and rejects a later one, so the test also
+// proves a change that fails part way leaves no log rows at all. It is added and
+// rolled back inside one transaction so no other test sees it.
 func TestAuditMigration_AFailingLogInsertDoesNotBlockTheWrite(t *testing.T) {
 	pool := newAuditMigrationTestPool(t)
 	auditTestTable(t, pool, "audit_failopen_t")
@@ -685,8 +686,26 @@ func TestAuditMigration_AFailingLogInsertDoesNotBlockTheWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "ALTER TABLE csm_audit_log ADD CONSTRAINT audit_failopen_block CHECK (false) NOT VALID"); err != nil {
-		t.Fatalf("force the log insert to fail: %v", err)
+	// jsonb walks keys shortest first, then by name: the update logs v then w, so w
+	// is the one refused; the delete logs v then id, so id is. Either way a first
+	// row is written before the second fails.
+	if _, err := tx.Exec(ctx, `ALTER TABLE csm_audit_log ADD CONSTRAINT audit_failopen_block CHECK (
+	    table_name <> 'audit_failopen_t'
+	    OR NOT ((action = 'UPDATE' AND field_name = 'w') OR (action = 'DELETE' AND field_name = 'id'))) NOT VALID`); err != nil {
+		t.Fatalf("force a later log insert to fail: %v", err)
+	}
+	const rowsSQL = "SELECT count(*) FROM csm_audit_log WHERE table_name = 'audit_failopen_t'"
+	var rowsBefore int
+	if err := tx.QueryRow(ctx, rowsSQL).Scan(&rowsBefore); err != nil {
+		t.Fatal(err)
+	}
+	rowsNow := func() int {
+		t.Helper()
+		var n int
+		if err := tx.QueryRow(ctx, rowsSQL).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
 	}
 
 	tag, err := tx.Exec(ctx, "UPDATE audit_failopen_t SET v = 'secret-new', w = 'y', updated_on = now() WHERE id = 1")
@@ -700,6 +719,13 @@ func TestAuditMigration_AFailingLogInsertDoesNotBlockTheWrite(t *testing.T) {
 	var v string
 	if err := tx.QueryRow(ctx, "SELECT v FROM audit_failopen_t WHERE id = 1").Scan(&v); err != nil || v != "secret-new" {
 		t.Errorf("row 1 = %q, err %v; the business change should have been kept", v, err)
+	}
+	var remaining int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM audit_failopen_t WHERE id = 2").Scan(&remaining); err != nil || remaining != 0 {
+		t.Errorf("row 2 still there (%d), err %v; the delete should have been kept", remaining, err)
+	}
+	if n := rowsNow(); n != rowsBefore {
+		t.Errorf("the failed changes left %d log row(s) behind, want none: a change is never half logged", n-rowsBefore)
 	}
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
