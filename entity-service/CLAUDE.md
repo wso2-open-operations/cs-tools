@@ -297,6 +297,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
 - `exclude_from_audit` on a registered table also drops its trigger, as `unregister_audit` does.
 - Every partition carries its own `csm_audit_log_no_truncate` guard, because a statement trigger on the parent does not reach them. `audit_create_partitions` adds it to each new month.
 - Everything lives in the schema the migration runs in (`current_schema()`), so the audit log works in `public` or in a `DB_SCHEMA`. The `SECURITY DEFINER` functions are installed through `DO` blocks that fill the schema into their search path and table names (`__SCHEMA__` / `__SCHEMA_LIT__`). A new function that touches the audit tables must be added the same way, never with `public` written in. Inside `format()` pass the schema as an argument (`%I`), never inside the format string. Their search path ends with `pg_temp`, so a caller's temp table cannot stand in for `audit_config`.
+- A migration that replaces an audit function (`0306`, `0307`) must run in the schema that holds the audit log: from a session whose `search_path` points elsewhere (`public` when the log is in `DB_SCHEMA`) it would install a second, unused copy, or fail with "permission denied for schema public". `0307` checks first and stops with a message naming the schema; run `SET search_path TO <schema>;` before it.
 - The new-table warning (an event trigger, needs superuser) watches that schema only.
 
 ### Tests

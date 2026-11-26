@@ -25,6 +25,16 @@
 -- field. Replaces the function installed by 0295 and changed by 0306, in place, so
 -- every existing trigger picks it up and keeps its grants. Safe to re-run.
 
+-- This replaces the function in the schema the migration runs in. Stop with a clear
+-- message when that is not the schema holding the audit log (a session whose
+-- search_path points elsewhere), instead of creating a second, unused copy there.
+DO $$
+BEGIN
+    IF to_regprocedure(format('%I.audit_log_row_change()', current_schema())) IS NULL THEN
+        RAISE EXCEPTION 'audit: audit_log_row_change() is not in schema "%". SET search_path to the schema that holds the audit log (the one 0295 ran in) and run this again.', current_schema();
+    END IF;
+END $$;
+
 -- The trigger function shared by every registered table, as 0306 defined it (a
 -- failed log write does not undo the business change), now logging a delete as one
 -- row.
