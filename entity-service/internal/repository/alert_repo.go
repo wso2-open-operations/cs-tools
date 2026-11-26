@@ -30,7 +30,8 @@ import (
 type AlertRepository interface {
 	// ReserveAlertIDs returns n new alert ids, in ascending order.
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	// InsertAlerts stores alert and error rows in one statement and returns how many were new; a row whose message was already stored is skipped.
+	// InsertAlerts stores alert and error rows in one statement and returns how many were new; a row whose message was
+	// already stored is skipped. When a NEW alert was stored it also notifies AlertStoredChannel, on commit.
 	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
 }
 
@@ -42,12 +43,25 @@ const (
 
 const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1, $1)`
 
-// An error row is stored as ERROR, so the alert processor's NEW never counts a message it will not take.
-const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on, status)
-SELECT a.*, CASE WHEN a.error_reason IS NULL THEN 'NEW' ELSE 'ERROR' END
-FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
-    AS a(id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
-ON CONFLICT (message_id, message_index) DO NOTHING`
+// AlertStoredChannel is the Postgres notification channel the insert below signals when it stored at least one NEW
+// alert; the alert processor LISTENs on it to start at once instead of waiting for its next poll.
+const AlertStoredChannel = "alert_stored"
+
+// insertAlertsQuery stores the rows and, in the same statement and so the same transaction, notifies
+// AlertStoredChannel once when any NEW alert was stored. Postgres delivers a notification only when its transaction
+// commits, so the processor is never woken for rows that were rolled back, and a redelivered message (nothing new)
+// wakes nobody. An error row is stored as ERROR, so the alert processor's NEW never counts a message it will not take.
+const insertAlertsQuery = `WITH inserted AS (
+    INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on, status)
+    SELECT a.*, CASE WHEN a.error_reason IS NULL THEN 'NEW' ELSE 'ERROR' END
+    FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
+        AS a(id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
+    ON CONFLICT (message_id, message_index) DO NOTHING
+    RETURNING status
+), notified AS (
+    SELECT pg_notify($13::text, '') FROM inserted WHERE status = 'NEW' LIMIT 1
+)
+SELECT (SELECT count(*) FROM inserted), (SELECT count(*) FROM notified)`
 
 type alertRepository struct {
 	db *Scoped
@@ -119,9 +133,10 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 		errorTexts[i] = nullIfEmpty(a.Error)
 		receivedOn[i] = a.ReceivedOn
 	}
-	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, rawBodies, contentTypes, errorReasons, errorTexts, receivedOn)
-	if err != nil {
+	var inserted, notified int64
+	if err := r.db.QueryRow(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, rawBodies, contentTypes, errorReasons, errorTexts, receivedOn, AlertStoredChannel).
+		Scan(&inserted, &notified); err != nil {
 		return 0, fmt.Errorf("insert alerts: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	return inserted, nil
 }

@@ -26,9 +26,18 @@ gateways ──► priority queues (Service Bus, SQS) ─┐
 
 ### Decisions and why
 
-- **Processor polls the table, in-process create.** No Event Hub hop or outbox: the alert row is the only copy of the
-  fact, and the create goes through the same service as `POST /incidents`, so assignment, `incident.created` and SLA
-  clocks are not reimplemented.
+- **Postgres is the queue, woken by `pg_notify`; in-process create.** The team asked for the processor to act on an
+  alert as soon as it is stored. The consumer's insert notifies `alert_stored` in the same transaction (delivered only on
+  commit) and a LISTEN connection wakes the workers at once; a 5s poll is the backstop. An expert review from four angles
+  (reliability, Postgres, messaging, delivery) preferred this to publishing `alert.created` through an outbox to Event
+  Hubs: nothing else reads the alerts, Postgres already gives exact priority (`ORDER BY tier DESC`), retry timing,
+  dead letter (FAILED) and idempotency, and an Event Hubs hop adds a second at-least-once hop with no per-message ack (it
+  needs a stale sweep), a hard dependency, and as first built about 1s per publish. One table, no `alert_outbox`: the
+  queue state lives on the alert row. The create goes through the same service as `POST /incidents`, so assignment,
+  `incident.created` and SLA clocks are not reimplemented.
+- **Store, commit, ACK, then decide separately.** Creating the incident before the queue ACK would tie intake to the
+  incident path: a slow create expires the queue lock and is created twice, an incident outage uses up the delivery count
+  and dead-letters alerts mid-outage, and a half-failed multi-alert message re-raises what already worked.
 - **Open incident found by correlation tag, not only by link.** alert-core's open incidents carry the same
   `[fp:<12>:<ms>]` tag, so during the overlap at cutover a v2 alert joins the incident v1 opened instead of paging
   again, and an alert whose link was lost still finds its incident.
@@ -64,6 +73,10 @@ gateways ──► priority queues (Service Bus, SQS) ─┐
 - A message SQS handed to a long poll that a stopping replica had open stays hidden for the 60 second visibility timeout,
   then arrives (seen in a local run): delayed, not lost.
 - One AWS region and one Service Bus namespace.
+- `CreateIncident` runs inside the fingerprint lock's transaction, so a worker can hold two pool connections; the
+  pool-budget check counts them. The LISTEN connection is one more Postgres connection, outside the pool.
+- If production reaches Postgres through a pooler in transaction mode, LISTEN receives nothing and decisions wait for
+  the 5s backstop; confirm before v2.
 
 ## Phase 2 (to do before v2 replaces v1)
 

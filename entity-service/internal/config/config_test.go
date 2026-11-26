@@ -1772,8 +1772,8 @@ func TestLoad_AlertConsumerDefaults(t *testing.T) {
 	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 0 {
 		t.Errorf("concurrency %d and weight %d, want 8 and 0 (strict priority)", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
 	}
-	if c.AlertProcessorConcurrency != 4 || c.AlertProcessorPollInterval != time.Second || c.AlertProcessorMaxIncidentAge != 24*time.Hour {
-		t.Errorf("processor concurrency %d, poll %s, max incident age %s; want 4, 1s and 24h",
+	if c.AlertProcessorConcurrency != 4 || c.AlertProcessorPollInterval != 5*time.Second || c.AlertProcessorMaxIncidentAge != 24*time.Hour {
+		t.Errorf("processor concurrency %d, poll %s, max incident age %s; want 4, 5s and 24h",
 			c.AlertProcessorConcurrency, c.AlertProcessorPollInterval, c.AlertProcessorMaxIncidentAge)
 	}
 }

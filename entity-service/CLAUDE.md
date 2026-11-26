@@ -108,7 +108,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `ALERT_CONSUMER_PRIORITY_WEIGHT` | no | `0` | `0` is strict priority: a standard alert runs only when no priority alert waits. `n` (at most 1000) lets a waiting standard alert go after `n` priority alerts in a row, an aging valve against starvation. A value out of range uses the default with a warning |
 | `ALERT_PROCESSOR_CALLER_ID` | v2 | none | The `"user"` UUID an alert-born incident is raised by (alert-core's `CALLER_ID`) |
 | `ALERT_PROCESSOR_CONCURRENCY` | no | `4` | Alerts the processor works on at once (1-16). Each worker can hold two pool connections, so `ALERT_CONSUMER_CONCURRENCY` plus twice this must stay below `DB_POOL_MAX_CONNS` |
-| `ALERT_PROCESSOR_POLL_INTERVAL` | no | `1s` | How long the processor waits before looking again when no alert is waiting |
+| `ALERT_PROCESSOR_POLL_INTERVAL` | no | `5s` | The processor's backstop poll. A committed NEW alert wakes the workers at once (`alert_stored` notification); an idle worker also looks again after this, for a missed notification or a retry falling due |
 | `ALERT_PROCESSOR_MAX_INCIDENT_AGE` | no | `24h` | How old an open incident may be and still take new alerts of its fingerprint; older, a new incident is raised. `0` is no limit |
 | `CR_STRICT_VISIBILITY_FROM` | no | — | RFC 3339 instant **with a zone**: change requests created at or after it are visible to a customer only when designated to them; earlier ones are "legacy" and keep today's visibility. Unset/empty = no cutover, every change request is legacy (the safe default and the rollback; a WARN is logged at startup). An unparsable value refuses to start. Set once per environment at release and never move it — see "Customer visibility and the cutover" |
 | `MIGRATION_CASE_REPORT_HOLD_TAG` | no | `s_mig_hold` | Tag (ignoring case) for the weekly migration scan's "customer requested to hold" table |
@@ -12346,10 +12346,21 @@ Two alerting gateways put every monitoring source's unmodified request body on a
 is started in `routes.go` wherever the consumer runs and stopped first in `closePublishers`. Design and phase-2 plan:
 `docs/alert-processor.md`.
 
-- **Claim.** Each worker claims up to 5 alerts with `processed_on IS NULL` and no `error_reason` (an error row is never
-  taken), a free or expired claim and a due retry,
-  priority tier first, then oldest (`FOR UPDATE SKIP LOCKED`, `alert_pending_idx`), on a 2-minute lease. A replica that
-  dies leaves its claims to expire.
+- **Postgres is the queue; a notification wakes it.** The consumer's insert notifies the `alert_stored` channel in the
+  same statement, once and only when it stored a NEW alert (`repository.AlertStoredChannel`); Postgres delivers it only
+  when that transaction commits, so a rolled-back insert, a redelivered message or an error row wakes nobody.
+  `repository.ListenAlertStored` holds one LISTEN connection, opened from the pool's settings but outside the pool (so
+  the service uses one Postgres connection more than `DB_POOL_MAX_CONNS`), and calls `AlertProcessor.Wake`, which
+  starts every idle worker at once; it reconnects with backoff (1s doubling to 30s) and wakes once after each connect.
+  `ALERT_PROCESSOR_POLL_INTERVAL` (5s) is the backstop for a missed notification, a retry falling due and another
+  replica's expired lease. LISTEN needs a session-level connection: through a pooler in transaction mode nothing
+  arrives and the backstop is the only wake-up. No Event Hubs hop: nothing else reads the alerts, Postgres already gives
+  the ordering, retries and dead letter (FAILED), and a second at-least-once hop would need its own recovery.
+- **Claim.** Each worker claims one alert at a time with `processed_on IS NULL` and no `error_reason` (an error row is
+  never taken), a free or expired claim and a due retry, priority tier first, then oldest (`FOR UPDATE SKIP LOCKED`,
+  `alert_pending_idx`), on a 2-minute lease, so the next alert any worker takes is the most urgent one waiting. A
+  replica that dies leaves its claims to expire. The worker takes its wake-up channel before claiming, so an alert
+  committed between an empty claim and the wait still wakes it.
 - **One fingerprint at a time.** The decision runs in one transaction holding
   `pg_advisory_xact_lock(hashtextextended('alert-fingerprint:' || fingerprint, 0))`, so two alerts of one fingerprint
   never both raise an incident.
@@ -12377,8 +12388,9 @@ is started in `routes.go` wherever the consumer runs and stopped first in `close
   its rule ends, the Chat fallback, paging on FAILED and on dead letters. See `docs/alert-processor.md`.
 - **Not audited.** 0309 excludes `alert` from the audit log; its rows carry their own outcome.
 
-Tests: `alert_processor_test.go` (service, fakes), `alert_processor_repo_integration_test.go` (real Postgres with
-0306, 0309, 0310 and 100029 applied, skipped without `ENTITY_TEST_DATABASE_URL`).
+Tests: `alert_processor_test.go` (service, fakes, including the wake-up), `alert_processor_repo_integration_test.go` and
+`alert_listener_integration_test.go` (real Postgres with 0306, 0309, 0310 and 100029 applied, skipped without
+`ENTITY_TEST_DATABASE_URL`; the latter checks the notification fires only for a committed NEW alert).
 
 ## Alert mute rules (`/alert-mute-rules`, Postgres only)
 

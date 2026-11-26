@@ -739,7 +739,8 @@ type Config struct {
 	AlertProcessorCallerID string
 	// AlertProcessorConcurrency is how many alerts the alert processor works on at once (ALERT_PROCESSOR_CONCURRENCY, default 4).
 	AlertProcessorConcurrency int
-	// AlertProcessorPollInterval is how long the alert processor waits before looking again when no alert is waiting (ALERT_PROCESSOR_POLL_INTERVAL, default 1s).
+	// AlertProcessorPollInterval is the alert processor's backstop poll (ALERT_PROCESSOR_POLL_INTERVAL, default 5s): an idle
+	// worker looks again after it even when no alert_stored notification woke it.
 	AlertProcessorPollInterval time.Duration
 	// AlertProcessorMaxIncidentAge is how old an open incident may be and still take a new alert of its fingerprint (ALERT_PROCESSOR_MAX_INCIDENT_AGE, default 24h, 0 = no limit).
 	AlertProcessorMaxIncidentAge time.Duration
@@ -1102,7 +1103,7 @@ func Load() *Config {
 		AlertConsumerPriorityWeight:                   envIntInRange("ALERT_CONSUMER_PRIORITY_WEIGHT", 0, 0, maxAlertConsumerPriorityWeight),
 		AlertProcessorCallerID:                        strings.TrimSpace(os.Getenv("ALERT_PROCESSOR_CALLER_ID")),
 		AlertProcessorConcurrency:                     envIntInRange("ALERT_PROCESSOR_CONCURRENCY", 4, 1, maxAlertProcessorConcurrency),
-		AlertProcessorPollInterval:                    envDuration("ALERT_PROCESSOR_POLL_INTERVAL", time.Second),
+		AlertProcessorPollInterval:                    envDuration("ALERT_PROCESSOR_POLL_INTERVAL", 5*time.Second),
 		AlertProcessorMaxIncidentAge:                  envDurationOrOff("ALERT_PROCESSOR_MAX_INCIDENT_AGE", 24*time.Hour),
 		AlertSQSPriorityQueueURLs:                     queueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
 		AlertSQSStandardQueueURLs:                     queueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),

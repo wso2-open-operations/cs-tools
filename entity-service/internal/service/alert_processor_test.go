@@ -54,6 +54,10 @@ type fakeProcessorRepo struct {
 	outcomes      map[string]domain.AlertProcessorOutcome
 	failures      []recordedFailure
 	claimLost     bool
+	// waiting is what the next claims hand out, one alert each; claims counts every ClaimAlerts call.
+	waiting []domain.ClaimedAlert
+	claims  int
+	claimed chan struct{}
 }
 
 type recordedFailure struct {
@@ -71,8 +75,26 @@ func newFakeProcessorRepo() *fakeProcessorRepo {
 	}
 }
 
-func (r *fakeProcessorRepo) ClaimAlerts(context.Context, string, time.Duration, int) ([]domain.ClaimedAlert, error) {
-	return nil, nil
+func (r *fakeProcessorRepo) ClaimAlerts(_ context.Context, _ string, _ time.Duration, limit int) ([]domain.ClaimedAlert, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.claims++
+	if r.claimed != nil {
+		select {
+		case r.claimed <- struct{}{}:
+		default:
+		}
+	}
+	n := min(limit, len(r.waiting))
+	out := r.waiting[:n]
+	r.waiting = r.waiting[n:]
+	return out, nil
+}
+
+func (r *fakeProcessorRepo) claimCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claims
 }
 
 func (r *fakeProcessorRepo) WithFingerprintLock(_ context.Context, fingerprint string, fn func(repository.AlertFingerprintTx) error) error {
@@ -499,5 +521,90 @@ func TestAlertMuteRuleMatches(t *testing.T) {
 	ended.EndedOn = &endedOn
 	if _, ok := matchAlertMuteRule([]domain.AlertMuteRule{ended}, a, testAlertReceivedOn); ok {
 		t.Error("an ended rule matched")
+	}
+}
+
+func TestAlertProcessor_WakeStartsIdleWorkersBeforeThePoll(t *testing.T) {
+	repo, creator := newFakeProcessorRepo(), &fakeIncidentCreator{}
+	repo.claimed = make(chan struct{}, 16)
+	p := NewAlertProcessor(repo, creator, &fakeMuteRules{}, AlertProcessorConfig{
+		Live: true, CallerID: testAlertCaller, DefaultServiceID: testAlertDefaultService, Concurrency: 3, PollInterval: time.Hour,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	waitClaims := func(n int) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for repo.claimCount() < n {
+			select {
+			case <-repo.claimed:
+			case <-deadline:
+				t.Fatalf("claims = %d, want at least %d", repo.claimCount(), n)
+			}
+		}
+	}
+	waitClaims(3) // every worker looked once and is now idle for an hour
+	repo.mu.Lock()
+	repo.waiting = []domain.ClaimedAlert{claimedAlert(t, "ALT000000050", firingAlert)}
+	repo.mu.Unlock()
+
+	p.Wake()
+
+	waitClaims(6)
+	deadline := time.After(5 * time.Second)
+	for {
+		repo.mu.Lock()
+		_, decided := repo.outcomes["ALT000000050"]
+		repo.mu.Unlock()
+		if decided {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the woken workers did not decide the alert")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestAlertWaker_BroadcastWakesEveryWaiterOnce(t *testing.T) {
+	w := alertWaker{ch: make(chan struct{})}
+	first, second := w.wait(), w.wait()
+	w.broadcast()
+	for i, ch := range []<-chan struct{}{first, second} {
+		select {
+		case <-ch:
+		default:
+			t.Fatalf("waiter %d was not woken", i)
+		}
+	}
+	select {
+	case <-w.wait():
+		t.Fatal("a wait taken after the broadcast is already woken")
+	default:
+	}
+}
+
+func TestAlertProcessor_IdleReturnsOnWakeOrPoll(t *testing.T) {
+	p := newTestProcessor(true, newFakeProcessorRepo(), &fakeIncidentCreator{}, &fakeMuteRules{})
+	p.cfg.PollInterval = time.Hour
+	p.sleep = sleepContext
+	woken := p.wake.wait()
+	start := time.Now()
+	go func() { time.Sleep(20 * time.Millisecond); p.Wake() }()
+	if !p.idle(context.Background(), woken) {
+		t.Fatal("idle = false, want true while the context is live")
+	}
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Fatalf("idle waited %s, want it to end at the wake-up", waited)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if p.idle(ctx, p.wake.wait()) {
+		t.Fatal("idle = true on a cancelled context, want false")
 	}
 }

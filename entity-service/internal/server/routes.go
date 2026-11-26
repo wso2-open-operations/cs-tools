@@ -1715,8 +1715,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			},
 		)
 		alertProcessorWG.Go(func() { processor.Run(alertProcessorCtx) })
+		// The consumer notifies alert_stored when it commits a NEW alert; the listener wakes the idle workers at once.
+		// PollInterval is the backstop for a missed notification and for retries falling due.
+		alertProcessorWG.Go(func() { repository.ListenAlertStored(alertProcessorCtx, db, processor.Wake) })
 		slog.Info("alert processor running", "live", cfg.AlertProcessorLive(), "alertingVersion", cfg.AlertingVersion,
-			"workers", cfg.AlertProcessorConcurrency, "maxIncidentAge", cfg.AlertProcessorMaxIncidentAge)
+			"workers", cfg.AlertProcessorConcurrency, "backstopPoll", cfg.AlertProcessorPollInterval, "maxIncidentAge", cfg.AlertProcessorMaxIncidentAge)
 	}
 	// Which Special Ops team a handoff goes to, and which GitHub repository
 	// its internal issue goes to, is configuration. A value that does not

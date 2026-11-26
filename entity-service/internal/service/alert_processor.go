@@ -53,7 +53,8 @@ type AlertProcessorConfig struct {
 	DefaultServiceID string
 	// Concurrency is how many alerts are worked on at once.
 	Concurrency int
-	// PollInterval is how long to wait before looking again when no alert is waiting.
+	// PollInterval is the backstop: how long an idle worker waits before looking again when no wake-up came (a missed
+	// notification, a retry falling due, another replica's expired lease).
 	PollInterval time.Duration
 	// MaxIncidentAge is how old an open incident may be and still take new alerts of its fingerprint; 0 is no limit.
 	MaxIncidentAge time.Duration
@@ -70,8 +71,9 @@ const alertClaimLease = 2 * time.Minute
 // alertProcessTimeout bounds one alert's decision and incident create, well inside the lease.
 const alertProcessTimeout = 60 * time.Second
 
-// alertClaimBatch is how many alerts one worker claims at a time; small, so priority alerts arriving meanwhile wait little.
-const alertClaimBatch = 5
+// alertClaimBatch is how many alerts one worker claims at a time. One, so every claim takes the most urgent waiting
+// alert: a priority alert that arrives while workers are busy is the next one any of them takes.
+const alertClaimBatch = 1
 
 // alertMaxAttempts is how many failed attempts make an alert FAILED.
 const alertMaxAttempts = 8
@@ -103,6 +105,7 @@ type AlertProcessor struct {
 	cfg       AlertProcessorConfig
 	now       func() time.Time
 	sleep     func(ctx context.Context, d time.Duration) bool
+	wake      alertWaker
 
 	rulesMu     sync.Mutex
 	rules       []domain.AlertMuteRule
@@ -122,7 +125,7 @@ type cachedServiceID struct {
 func NewAlertProcessor(repo repository.AlertProcessorRepository, incidents AlertIncidentCreator, muteRules AlertMuteRuleSource, cfg AlertProcessorConfig) *AlertProcessor {
 	cfg.Concurrency = max(cfg.Concurrency, 1)
 	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = time.Second
+		cfg.PollInterval = 5 * time.Second
 	}
 	if cfg.Owner == "" {
 		cfg.Owner = alertProcessorActor
@@ -134,8 +137,54 @@ func NewAlertProcessor(repo repository.AlertProcessorRepository, incidents Alert
 		cfg:       cfg,
 		now:       time.Now,
 		sleep:     sleepContext,
+		wake:      alertWaker{ch: make(chan struct{})},
 		services:  map[string]cachedServiceID{},
 	}
+}
+
+// Wake starts every idle worker at once; the alert_stored listener calls it when the consumer has committed a NEW
+// alert. Safe to call from any goroutine, any number of times.
+func (p *AlertProcessor) Wake() {
+	p.wake.broadcast()
+}
+
+// alertWaker wakes every waiting worker together: broadcast closes the channel the workers wait on and starts a new one.
+type alertWaker struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func (w *alertWaker) wait() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ch
+}
+
+func (w *alertWaker) broadcast() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	close(w.ch)
+	w.ch = make(chan struct{})
+}
+
+// idle waits for a wake-up or PollInterval, whichever comes first; false when ctx is done.
+func (p *AlertProcessor) idle(ctx context.Context, woken <-chan struct{}) bool {
+	select {
+	case <-woken:
+		return ctx.Err() == nil
+	default:
+	}
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-woken:
+			cancel()
+		case <-waitCtx.Done():
+		}
+	}()
+	p.sleep(waitCtx, p.cfg.PollInterval)
+	return ctx.Err() == nil
 }
 
 // Run works on waiting alerts until ctx is done; an alert in flight is finished first.
@@ -147,21 +196,25 @@ func (p *AlertProcessor) Run(ctx context.Context) {
 	workers.Wait()
 }
 
-// work claims a few alerts at a time and decides each, waiting PollInterval whenever none is waiting.
+// work claims the most urgent waiting alert and decides it, again and again. With nothing waiting it idles until a
+// wake-up (a NEW alert committed) or PollInterval. The wake-up channel is taken before the claim, so an alert committed
+// between an empty claim and the wait still wakes it.
 func (p *AlertProcessor) work(ctx context.Context) {
 	for ctx.Err() == nil {
+		woken := p.wake.wait()
 		claimed, err := p.repo.ClaimAlerts(ctx, p.cfg.Owner, alertClaimLease, alertClaimBatch)
 		if err != nil {
 			if ctx.Err() == nil {
 				slog.ErrorContext(ctx, "alert processor: claiming alerts failed, retrying", "err", err)
 			}
+			// Not idle: a wake-up must not turn a failing database into a busy loop.
 			if !p.sleep(ctx, p.cfg.PollInterval) {
 				return
 			}
 			continue
 		}
 		if len(claimed) == 0 {
-			if !p.sleep(ctx, p.cfg.PollInterval) {
+			if !p.idle(ctx, woken) {
 				return
 			}
 			continue
