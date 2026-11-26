@@ -1411,12 +1411,15 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	//
 	// chatKey is simply never claimed when skipped; forgetting an unclaimed
 	// key below is a harmless no-op (see Dispatcher.forget), so nothing
-	// else in this function needs to change. Always resolves to the fixed
-	// chataudience.IncidentMonitor audience (no team detection, no
-	// per-product routing — see googleChatSender's own doc comment); an
-	// unconfigured audience is a no-op inside SendCaseCreatedAlert itself,
-	// not distinguishable here from a genuine send, so there's no "empty
-	// product, skip" branch left the way there used to be.
+	// else in this function needs to change. The audience is
+	// chataudience.CaseCardAudience: the Evaluation space for an Evaluation
+	// Subscription case, the fixed Incident Monitor audience for every other
+	// (no team detection, no per-product routing — see googleChatSender's
+	// own doc comment); an unconfigured audience is a no-op inside
+	// SendCaseCreatedAlert itself, not distinguishable here from a genuine
+	// send, so there's no "empty product, skip" branch left the way there
+	// used to be.
+	chatAudience := chataudience.CaseCardAudience(p.IsEvaluationAccount, d.googleChat.HasAudienceSpace)
 	switch {
 	case isLowSeverity(p.Priority):
 		// No chat — see the doc comment above.
@@ -1425,7 +1428,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 		if chatOwned {
 			caseLink := d.links.CSMLink(p.CaseID)
 			title := truncateTitle(p.CaseTitle, maxChatTitleLength)
-			chatErr := d.googleChat.SendSecurityReportAnalysisAlert(ctx, chataudience.IncidentMonitor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, p.Product, title, p.Team, caseLink)
+			chatErr := d.googleChat.SendSecurityReportAnalysisAlert(ctx, chatAudience, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, p.Product, title, p.Team, caseLink)
 			if chatErr != nil {
 				errs = append(errs, chatErr)
 				d.forget(chatKey)
@@ -1437,7 +1440,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 			caseLink := d.links.CSMLink(p.CaseID)
 			title := truncateTitle(p.CaseTitle, maxChatTitleLength)
 			severityLabel, severityColor := severityLabelAndColor(p.Priority)
-			chatErr := d.googleChat.SendCaseCreatedAlert(ctx, chataudience.IncidentMonitor, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, p.Product, title, p.Team, caseLink)
+			chatErr := d.googleChat.SendCaseCreatedAlert(ctx, chatAudience, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, p.Product, title, p.Team, caseLink)
 			if chatErr != nil {
 				errs = append(errs, chatErr)
 				d.forget(chatKey)
@@ -1888,14 +1891,16 @@ func (d *Dispatcher) handleCaseAcknowledged(ctx context.Context, record eventbus
 	var chatErr error
 	if chatOwned {
 		caseLink := d.links.CSMLink(p.CaseID)
+		// Same space as the case's case.created card — see handleCaseCreated.
+		chatAudience := chataudience.CaseCardAudience(p.IsEvaluationAccount, d.googleChat.HasAudienceSpace)
 		if isSecurityReportAnalysisCaseType(p.CaseType) {
 			// No severity line — see SendSecurityReportAnalysisAcknowledgedAlert's
 			// own doc comment for why this type gets its own card instead of
 			// severityLabelAndColor's "Unknown" fallback below.
-			chatErr = d.googleChat.SendSecurityReportAnalysisAcknowledgedAlert(ctx, chataudience.IncidentMonitor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
+			chatErr = d.googleChat.SendSecurityReportAnalysisAcknowledgedAlert(ctx, chatAudience, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
 		} else {
 			severityLabel, severityColor := severityLabelAndColor(p.Severity)
-			chatErr = d.googleChat.SendCaseAcknowledgedAlert(ctx, chataudience.IncidentMonitor, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
+			chatErr = d.googleChat.SendCaseAcknowledgedAlert(ctx, chatAudience, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
 		}
 		if chatErr != nil {
 			d.forget(chatKey)
@@ -2110,11 +2115,13 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// shape handleCaseCreated's own chat block uses (outside its email
 	// if/else, not nested inside the success branch).
 	//
-	// Product rule: a move TO low severity (S4) never posts to the Incident
-	// Monitor chat, whatever the old severity was; a move to any higher
-	// severity (S0-S3, including an upgrade from S4) always does. Only the
-	// NEW severity matters. chatKey is simply never claimed when skipped;
-	// forgetting an unclaimed key below is a harmless no-op.
+	// Product rule: a move TO low severity (S4) never posts a Chat card,
+	// whatever the old severity was; a move to any higher severity (S0-S3,
+	// including an upgrade from S4) always does. Only the NEW severity
+	// matters. chatKey is simply never claimed when skipped; forgetting an
+	// unclaimed key below is a harmless no-op. The card goes to the same
+	// space as the case's case.created card (chataudience.CaseCardAudience:
+	// Evaluation for an Evaluation Subscription case, else Incident Monitor).
 	chatOwned := false
 	if !isLowSeverity(p.NewSeverity) {
 		chatOwned = d.claim(chatKey)
@@ -2122,7 +2129,8 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	if chatOwned {
 		caseLink := d.links.CSMLink(p.CaseID)
 		title := truncateTitle(p.CaseTitle, maxChatTitleLength)
-		if chatErr := d.googleChat.SendSeverityChangedAlert(ctx, chataudience.IncidentMonitor, oldLabel, oldColor, newLabel, newColor, caseRef, p.WSO2CaseID, p.Product, title, p.Team, caseLink); chatErr != nil {
+		chatAudience := chataudience.CaseCardAudience(p.IsEvaluationAccount, d.googleChat.HasAudienceSpace)
+		if chatErr := d.googleChat.SendSeverityChangedAlert(ctx, chatAudience, oldLabel, oldColor, newLabel, newColor, caseRef, p.WSO2CaseID, p.Product, title, p.Team, caseLink); chatErr != nil {
 			errs = append(errs, chatErr)
 			d.forget(chatKey)
 		}

@@ -2033,6 +2033,13 @@ func (s *stubMirrorCaseService) AccountSRETeam(ctx context.Context, projectID st
 	return "", "", nil
 }
 
+// ProjectOnboardingInfo backs the evaluation-account lookup the case.created/
+// case.acknowledged/case.severity_changed publishers make through pgFallback:
+// "not onboarding, not an evaluation account", like the unset hooks above.
+func (s *stubMirrorCaseService) ProjectOnboardingInfo(ctx context.Context, projectID string) (string, bool, error) {
+	return "", false, nil
+}
+
 func (s *stubMirrorCaseService) GetCaseEtaSharedOn(ctx context.Context, caseID string) (*time.Time, error) {
 	if s.getCaseEtaSharedOnFn != nil {
 		return s.getCaseEtaSharedOnFn(ctx, caseID)

@@ -320,6 +320,8 @@ type CaseAcknowledgedPayload struct {
 	// carries a severity, so csm-notification-service uses this to render a
 	// dedicated ack card with no severity line instead of "Unknown".
 	CaseType string `json:"caseType,omitempty"`
+	// IsEvaluationAccount — see CaseCreatedPayload's own doc comment.
+	IsEvaluationAccount bool `json:"isEvaluationAccount,omitempty"`
 }
 
 // WorkaroundProvidedPayload is the Payload shape for
@@ -385,6 +387,8 @@ type SeverityChangedPayload struct {
 	SRETeamID   string   `json:"sreTeamId,omitempty"`
 	SRETeamName string   `json:"sreTeamName,omitempty"`
 	Recipients  []string `json:"recipients"`
+	// IsEvaluationAccount — see CaseCreatedPayload's own doc comment.
+	IsEvaluationAccount bool `json:"isEvaluationAccount,omitempty"`
 }
 
 // CaseTypeChangedPayload is the Payload shape for TypeCaseTypeChanged. No
@@ -489,6 +493,14 @@ type CaseCreatedPayload struct {
 	// publisher that never sent this field at all.
 	DescriptionTruncated bool     `json:"descriptionTruncated,omitempty"`
 	Recipients           []string `json:"recipients"`
+	// IsEvaluationAccount is true when the case's project is an Evaluation
+	// Subscription (CaseRepository.ProjectOnboardingInfo, the same fact
+	// CommentAddedPayload carries). csm-notification-service posts the Chat
+	// card for such a case to the Evaluation space instead of Incident
+	// Monitor. Best-effort: false when the lookup fails or there is no
+	// Postgres pool, so the card then goes to Incident Monitor as before.
+	// The same field is on CaseAcknowledgedPayload and SeverityChangedPayload.
+	IsEvaluationAccount bool `json:"isEvaluationAccount,omitempty"`
 }
 
 // IncidentCreatedPayload is the Payload shape for TypeIncidentCreated —

@@ -859,7 +859,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// persisted first (immediately above) for the same reason
 	// createCaseSNFirst orders it this way: publishCaseCreatedEvent's own
 	// GetCaseByID re-fetch needs them already written to resolve Recipients.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, s.ProjectOnboardingInfo, req, c.ID)
 	// Plain Postgres only: under dual-write the SR is created in ServiceNow
 	// first, where its own flow still assigns, acknowledges and announces it.
 	if req.Type == "service_request" && s.srNotices != nil {
@@ -1044,7 +1044,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// after the ServiceNow POST, before this Postgres insert was even
 	// attempted) — same reasoning incidentService.createIncidentSNFirst
 	// already established.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, s.ProjectOnboardingInfo, req, c.ID)
 
 	responseState := ""
 	if c.State != nil {
@@ -2566,7 +2566,7 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 				}
 			}
 			cv.WatchList = s.filterActiveWatchListUsers(ctx, cv, cv.WatchList)
-			publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
+			publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, s.ProjectOnboardingInfo, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
 		}
 	}
 
@@ -3278,14 +3278,15 @@ func (s *caseService) publishCaseAcknowledged(ctx context.Context, caseID, ackno
 	}
 
 	payload, err := json.Marshal(events.CaseAcknowledgedPayload{
-		CaseID:           caseID,
-		CaseNumber:       cv.Number,
-		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
-		Product:          caseProductName(cv),
-		Team:             caseTeamName(cv),
-		AcknowledgerName: acknowledgerName,
-		CaseType:         strings.ToUpper(derefString(cv.Type)),
+		CaseID:              caseID,
+		CaseNumber:          cv.Number,
+		WSO2CaseID:          cv.InternalID,
+		Severity:            strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Product:             caseProductName(cv),
+		Team:                caseTeamName(cv),
+		AcknowledgerName:    acknowledgerName,
+		CaseType:            strings.ToUpper(derefString(cv.Type)),
+		IsEvaluationAccount: caseIsEvaluationAccount(ctx, s.ProjectOnboardingInfo, cv, "update case"),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "update case: encode case.acknowledged payload failed", "caseId", caseID, "error", err)
