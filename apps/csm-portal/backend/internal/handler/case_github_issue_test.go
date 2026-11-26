@@ -172,21 +172,21 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 
 	t.Run("builds the body and labels from the optional fields", func(t *testing.T) {
 		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
-		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"updateLevel":"U12","publicIssueUrl":"https://example.com/i/1","hotFixRequired":true,"regression":true,"reason":"migration","onboardingInProgress":true,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/High"}`)
+		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"updateLevel":"U12","publicIssueUrl":"https://example.com/i/1","hotFixRequired":true,"regression":true,"reason":"migration","onboardingInProgress":true,"issueTypeLabel":"Type/Patch"}`)
 		assertStatus(t, w, http.StatusCreated)
 		c := eng.calls[0]
 		wantBody := "It fails.\n\nHotfix Required : Yes\n\n" + infoBlock("Alpha", "U12", "", "", "https://example.com/i/1", "", testUser.Email)
 		if c.body != wantBody {
 			t.Errorf("body = %q, want %q", c.body, wantBody)
 		}
-		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/High(P1)", "Require/Hotfix", "regression", "Affected/Migration", "Onboarding/affected"}; !slices.Equal(c.labels, want) {
+		if want := []string{"Origin/CS", "Alpha", "Type/Patch", "patch", "Require/Hotfix", "regression", "Affected/Migration", "Onboarding/affected"}; !slices.Equal(c.labels, want) {
 			t.Errorf("labels = %v, want %v", c.labels, want)
 		}
 	})
 
 	t.Run("writes the new optional fields between the description and the footer, and adds no label for them", func(t *testing.T) {
 		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
-		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Immediate(P0)","priorityJustification":"  Go-live on Friday\nis blocked  ","reproducingSteps":"1. Log in\n2. Request a token","hotFixRequired":true,"hotFixReason":"Customer-Requested Hotfix","relatedInternalIssues":"example/internal#12\nexample/internal#13"}`)
+		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"priorityLevel":"Priority/Immediate(P0)","priorityJustification":"  Go-live on Friday\nis blocked  ","reproducingSteps":"1. Log in\n2. Request a token","hotFixRequired":true,"hotFixReason":"Customer-Requested Hotfix","relatedInternalIssues":"example/internal#12\nexample/internal#13"}`)
 		assertStatus(t, w, http.StatusCreated)
 		c := eng.calls[0]
 		wantBody := "It fails." +
@@ -198,7 +198,7 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		if c.body != wantBody {
 			t.Errorf("body = %q, want %q", c.body, wantBody)
 		}
-		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/Immediate(P0)", "Require/Hotfix"}; !slices.Equal(c.labels, want) {
+		if want := []string{"Origin/CS", "Alpha", "Require/Hotfix"}; !slices.Equal(c.labels, want) {
 			t.Errorf("labels = %v, want %v", c.labels, want)
 		}
 	})
@@ -999,17 +999,25 @@ func TestCaseGitHubIssueRequest_ScopedToIssueType(t *testing.T) {
 	discussion := all
 	discussion.IssueTypeLabel = "Type/Discussion"
 	discussion = discussion.scopedToIssueType()
-	for _, s := range gitHubIssueSections(discussion) {
-		if strings.HasPrefix(s, "Business Use Case") || strings.HasPrefix(s, "Related Git Issue(s)") {
-			t.Errorf("unexpected section on a Discussion: %q", s)
-		}
+	if got, want := buildGitHubIssueLabels("product/is", discussion), []string{"Origin/CS", "product/is", "Type/Incident", "Priority/High(P1)", "Affected/Migration"}; !slices.Equal(got, want) {
+		t.Errorf("discussion labels = %v, want %v", got, want)
 	}
-	if len(gitHubIssueSections(discussion)) != 4 {
-		t.Errorf("discussion sections = %q, want its own four", gitHubIssueSections(discussion))
+	if got, want := gitHubIssueSections(discussion), []string{"Priority Justification : Production is down.", "Related Internal Issue(s) :\nexample/internal#12"}; !slices.Equal(got, want) {
+		t.Errorf("discussion sections = %q, want %q", got, want)
 	}
 
-	// The legacy Patch type and a request with no type are left as sent.
-	for _, typ := range []string{"Type/Patch", ""} {
+	patch := all
+	patch.IssueTypeLabel = "Type/Patch"
+	patch = patch.scopedToIssueType()
+	if got, want := buildGitHubIssueLabels("product/is", patch), []string{"Origin/CS", "product/is", "Type/Patch", "patch", "Require/Hotfix", "regression", "Affected/Migration"}; !slices.Equal(got, want) {
+		t.Errorf("patch labels = %v, want %v", got, want)
+	}
+	if got, want := gitHubIssueSections(patch), []string{"Reproducing Steps :\n1. Log in", "Hotfix Required : Yes\nHotfix Reason : Customer-Requested Hotfix"}; !slices.Equal(got, want) {
+		t.Errorf("patch sections = %q, want %q", got, want)
+	}
+
+	// A request with no type is left as sent.
+	for _, typ := range []string{""} {
 		other := all
 		other.IssueTypeLabel = typ
 		if got := other.scopedToIssueType(); got != other {

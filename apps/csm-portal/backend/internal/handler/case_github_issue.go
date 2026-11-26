@@ -159,11 +159,12 @@ func (req caseGitHubIssueRequest) hotFixReason() string {
 }
 
 // scopedToIssueType is the request with the fields of the other issue type
-// cleared, so they reach neither the body nor the labels: a Feature Request
-// carries no priority, justification, reproducing steps, hotfix, regression or
-// related internal issues, and a Discussion no business use case or related
-// Git issues. The dialog never sends them; this covers any other caller. Any
-// other type (the legacy Type/Patch, or none) is left as sent.
+// cleared, so they reach neither the body nor the labels. Each type keeps only
+// its own fields. Patch: reproducing steps, update level and public issue,
+// hotfix (with reason) and regression. Discussion: priority, justification,
+// update level and public issue, and related internal issues. Feature: business
+// use case and related Git issues. The dialog never sends the others; this
+// covers any other caller. A request with no or an unknown type is left as sent.
 func (req caseGitHubIssueRequest) scopedToIssueType() caseGitHubIssueRequest {
 	switch strings.TrimSpace(req.IssueTypeLabel) {
 	case featureIssueTypeLabel:
@@ -174,7 +175,17 @@ func (req caseGitHubIssueRequest) scopedToIssueType() caseGitHubIssueRequest {
 		req.HotFixReason = ""
 		req.Regression = false
 		req.RelatedInternalIssues = ""
+	case patchIssueTypeLabel:
+		req.PriorityLevel = ""
+		req.PriorityJustification = ""
+		req.RelatedInternalIssues = ""
+		req.BusinessUseCase = ""
+		req.RelatedGitIssues = ""
 	case discussionIssueTypeLabel:
+		req.ReproducingSteps = ""
+		req.HotFixRequired = false
+		req.HotFixReason = ""
+		req.Regression = false
 		req.BusinessUseCase = ""
 		req.RelatedGitIssues = ""
 	}
