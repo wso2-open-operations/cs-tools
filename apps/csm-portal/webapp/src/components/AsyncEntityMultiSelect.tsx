@@ -87,6 +87,11 @@ export default function AsyncEntityMultiSelect<T>({
   compactSelectedValues = false,
 }: AsyncEntityMultiSelectProps<T>): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
+  // What the textbox shows, held here rather than by Autocomplete: it resets
+  // the text on every change of `value`, including a selected value's label
+  // resolving while the user types. Only typing, clearing, picking/removing an
+  // option and leaving the field change it (see `onInputChange`).
+  const [inputValue, setInputValue] = useState("");
   const [open, setOpen] = useState(false);
   const debounced = useDebouncedValue(searchTerm, 300);
   const query = debounced.trim();
@@ -96,15 +101,21 @@ export default function AsyncEntityMultiSelect<T>({
 
   const [labelById, setLabelById] = useState<Record<string, string>>(() => knownLabels ?? {});
 
-  const selectedOptions = useMemo<AsyncEntityMultiSelectOption[]>(
-    () =>
-      values.map((v) => {
-        const match = items.find((item) => getId(item) === v);
-        const label = match ? getLabel(match) : (labelById[v] ?? v);
-        return { id: v, label };
-      }),
-    [values, items, labelById, getId, getLabel],
-  );
+  const selectedLabels = values.map((v) => {
+    const match = items.find((item) => getId(item) === v);
+    // A current search result first, then the caller's `knownLabels` as it is
+    // now (it may still be loading when this mounts, and is the fresher name
+    // once it arrives), then the name cached when the value was picked.
+    return match ? getLabel(match) : (knownLabels?.[v] ?? labelById[v] ?? v);
+  });
+  // Keyed on the ids and labels themselves, so the array keeps its identity
+  // while neither changes, rather than on every new search result (or inline
+  // `getId`/`getLabel`).
+  const selectedKey = JSON.stringify([values, selectedLabels]);
+  const selectedOptions = useMemo<AsyncEntityMultiSelectOption[]>(() => {
+    const [ids, labels] = JSON.parse(selectedKey) as [string[], string[]];
+    return ids.map((id, i) => ({ id, label: labels[i] }));
+  }, [selectedKey]);
 
   const options = useMemo<AsyncEntityMultiSelectOption[]>(() => {
     const results = items.map((item) => ({ id: getId(item), label: getLabel(item) }));
@@ -172,12 +183,24 @@ export default function AsyncEntityMultiSelect<T>({
       onChange={(_event, next) => {
         setLabelById((prev) => {
           const merged = { ...prev };
-          for (const o of next) merged[o.id] = o.label;
+          // A label that is still just the id is not resolved yet: caching it
+          // would outrank a name `knownLabels` brings in afterwards.
+          for (const o of next) if (o.label !== o.id) merged[o.id] = o.label;
           return merged;
         });
+        // A selection change (picking, or removing a chip, which Autocomplete
+        // reports only here and then as a "reset" below) clears the text, as
+        // Autocomplete itself did. The search term is left as it was.
+        setInputValue("");
         onChange(next.map((o) => o.id));
       }}
+      inputValue={inputValue}
       onInputChange={(_event, val, reason) => {
+        // "reset" is Autocomplete reacting to a new `value` (e.g. a label
+        // resolving): what the user typed stays. Picking or removing an
+        // option and leaving the field still clear it, as before.
+        if (reason === "reset") return;
+        setInputValue(val);
         if (reason === "input") setSearchTerm(val);
         else if (reason === "clear") setSearchTerm("");
       }}
