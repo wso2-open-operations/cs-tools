@@ -39,7 +39,7 @@ type storedAlert struct {
 // fakeStore is an in-memory alert table; InGroup keeps its changes only when fn succeeds, as a rolled-back transaction would.
 type fakeStore struct {
 	alerts map[string]storedAlert
-	// failLinks makes the next LinkAlert calls fail, like a database outage after the sink was written.
+	// failLinks makes the next LinkAlert calls fail, like a database outage after the incident was written.
 	failLinks int
 }
 
@@ -119,8 +119,8 @@ func (t fakeTx) LinkAlert(_ context.Context, id, incidentID string) error {
 
 func (s *fakeStore) linkOf(id string) string { return s.alerts[id].incidentID }
 
-// fakeSink records what the processor asks for; byAlert is what Find answers.
-type fakeSink struct {
+// fakeWriter records what the processor asks for; byAlert is what Find answers.
+type fakeWriter struct {
 	opened  []string
 	notes   []string
 	closed  map[string]bool
@@ -128,11 +128,11 @@ type fakeSink struct {
 	openErr error
 }
 
-func newFakeSink() *fakeSink {
-	return &fakeSink{closed: map[string]bool{}, byAlert: map[string]string{}}
+func newFakeWriter() *fakeWriter {
+	return &fakeWriter{closed: map[string]bool{}, byAlert: map[string]string{}}
 }
 
-func (s *fakeSink) Open(_ context.Context, e event.Event) (string, error) {
+func (s *fakeWriter) Open(_ context.Context, e event.Event) (string, error) {
 	if s.openErr != nil {
 		return "", s.openErr
 	}
@@ -143,17 +143,17 @@ func (s *fakeSink) Open(_ context.Context, e event.Event) (string, error) {
 	s.byAlert[e.AlertID] = "inc-" + e.AlertID
 	return s.byAlert[e.AlertID], nil
 }
-func (s *fakeSink) Find(_ context.Context, alertID string) (string, error) {
+func (s *fakeWriter) Find(_ context.Context, alertID string) (string, error) {
 	return s.byAlert[alertID], nil
 }
-func (s *fakeSink) IsOpen(_ context.Context, id string) (bool, error) { return !s.closed[id], nil }
-func (s *fakeSink) Fold(_ context.Context, id string, outcome strategy.Outcome, e event.Event) error {
+func (s *fakeWriter) IsOpen(_ context.Context, id string) (bool, error) { return !s.closed[id], nil }
+func (s *fakeWriter) Fold(_ context.Context, id string, outcome strategy.Outcome, e event.Event) error {
 	s.notes = append(s.notes, id+": "+string(outcome)+" "+e.AlertID)
 	return nil
 }
 
-func newProcessor(store *fakeStore, sink *fakeSink, apply bool) *Processor {
-	return &Processor{Store: store, Sink: sink, Chain: strategy.Default(5 * time.Minute), Lookback: 5 * time.Minute, Apply: apply}
+func newProcessor(store *fakeStore, writer *fakeWriter, apply bool) *Processor {
+	return &Processor{Store: store, Incidents: writer, Chain: strategy.Default(5 * time.Minute), Lookback: 5 * time.Minute, Apply: apply}
 }
 
 var firstSeen = time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
@@ -166,19 +166,19 @@ func alert(id, severity string, after time.Duration) event.Event {
 }
 
 func TestProcessorFoldsAFingerprint(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
 	ctx := context.Background()
 	for _, e := range []event.Event{alert("A1", "critical", 0), alert("A2", "critical", time.Minute), alert("A3", "ok", 2*time.Minute)} {
 		if err := p.Handle(ctx, store.add(e)); err != nil {
 			t.Fatalf("Handle(%s): %v", e.AlertID, err)
 		}
 	}
-	if len(sink.opened) != 1 || sink.opened[0] != "A1" {
-		t.Fatalf("opened %v, want one incident from A1", sink.opened)
+	if len(writer.opened) != 1 || writer.opened[0] != "A1" {
+		t.Fatalf("opened %v, want one incident from A1", writer.opened)
 	}
-	if len(sink.notes) != 2 || !strings.Contains(sink.notes[0], "duplicate A2") || !strings.Contains(sink.notes[1], "resolve A3") {
-		t.Fatalf("notes %v, want a Duplicate then an OK note", sink.notes)
+	if len(writer.notes) != 2 || !strings.Contains(writer.notes[0], "duplicate A2") || !strings.Contains(writer.notes[1], "resolve A3") {
+		t.Fatalf("notes %v, want a Duplicate then an OK note", writer.notes)
 	}
 	for _, id := range []string{"A1", "A2", "A3"} {
 		if store.linkOf(id) != "inc-A1" {
@@ -188,47 +188,47 @@ func TestProcessorFoldsAFingerprint(t *testing.T) {
 }
 
 func TestProcessorOpensAgainOnceTheIncidentIsClosed(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
 	ctx := context.Background()
 	_ = p.Handle(ctx, store.add(alert("A1", "critical", 0)))
-	sink.closed["inc-A1"] = true
+	writer.closed["inc-A1"] = true
 	if err := p.Handle(ctx, store.add(alert("A2", "critical", time.Minute))); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.opened) != 2 || store.linkOf("A2") != "inc-A2" {
-		t.Fatalf("opened %v, A2 linked to %q; want a new incident for A2", sink.opened, store.linkOf("A2"))
+	if len(writer.opened) != 2 || store.linkOf("A2") != "inc-A2" {
+		t.Fatalf("opened %v, A2 linked to %q; want a new incident for A2", writer.opened, store.linkOf("A2"))
 	}
 }
 
 func TestProcessorRedeliveryIsANoOp(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
 	e := store.add(alert("A1", "critical", 0))
 	for range 2 {
 		if err := p.Handle(context.Background(), e); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(sink.opened) != 1 || len(sink.notes) != 0 {
-		t.Fatalf("opened %v notes %v, want the redelivery to do nothing", sink.opened, sink.notes)
+	if len(writer.opened) != 1 || len(writer.notes) != 0 {
+		t.Fatalf("opened %v notes %v, want the redelivery to do nothing", writer.opened, writer.notes)
 	}
 }
 
 func TestProcessorWithoutApplyOnlyDecides(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	if err := newProcessor(store, sink, false).Handle(context.Background(), store.add(alert("A1", "critical", 0))); err != nil {
+	store, writer := newFakeStore(), newFakeWriter()
+	if err := newProcessor(store, writer, false).Handle(context.Background(), store.add(alert("A1", "critical", 0))); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.opened) != 0 || store.linkOf("A1") != "" {
-		t.Fatalf("hybrid wrote: opened %v, A1 linked to %q", sink.opened, store.linkOf("A1"))
+	if len(writer.opened) != 0 || store.linkOf("A1") != "" {
+		t.Fatalf("hybrid wrote: opened %v, A1 linked to %q", writer.opened, store.linkOf("A1"))
 	}
 }
 
 func TestProcessorFailedOpenIsRetried(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	sink.openErr = errors.New("csm down")
-	if err := newProcessor(store, sink, true).Handle(context.Background(), store.add(alert("A1", "critical", 0))); err == nil {
+	store, writer := newFakeStore(), newFakeWriter()
+	writer.openErr = errors.New("csm down")
+	if err := newProcessor(store, writer, true).Handle(context.Background(), store.add(alert("A1", "critical", 0))); err == nil {
 		t.Fatal("Handle succeeded, want the error so the event is retried")
 	}
 	if store.linkOf("A1") != "" {
@@ -237,8 +237,8 @@ func TestProcessorFailedOpenIsRetried(t *testing.T) {
 }
 
 func TestProcessorRetryAfterALinkFailureOpensNoSecondIncident(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
 	e := store.add(alert("A1", "critical", 0))
 	store.failLinks = 1
 	if err := p.Handle(context.Background(), e); err == nil {
@@ -247,36 +247,36 @@ func TestProcessorRetryAfterALinkFailureOpensNoSecondIncident(t *testing.T) {
 	if err := p.Handle(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.opened) != 1 || store.linkOf("A1") != "inc-A1" {
-		t.Fatalf("opened %v, A1 linked to %q; want one incident, linked on the retry", sink.opened, store.linkOf("A1"))
+	if len(writer.opened) != 1 || store.linkOf("A1") != "inc-A1" {
+		t.Fatalf("opened %v, A1 linked to %q; want one incident, linked on the retry", writer.opened, store.linkOf("A1"))
 	}
 }
 
 func TestProcessorLaterAlertFindsAnIncidentNeverLinked(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
 	ctx := context.Background()
 	store.failLinks = 1
 	_ = p.Handle(ctx, store.add(alert("A1", "critical", 0))) // incident created, never linked, event given up on
 	if err := p.Handle(ctx, store.add(alert("A2", "critical", time.Minute))); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.opened) != 1 || store.linkOf("A1") != "inc-A1" || store.linkOf("A2") != "inc-A1" {
-		t.Fatalf("opened %v, A1→%q A2→%q; want A2 folded into A1's incident and A1 linked", sink.opened, store.linkOf("A1"), store.linkOf("A2"))
+	if len(writer.opened) != 1 || store.linkOf("A1") != "inc-A1" || store.linkOf("A2") != "inc-A1" {
+		t.Fatalf("opened %v, A1→%q A2→%q; want A2 folded into A1's incident and A1 linked", writer.opened, store.linkOf("A1"), store.linkOf("A2"))
 	}
 }
 
 func TestProcessorLaterAlertOpensWhenTheEarlierOpenCreatedNothing(t *testing.T) {
-	store, sink := newFakeStore(), newFakeSink()
-	p := newProcessor(store, sink, true)
+	store, writer := newFakeStore(), newFakeWriter()
+	p := newProcessor(store, writer, true)
 	ctx := context.Background()
-	sink.openErr = errors.New("csm down")
+	writer.openErr = errors.New("csm down")
 	_ = p.Handle(ctx, store.add(alert("A1", "critical", 0)))
-	sink.openErr = nil
+	writer.openErr = nil
 	if err := p.Handle(ctx, store.add(alert("A2", "critical", time.Minute))); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.opened) != 1 || sink.opened[0] != "A2" || store.linkOf("A2") != "inc-A2" {
-		t.Fatalf("opened %v, A2 linked to %q; want A2 to open the incident", sink.opened, store.linkOf("A2"))
+	if len(writer.opened) != 1 || writer.opened[0] != "A2" || store.linkOf("A2") != "inc-A2" {
+		t.Fatalf("opened %v, A2 linked to %q; want A2 to open the incident", writer.opened, store.linkOf("A2"))
 	}
 }

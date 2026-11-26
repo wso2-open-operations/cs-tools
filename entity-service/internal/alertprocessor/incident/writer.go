@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package sink carries the processor's decisions into CSM incidents, through the incident service in-process.
-package sink
+// Package incident writes the processor's decisions to CSM incidents, through the incident service in-process.
+package incident
 
 import (
 	"context"
@@ -30,8 +30,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Incidents is the part of the incident service the sink uses, called in-process.
-type Incidents interface {
+// Service is the part of the incident service the writer uses, called in-process.
+type Service interface {
 	CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error)
 	GetIncidentByID(ctx context.Context, id string) (domain.IncidentView, error)
 	UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error)
@@ -48,11 +48,11 @@ type Services interface {
 	SearchITServices(ctx context.Context, searchQuery string, limit, offset int) ([]domain.ITService, int, error)
 }
 
-// Incident creates and updates CSM incidents through the incident service; it implements alertprocessor.Sink.
-type Incident struct {
-	Incidents Incidents
-	Services  Services
-	Notes     Notes
+// Writer creates and updates CSM incidents through the incident service; it implements alertprocessor.IncidentWriter.
+type Writer struct {
+	Service  Service
+	Services Services
+	Notes    Notes
 	// CallerID is the user every alert incident is raised by.
 	CallerID string
 	// DefaultServiceID is the service for an alert whose service label matches none.
@@ -63,7 +63,7 @@ type Incident struct {
 const serviceSearchLimit = 50
 
 // Open creates the alert's incident; the alert id is the incident's correlation id, so a retry finds the incident it already created.
-func (s Incident) Open(ctx context.Context, e event.Event) (string, error) {
+func (s Writer) Open(ctx context.Context, e event.Event) (string, error) {
 	if id, err := s.Find(ctx, e.AlertID); err != nil || id != "" {
 		return id, err
 	}
@@ -88,7 +88,7 @@ func (s Incident) Open(ctx context.Context, e event.Event) (string, error) {
 	if env := strings.TrimSpace(e.Alert.Environment); env != "" {
 		req.Environment = &env
 	}
-	resp, err := s.Incidents.CreateIncident(ctx, req)
+	resp, err := s.Service.CreateIncident(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("create incident: %w", err)
 	}
@@ -99,8 +99,8 @@ func (s Incident) Open(ctx context.Context, e event.Event) (string, error) {
 }
 
 // IsOpen is false once the incident is resolved, closed or cancelled, so the next alert opens a new one.
-func (s Incident) IsOpen(ctx context.Context, incidentID string) (bool, error) {
-	view, err := s.Incidents.GetIncidentByID(ctx, incidentID)
+func (s Writer) IsOpen(ctx context.Context, incidentID string) (bool, error) {
+	view, err := s.Service.GetIncidentByID(ctx, incidentID)
 	if err != nil {
 		var notFound *apierror.NotFoundError
 		if errors.As(err, &notFound) {
@@ -119,23 +119,23 @@ func (s Incident) IsOpen(ctx context.Context, incidentID string) (bool, error) {
 }
 
 // Find returns the incident the alert opened, or "" when it opened none.
-func (s Incident) Find(ctx context.Context, alertID string) (string, error) {
+func (s Writer) Find(ctx context.Context, alertID string) (string, error) {
 	return s.byCorrelationID(ctx, correlationID(alertID))
 }
 
 // Fold adds the alert to the incident as a Duplicate or OK work note, once: a retry finds the note by the alert id it names.
-func (s Incident) Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error {
+func (s Writer) Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error {
 	noted, err := s.Notes.HasNote(ctx, incidentID, noteMarker(e.AlertID))
 	if err != nil || noted {
 		return err
 	}
 	note := foldNote(outcome, e)
-	_, err = s.Incidents.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
+	_, err = s.Service.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
 	return err
 }
 
-func (s Incident) byCorrelationID(ctx context.Context, correlation string) (string, error) {
-	resp, err := s.Incidents.SearchIncidents(ctx, domain.SearchIncidentsRequest{
+func (s Writer) byCorrelationID(ctx context.Context, correlation string) (string, error) {
+	resp, err := s.Service.SearchIncidents(ctx, domain.SearchIncidentsRequest{
 		Filters:    domain.SearchIncidentsFilters{CorrelationID: &correlation},
 		Pagination: domain.Pagination{Limit: 1},
 		SkipTotal:  true,
@@ -150,7 +150,7 @@ func (s Incident) byCorrelationID(ctx context.Context, correlation string) (stri
 }
 
 // serviceID is the service named exactly by the label, or the default service when there is no label or no match.
-func (s Incident) serviceID(ctx context.Context, label string) (string, error) {
+func (s Writer) serviceID(ctx context.Context, label string) (string, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return s.DefaultServiceID, nil

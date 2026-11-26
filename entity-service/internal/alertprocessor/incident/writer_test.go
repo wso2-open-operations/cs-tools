@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package sink
+package incident
 
 import (
 	"context"
@@ -84,18 +84,18 @@ func (f fakeServices) SearchITServices(_ context.Context, query string, _, _ int
 	return out, len(out), nil
 }
 
-func newSink(incidents *fakeIncidents) Incident {
-	return Incident{
-		Incidents: incidents, Notes: fakeNotes{}, CallerID: "caller", DefaultServiceID: "svc-default",
+func newWriter(incidents *fakeIncidents) Writer {
+	return Writer{
+		Service: incidents, Notes: fakeNotes{}, CallerID: "caller", DefaultServiceID: "svc-default",
 		Services: fakeServices{"Client-Prod-Alert-Integration": "svc-1", "client-prod-alert-integration-eu": "svc-2"},
 	}
 }
 
-func TestIncidentSinkOpen(t *testing.T) {
+func TestWriterOpen(t *testing.T) {
 	incidents := &fakeIncidents{}
 	e := alert("A1", "major")
 	e.Alert.Source = "Azure Monitor"
-	id, err := newSink(incidents).Open(context.Background(), e)
+	id, err := newWriter(incidents).Open(context.Background(), e)
 	if err != nil || id != "inc-new" {
 		t.Fatalf("Open = %q, %v", id, err)
 	}
@@ -111,19 +111,19 @@ func TestIncidentSinkOpen(t *testing.T) {
 	}
 }
 
-func TestIncidentSinkOpenReusesTheIncidentAlreadyCreated(t *testing.T) {
+func TestWriterOpenReusesTheIncidentAlreadyCreated(t *testing.T) {
 	incidents := &fakeIncidents{existing: "inc-old"}
-	id, err := newSink(incidents).Open(context.Background(), alert("A1", "critical"))
+	id, err := newWriter(incidents).Open(context.Background(), alert("A1", "critical"))
 	if err != nil || id != "inc-old" || len(incidents.created) != 0 {
 		t.Fatalf("Open = %q, %v, created %d; want the incident found by correlation id", id, err, len(incidents.created))
 	}
 }
 
-func TestIncidentSinkFallsBackToTheDefaultService(t *testing.T) {
+func TestWriterFallsBackToTheDefaultService(t *testing.T) {
 	incidents := &fakeIncidents{}
 	e := alert("A1", "critical")
 	e.Alert.Service = "unknown-service"
-	if _, err := newSink(incidents).Open(context.Background(), e); err != nil {
+	if _, err := newWriter(incidents).Open(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
 	if incidents.created[0].ServiceID != "svc-default" {
@@ -131,7 +131,7 @@ func TestIncidentSinkFallsBackToTheDefaultService(t *testing.T) {
 	}
 }
 
-func TestIncidentSinkIsOpen(t *testing.T) {
+func TestWriterIsOpen(t *testing.T) {
 	str := func(s string) *string { return &s }
 	tests := map[string]struct {
 		incidents *fakeIncidents
@@ -144,7 +144,7 @@ func TestIncidentSinkIsOpen(t *testing.T) {
 		"deleted":   {&fakeIncidents{missing: true}, false},
 	}
 	for name, tt := range tests {
-		got, err := newSink(tt.incidents).IsOpen(context.Background(), "inc-1")
+		got, err := newWriter(tt.incidents).IsOpen(context.Background(), "inc-1")
 		if err != nil || got != tt.want {
 			t.Errorf("%s: IsOpen = %v, %v; want %v", name, got, err, tt.want)
 		}
@@ -162,13 +162,13 @@ func (r *recordingIncidents) UpdateIncident(context.Context, domain.UpdateIncide
 	return domain.UpdateIncidentResponse{}, nil
 }
 
-func TestIncidentSinkFoldIsIdempotent(t *testing.T) {
+func TestWriterFoldIsIdempotent(t *testing.T) {
 	for name, tt := range map[string]struct {
 		already bool
 		want    int
 	}{"first time": {false, 1}, "retry after the note was added": {true, 0}} {
 		incidents := &recordingIncidents{}
-		s := Incident{Incidents: incidents, Notes: fakeNotes{has: tt.already}}
+		s := Writer{Service: incidents, Notes: fakeNotes{has: tt.already}}
 		if err := s.Fold(context.Background(), "inc-1", strategy.Duplicate, alert("A2", "critical")); err != nil {
 			t.Fatal(err)
 		}

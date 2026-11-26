@@ -26,8 +26,8 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/incident"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/relay"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/sink"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/subscriber"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
@@ -37,12 +37,12 @@ import (
 
 // The adapters below must satisfy the processor's ports.
 var (
-	_ alertprocessor.Store = (*repository.AlertGroups)(nil)
-	_ alertprocessor.Sink  = sink.Incident{}
-	_ sink.Notes           = (*repository.IncidentNotes)(nil)
-	_ relay.Queue          = (*repository.UnpublishedAlerts)(nil)
-	_ relay.Publisher      = (*eventbus.Producer)(nil)
-	_ subscriber.Source    = (*eventbus.Consumer)(nil)
+	_ alertprocessor.Store          = (*repository.AlertGroups)(nil)
+	_ alertprocessor.IncidentWriter = incident.Writer{}
+	_ incident.Notes                = (*repository.IncidentNotes)(nil)
+	_ relay.Queue                   = (*repository.UnpublishedAlerts)(nil)
+	_ relay.Publisher               = (*eventbus.Producer)(nil)
+	_ subscriber.Source             = (*eventbus.Consumer)(nil)
 )
 
 const (
@@ -54,7 +54,7 @@ const (
 var alertProcessorRetry = eventbus.RetryPolicy{Attempts: 5, Delay: time.Second, MaxDelay: 30 * time.Second}
 
 // startAlertProcessor runs the relay that publishes unpublished alerts as alert.created and the subscriber that hands them to the processor, and returns the function that stops both.
-func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.Incidents) func() {
+func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents incident.Service) func() {
 	if !cfg.AlertProcessorEnabled || !cfg.AlertConsumerEnabled() || db == nil {
 		return func() {}
 	}
@@ -68,8 +68,8 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 
 	processor := &alertprocessor.Processor{
 		Store: repository.NewAlertGroups(scoped),
-		Sink: sink.Incident{
-			Incidents:        incidents,
+		Incidents: incident.Writer{
+			Service:          incidents,
 			Services:         repository.NewITServiceRepository(db),
 			Notes:            repository.NewIncidentNotes(scoped),
 			CallerID:         cfg.AlertProcessorCallerID,

@@ -24,7 +24,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 )
 
-// The processor depends only on these ports; the repository and sink adapters implement them.
+// The processor depends only on these ports; the repository and incident writer implement them.
 
 // Store reads a fingerprint's group from its alerts and links each alert to its incident.
 type Store interface {
@@ -43,8 +43,8 @@ type GroupTx interface {
 	LinkAlert(ctx context.Context, alertID, incidentID string) error
 }
 
-// Sink is where incidents live.
-type Sink interface {
+// IncidentWriter creates incidents and adds alerts to them.
+type IncidentWriter interface {
 	// Open creates the alert's incident and returns its id; it returns the same incident when called again for the same alert.
 	Open(ctx context.Context, e event.Event) (string, error)
 	// Find returns the incident the alert opened, or "" when it opened none.

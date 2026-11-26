@@ -184,12 +184,12 @@ func (t groupTx) LinkAlert(ctx context.Context, alertID, incidentID string) erro
 	return nil
 }
 
-// IncidentNotes finds work notes on incidents; it implements sink.Notes.
+// IncidentNotes finds work notes on incidents; it implements incident.Notes.
 type IncidentNotes struct {
 	db *Scoped
 }
 
-// NewIncidentNotes returns the lookup the alert sink uses to add each alert's note once.
+// NewIncidentNotes returns the lookup the incident writer uses to add each alert's note once.
 func NewIncidentNotes(db *Scoped) *IncidentNotes {
 	return &IncidentNotes{db: db}
 }

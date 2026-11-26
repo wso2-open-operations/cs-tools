@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), sink (incidents), relay (unpublished alerts to event hub) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
+// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), incident (writes CSM incidents), relay (unpublished alerts to event hub) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
 package alertprocessor
 
 import (
@@ -29,9 +29,9 @@ import (
 
 // Processor decides each alert.created event with its strategy chain and, when Apply is set, carries the decision out. All its state is the alert table: an alert linked to an incident is done, and a fingerprint's group is read from its linked alerts.
 type Processor struct {
-	Store Store
-	Sink  Sink
-	Chain strategy.Chain
+	Store     Store
+	Incidents IncidentWriter
+	Chain     strategy.Chain
 	// Lookback is how far back an alert looks for an earlier alert of its fingerprint whose incident was created but never linked.
 	Lookback time.Duration
 	// Apply writes incidents and notes; off, decisions are only logged (ALERTING_VERSION hybrid).
@@ -44,7 +44,7 @@ type step struct {
 	incidentID string
 }
 
-// Handle decides, writes to the sink, then links the alert. Each step is safe to repeat: Open finds the incident an alert already created and Fold skips a note already added, so a retry neither opens a second incident nor adds a second note.
+// Handle decides, writes the incident, then links the alert. Each step is safe to repeat: Open finds the incident an alert already created and Fold skips a note already added, so a retry neither opens a second incident nor adds a second note.
 func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 	todo, err := p.decide(ctx, e)
 	if err != nil || todo == nil {
@@ -52,11 +52,11 @@ func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 	}
 	switch {
 	case todo.outcome == strategy.Open:
-		if todo.incidentID, err = p.Sink.Open(ctx, e); err != nil {
+		if todo.incidentID, err = p.Incidents.Open(ctx, e); err != nil {
 			return fmt.Errorf("open incident for %s: %w", e.AlertID, err)
 		}
 	case todo.outcome.Folds():
-		if err := p.Sink.Fold(ctx, todo.incidentID, todo.outcome, e); err != nil {
+		if err := p.Incidents.Fold(ctx, todo.incidentID, todo.outcome, e); err != nil {
 			return fmt.Errorf("fold %s into incident %s: %w", e.AlertID, todo.incidentID, err)
 		}
 	}
@@ -104,7 +104,7 @@ func (p *Processor) linkUnrecorded(ctx context.Context, tx GroupTx, e event.Even
 		return err
 	}
 	for _, alertID := range earlier {
-		incidentID, err := p.Sink.Find(ctx, alertID)
+		incidentID, err := p.Incidents.Find(ctx, alertID)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func (p *Processor) input(ctx context.Context, tx GroupTx, e event.Event) (strat
 	}
 	if group != nil {
 		in.Group = group
-		if in.IncidentOpen, err = p.Sink.IsOpen(ctx, group.IncidentID); err != nil {
+		if in.IncidentOpen, err = p.Incidents.IsOpen(ctx, group.IncidentID); err != nil {
 			return strategy.Input{}, err
 		}
 	}
