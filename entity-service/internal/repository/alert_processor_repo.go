@@ -18,7 +18,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -26,89 +25,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// The alert processor keeps all its state in alert: published_on queues an alert for the relay and incident_id marks it done. Every query runs as the system identity, because alert is internal only.
-
-// UnpublishedAlerts is the relay's queue: the alert rows whose published_on is NULL.
-type UnpublishedAlerts struct {
-	db *Scoped
-}
-
-// NewUnpublishedAlerts returns the queue the alert relay drains.
-func NewUnpublishedAlerts(db *Scoped) *UnpublishedAlerts {
-	return &UnpublishedAlerts{db: db}
-}
-
-// unpublishedLock serializes drains across replicas, so batches publish in arrival order and a newer alert never overtakes an older one for its fingerprint.
-const unpublishedLock = `SELECT pg_advisory_xact_lock(hashtextextended('alert_unpublished', 0))`
-
-const drainUnpublishedQuery = `SELECT id, tier, received_on, alert
-FROM alert
-WHERE published_on IS NULL AND error_reason IS NULL
-ORDER BY id
-LIMIT $1
-FOR UPDATE`
-
-const markPublishedQuery = `UPDATE alert SET published_on = NOW() WHERE id = ANY($1::text[])`
-
-// Drain implements relay.Queue.
-func (u *UnpublishedAlerts) Drain(ctx context.Context, limit int, publish func([]event.Event) []string) (int, error) {
-	marked := 0
-	err := u.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, unpublishedLock); err != nil {
-			return fmt.Errorf("lock unpublished alerts: %w", err)
-		}
-		rows, err := tx.Query(ctx, drainUnpublishedQuery, limit)
-		if err != nil {
-			return fmt.Errorf("read unpublished alerts: %w", err)
-		}
-		batch, err := pgx.CollectRows(rows, scanAlertEvent)
-		if err != nil || len(batch) == 0 {
-			return err
-		}
-		published := publish(batch)
-		if len(published) == 0 {
-			return nil
-		}
-		if _, err := tx.Exec(ctx, markPublishedQuery, published); err != nil {
-			return fmt.Errorf("mark alerts published: %w", err)
-		}
-		marked = len(published)
-		return nil
-	})
-	return marked, err
-}
-
-// MaxAlertRequeues bounds how often an alert whose processing keeps failing is queued again, so one poison alert cannot cycle forever.
-const MaxAlertRequeues = 10
-
-// Requeue queues a published alert again, in its arrival place; false means it reached MaxAlertRequeues and stays published.
-func (u *UnpublishedAlerts) Requeue(ctx context.Context, alertID string) (bool, error) {
-	tag, err := u.db.Exec(WithSystemIdentity(ctx),
-		`UPDATE alert SET published_on = NULL, requeues = requeues + 1 WHERE id = $1 AND requeues < $2`, alertID, MaxAlertRequeues)
-	if err != nil {
-		return false, fmt.Errorf("requeue alert %s: %w", alertID, err)
-	}
-	return tag.RowsAffected() == 1, nil
-}
-
-func scanAlertEvent(row pgx.CollectableRow) (event.Event, error) {
-	var e event.Event
-	var tier string
-	var body []byte
-	if err := row.Scan(&e.AlertID, &tier, &e.ReceivedOn, &body); err != nil {
-		return event.Event{}, err
-	}
-	e.Tier = domain.AlertTier(tier)
-	if err := json.Unmarshal(body, &e.Alert); err != nil {
-		return event.Event{}, fmt.Errorf("decode alert %s: %w", e.AlertID, err)
-	}
-	return e, nil
-}
+// The alert processor keeps its state in alert: incident_id marks an alert done, and a fingerprint's group is read from its alerts. Every query runs as the system identity, because alert is internal only.
 
 // AlertGroups reads each fingerprint's group from its alerts; it implements alertprocessor.Store.
 type AlertGroups struct {

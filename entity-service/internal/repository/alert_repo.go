@@ -18,7 +18,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -30,8 +32,8 @@ import (
 type AlertRepository interface {
 	// ReserveAlertIDs returns n new alert ids, in ascending order.
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	// InsertAlerts stores alert and error rows in one statement and returns how many were new; a row whose message was already stored is skipped.
-	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
+	// InsertAlerts stores alert and error rows in one statement and returns the message's rows as stored, with how many were new; a redelivered message returns the rows stored the first time.
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error)
 }
 
 // Alert ids are ALT plus nine digits, the format alert-ingestion writes, so they sort in arrival order.
@@ -42,22 +44,19 @@ const (
 
 const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1, $1)`
 
-// insertAlertsQuery stores a message's rows; with publish ($13) each alert row is left unpublished, which queues it for alert.created, and an error row never is. A redelivered message inserts nothing and so queues nothing.
-const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on, published_on)
-SELECT r.*, CASE WHEN $13::boolean AND r.error_reason IS NULL THEN NULL ELSE NOW() END
-FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
-	AS r(id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
-ON CONFLICT (message_id, message_index) DO NOTHING`
+// insertAlertsQuery stores a message's rows and returns them as stored. A redelivered message conflicts on (message_id, message_index); the no-op update makes RETURNING hand back the row stored the first time, so the consumer can publish it again without a second query. inserted is true only for a row this statement created.
+const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
+SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
+ON CONFLICT (message_id, message_index) DO UPDATE SET message_index = EXCLUDED.message_index
+RETURNING id, coalesce(source, ''), coalesce(alert::text, ''), coalesce(fingerprint, ''), tier, message_id, message_index, coalesce(error_reason, ''), received_on, (xmax = 0)`
 
 type alertRepository struct {
 	db *Scoped
-	// publish leaves each stored alert row unpublished, which queues it for the alert processor; off, rows are stored as published.
-	publish bool
 }
 
-// NewAlertRepository returns an AlertRepository; callers run it under the system identity because alert is internal only. With publish, every stored alert row is queued for alert.created.
-func NewAlertRepository(db *Scoped, publish bool) AlertRepository {
-	return &alertRepository{db: db, publish: publish}
+// NewAlertRepository returns an AlertRepository; callers run it under the system identity because alert is internal only.
+func NewAlertRepository(db *Scoped) AlertRepository {
+	return &alertRepository{db: db}
 }
 
 // FormatAlertID renders a sequence value as an alert id, such as ALT000000042.
@@ -87,9 +86,9 @@ func (r *alertRepository) ReserveAlertIDs(ctx context.Context, n int) ([]string,
 	return ids, nil
 }
 
-func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error) {
+func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
 	if len(alerts) == 0 {
-		return 0, nil
+		return nil, 0, nil
 	}
 	ids := make([]string, len(alerts))
 	sources := make([]*string, len(alerts))
@@ -121,9 +120,35 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 		errorTexts[i] = nullIfEmpty(a.Error)
 		receivedOn[i] = a.ReceivedOn
 	}
-	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, rawBodies, contentTypes, errorReasons, errorTexts, receivedOn, r.publish)
+	rows, err := r.db.Query(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, rawBodies, contentTypes, errorReasons, errorTexts, receivedOn)
 	if err != nil {
-		return 0, fmt.Errorf("insert alerts: %w", err)
+		return nil, 0, fmt.Errorf("insert alerts: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	var inserted int64
+	stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
+		var a domain.NewAlert
+		var body, tier string
+		var isNew bool
+		if err := row.Scan(&a.ID, &a.Source, &body, &a.Fingerprint, &tier, &a.MessageID, &a.MessageIndex, &a.ErrorReason, &a.ReceivedOn, &isNew); err != nil {
+			return domain.NewAlert{}, err
+		}
+		a.Alert, a.Tier = nilIfEmptyJSON(body), domain.AlertTier(tier)
+		if isNew {
+			inserted++
+		}
+		return a, nil
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("insert alerts: %w", err)
+	}
+	slices.SortFunc(stored, func(a, b domain.NewAlert) int { return a.MessageIndex - b.MessageIndex })
+	return stored, inserted, nil
+}
+
+// nilIfEmptyJSON is nil for an error row's empty alert, else the stored JSON.
+func nilIfEmptyJSON(body string) json.RawMessage {
+	if body == "" {
+		return nil
+	}
+	return json.RawMessage(body)
 }

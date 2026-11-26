@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), incident (writes CSM incidents), relay (unpublished alerts to event hub) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
+// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), incident (writes CSM incidents), publisher (stored alerts to alert.created) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
 package alertprocessor
 
 import (

@@ -756,7 +756,7 @@ type Config struct {
 	AlertConsumerConcurrency int
 	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT); 0, the default, is strict priority: standard alerts run only when no priority alert waits.
 	AlertConsumerPriorityWeight int
-	// AlertProcessorEnabled runs the alert relay and processor (ALERT_PROCESSOR_ENABLED): stored alerts are published as alert.created and folded into incidents, which only v2 writes; hybrid logs the decisions.
+	// AlertProcessorEnabled runs the alert processor (ALERT_PROCESSOR_ENABLED): the consumer publishes stored alerts as alert.created before acknowledging them and folded into incidents, which only v2 writes; hybrid logs the decisions.
 	AlertProcessorEnabled bool
 	// AlertEventHubTopic is the topic alert.created is published to and read from (ALERT_EVENT_HUB_TOPIC); its own, because sre-events consumers reject event types they do not know.
 	AlertEventHubTopic string

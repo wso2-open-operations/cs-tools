@@ -33,7 +33,7 @@ type Source interface {
 	Run(ctx context.Context, handle eventbus.Handle, onExhausted eventbus.OnExhausted)
 }
 
-// Exhausted is called with an event every retry failed on, before its offset is committed; it should keep the event somewhere durable, such as queued again for the relay.
+// Exhausted is called with an event every retry failed on, before its offset is committed; it should keep the event somewhere durable, such as publishing it again.
 type Exhausted func(ctx context.Context, e event.Event, cause error) error
 
 // Subscriber connects a Source to a Handler.

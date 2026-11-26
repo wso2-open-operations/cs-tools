@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package event is the alert.created record: the wire shape the relay publishes and the subscriber reads.
+// Package event is the alert.created record: the wire shape the consumer publishes and the subscriber reads.
 package event
 
 import (
@@ -36,6 +36,20 @@ type Event struct {
 	Tier       domain.AlertTier `json:"tier"`
 	ReceivedOn time.Time        `json:"receivedOn"`
 	Alert      model.Alert      `json:"alert"`
+	// Attempt counts how often processing gave up on this event and it was published again; 0 the first time.
+	Attempt int `json:"attempt,omitempty"`
+}
+
+// FromRow is the event for a stored alert row; ok is false for an error row, which has no alert to process.
+func FromRow(row domain.NewAlert) (e Event, ok bool, err error) {
+	if row.ErrorReason != "" || len(row.Alert) == 0 {
+		return Event{}, false, nil
+	}
+	e = Event{AlertID: row.ID, Tier: row.Tier, ReceivedOn: row.ReceivedOn}
+	if err := json.Unmarshal(row.Alert, &e.Alert); err != nil {
+		return Event{}, false, fmt.Errorf("decode alert %s: %w", row.ID, err)
+	}
+	return e, true, nil
 }
 
 // Fingerprint is the key an alert folds by; it is computed, never stored on the alert.

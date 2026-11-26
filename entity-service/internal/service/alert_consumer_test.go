@@ -158,18 +158,18 @@ func (r *fakeAlertRepo) ReserveAlertIDs(_ context.Context, n int) ([]string, err
 	return ids, nil
 }
 
-func (r *fakeAlertRepo) InsertAlerts(_ context.Context, alerts []domain.NewAlert) (int64, error) {
+func (r *fakeAlertRepo) InsertAlerts(_ context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
 	r.mu.Lock()
 	r.insertCalls++
 	if r.failInserts > 0 {
 		r.failInserts--
 		r.mu.Unlock()
-		return 0, errors.New("connection reset")
+		return nil, 0, errors.New("connection reset")
 	}
 	if r.refuseInserts > 0 {
 		r.refuseInserts--
 		r.mu.Unlock()
-		return 0, fmt.Errorf("insert alerts: %w", sqlStateError("22P05"))
+		return nil, 0, fmt.Errorf("insert alerts: %w", sqlStateError("22P05"))
 	}
 	r.inFlight++
 	r.maxConcurrent = max(r.maxConcurrent, r.inFlight)
@@ -180,16 +180,19 @@ func (r *fakeAlertRepo) InsertAlerts(_ context.Context, alerts []domain.NewAlert
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.inFlight--
-	var stored int64
-	for _, a := range alerts {
+	var inserted int64
+	stored := make([]domain.NewAlert, len(alerts))
+	for i, a := range alerts {
 		key := fmt.Sprintf("%s/%d", a.MessageID, a.MessageIndex)
-		if _, exists := r.rows[key]; exists {
+		if existing, exists := r.rows[key]; exists {
+			stored[i] = existing
 			continue
 		}
 		r.rows[key] = a
-		stored++
+		stored[i] = a
+		inserted++
 	}
-	return stored, nil
+	return stored, inserted, nil
 }
 
 // sqlStateError is a database error carrying a SQLSTATE, as pgconn.PgError does.
@@ -611,7 +614,7 @@ type slowAlertRepo struct {
 	delay time.Duration
 }
 
-func (r slowAlertRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error) {
+func (r slowAlertRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
 	time.Sleep(r.delay)
 	return r.fakeAlertRepo.InsertAlerts(ctx, alerts)
 }
@@ -637,11 +640,11 @@ type renewalGatedRepo struct {
 	queue *fakeAlertQueue
 }
 
-func (r renewalGatedRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error) {
+func (r renewalGatedRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for r.queue.renewCount() == 0 {
 		if time.Now().After(deadline) {
-			return 0, errors.New("no lock renewal while the insert ran")
+			return nil, 0, errors.New("no lock renewal while the insert ran")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -806,5 +809,68 @@ func TestAlertConsumerSettle_DeadLettersWithTheReason(t *testing.T) {
 	c.settle(context.Background(), priority, alertMessage("m-1", "nagios", canonicalAlert), alertDeadLetterDecision(alertErrorUnknownSource, "no transform"))
 	if priority.deadLettered["m-1"] != alertErrorUnknownSource {
 		t.Fatalf("dead-lettered = %v, want m-1 with %s", priority.deadLettered, alertErrorUnknownSource)
+	}
+}
+
+// fakeAlertPublisher records the alerts it publishes; failures makes the next calls fail.
+type fakeAlertPublisher struct {
+	published [][]domain.NewAlert
+	failures  int
+}
+
+func (p *fakeAlertPublisher) Publish(_ context.Context, alerts []domain.NewAlert) error {
+	if p.failures > 0 {
+		p.failures--
+		return errors.New("event hub down")
+	}
+	p.published = append(p.published, alerts)
+	return nil
+}
+
+func publishingConsumer(t *testing.T, repo AlertStore, publisher AlertPublisher) *AlertConsumer {
+	t.Helper()
+	c := NewAlertConsumer(repo, mustRegistry(t), []AlertQueue{newFakeAlertQueue("priority")}, []AlertQueue{newFakeAlertQueue("standard")},
+		AlertConsumerConfig{Concurrency: 1, Publisher: publisher})
+	c.sleep = func(ctx context.Context, _ time.Duration) bool { return ctx.Err() == nil }
+	return c
+}
+
+func TestAlertConsumerProcess_PublishesStoredAlertsBeforeAcknowledging(t *testing.T) {
+	publisher := &fakeAlertPublisher{}
+	c := publishingConsumer(t, newFakeAlertRepo(), publisher)
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
+	if decision.settlement != alertComplete || len(publisher.published) != 1 || len(publisher.published[0]) != 1 {
+		t.Fatalf("decision %+v, published %v; want the stored alert published, then the message completed", decision, publisher.published)
+	}
+	if got := publisher.published[0][0]; got.ID == "" || got.Fingerprint == "" || got.Tier != domain.AlertTierPriority {
+		t.Fatalf("published %+v, want the stored row with its id, fingerprint and tier", got)
+	}
+}
+
+func TestAlertConsumerProcess_AFailedPublishLeavesTheMessageForRedelivery(t *testing.T) {
+	repo, publisher := newFakeAlertRepo(), &fakeAlertPublisher{failures: 100}
+	c := publishingConsumer(t, repo, publisher)
+	message := alertMessage("m-1", "servicenow", canonicalAlert)
+	if decision := c.process(context.Background(), domain.AlertTierPriority, "priority", message); decision.settlement != alertAbandon {
+		t.Fatalf("decision %+v, want the message abandoned so it is redelivered", decision)
+	}
+	stored := repo.rows["priority/m-1/0"]
+	publisher.failures = 0
+	if decision := c.process(context.Background(), domain.AlertTierPriority, "priority", message); decision.settlement != alertComplete || decision.stored != 0 {
+		t.Fatalf("redelivery decision %+v, want completed with nothing new stored", decision)
+	}
+	if len(publisher.published) != 1 || publisher.published[0][0].ID != stored.ID {
+		t.Fatalf("published %v, want the redelivery to publish the row stored the first time (%s)", publisher.published, stored.ID)
+	}
+}
+
+func TestAlertConsumerProcess_ErrorRowsAreNotPublished(t *testing.T) {
+	publisher := &fakeAlertPublisher{}
+	c := publishingConsumer(t, newFakeAlertRepo(), publisher)
+	if decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "nagios", canonicalAlert)); decision.settlement != alertComplete {
+		t.Fatalf("decision %+v, want the error row stored and completed", decision)
+	}
+	if len(publisher.published) != 0 {
+		t.Fatalf("published %v, want nothing for a message that could not be normalised", publisher.published)
 	}
 }

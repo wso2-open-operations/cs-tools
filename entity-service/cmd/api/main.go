@@ -29,6 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/publisher"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
@@ -426,11 +427,18 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		log.Printf("alert consumer: AWS SQS %v in %s", names, cfg.AlertSQSRegion())
 	}
 
+	consumerCfg := service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight}
+	if cfg.AlertProcessorEnabled {
+		// Each message's alerts are published as alert.created after they are stored and before the message is acknowledged.
+		producer := eventbus.NewProducer(eventbus.Config{Broker: cfg.EventHubBroker, ConnectionString: cfg.EventHubConnectionString, Topic: cfg.AlertEventHubTopic})
+		consumerCfg.Publisher = publisher.Publisher{Producer: producer}
+		closers = append(closers, func(context.Context) error { producer.Close(); return nil })
+	}
 	consumer := service.NewAlertConsumer(
-		repository.NewAlertRepository(repository.NewScoped(pool), cfg.AlertProcessorEnabled),
+		repository.NewAlertRepository(repository.NewScoped(pool)),
 		transforms,
 		priorityQueues, standardQueues,
-		service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight},
+		consumerCfg,
 	)
 	// The system identity, because the alert table is internal only and there is no caller.
 	ctx, cancel := context.WithCancel(repository.WithSystemIdentity(context.Background()))

@@ -68,7 +68,7 @@ func integrationAlert(id, messageID string, index int) domain.NewAlert {
 
 func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
-	repo := NewAlertRepository(NewScoped(pool), true)
+	repo := NewAlertRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 
 	ids, err := repo.ReserveAlertIDs(ctx, 4)
@@ -84,13 +84,14 @@ func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testin
 		}
 	}
 
-	first, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-1", 0), integrationAlert(ids[1], "it-alert-1", 1)})
-	if err != nil || first != 2 {
-		t.Fatalf("first insert stored %d (%v), want 2", first, err)
+	stored, first, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-1", 0), integrationAlert(ids[1], "it-alert-1", 1)})
+	if err != nil || first != 2 || len(stored) != 2 || stored[0].ID != ids[0] || stored[1].ID != ids[1] {
+		t.Fatalf("first insert stored %d %v (%v), want 2 with their ids", first, stored, err)
 	}
-	again, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[2], "it-alert-1", 0), integrationAlert(ids[3], "it-alert-1", 1)})
-	if err != nil || again != 0 {
-		t.Fatalf("redelivered insert stored %d (%v), want 0", again, err)
+	// A redelivery stores nothing new, and returns the rows stored the first time so the consumer can publish them again.
+	restored, again, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[2], "it-alert-1", 0), integrationAlert(ids[3], "it-alert-1", 1)})
+	if err != nil || again != 0 || len(restored) != 2 || restored[0].ID != ids[0] || restored[1].ID != ids[1] || restored[0].Fingerprint == "" || len(restored[0].Alert) == 0 {
+		t.Fatalf("redelivered insert stored %d, returned %+v (%v); want 0 new and the first rows back", again, restored, err)
 	}
 
 	var rows int
@@ -113,13 +114,13 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 	if bypassesRLS {
 		t.Skip("ENTITY_TEST_DATABASE_URL connects as a role that bypasses row-level security; use an ordinary role to run this test")
 	}
-	repo := NewAlertRepository(NewScoped(pool), true)
+	repo := NewAlertRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 1)
 	if err != nil {
 		t.Fatalf("ReserveAlertIDs: %v", err)
 	}
-	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-2", 0)}); err != nil {
+	if _, _, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-2", 0)}); err != nil {
 		t.Fatalf("InsertAlerts: %v", err)
 	}
 
@@ -135,7 +136,7 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 
 func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
-	repo := NewAlertRepository(NewScoped(pool), true)
+	repo := NewAlertRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 3)
 	if err != nil {
@@ -145,7 +146,7 @@ func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 	// A batch keeps the body once, on its first row.
 	first := integrationAlert(ids[0], "it-alert-3", 0)
 	first.RawBody, first.ContentType = []byte(`[{"a":1},{"a":2}]`), "application/json"
-	if n, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, integrationAlert(ids[1], "it-alert-3", 1)}); err != nil || n != 2 {
+	if _, n, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, integrationAlert(ids[1], "it-alert-3", 1)}); err != nil || n != 2 {
 		t.Fatalf("insert batch stored %d (%v), want 2", n, err)
 	}
 	// A message with no source that could not be normalised, whose body holds a NUL byte jsonb could not.
@@ -155,7 +156,7 @@ func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 		ErrorReason: "MissingSource", Error: "the message has no source property",
 		ReceivedOn: time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC),
 	}
-	if n, err := repo.InsertAlerts(ctx, []domain.NewAlert{errorRow}); err != nil || n != 1 {
+	if _, n, err := repo.InsertAlerts(ctx, []domain.NewAlert{errorRow}); err != nil || n != 1 {
 		t.Fatalf("insert error row stored %d (%v), want 1", n, err)
 	}
 
@@ -185,7 +186,7 @@ func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 
 func TestAlertRepositoryIntegration_RefusesWhatCanNeverBeStored(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
-	repo := NewAlertRepository(NewScoped(pool), true)
+	repo := NewAlertRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 2)
 	if err != nil {
@@ -197,7 +198,7 @@ func TestAlertRepositoryIntegration_RefusesWhatCanNeverBeStored(t *testing.T) {
 	mixed := integrationAlert(ids[1], "it-alert-6", 0)
 	mixed.ErrorReason, mixed.Error = "TransformFailed", "boom"
 	for name, row := range map[string]domain.NewAlert{"NUL in jsonb": nul, "error row with an alert": mixed} {
-		_, err := repo.InsertAlerts(ctx, []domain.NewAlert{row})
+		_, _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row})
 		var sqlErr interface{ SQLState() string }
 		if !errors.As(err, &sqlErr) || (sqlErr.SQLState()[:2] != "22" && sqlErr.SQLState()[:2] != "23") {
 			t.Fatalf("%s: err = %v, want a class 22 or 23 error the consumer treats as permanent", name, err)

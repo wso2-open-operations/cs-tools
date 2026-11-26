@@ -19,7 +19,6 @@ package server
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,7 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/incident"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/relay"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/publisher"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/subscriber"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
@@ -40,20 +39,14 @@ var (
 	_ alertprocessor.Store          = (*repository.AlertGroups)(nil)
 	_ alertprocessor.IncidentWriter = incident.Writer{}
 	_ incident.Notes                = (*repository.IncidentNotes)(nil)
-	_ relay.Queue                   = (*repository.UnpublishedAlerts)(nil)
-	_ relay.Publisher               = (*eventbus.Producer)(nil)
+	_ publisher.Producer            = (*eventbus.Producer)(nil)
 	_ subscriber.Source             = (*eventbus.Consumer)(nil)
 )
 
-const (
-	alertRelayInterval = time.Second
-	alertRelayBatch    = 100
-)
-
-// alertProcessorRetry retries a failing event briefly; after that the alert is queued again and the relay publishes it again.
+// alertProcessorRetry retries a failing event briefly; after that the event is published again (at most publisher.MaxAttempts times).
 var alertProcessorRetry = eventbus.RetryPolicy{Attempts: 5, Delay: time.Second, MaxDelay: 30 * time.Second}
 
-// startAlertProcessor runs the relay that publishes unpublished alerts as alert.created and the subscriber that hands them to the processor, and returns the function that stops both.
+// startAlertProcessor runs the subscriber that hands alert.created events to the processor, and returns the function that stops it. The consumer publishes the events (cmd/api/main.go).
 func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents incident.Service) func() {
 	if !cfg.AlertProcessorEnabled || !cfg.AlertConsumerEnabled() || db == nil {
 		return func() {}
@@ -62,9 +55,8 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents inciden
 	scoped := repository.NewScoped(db)
 	apply := cfg.AlertingVersion == config.AlertingVersionV2
 
-	queue := repository.NewUnpublishedAlerts(scoped)
 	producer := eventbus.NewProducer(bus)
-	publisher := &relay.Relay{Queue: queue, Publisher: producer, Interval: alertRelayInterval, Batch: alertRelayBatch}
+	republisher := publisher.Publisher{Producer: producer}
 
 	processor := &alertprocessor.Processor{
 		Store: repository.NewAlertGroups(scoped),
@@ -83,30 +75,27 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents inciden
 	consumer := eventbus.NewConsumer(bus, cfg.AlertProcessorConsumerGroup, alertProcessorRetry)
 	listener := subscriber.New(consumer, processor.Handle, subscriber.Log(), subscriber.Recover())
 	listener.OnExhausted = func(ctx context.Context, e event.Event, cause error) error {
-		requeued, err := queue.Requeue(ctx, e.AlertID)
-		if err == nil && !requeued {
-			slog.ErrorContext(ctx, "alert processor: gave up on an alert after its requeues; it has no incident", "alertId", e.AlertID, "requeues", repository.MaxAlertRequeues, "err", cause)
+		sent, err := republisher.Republish(ctx, e)
+		if err == nil && !sent {
+			slog.ErrorContext(ctx, "alert processor: gave up on an alert after its attempts; it has no incident", "alertId", e.AlertID, "attempts", publisher.MaxAttempts, "err", cause)
 		}
 		return err
 	}
 
 	// The system identity, because alerts and incidents created from them are internal and there is no caller.
 	ctx, cancel := context.WithCancel(repository.WithSystemIdentity(context.Background()))
-	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){publisher.Run, listener.Run} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			run(ctx)
-		}()
-	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		listener.Run(ctx)
+	}()
 	slog.Info("alert processor running", "topic", bus.Topic, "group", cfg.AlertProcessorConsumerGroup,
 		"dedupWindow", cfg.AlertDedupWindow, "createsIncidents", apply)
 
 	return func() {
 		cancel()
 		consumer.Close()
-		wg.Wait()
+		<-done
 		producer.Close()
 	}
 }

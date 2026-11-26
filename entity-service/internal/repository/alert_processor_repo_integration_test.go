@@ -26,25 +26,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
-
-// drainIDs drains the queue once, publishing everything, and returns the alert ids it was handed.
-func drainIDs(t *testing.T, queue *UnpublishedAlerts) []string {
-	t.Helper()
-	var ids []string
-	_, err := queue.Drain(context.Background(), 100, func(batch []event.Event) []string {
-		for _, e := range batch {
-			ids = append(ids, e.AlertID)
-		}
-		return ids
-	})
-	if err != nil {
-		t.Fatalf("Drain: %v", err)
-	}
-	return ids
-}
 
 // storeAlerts reserves ids and stores one single-alert message per row the change builds.
 func storeAlerts(t *testing.T, repo AlertRepository, n int, change func(i int, row *domain.NewAlert)) []string {
@@ -58,61 +41,11 @@ func storeAlerts(t *testing.T, repo AlertRepository, n int, change func(i int, r
 		row := integrationAlert(id, "it-alert-proc-"+id, 0)
 		row.RawBody = []byte("{}")
 		change(i, &row)
-		if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
+		if _, _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
 			t.Fatalf("InsertAlerts %s: %v", id, err)
 		}
 	}
 	return ids
-}
-
-func TestUnpublishedAlertsIntegration_QueuesStoredAlertsOnce(t *testing.T) {
-	pool := newAlertIntegrationPool(t)
-	queue := NewUnpublishedAlerts(NewScoped(pool))
-	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool), true), 3, func(i int, row *domain.NewAlert) {
-		if i == 2 {
-			row.Alert, row.Fingerprint, row.ErrorReason, row.Error = nil, "", "UnknownSource", "no transform"
-		}
-	})
-	// A redelivered message stores nothing and so queues nothing.
-	again := integrationAlert(ids[0], "it-alert-proc-"+ids[0], 0)
-	again.RawBody = []byte("{}")
-	if n, err := NewAlertRepository(NewScoped(pool), true).InsertAlerts(WithSystemIdentity(context.Background()), []domain.NewAlert{again}); err != nil || n != 0 {
-		t.Fatalf("redelivery stored %d (%v), want 0", n, err)
-	}
-
-	if got := drainIDs(t, queue); !slices.Equal(got, ids[:2]) {
-		t.Fatalf("drained %v, want the two alert rows once each and never the error row", got)
-	}
-	if got := drainIDs(t, queue); len(got) != 0 {
-		t.Fatalf("second drain handed %v, want nothing once published", got)
-	}
-}
-
-func TestUnpublishedAlertsIntegration_NothingQueuedWithoutPublish(t *testing.T) {
-	pool := newAlertIntegrationPool(t)
-	storeAlerts(t, NewAlertRepository(NewScoped(pool), false), 1, func(int, *domain.NewAlert) {})
-	if got := drainIDs(t, NewUnpublishedAlerts(NewScoped(pool))); len(got) != 0 {
-		t.Fatalf("drained %v, want nothing while the processor is off", got)
-	}
-}
-
-func TestUnpublishedAlertsIntegration_RequeueIsCapped(t *testing.T) {
-	pool := newAlertIntegrationPool(t)
-	ctx := WithSystemIdentity(context.Background())
-	queue := NewUnpublishedAlerts(NewScoped(pool))
-	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool), true), 1, func(int, *domain.NewAlert) {})
-	for i := 0; i < MaxAlertRequeues; i++ {
-		if got := drainIDs(t, queue); !slices.Equal(got, ids) {
-			t.Fatalf("drain %d handed %v, want the alert again", i, got)
-		}
-		if ok, err := queue.Requeue(ctx, ids[0]); err != nil || !ok {
-			t.Fatalf("Requeue %d = %v, %v; want requeued", i, ok, err)
-		}
-	}
-	drainIDs(t, queue)
-	if ok, err := queue.Requeue(ctx, ids[0]); err != nil || ok {
-		t.Fatalf("Requeue past the cap = %v, %v; want it left published", ok, err)
-	}
 }
 
 func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
@@ -129,7 +62,7 @@ func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
 	}
 	seen := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
 	fingerprint := "it-group-" + time.Now().Format("150405.000000")
-	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool), false), 3, func(i int, row *domain.NewAlert) {
+	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool)), 3, func(i int, row *domain.NewAlert) {
 		row.Fingerprint, row.ReceivedOn = fingerprint, seen.Add(time.Duration(i)*time.Minute)
 	})
 	groups := NewAlertGroups(NewScoped(pool))

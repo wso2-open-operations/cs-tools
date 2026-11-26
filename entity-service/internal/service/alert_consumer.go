@@ -51,7 +51,13 @@ type AlertQueue interface {
 // AlertStore is the storage the alert consumer writes to; repository.AlertRepository satisfies it.
 type AlertStore interface {
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
+	// InsertAlerts stores a message's rows and returns them as stored, with how many are new; a redelivered message returns the rows stored the first time.
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error)
+}
+
+// AlertPublisher announces stored alerts to the alert processor; a message is acknowledged only after its alerts are published.
+type AlertPublisher interface {
+	Publish(ctx context.Context, alerts []domain.NewAlert) error
 }
 
 // AlertTransforms finds the transform for a gateway route; *alertsource.Registry satisfies it.
@@ -65,6 +71,8 @@ type AlertConsumerConfig struct {
 	Concurrency int
 	// PriorityWeight is how many priority alerts may be processed in a row while a standard alert waits; 0 is strict priority.
 	PriorityWeight int
+	// Publisher, when set, publishes each message's alerts after they are stored and before the message is acknowledged.
+	Publisher AlertPublisher
 }
 
 // Message properties the alerting gateway sets on every message.
@@ -176,6 +184,7 @@ func newAlertLane(tier domain.AlertTier, queues []AlertQueue, workers int) *aler
 // AlertConsumer streams alerts from the priority and standard queues of every configured cloud into the alert table.
 type AlertConsumer struct {
 	repo            AlertStore
+	publisher       AlertPublisher
 	transforms      AlertTransforms
 	lanes           map[domain.AlertTier]*alertLane
 	scheduler       *scheduler[queuedMessage]
@@ -201,6 +210,7 @@ func NewAlertConsumer(
 	}
 	return &AlertConsumer{
 		repo:                 repo,
+		publisher:            cfg.Publisher,
 		transforms:           transforms,
 		lanes:                lanes,
 		scheduler:            newScheduler(lanes[domain.AlertTierPriority].messages, lanes[domain.AlertTierStandard].messages, cfg.PriorityWeight),
@@ -412,9 +422,10 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 	if err != nil {
 		return c.storeError(ctx, tier, queueName, message, source, alertErrorTransformFailed, err.Error())
 	}
-	var stored int64
+	var stored []domain.NewAlert
+	var inserted int64
 	if err := c.withStoreRetry(ctx, func() (err error) {
-		stored, err = c.repo.InsertAlerts(ctx, rows)
+		stored, inserted, err = c.repo.InsertAlerts(ctx, rows)
 		return err
 	}); err != nil {
 		if isPermanentStoreError(err) {
@@ -423,7 +434,14 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 		slog.ErrorContext(ctx, "alert consumer: could not store alerts, the message will be redelivered", "messageId", message.ID, "err", err)
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
-	return alertDecision{settlement: alertComplete, stored: stored, alerts: len(alerts)}
+	// Published after storing and before acknowledging: a failed publish leaves the message to be redelivered, and the redelivery publishes the rows stored the first time.
+	if c.publisher != nil {
+		if err := c.withStoreRetry(ctx, func() error { return c.publisher.Publish(ctx, stored) }); err != nil {
+			slog.ErrorContext(ctx, "alert consumer: could not publish stored alerts, the message will be redelivered", "messageId", message.ID, "err", err)
+			return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
+		}
+	}
+	return alertDecision{settlement: alertComplete, stored: inserted, alerts: len(alerts)}
 }
 
 // storeError stores one error row holding the raw body and why it could not be normalised, so the alert is visible in the database; only a row the database refuses outright is dead-lettered.
@@ -450,7 +468,7 @@ func (c *AlertConsumer) storeError(ctx context.Context, tier domain.AlertTier, q
 	}
 	var stored int64
 	if err := c.withStoreRetry(ctx, func() (err error) {
-		stored, err = c.repo.InsertAlerts(ctx, []domain.NewAlert{row})
+		_, stored, err = c.repo.InsertAlerts(ctx, []domain.NewAlert{row})
 		return err
 	}); err != nil {
 		if isPermanentStoreError(err) {
