@@ -357,13 +357,7 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	var closers []func(context.Context) error
 
 	if cfg.HasAlertServiceBus() {
-		sbConfig := servicebus.Config{
-			ConnectionString: cfg.AlertServiceBusConnectionString,
-			Namespace:        cfg.AlertServiceBusNamespace,
-			TenantID:         cfg.AlertServiceBusTenantID,
-			ClientID:         cfg.AlertServiceBusClientID,
-			ClientSecret:     cfg.AlertServiceBusClientSecret,
-		}
+		sbConfig := servicebus.Config{ConnectionString: cfg.AlertServiceBusConnectionString}
 		client, err := servicebus.NewClient(sbConfig)
 		if err != nil {
 			log.Fatalf("alert consumer: %v", err)

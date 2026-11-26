@@ -22,30 +22,9 @@ import (
 	"testing"
 )
 
-func TestFullyQualifiedNamespace(t *testing.T) {
-	for in, want := range map[string]string{
-		"sbns-example":                                "sbns-example.servicebus.windows.net",
-		"sbns-example.servicebus.windows.net":         "sbns-example.servicebus.windows.net",
-		" sb://sbns-example.servicebus.windows.net/ ": "sbns-example.servicebus.windows.net",
-		"sbns-example.servicebus.usgovcloudapi.net":   "sbns-example.servicebus.usgovcloudapi.net",
-	} {
-		if got := FullyQualifiedNamespace(in); got != want {
-			t.Errorf("FullyQualifiedNamespace(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestNewClient_RequiresEveryCredential(t *testing.T) {
-	full := Config{Namespace: "sbns-example", TenantID: "tenant", ClientID: "client", ClientSecret: "secret"}
-	for name, cfg := range map[string]Config{
-		"no namespace": {TenantID: full.TenantID, ClientID: full.ClientID, ClientSecret: full.ClientSecret},
-		"no tenant":    {Namespace: full.Namespace, ClientID: full.ClientID, ClientSecret: full.ClientSecret},
-		"no client":    {Namespace: full.Namespace, TenantID: full.TenantID, ClientSecret: full.ClientSecret},
-		"no secret":    {Namespace: full.Namespace, TenantID: full.TenantID, ClientID: full.ClientID},
-	} {
-		if _, err := NewClient(cfg); err == nil {
-			t.Errorf("%s: NewClient succeeded, want an error", name)
-		}
+func TestNewClient_RequiresConnectionString(t *testing.T) {
+	if _, err := NewClient(Config{}); err == nil {
+		t.Error("NewClient with no connection string succeeded, want an error")
 	}
 }
 
@@ -62,7 +41,7 @@ func TestNewClient_ConnectionString(t *testing.T) {
 func TestNewClient_RejectsBadConnectionString(t *testing.T) {
 	for name, cfg := range map[string]Config{
 		"not a connection string": {ConnectionString: "not-a-connection-string"},
-		"with an application":     {ConnectionString: testConnectionString, Namespace: "sbns-example", TenantID: "tenant", ClientID: "client", ClientSecret: "secret"},
+		"no key":                  {ConnectionString: "Endpoint=sb://sbns-example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey"},
 	} {
 		_, err := NewClient(cfg)
 		if err == nil {
@@ -78,7 +57,6 @@ func TestConfigHost(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		"namespace":         {Config{Namespace: "sbns-example"}, "sbns-example.servicebus.windows.net"},
 		"connection string": {Config{ConnectionString: testConnectionString}, "sbns-example.servicebus.windows.net"},
 		"no endpoint":       {Config{ConnectionString: "SharedAccessKeyName=x;SharedAccessKey=y"}, ""},
 		"user information":  {Config{ConnectionString: "Endpoint=sb://user:hunter2@sbns-example.servicebus.windows.net:443/;SharedAccessKeyName=x;SharedAccessKey=y"}, "sbns-example.servicebus.windows.net"},
