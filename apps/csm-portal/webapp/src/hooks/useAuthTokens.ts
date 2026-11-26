@@ -22,6 +22,7 @@ import {
 } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
 import { trySilentSignInOnce } from "@hooks/silentSignIn";
+import { useTokenSource } from "@hooks/useTokenSource";
 
 // Shared across every caller's hook instance. Each useAuthTokens() call
 // creates its own closures, so this lives at module scope to ensure only ONE
@@ -88,7 +89,8 @@ export interface AuthTokens {
  * recovery dance.
  */
 export function useAuthTokens() {
-  const { getAccessToken, getIdToken, signIn, signInSilently } = useAsgardeo();
+  const { signIn, signInSilently } = useAsgardeo();
+  const { getAccessToken, getIdToken } = useTokenSource();
   const logger = useLogger();
 
   // getAccessToken/getIdToken are stable across AsgardeoProvider re-renders,

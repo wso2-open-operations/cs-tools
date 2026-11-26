@@ -20,6 +20,7 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
 import { configDefaults, defineConfig as defineVitestConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { federation } from "@module-federation/vite";
 
 // Choreo's runtime-configuration mechanism injects /config.js fresh at deploy
 // time under a fixed filename that never changes across deploys (unlike
@@ -62,6 +63,32 @@ const viteConfig = defineConfig({
       },
     }),
     configVersionPlugin(),
+    // Publishes the portal as a remote: a host application fetches
+    // remoteEntry.js from this deployment and renders src/remote/RemoteEntry
+    // inside its own page. The portal still runs on its own exactly as before.
+    // The shared packages are taken from the host when there is one, so the
+    // portal joins the host's React tree and its sign-in session.
+    // Left out under Vitest, where nothing is loaded remotely.
+    ...(process.env.VITEST
+      ? []
+      : [
+          federation({
+            name: "csm",
+            filename: "remoteEntry.js",
+            exposes: {
+              "./App": "./src/remote/RemoteEntry.tsx",
+            },
+            // The ranges say which host versions are acceptable. Without
+            // them the exact versions pinned in package.json would be
+            // required, and any host a patch release apart would warn.
+            shared: {
+              react: { singleton: true, requiredVersion: "^19.0.0" },
+              "react-dom": { singleton: true, requiredVersion: "^19.0.0" },
+              "@asgardeo/react": { singleton: true, requiredVersion: "^0.25.0" },
+            },
+            dts: false,
+          }),
+        ]),
   ],
   resolve: {
     alias: {
@@ -135,6 +162,13 @@ const viteConfig = defineConfig({
   server: {
     port: 3001,
     strictPort: true,
+  },
+  // A host on another origin fetches this build's files, so serve them with
+  // CORS headers when previewing locally. The real deployment needs the same.
+  preview: {
+    port: 3001,
+    strictPort: true,
+    cors: true,
   },
 });
 

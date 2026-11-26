@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { apiConfig } from "@config/apiConfig";
 import {
@@ -23,6 +23,7 @@ import {
 } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
 import { trySilentSignInOnce } from "@hooks/silentSignIn";
+import { useTokenSource } from "@hooks/useTokenSource";
 import { CORRELATION_ID_HEADER, newCorrelationId } from "@utils/correlationId";
 
 // Shared across every caller's hook instance. Each useAuthApiClient() call
@@ -252,8 +253,12 @@ function buildRequestHeaders(
 // backend; calls to any other origin are refused so credentials can't be
 // leaked to third-party hosts.
 export function useAuthApiClient() {
-  const { getAccessToken, getIdToken, signIn, signInSilently } = useAsgardeo();
+  const { signIn, signInSilently } = useAsgardeo();
+  const { getAccessToken, getIdToken } = useTokenSource();
   const logger = useLogger();
+  // The access token the backend last answered 401 to, handed back to the
+  // token source so the retry is not made with that same token.
+  const rejectedToken = useRef<string | undefined>(undefined);
 
   // Redirect to a full sign-in, single-flighted so concurrent auth failures
   // don't fire multiple redirects. Returns a never-resolving promise so
@@ -297,7 +302,7 @@ export function useAuthApiClient() {
       let idToken: string | undefined;
       try {
         [token, idToken] = await Promise.all([
-          getAccessToken(),
+          getAccessToken(rejectedToken.current),
           getIdToken(),
         ]);
       } catch (error) {
@@ -345,6 +350,7 @@ export function useAuthApiClient() {
         // for the next attempt.
         const requestToSend = input instanceof Request ? input.clone() : input;
         const response = await fetch(requestToSend, { ...options, headers });
+        if (response.status === 401) rejectedToken.current = token;
         const line = `[api] ${method} ${url.pathname} -> ${response.status} correlationID=${correlationId}`;
         if (response.ok) {
           logger.debug(line);
