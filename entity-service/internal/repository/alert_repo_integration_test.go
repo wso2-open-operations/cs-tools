@@ -58,6 +58,7 @@ func integrationAlert(id, messageID string, index int) domain.NewAlert {
 		ID:           id,
 		Source:       "azure",
 		Alert:        json.RawMessage(`{"service":"svc-a","metric_name":"cpu"}`),
+		Fingerprint:  "it-fingerprint",
 		Tier:         domain.AlertTierPriority,
 		MessageID:    messageID,
 		MessageIndex: index,

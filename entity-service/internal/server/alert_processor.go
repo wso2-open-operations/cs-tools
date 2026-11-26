@@ -41,7 +41,7 @@ var (
 	_ alertprocessor.Store = (*repository.AlertGroups)(nil)
 	_ alertprocessor.Sink  = sink.Incident{}
 	_ sink.Notes           = (*repository.IncidentNotes)(nil)
-	_ relay.Outbox         = (*repository.AlertOutbox)(nil)
+	_ relay.Queue          = (*repository.UnpublishedAlerts)(nil)
 	_ relay.Publisher      = (*eventbus.Producer)(nil)
 	_ subscriber.Source    = (*eventbus.Consumer)(nil)
 )
@@ -51,10 +51,10 @@ const (
 	alertRelayBatch    = 100
 )
 
-// alertProcessorRetry retries a failing event briefly; after that the alert goes back to the outbox and the relay publishes it again.
+// alertProcessorRetry retries a failing event briefly; after that the alert is queued again and the relay publishes it again.
 var alertProcessorRetry = eventbus.RetryPolicy{Attempts: 5, Delay: time.Second, MaxDelay: 30 * time.Second}
 
-// startAlertProcessor runs the relay that publishes stored alerts as alert.created and the subscriber that hands them to the processor, and returns the function that stops both.
+// startAlertProcessor runs the relay that publishes unpublished alerts as alert.created and the subscriber that hands them to the processor, and returns the function that stops both.
 func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.Incidents) func() {
 	if !cfg.AlertProcessorEnabled || !cfg.AlertConsumerEnabled() || db == nil {
 		return func() {}
@@ -63,9 +63,9 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 	scoped := repository.NewScoped(db)
 	apply := cfg.AlertingVersion == config.AlertingVersionV2
 
-	outbox := repository.NewAlertOutbox(scoped)
+	queue := repository.NewUnpublishedAlerts(scoped)
 	producer := eventbus.NewProducer(bus)
-	publisher := &relay.Relay{Outbox: outbox, Publisher: producer, Interval: alertRelayInterval, Batch: alertRelayBatch}
+	publisher := &relay.Relay{Queue: queue, Publisher: producer, Interval: alertRelayInterval, Batch: alertRelayBatch}
 
 	muteRules := repository.NewAlertMuteRuleRepository(scoped)
 	processor := &alertprocessor.Processor{
@@ -81,13 +81,14 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 			return muteRules.Active(ctx, now)
 		},
 		// RIA and other ways of grouping join with Chain.Before or Chain.After.
-		Chain: strategy.Core(cfg.AlertDedupWindow),
-		Apply: apply,
+		Chain:    strategy.Default(cfg.AlertDedupWindow),
+		Lookback: cfg.AlertDedupWindow,
+		Apply:    apply,
 	}
 	consumer := eventbus.NewConsumer(bus, cfg.AlertProcessorConsumerGroup, alertProcessorRetry)
 	listener := subscriber.New(consumer, processor.Handle, subscriber.Log(), subscriber.Recover())
 	listener.OnExhausted = func(ctx context.Context, e event.Event, cause error) error {
-		requeued, err := outbox.Requeue(ctx, e.AlertID)
+		requeued, err := queue.Requeue(ctx, e.AlertID)
 		if err == nil && !requeued {
 			slog.ErrorContext(ctx, "alert processor: gave up on an alert after its requeues; it has no incident", "alertId", e.AlertID, "requeues", repository.MaxAlertRequeues, "err", cause)
 		}

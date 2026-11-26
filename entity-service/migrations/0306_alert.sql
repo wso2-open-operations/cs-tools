@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS alert (
     source           TEXT        CHECK (btrim(source) <> ''),
     -- The canonical alert as JSON, with the same keys alert-ingestion writes; NULL on an error row.
     alert            JSONB       CHECK (jsonb_typeof(alert) = 'object'),
-    -- sha256 of source|service|metric_name|environment|unique_identifier, the key alert-core folds incidents by; NULL on an error row.
+    -- sha256 of source|service|metric_name|environment|unique_identifier, the key the alert processor folds incidents by; NULL on an error row.
     fingerprint      TEXT,
     tier             TEXT        NOT NULL CHECK (tier IN ('priority', 'standard')),
     -- The queue's name and message id (such as sqs/priority-queue/<id>) and the alert's position in it; a redelivered message stores nothing new.

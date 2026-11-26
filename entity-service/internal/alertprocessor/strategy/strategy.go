@@ -43,15 +43,13 @@ const (
 // Folds reports whether the outcome adds the alert to an existing incident.
 func (o Outcome) Folds() bool { return o == Duplicate || o == Resolve }
 
-// Group is a fingerprint's state: the incident its alerts currently fold into.
+// Group is a fingerprint's state, read from its alerts: the incident they currently fold into, and its first and last alert.
 type Group struct {
 	Fingerprint string
 	IncidentID  string
-	// OpeningAlertID is the alert whose incident is being created; set until that incident is recorded, so a later alert can finish the open instead of starting another.
-	OpeningAlertID string
-	FirstSeenOn    time.Time
-	LastSeenOn     time.Time
-	AlertCount     int
+	FirstSeenOn time.Time
+	LastSeenOn  time.Time
+	AlertCount  int
 }
 
 // Input is everything a strategy may look at; strategies do no I/O.

@@ -14,35 +14,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), sink (incidents), relay (outbox to event hub) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
+// Package alertprocessor turns stored alerts into incidents. Its subpackages split the work: event (the alert.created record), strategy (pure decisions), severity (label mapping), sink (incidents), relay (unpublished alerts to event hub) and subscriber (event hub to a handler, wrapped in middleware). This package holds the Processor and the ports it depends on.
 package alertprocessor
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 )
 
-// Processor decides each alert.created event with its strategy chain and, when Apply is set, carries the decision out.
+// Processor decides each alert.created event with its strategy chain and, when Apply is set, carries the decision out. All its state is the alert table: an alert linked to an incident is done, and a fingerprint's group is read from its linked alerts.
 type Processor struct {
 	Store     Store
 	Sink      Sink
 	MuteRules MuteRules
 	Chain     strategy.Chain
+	// Lookback is how far back an alert looks for an earlier alert of its fingerprint whose incident was created but never linked.
+	Lookback time.Duration
 	// Apply writes incidents and notes; off, decisions are only logged (ALERTING_VERSION hybrid).
 	Apply bool
 }
 
-// step is a decision to carry out: what to do with the alert and the group it acts on.
+// step is a decision to carry out: what to do with the alert, and the incident a fold adds it to.
 type step struct {
-	outcome strategy.Outcome
-	group   strategy.Group
+	outcome    strategy.Outcome
+	incidentID string
 }
 
-// Handle processes one event in three steps: decide (and record a pending open), write to the sink, record the result. Each step is safe to repeat, so a retry neither opens a second incident nor adds a second note.
+// Handle decides, writes to the sink, then links the alert. Each step is safe to repeat: Open finds the incident an alert already created and Fold skips a note already added, so a retry neither opens a second incident nor adds a second note.
 func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 	todo, err := p.decide(ctx, e)
 	if err != nil || todo == nil {
@@ -50,16 +53,17 @@ func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 	}
 	switch {
 	case todo.outcome == strategy.Open:
-		if todo.group.IncidentID, err = p.Sink.Open(ctx, e); err != nil {
+		if todo.incidentID, err = p.Sink.Open(ctx, e); err != nil {
 			return fmt.Errorf("open incident for %s: %w", e.AlertID, err)
 		}
-		todo.group.OpeningAlertID = ""
 	case todo.outcome.Folds():
-		if err := p.Sink.Fold(ctx, todo.group.IncidentID, todo.outcome, e); err != nil {
-			return fmt.Errorf("fold %s into incident %s: %w", e.AlertID, todo.group.IncidentID, err)
+		if err := p.Sink.Fold(ctx, todo.incidentID, todo.outcome, e); err != nil {
+			return fmt.Errorf("fold %s into incident %s: %w", e.AlertID, todo.incidentID, err)
 		}
 	}
-	return p.record(ctx, e, todo)
+	return p.Store.InGroup(ctx, e.Fingerprint(), func(tx GroupTx) error {
+		return tx.LinkAlert(ctx, e.AlertID, todo.incidentID)
+	})
 }
 
 // decide returns the step to carry out, or nil when there is none: the alert is already linked, the outcome writes nothing, or Apply is off.
@@ -70,19 +74,12 @@ func (p *Processor) decide(ctx context.Context, e event.Event) (*step, error) {
 		if err != nil || linked {
 			return err
 		}
-		group, err := tx.Group(ctx)
-		if err != nil {
-			return err
+		if p.Apply {
+			if err := p.linkUnrecorded(ctx, tx, e); err != nil {
+				return err
+			}
 		}
-		if group, err = p.finishOpen(ctx, tx, group, e.AlertID); err != nil {
-			return err
-		}
-		if group != nil && group.OpeningAlertID == e.AlertID {
-			// A retry of this alert's own open: carry on with it rather than deciding again.
-			todo = &step{outcome: strategy.Open, group: *group}
-			return nil
-		}
-		in, err := p.input(ctx, group, e)
+		in, err := p.input(ctx, tx, e)
 		if err != nil {
 			return err
 		}
@@ -91,43 +88,46 @@ func (p *Processor) decide(ctx context.Context, e event.Event) (*step, error) {
 			"outcome", d.Outcome, "strategy", d.Strategy, "reason", d.Reason, "apply", p.Apply)
 		switch {
 		case !p.Apply:
-			return nil
 		case d.Outcome == strategy.Open:
-			// Recorded before the incident is created, so a later alert finds this open instead of starting another.
-			pending := strategy.Group{Fingerprint: e.Fingerprint(), OpeningAlertID: e.AlertID, FirstSeenOn: e.ReceivedOn, LastSeenOn: e.ReceivedOn, AlertCount: 1}
-			todo = &step{outcome: strategy.Open, group: pending}
-			return tx.SaveGroup(ctx, pending)
+			todo = &step{outcome: strategy.Open}
 		case d.Outcome.Folds():
-			todo = &step{outcome: d.Outcome, group: *in.Group}
+			todo = &step{outcome: d.Outcome, incidentID: in.Group.IncidentID}
 		}
 		return nil
 	})
 	return todo, err
 }
 
-// finishOpen completes another alert's open that never recorded its incident: the incident it created is linked, or, when it created none, the group is dropped so this alert decides afresh.
-func (p *Processor) finishOpen(ctx context.Context, tx GroupTx, group *strategy.Group, alertID string) (*strategy.Group, error) {
-	if group == nil || group.IncidentID != "" || group.OpeningAlertID == "" || group.OpeningAlertID == alertID {
-		return group, nil
+// linkUnrecorded links earlier alerts of the fingerprint that created an incident but failed before linking it, so this alert folds into that incident instead of opening a second one.
+func (p *Processor) linkUnrecorded(ctx context.Context, tx GroupTx, e event.Event) error {
+	earlier, err := tx.Unlinked(ctx, e.ReceivedOn.Add(-p.Lookback), e.ReceivedOn, e.AlertID)
+	if err != nil {
+		return err
 	}
-	incidentID, err := p.Sink.Find(ctx, group.OpeningAlertID)
-	if err != nil || incidentID == "" {
-		return nil, err
+	for _, alertID := range earlier {
+		incidentID, err := p.Sink.Find(ctx, alertID)
+		if err != nil {
+			return err
+		}
+		if incidentID == "" {
+			continue
+		}
+		if err := tx.LinkAlert(ctx, alertID, incidentID); err != nil {
+			return err
+		}
 	}
-	opener := group.OpeningAlertID
-	group.IncidentID, group.OpeningAlertID = incidentID, ""
-	if err := tx.SaveGroup(ctx, *group); err != nil {
-		return nil, err
-	}
-	return group, tx.LinkAlert(ctx, opener, incidentID)
+	return nil
 }
 
 // input gathers what the strategies look at: the group, whether its incident is open, and the active mute rules.
-func (p *Processor) input(ctx context.Context, group *strategy.Group, e event.Event) (strategy.Input, error) {
+func (p *Processor) input(ctx context.Context, tx GroupTx, e event.Event) (strategy.Input, error) {
 	in := strategy.Input{Event: e}
-	if group != nil && group.IncidentID != "" {
+	group, err := tx.Group(ctx)
+	if err != nil {
+		return strategy.Input{}, err
+	}
+	if group != nil {
 		in.Group = group
-		var err error
 		if in.IncidentOpen, err = p.Sink.IsOpen(ctx, group.IncidentID); err != nil {
 			return strategy.Input{}, err
 		}
@@ -139,28 +139,4 @@ func (p *Processor) input(ctx context.Context, group *strategy.Group, e event.Ev
 	}
 	in.MuteRules = rules
 	return in, nil
-}
-
-// record saves the group and links the alert to its incident, which marks the event done.
-func (p *Processor) record(ctx context.Context, e event.Event, todo *step) error {
-	return p.Store.InGroup(ctx, e.Fingerprint(), func(tx GroupTx) error {
-		group := todo.group
-		if todo.outcome.Folds() {
-			current, err := tx.Group(ctx)
-			if err != nil {
-				return err
-			}
-			if current != nil && current.IncidentID == group.IncidentID {
-				group = *current
-			}
-			group.AlertCount++
-			if e.ReceivedOn.After(group.LastSeenOn) {
-				group.LastSeenOn = e.ReceivedOn
-			}
-		}
-		if err := tx.SaveGroup(ctx, group); err != nil {
-			return err
-		}
-		return tx.LinkAlert(ctx, e.AlertID, group.IncidentID)
-	})
 }

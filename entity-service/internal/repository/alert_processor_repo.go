@@ -31,41 +31,40 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Every query here runs as the system identity, because alert, alert_outbox and alert_group are internal only.
+// The alert processor keeps all its state in alert: published_on queues an alert for the relay and incident_id marks it done. Every query runs as the system identity, because alert is internal only.
 
-// AlertOutbox is alert_outbox, drained by the alert relay.
-type AlertOutbox struct {
+// UnpublishedAlerts is the relay's queue: the alert rows whose published_on is NULL.
+type UnpublishedAlerts struct {
 	db *Scoped
 }
 
-// NewAlertOutbox returns the outbox the alert relay drains.
-func NewAlertOutbox(db *Scoped) *AlertOutbox {
-	return &AlertOutbox{db: db}
+// NewUnpublishedAlerts returns the queue the alert relay drains.
+func NewUnpublishedAlerts(db *Scoped) *UnpublishedAlerts {
+	return &UnpublishedAlerts{db: db}
 }
 
-// alertOutboxLock serializes drains across replicas, so batches publish in outbox order and a newer alert never overtakes an older one for its fingerprint.
-const alertOutboxLock = `SELECT pg_advisory_xact_lock(hashtextextended('alert_outbox', 0))`
+// unpublishedLock serializes drains across replicas, so batches publish in arrival order and a newer alert never overtakes an older one for its fingerprint.
+const unpublishedLock = `SELECT pg_advisory_xact_lock(hashtextextended('alert_unpublished', 0))`
 
-// SKIP LOCKED keeps a drain from waiting on rows another statement holds; the advisory lock above already makes the drainer single.
-const drainAlertOutboxQuery = `SELECT o.alert_id, a.tier, a.received_on, a.alert
-FROM alert_outbox o JOIN alert a ON a.id = o.alert_id
-WHERE o.published_on IS NULL
-ORDER BY o.created_on, o.alert_id
+const drainUnpublishedQuery = `SELECT id, tier, received_on, alert
+FROM alert
+WHERE published_on IS NULL AND error_reason IS NULL
+ORDER BY id
 LIMIT $1
-FOR UPDATE OF o SKIP LOCKED`
+FOR UPDATE`
 
-const markAlertOutboxQuery = `UPDATE alert_outbox SET published_on = NOW() WHERE alert_id = ANY($1::text[])`
+const markPublishedQuery = `UPDATE alert SET published_on = NOW() WHERE id = ANY($1::text[])`
 
-// Drain implements relay.Outbox.
-func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]event.Event) []string) (int, error) {
+// Drain implements relay.Queue.
+func (u *UnpublishedAlerts) Drain(ctx context.Context, limit int, publish func([]event.Event) []string) (int, error) {
 	marked := 0
-	err := o.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, alertOutboxLock); err != nil {
-			return fmt.Errorf("lock alert outbox: %w", err)
+	err := u.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, unpublishedLock); err != nil {
+			return fmt.Errorf("lock unpublished alerts: %w", err)
 		}
-		rows, err := tx.Query(ctx, drainAlertOutboxQuery, limit)
+		rows, err := tx.Query(ctx, drainUnpublishedQuery, limit)
 		if err != nil {
-			return fmt.Errorf("read alert outbox: %w", err)
+			return fmt.Errorf("read unpublished alerts: %w", err)
 		}
 		batch, err := pgx.CollectRows(rows, scanAlertEvent)
 		if err != nil || len(batch) == 0 {
@@ -75,8 +74,8 @@ func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]event
 		if len(published) == 0 {
 			return nil
 		}
-		if _, err := tx.Exec(ctx, markAlertOutboxQuery, published); err != nil {
-			return fmt.Errorf("mark alert outbox: %w", err)
+		if _, err := tx.Exec(ctx, markPublishedQuery, published); err != nil {
+			return fmt.Errorf("mark alerts published: %w", err)
 		}
 		marked = len(published)
 		return nil
@@ -84,13 +83,13 @@ func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]event
 	return marked, err
 }
 
-// MaxAlertRequeues bounds how often an alert whose processing keeps failing goes back to the outbox, so one poison alert cannot cycle forever.
+// MaxAlertRequeues bounds how often an alert whose processing keeps failing is queued again, so one poison alert cannot cycle forever.
 const MaxAlertRequeues = 10
 
-// Requeue puts a published alert back in the outbox, in its original place, so the relay publishes it again; false means it reached MaxAlertRequeues and stays published.
-func (o *AlertOutbox) Requeue(ctx context.Context, alertID string) (bool, error) {
-	tag, err := o.db.Exec(WithSystemIdentity(ctx),
-		`UPDATE alert_outbox SET published_on = NULL, requeues = requeues + 1 WHERE alert_id = $1 AND requeues < $2`, alertID, MaxAlertRequeues)
+// Requeue queues a published alert again, in its arrival place; false means it reached MaxAlertRequeues and stays published.
+func (u *UnpublishedAlerts) Requeue(ctx context.Context, alertID string) (bool, error) {
+	tag, err := u.db.Exec(WithSystemIdentity(ctx),
+		`UPDATE alert SET published_on = NULL, requeues = requeues + 1 WHERE id = $1 AND requeues < $2`, alertID, MaxAlertRequeues)
 	if err != nil {
 		return false, fmt.Errorf("requeue alert %s: %w", alertID, err)
 	}
@@ -111,17 +110,17 @@ func scanAlertEvent(row pgx.CollectableRow) (event.Event, error) {
 	return e, nil
 }
 
-// AlertGroups is alert_group, the alert processor's state.
+// AlertGroups reads each fingerprint's group from its alerts; it implements alertprocessor.Store.
 type AlertGroups struct {
 	db *Scoped
 }
 
-// NewAlertGroups returns the store the alert processor keeps its groups in.
+// NewAlertGroups returns the store the alert processor reads groups and links alerts through.
 func NewAlertGroups(db *Scoped) *AlertGroups {
 	return &AlertGroups{db: db}
 }
 
-// InGroup implements alertprocessor.Store; the advisory lock is released when the transaction ends.
+// InGroup implements alertprocessor.Store; the advisory lock on the fingerprint is released when the transaction ends.
 func (g *AlertGroups) InGroup(ctx context.Context, fingerprint string, fn func(alertprocessor.GroupTx) error) error {
 	return g.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, fingerprint); err != nil {
@@ -136,37 +135,38 @@ type groupTx struct {
 	fingerprint string
 }
 
+// groupQuery takes the incident of the fingerprint's latest linked alert, then that incident's alerts of the fingerprint.
+const groupQuery = `WITH current AS (
+	SELECT incident_id FROM alert
+	WHERE fingerprint = $1 AND incident_id IS NOT NULL
+	ORDER BY received_on DESC, id DESC
+	LIMIT 1
+)
+SELECT a.incident_id::text, min(a.received_on), max(a.received_on), count(*)
+FROM alert a JOIN current c ON a.incident_id = c.incident_id
+WHERE a.fingerprint = $1
+GROUP BY a.incident_id`
+
 func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
 	g := strategy.Group{Fingerprint: t.fingerprint}
-	var incidentID, openingAlertID *string
-	err := t.tx.QueryRow(ctx,
-		`SELECT incident_id::text, opening_alert_id, first_seen_on, last_seen_on, alert_count FROM alert_group WHERE fingerprint = $1`, t.fingerprint,
-	).Scan(&incidentID, &openingAlertID, &g.FirstSeenOn, &g.LastSeenOn, &g.AlertCount)
+	err := t.tx.QueryRow(ctx, groupQuery, t.fingerprint).Scan(&g.IncidentID, &g.FirstSeenOn, &g.LastSeenOn, &g.AlertCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read alert group: %w", err)
 	}
-	if incidentID != nil {
-		g.IncidentID = *incidentID
-	}
-	if openingAlertID != nil {
-		g.OpeningAlertID = *openingAlertID
-	}
 	return &g, nil
 }
 
-func (t groupTx) SaveGroup(ctx context.Context, g strategy.Group) error {
-	_, err := t.tx.Exec(ctx, `INSERT INTO alert_group (fingerprint, incident_id, opening_alert_id, first_seen_on, last_seen_on, alert_count, updated_on)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (fingerprint) DO UPDATE SET incident_id = EXCLUDED.incident_id, opening_alert_id = EXCLUDED.opening_alert_id,
-	first_seen_on = EXCLUDED.first_seen_on, last_seen_on = EXCLUDED.last_seen_on, alert_count = EXCLUDED.alert_count, updated_on = EXCLUDED.updated_on`,
-		t.fingerprint, nullIfEmpty(g.IncidentID), nullIfEmpty(g.OpeningAlertID), g.FirstSeenOn, g.LastSeenOn, g.AlertCount, time.Now())
+func (t groupTx) Unlinked(ctx context.Context, since, until time.Time, except string) ([]string, error) {
+	rows, err := t.tx.Query(ctx, `SELECT id FROM alert
+WHERE fingerprint = $1 AND incident_id IS NULL AND received_on BETWEEN $2 AND $3 AND id <> $4
+ORDER BY received_on, id`, t.fingerprint, since, until, except)
 	if err != nil {
-		return fmt.Errorf("save alert group: %w", err)
+		return nil, fmt.Errorf("read unlinked alerts: %w", err)
 	}
-	return nil
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func (t groupTx) AlertLinked(ctx context.Context, alertID string) (bool, error) {

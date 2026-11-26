@@ -47,8 +47,8 @@ func rule(field, value string) domain.AlertMuteRule {
 	return domain.AlertMuteRule{Number: "AMR0000001", Conditions: []domain.AlertMuteRuleCondition{{Field: field, Value: value}}}
 }
 
-func TestCore(t *testing.T) {
-	chain := Core(5 * time.Minute)
+func TestDefault(t *testing.T) {
+	chain := Default(5 * time.Minute)
 	tests := map[string]struct {
 		in   Input
 		want Outcome
@@ -99,7 +99,7 @@ func (a always) Decide(Input) (Decision, bool) { return Decision{Outcome: a.outc
 
 func TestChainBeforeAndAfter(t *testing.T) {
 	in := Input{Event: alert("critical", 0)}
-	core := Core(time.Minute)
+	core := Default(time.Minute)
 	if d := core.Before(always{Mute}).Decide(in); d.Outcome != Mute || d.Strategy != "always" {
 		t.Fatalf("Before: decision = %+v, want the plugged-in strategy first", d)
 	}

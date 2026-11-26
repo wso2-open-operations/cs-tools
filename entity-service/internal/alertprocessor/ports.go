@@ -27,7 +27,7 @@ import (
 
 // The processor depends only on these ports; the repository, sink and mute rule adapters implement them.
 
-// Store keeps each fingerprint's group and each alert's incident.
+// Store reads a fingerprint's group from its alerts and links each alert to its incident.
 type Store interface {
 	// InGroup runs fn in one transaction that holds the fingerprint's lock, so one fingerprint is decided by one worker at a time.
 	InGroup(ctx context.Context, fingerprint string, fn func(GroupTx) error) error
@@ -35,9 +35,10 @@ type Store interface {
 
 // GroupTx is the transaction InGroup hands to its function.
 type GroupTx interface {
-	// Group is the fingerprint's group, or nil when it has none.
+	// Group is the fingerprint's current incident, from the latest of its alerts linked to one, or nil when none is.
 	Group(ctx context.Context) (*strategy.Group, error)
-	SaveGroup(ctx context.Context, g strategy.Group) error
+	// Unlinked lists the fingerprint's other alerts received in [since, until] that belong to no incident, oldest first.
+	Unlinked(ctx context.Context, since, until time.Time, except string) ([]string, error)
 	// AlertLinked reports whether the alert already belongs to an incident, which makes a redelivered event a no-op.
 	AlertLinked(ctx context.Context, alertID string) (bool, error)
 	LinkAlert(ctx context.Context, alertID, incidentID string) error

@@ -745,7 +745,7 @@ type Config struct {
 	// ports, it runs wherever the data is.
 	IncidentReportPollInterval time.Duration
 
-	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, hybrid v1 plus the queue consumer storing alerts only, and v2, refused until the alert processor creates incidents.
+	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the existing alert services only, hybrid v1 plus the queue consumer storing alerts, and v2 the queue consumer and the alert processor creating incidents.
 	AlertingVersion AlertingVersion
 	// AlertServiceBusConnectionString is a shared access policy's connection string for the namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_CONNECTION_STRING); empty leaves Azure out.
 	AlertServiceBusConnectionString string
@@ -2022,7 +2022,7 @@ func (c *Config) applySREEventHubTopic() {
 // maxAlertConsumerConcurrency keeps the alert consumer from taking most of the database pool from API requests.
 const maxAlertConsumerConcurrency = 64
 
-// AlertingVersion is a stage of the move from the ingestion and alert-core services to the queue consumer.
+// AlertingVersion is a stage of the move from the existing alert services to the queue consumer and alert processor.
 type AlertingVersion string
 
 // Alerting versions; v1 is the default, so nothing changes until a deployment opts in.

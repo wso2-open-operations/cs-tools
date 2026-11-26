@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package severity reads alert severity labels the way alert-core did, and maps them to incident priority, category and contact type.
+// Package severity reads alert severity labels and maps them to incident priority, category and contact type.
 package severity
 
 import (
@@ -23,7 +23,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// severityRank orders the severity labels alert-core understood, 1 being the most severe; ok and clear resolve.
+// severityRank orders the severity labels, 1 being the most severe; ok and clear resolve.
 var severityRank = map[string]int{
 	"critical": 1,
 	"major":    2,

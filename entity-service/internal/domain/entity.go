@@ -10883,8 +10883,9 @@ type NewAlert struct {
 	ID string
 	// Source is empty only on an error row whose message named no source, and is stored as NULL.
 	Source string
-	// Alert is empty on an error row.
+	// Alert and Fingerprint are empty on an error row; Fingerprint is the key the alert processor folds by.
 	Alert        json.RawMessage
+	Fingerprint  string
 	Tier         AlertTier
 	MessageID    string
 	MessageIndex int

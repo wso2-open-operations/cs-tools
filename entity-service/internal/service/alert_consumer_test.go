@@ -254,6 +254,9 @@ func TestAlertConsumerProcess_StoresAlertLikeIngestion(t *testing.T) {
 	if stored.UniqueIdentifier != row.ID {
 		t.Fatalf("unique_identifier = %q, want the alert's own id when the source sent none", stored.UniqueIdentifier)
 	}
+	if row.Fingerprint != model.Fingerprint(stored) {
+		t.Fatal("fingerprint was not computed from the stored alert")
+	}
 	if want := time.Date(2026, 11, 13, 10, 0, 0, 123456700, time.UTC); !row.ReceivedOn.Equal(want) {
 		t.Fatalf("received_on = %s, want the gateway's %s", row.ReceivedOn, want)
 	}

@@ -14,15 +14,13 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- The alert processor (internal/alertprocessor) groups stored alerts into incidents from alert.created events, so alert keeps only what was received. Safe to run again.
--- Stop the alert consumer (ALERTING_VERSION=v1) before running this and start the new build after it: the old build writes high/default tiers and the fingerprint column, which this file retires, so its inserts would fail.
+-- The alert processor (internal/alertprocessor) folds stored alerts into incidents from alert.created events, keeping all its state in alert: published_on queues an alert for the relay, and incident_id marks it done. Safe to run again.
+-- Stop the alert consumer (ALERTING_VERSION=v1) before running this and start the new build after it: the old build writes high/default tiers, which this file retires, so its inserts would fail.
 
 -- alert is FORCE ROW LEVEL SECURITY, so the tier update sees its rows only as the internal identity.
 SELECT set_config('app.is_internal', 'true', false);
 
--- Each check is swapped in one statement, so it is never absent; NOT VALID skips the scan under the exclusive lock, and VALIDATE checks existing rows without blocking reads or writes.
-
--- Tiers are named after the queue an alert arrived on.
+-- Tiers are named after the queue an alert arrived on. The check is swapped in one statement, so it is never absent; NOT VALID skips the scan under the exclusive lock, and VALIDATE checks existing rows without blocking reads or writes.
 ALTER TABLE alert
     DROP CONSTRAINT IF EXISTS alert_tier_check,
     ADD CONSTRAINT alert_tier_check CHECK (tier IN ('priority', 'standard')) NOT VALID;
@@ -30,47 +28,23 @@ UPDATE alert SET tier = 'priority' WHERE tier = 'high';
 UPDATE alert SET tier = 'standard' WHERE tier = 'default';
 ALTER TABLE alert VALIDATE CONSTRAINT alert_tier_check;
 
--- Grouping state lives in alert_group and delivery in alert_outbox, so the per-row fingerprint and claim columns go.
--- Alerts stored before this file are not queued: v2 could not start before it, so every one was stored under hybrid, where alert-core raised its incident; queueing them would page again for old alerts.
-DROP INDEX IF EXISTS alert_unprocessed_idx;
-DROP INDEX IF EXISTS alert_unprocessed_fingerprint_idx;
--- An alert row has a source and alert and no error; an error row is the message's only row, with an error and no alert.
-ALTER TABLE alert
-    DROP CONSTRAINT IF EXISTS alert_row_kind,
-    DROP COLUMN IF EXISTS fingerprint,
-    DROP COLUMN IF EXISTS claimed_by,
-    DROP COLUMN IF EXISTS claim_expires_on,
-    DROP COLUMN IF EXISTS processed_on,
-    ADD CONSTRAINT alert_row_kind CHECK (
-        (error_reason IS NULL AND error IS NULL AND source IS NOT NULL AND alert IS NOT NULL)
-        OR (error_reason IS NOT NULL AND btrim(error_reason) <> '' AND alert IS NULL AND message_index = 0 AND incident_id IS NULL)
-    ) NOT VALID;
-ALTER TABLE alert VALIDATE CONSTRAINT alert_row_kind;
-
 SELECT set_config('app.is_internal', '', false);
 
--- One row per stored alert still to be published as alert.created; written in the same statement as the alert.
-CREATE TABLE IF NOT EXISTS alert_outbox (
-    alert_id     TEXT        PRIMARY KEY REFERENCES alert(id) ON DELETE CASCADE,
-    created_on   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    published_on TIMESTAMPTZ,
-    -- How often processing gave up and put the alert back; capped so a poison alert cannot cycle forever.
-    requeues     INTEGER     NOT NULL DEFAULT 0 CHECK (requeues >= 0)
-);
--- The relay drains the oldest unpublished rows first.
-CREATE INDEX IF NOT EXISTS alert_outbox_unpublished_idx ON alert_outbox (created_on) WHERE published_on IS NULL;
+-- The processor reads its state from published_on and incident_id, so the claim columns go.
+DROP INDEX IF EXISTS alert_unprocessed_idx;
+DROP INDEX IF EXISTS alert_unprocessed_fingerprint_idx;
+ALTER TABLE alert
+    DROP COLUMN IF EXISTS claimed_by,
+    DROP COLUMN IF EXISTS claim_expires_on,
+    DROP COLUMN IF EXISTS processed_on;
 
--- One row per fingerprint (sha256 of source|service|metric_name|environment|unique_identifier): the incident its alerts currently fold into.
-CREATE TABLE IF NOT EXISTS alert_group (
-    fingerprint   TEXT        PRIMARY KEY,
-    incident_id   UUID        REFERENCES incident(id) ON DELETE SET NULL,
-    -- The alert whose incident is being created, until that incident is recorded, so a later alert finishes the open instead of starting another.
-    opening_alert_id TEXT,
-    first_seen_on TIMESTAMPTZ NOT NULL,
-    last_seen_on  TIMESTAMPTZ NOT NULL,
-    alert_count   INTEGER     NOT NULL DEFAULT 1 CHECK (alert_count > 0),
-    updated_on    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- published_on is when the relay published the alert as alert.created; NULL queues it. Rows already stored take the migration time, so they are never queued: v2 could not start before this file, so each was stored under hybrid, where the v1 services raised its incident, and queueing them would page again.
+ALTER TABLE alert ADD COLUMN IF NOT EXISTS published_on TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE alert ALTER COLUMN published_on DROP DEFAULT;
+-- requeues counts how often processing gave up and put the alert back; capped so a poison alert cannot cycle forever.
+ALTER TABLE alert ADD COLUMN IF NOT EXISTS requeues SMALLINT NOT NULL DEFAULT 0 CHECK (requeues >= 0);
 
-COMMENT ON TABLE alert_group IS
-    'Alert processor state: the incident each fingerprint folds into, and when that incident''s first alert arrived.';
+-- The relay drains queued alert rows in id order, which is arrival order.
+CREATE INDEX IF NOT EXISTS alert_unpublished_idx ON alert (id) WHERE published_on IS NULL AND error_reason IS NULL;
+-- The processor reads a fingerprint's alerts, newest first, to find the incident they fold into.
+CREATE INDEX IF NOT EXISTS alert_fingerprint_idx ON alert (fingerprint, received_on) WHERE fingerprint IS NOT NULL;

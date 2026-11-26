@@ -488,7 +488,7 @@ func safeTransform(transform alertsource.Transform, body []byte) (alerts []model
 	return transform(body)
 }
 
-// buildRows gives each alert its id the way alert-ingestion does: an alert with no identifier takes its own id.
+// buildRows gives each alert its id and fingerprint the way alert-ingestion does: an alert with no identifier takes its own id.
 func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
 	messageKey := alertMessageKey(queueName, message.ID)
 	receivedOn := c.receivedOn(message)
@@ -508,6 +508,7 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueNam
 			ID:           ids[i],
 			Source:       source,
 			Alert:        body,
+			Fingerprint:  model.Fingerprint(alert),
 			Tier:         tier,
 			MessageID:    messageKey,
 			MessageIndex: i,

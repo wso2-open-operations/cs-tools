@@ -18,7 +18,7 @@ package strategy
 
 import "time"
 
-// Core is alert-core's behaviour: resolve, then fold duplicates into the open incident, then mute, then open.
-func Core(dedupWindow time.Duration) Chain {
+// Default is the standard chain: resolve, then fold duplicates into the open incident, then mute, then open.
+func Default(dedupWindow time.Duration) Chain {
 	return Chain{ResolveStrategy{}, DedupStrategy{Window: dedupWindow}, MuteStrategy{}}
 }

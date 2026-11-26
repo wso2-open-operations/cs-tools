@@ -27,15 +27,14 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// drainIDs drains the outbox once, publishing everything, and returns the alert ids it was handed.
-func drainIDs(t *testing.T, outbox *AlertOutbox) []string {
+// drainIDs drains the queue once, publishing everything, and returns the alert ids it was handed.
+func drainIDs(t *testing.T, queue *UnpublishedAlerts) []string {
 	t.Helper()
 	var ids []string
-	_, err := outbox.Drain(context.Background(), 100, func(batch []event.Event) []string {
+	_, err := queue.Drain(context.Background(), 100, func(batch []event.Event) []string {
 		for _, e := range batch {
 			ids = append(ids, e.AlertID)
 		}
@@ -47,81 +46,102 @@ func drainIDs(t *testing.T, outbox *AlertOutbox) []string {
 	return ids
 }
 
-func TestAlertOutboxIntegration_QueuesStoredAlertsOnce(t *testing.T) {
-	pool := newAlertIntegrationPool(t)
+// storeAlerts reserves ids and stores one single-alert message per row the change builds.
+func storeAlerts(t *testing.T, repo AlertRepository, n int, change func(i int, row *domain.NewAlert)) []string {
+	t.Helper()
 	ctx := WithSystemIdentity(context.Background())
-	repo := NewAlertRepository(NewScoped(pool), true)
-	outbox := NewAlertOutbox(NewScoped(pool))
-	ids, err := repo.ReserveAlertIDs(ctx, 3)
+	ids, err := repo.ReserveAlertIDs(ctx, n)
 	if err != nil {
 		t.Fatal(err)
 	}
-	errorRow := integrationAlert(ids[2], "it-alert-outbox-2", 0)
-	errorRow.Alert, errorRow.ErrorReason, errorRow.Error, errorRow.RawBody = nil, "UnknownSource", "no transform", []byte("x")
-	message := []domain.NewAlert{integrationAlert(ids[0], "it-alert-outbox-1", 0), integrationAlert(ids[1], "it-alert-outbox-1", 1)}
-	message[0].RawBody = []byte("{}")
-	for _, rows := range [][]domain.NewAlert{message, message, {errorRow}} {
-		if _, err := repo.InsertAlerts(ctx, rows); err != nil {
-			t.Fatalf("InsertAlerts: %v", err)
+	for i, id := range ids {
+		row := integrationAlert(id, "it-alert-proc-"+id, 0)
+		row.RawBody = []byte("{}")
+		change(i, &row)
+		if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
+			t.Fatalf("InsertAlerts %s: %v", id, err)
 		}
 	}
+	return ids
+}
 
-	got := drainIDs(t, outbox)
-	if !slices.Equal(got, ids[:2]) {
+func TestUnpublishedAlertsIntegration_QueuesStoredAlertsOnce(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	queue := NewUnpublishedAlerts(NewScoped(pool))
+	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool), true), 3, func(i int, row *domain.NewAlert) {
+		if i == 2 {
+			row.Alert, row.Fingerprint, row.ErrorReason, row.Error = nil, "", "UnknownSource", "no transform"
+		}
+	})
+	// A redelivered message stores nothing and so queues nothing.
+	again := integrationAlert(ids[0], "it-alert-proc-"+ids[0], 0)
+	again.RawBody = []byte("{}")
+	if n, err := NewAlertRepository(NewScoped(pool), true).InsertAlerts(WithSystemIdentity(context.Background()), []domain.NewAlert{again}); err != nil || n != 0 {
+		t.Fatalf("redelivery stored %d (%v), want 0", n, err)
+	}
+
+	if got := drainIDs(t, queue); !slices.Equal(got, ids[:2]) {
 		t.Fatalf("drained %v, want the two alert rows once each and never the error row", got)
 	}
-	if again := drainIDs(t, outbox); len(again) != 0 {
-		t.Fatalf("second drain handed %v, want nothing once published", again)
+	if got := drainIDs(t, queue); len(got) != 0 {
+		t.Fatalf("second drain handed %v, want nothing once published", got)
 	}
 }
 
-func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
+func TestUnpublishedAlertsIntegration_NothingQueuedWithoutPublish(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	storeAlerts(t, NewAlertRepository(NewScoped(pool), false), 1, func(int, *domain.NewAlert) {})
+	if got := drainIDs(t, NewUnpublishedAlerts(NewScoped(pool))); len(got) != 0 {
+		t.Fatalf("drained %v, want nothing while the processor is off", got)
+	}
+}
+
+func TestUnpublishedAlertsIntegration_RequeueIsCapped(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
 	ctx := WithSystemIdentity(context.Background())
-	repo := NewAlertRepository(NewScoped(pool), false)
-	groups := NewAlertGroups(NewScoped(pool))
-	ids, err := repo.ReserveAlertIDs(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
+	queue := NewUnpublishedAlerts(NewScoped(pool))
+	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool), true), 1, func(int, *domain.NewAlert) {})
+	for i := 0; i < MaxAlertRequeues; i++ {
+		if got := drainIDs(t, queue); !slices.Equal(got, ids) {
+			t.Fatalf("drain %d handed %v, want the alert again", i, got)
+		}
+		if ok, err := queue.Requeue(ctx, ids[0]); err != nil || !ok {
+			t.Fatalf("Requeue %d = %v, %v; want requeued", i, ok, err)
+		}
 	}
-	row := integrationAlert(ids[0], "it-alert-group-1", 0)
-	row.RawBody = []byte("{}")
-	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
-		t.Fatal(err)
+	drainIDs(t, queue)
+	if ok, err := queue.Requeue(ctx, ids[0]); err != nil || ok {
+		t.Fatalf("Requeue past the cap = %v, %v; want it left published", ok, err)
 	}
+}
+
+func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	ctx := WithSystemIdentity(context.Background())
 	// Through Scoped, because incident is FORCE ROW LEVEL SECURITY and a raw pool query sees no rows.
 	var incidentID string
-	err = NewScoped(pool).QueryRow(ctx, `SELECT id::text FROM incident LIMIT 1`).Scan(&incidentID)
+	err := NewScoped(pool).QueryRow(ctx, `SELECT id::text FROM incident LIMIT 1`).Scan(&incidentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		t.Skip("no incident to link to")
 	}
 	if err != nil {
 		t.Fatalf("find an incident: %v", err)
 	}
-	fingerprint := "it-fingerprint-" + ids[0]
-	t.Cleanup(func() {
-		_, _ = NewScoped(pool).Exec(ctx, `DELETE FROM alert_group WHERE fingerprint = $1`, fingerprint)
-	})
 	seen := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	fingerprint := "it-group-" + time.Now().Format("150405.000000")
+	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool), false), 3, func(i int, row *domain.NewAlert) {
+		row.Fingerprint, row.ReceivedOn = fingerprint, seen.Add(time.Duration(i)*time.Minute)
+	})
+	groups := NewAlertGroups(NewScoped(pool))
 
 	err = groups.InGroup(ctx, fingerprint, func(tx alertprocessor.GroupTx) error {
 		if g, err := tx.Group(ctx); err != nil || g != nil {
-			t.Fatalf("Group = %+v, %v; want none yet", g, err)
+			t.Fatalf("Group = %+v, %v; want none before any alert is linked", g, err)
 		}
-		if linked, err := tx.AlertLinked(ctx, ids[0]); err != nil || linked {
-			t.Fatalf("AlertLinked = %v, %v; want false", linked, err)
-		}
-		// A pending open: no incident yet, only the alert that is opening one.
-		if err := tx.SaveGroup(ctx, strategy.Group{OpeningAlertID: ids[0], FirstSeenOn: seen, LastSeenOn: seen, AlertCount: 1}); err != nil {
+		if err := tx.LinkAlert(ctx, ids[0], incidentID); err != nil {
 			return err
 		}
-		if g, err := tx.Group(ctx); err != nil || g.IncidentID != "" || g.OpeningAlertID != ids[0] {
-			t.Fatalf("pending Group = %+v, %v", g, err)
-		}
-		if err := tx.SaveGroup(ctx, strategy.Group{IncidentID: incidentID, FirstSeenOn: seen, LastSeenOn: seen, AlertCount: 1}); err != nil {
-			return err
-		}
-		return tx.LinkAlert(ctx, ids[0], incidentID)
+		return tx.LinkAlert(ctx, ids[1], incidentID)
 	})
 	if err != nil {
 		t.Fatalf("InGroup: %v", err)
@@ -129,8 +149,12 @@ func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
 
 	err = groups.InGroup(ctx, fingerprint, func(tx alertprocessor.GroupTx) error {
 		g, err := tx.Group(ctx)
-		if err != nil || g == nil || g.IncidentID != incidentID || g.AlertCount != 1 || !g.FirstSeenOn.Equal(seen) {
-			t.Fatalf("Group = %+v, %v; want the saved group", g, err)
+		if err != nil || g == nil || g.IncidentID != incidentID || g.AlertCount != 2 || !g.FirstSeenOn.Equal(seen) || !g.LastSeenOn.Equal(seen.Add(time.Minute)) {
+			t.Fatalf("Group = %+v, %v; want the incident with its two alerts", g, err)
+		}
+		unlinked, err := tx.Unlinked(ctx, seen, seen.Add(time.Hour), ids[0])
+		if err != nil || !slices.Equal(unlinked, ids[2:]) {
+			t.Fatalf("Unlinked = %v, %v; want only the third alert", unlinked, err)
 		}
 		linked, err := tx.AlertLinked(ctx, ids[0])
 		if err != nil || !linked {
@@ -140,33 +164,5 @@ func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("InGroup: %v", err)
-	}
-}
-
-func TestAlertOutboxIntegration_RequeueIsCapped(t *testing.T) {
-	pool := newAlertIntegrationPool(t)
-	ctx := WithSystemIdentity(context.Background())
-	repo := NewAlertRepository(NewScoped(pool), true)
-	outbox := NewAlertOutbox(NewScoped(pool))
-	ids, err := repo.ReserveAlertIDs(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	row := integrationAlert(ids[0], "it-alert-requeue-1", 0)
-	row.RawBody = []byte("{}")
-	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < MaxAlertRequeues; i++ {
-		if got := drainIDs(t, outbox); !slices.Equal(got, ids) {
-			t.Fatalf("drain %d handed %v, want the alert again", i, got)
-		}
-		if ok, err := outbox.Requeue(ctx, ids[0]); err != nil || !ok {
-			t.Fatalf("Requeue %d = %v, %v; want requeued", i, ok, err)
-		}
-	}
-	drainIDs(t, outbox)
-	if ok, err := outbox.Requeue(ctx, ids[0]); err != nil || ok {
-		t.Fatalf("Requeue past the cap = %v, %v; want it left published", ok, err)
 	}
 }
