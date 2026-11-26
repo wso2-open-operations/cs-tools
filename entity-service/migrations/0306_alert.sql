@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS alert (
     alert            JSONB       CHECK (jsonb_typeof(alert) = 'object'),
     -- sha256 of source|service|metric_name|environment|unique_identifier, the key alert-core folds incidents by; NULL on an error row.
     fingerprint      TEXT,
-    tier             TEXT        NOT NULL CHECK (tier IN ('high', 'default')),
+    tier             TEXT        NOT NULL CHECK (tier IN ('priority', 'standard')),
     -- The queue's name and message id (such as sqs/priority-queue/<id>) and the alert's position in it; a redelivered message stores nothing new.
     message_id       TEXT        NOT NULL,
     message_index    INTEGER     NOT NULL CHECK (message_index >= 0),

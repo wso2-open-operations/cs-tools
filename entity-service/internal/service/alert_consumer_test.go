@@ -239,13 +239,13 @@ func TestAlertConsumerProcess_StoresAlertLikeIngestion(t *testing.T) {
 	repo := newFakeAlertRepo()
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "ServiceNow", canonicalAlert))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "ServiceNow", canonicalAlert))
 	if decision.settlement != alertComplete || decision.stored != 1 {
 		t.Fatalf("decision = %+v, want complete with one stored alert", decision)
 	}
 	row := repo.rows["priority/m-1/0"]
-	if row.ID != "ALT000000001" || row.Source != "servicenow" || row.Tier != domain.AlertTierHigh {
-		t.Fatalf("row = %+v, want ALT000000001 from servicenow on the high tier", row)
+	if row.ID != "ALT000000001" || row.Source != "servicenow" || row.Tier != domain.AlertTierPriority {
+		t.Fatalf("row = %+v, want ALT000000001 from servicenow on the priority tier", row)
 	}
 	var stored model.Alert
 	if err := json.Unmarshal(row.Alert, &stored); err != nil {
@@ -270,7 +270,7 @@ func TestAlertConsumerProcess_FallsBackToTheQueueTime(t *testing.T) {
 	delete(message.Properties, "received_at")
 	message.EnqueuedOn = &enqueuedOn
 
-	c.process(context.Background(), domain.AlertTierHigh, "priority", message)
+	c.process(context.Background(), domain.AlertTierPriority, "priority", message)
 	if got := repo.rows["priority/m-1/0"].ReceivedOn; !got.Equal(enqueuedOn) {
 		t.Fatalf("received_on = %s, want the queue's %s", got, enqueuedOn)
 	}
@@ -281,7 +281,7 @@ func TestAlertConsumerProcess_KeepsSourceIdentifier(t *testing.T) {
 	c, _ := singleQueueConsumer(t, repo)
 	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","unique_identifier":"alarm-7"}`
 
-	c.process(context.Background(), domain.AlertTierDefault, "priority", alertMessage("m-1", "servicenow", body))
+	c.process(context.Background(), domain.AlertTierStandard, "priority", alertMessage("m-1", "servicenow", body))
 	var stored model.Alert
 	_ = json.Unmarshal(repo.rows["priority/m-1/0"].Alert, &stored)
 	if stored.UniqueIdentifier != "alarm-7" {
@@ -293,7 +293,7 @@ func TestAlertConsumerProcess_StoresEveryAlertOfABatch(t *testing.T) {
 	repo := newFakeAlertRepo()
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierDefault, "priority", alertMessage("m-1", "servicenow", "["+canonicalAlert+","+canonicalAlert+"]"))
+	decision := c.process(context.Background(), domain.AlertTierStandard, "priority", alertMessage("m-1", "servicenow", "["+canonicalAlert+","+canonicalAlert+"]"))
 	if decision.stored != 2 || repo.rowCount() != 2 {
 		t.Fatalf("stored %d rows, want 2", repo.rowCount())
 	}
@@ -309,7 +309,7 @@ func TestAlertConsumerProcess_KeepsTheRawBodyOnTheFirstRow(t *testing.T) {
 	message := alertMessage("m-1", "servicenow", body)
 	message.ContentType = "application/json"
 
-	c.process(context.Background(), domain.AlertTierDefault, "priority", message)
+	c.process(context.Background(), domain.AlertTierStandard, "priority", message)
 	first, second := repo.rows["priority/m-1/0"], repo.rows["priority/m-1/1"]
 	if string(first.RawBody) != body || first.ContentType != "application/json" {
 		t.Fatalf("first row raw body %q and content type %q, want the message's", first.RawBody, first.ContentType)
@@ -326,8 +326,8 @@ func TestAlertConsumerProcess_SameMessageIDOnAnotherQueueIsStoredToo(t *testing.
 	repo := newFakeAlertRepo()
 	c, _ := singleQueueConsumer(t, repo)
 
-	first := c.process(context.Background(), domain.AlertTierHigh, "sqs/priority-queue", alertMessage("m-1", "servicenow", canonicalAlert))
-	second := c.process(context.Background(), domain.AlertTierHigh, "servicebus/priority-queue", alertMessage("m-1", "servicenow", canonicalAlert))
+	first := c.process(context.Background(), domain.AlertTierPriority, "sqs/priority-queue", alertMessage("m-1", "servicenow", canonicalAlert))
+	second := c.process(context.Background(), domain.AlertTierPriority, "servicebus/priority-queue", alertMessage("m-1", "servicenow", canonicalAlert))
 	if first.stored != 1 || second.stored != 1 || repo.rowCount() != 2 {
 		t.Fatalf("stored %d and %d (%d rows), want each queue's message stored", first.stored, second.stored, repo.rowCount())
 	}
@@ -341,8 +341,8 @@ func TestAlertConsumerProcess_RedeliveryStoresNothingNew(t *testing.T) {
 	c, _ := singleQueueConsumer(t, repo)
 	message := alertMessage("m-1", "servicenow", "["+canonicalAlert+","+canonicalAlert+"]")
 
-	c.process(context.Background(), domain.AlertTierDefault, "priority", message)
-	again := c.process(context.Background(), domain.AlertTierDefault, "priority", message)
+	c.process(context.Background(), domain.AlertTierStandard, "priority", message)
+	again := c.process(context.Background(), domain.AlertTierStandard, "priority", message)
 	if again.settlement != alertComplete || again.stored != 0 {
 		t.Fatalf("redelivery decision = %+v, want complete with nothing new stored", again)
 	}
@@ -367,7 +367,7 @@ func TestAlertConsumerProcess_StoresAMessageItCannotNormaliseAsAnErrorRow(t *tes
 			repo := newFakeAlertRepo()
 			c, _ := singleQueueConsumer(t, repo)
 			tc.message.ContentType = "text/plain"
-			decision := c.process(context.Background(), domain.AlertTierHigh, "priority", tc.message)
+			decision := c.process(context.Background(), domain.AlertTierPriority, "priority", tc.message)
 			if decision.settlement != alertComplete || decision.stored != 1 {
 				t.Fatalf("decision = %+v, want complete once the error row is stored", decision)
 			}
@@ -381,7 +381,7 @@ func TestAlertConsumerProcess_StoresAMessageItCannotNormaliseAsAnErrorRow(t *tes
 			if string(row.RawBody) != string(tc.message.Body) || row.ContentType != "text/plain" {
 				t.Fatalf("raw body %q and content type %q, want the message's", row.RawBody, row.ContentType)
 			}
-			if row.Alert != nil || row.Fingerprint != "" || row.Tier != domain.AlertTierHigh || row.ReceivedOn.IsZero() {
+			if row.Alert != nil || row.Fingerprint != "" || row.Tier != domain.AlertTierPriority || row.ReceivedOn.IsZero() {
 				t.Fatalf("row = %+v, want no alert or fingerprint, with the tier and received time", row)
 			}
 		})
@@ -396,7 +396,7 @@ func TestAlertConsumerProcess_StoresTooManyAlertsAsAnErrorRow(t *testing.T) {
 		alerts[i] = canonicalAlert
 	}
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "servicenow", "["+strings.Join(alerts, ",")+"]"))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", "["+strings.Join(alerts, ",")+"]"))
 	if decision.settlement != alertComplete || repo.rows["priority/m-1/0"].ErrorReason != alertErrorTooManyAlerts || repo.rowCount() != 1 {
 		t.Fatalf("decision = %+v with %d rows, want one %s error row", decision, repo.rowCount(), alertErrorTooManyAlerts)
 	}
@@ -406,7 +406,7 @@ func TestAlertConsumerProcess_StoresAMessageWithNoAlertsAsAnErrorRow(t *testing.
 	repo := newFakeAlertRepo()
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "prometheus", `{"alerts":[1,"two",null]}`))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "prometheus", `{"alerts":[1,"two",null]}`))
 	if decision.settlement != alertComplete || repo.rows["priority/m-1/0"].ErrorReason != alertErrorNoAlerts || repo.rowCount() != 1 {
 		t.Fatalf("decision = %+v with %d rows, want one %s error row", decision, repo.rowCount(), alertErrorNoAlerts)
 	}
@@ -418,7 +418,7 @@ func TestAlertConsumerProcess_StoresAnAlertTheDatabaseRefusesAsAnErrorRow(t *tes
 	repo.refuseInserts = 1
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
 	if decision.settlement != alertComplete || repo.rows["priority/m-1/0"].ErrorReason != alertErrorUnstorable {
 		t.Fatalf("decision = %+v, rows %v; want a stored %s error row", decision, repo.rows, alertErrorUnstorable)
 	}
@@ -433,7 +433,7 @@ func TestAlertConsumerProcess_DeadLettersWhenEvenTheErrorRowIsRefused(t *testing
 	repo.refuseInserts = 2
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
 	if decision.settlement != alertDeadLetter || decision.reason != alertErrorUnstorable {
 		t.Fatalf("decision = %+v, want dead-letter with %s", decision, alertErrorUnstorable)
 	}
@@ -444,7 +444,7 @@ func TestAlertConsumerProcess_AbandonsWhenTheErrorRowCannotBeStoredYet(t *testin
 	repo.failInserts = 99
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "nagios", canonicalAlert))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "nagios", canonicalAlert))
 	if decision.settlement != alertAbandon {
 		t.Fatalf("decision = %+v, want abandon so the queue redelivers it", decision)
 	}
@@ -461,7 +461,7 @@ func TestAlertConsumerProcess_RetriesAShortStoreOutage(t *testing.T) {
 	repo.failInserts = 2
 	c, _ := singleQueueConsumer(t, repo)
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
 	if decision.settlement != alertComplete || repo.rowCount() != 1 {
 		t.Fatalf("decision = %+v with %d rows, want the third attempt to store the alert", decision, repo.rowCount())
 	}
@@ -474,7 +474,7 @@ func TestAlertConsumerProcess_AbandonsWhenTheStoreStaysDown(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, _ := singleQueueConsumer(t, repo)
-			decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
+			decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", canonicalAlert))
 			if decision.settlement != alertAbandon {
 				t.Fatalf("decision = %+v, want abandon so the queue redelivers it", decision)
 			}
@@ -487,7 +487,7 @@ func TestAlertConsumerProcess_StoresATransformThatPanicsAsAnErrorRow(t *testing.
 	c, _ := singleQueueConsumer(t, repo)
 	c.transforms = panickingTransforms{}
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "anything", canonicalAlert))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "anything", canonicalAlert))
 	if decision.settlement != alertComplete || repo.rows["priority/m-1/0"].ErrorReason != alertErrorTransformFailed {
 		t.Fatalf("decision = %+v, want a %s error row instead of a crash", decision, alertErrorTransformFailed)
 	}
@@ -498,7 +498,7 @@ func TestAlertConsumerProcess_StoresANULItCannotStoreAsAnErrorRow(t *testing.T) 
 	c, _ := singleQueueConsumer(t, repo)
 	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","description":"bad \u0000 byte"}`
 
-	decision := c.process(context.Background(), domain.AlertTierHigh, "priority", alertMessage("m-1", "servicenow", body))
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", body))
 	row := repo.rows["priority/m-1/0"]
 	if decision.settlement != alertComplete || row.ErrorReason != alertErrorUnstorable || string(row.RawBody) != body {
 		t.Fatalf("decision = %+v, row %+v; want a %s error row with the raw body instead of retrying an insert that always fails", decision, row, alertErrorUnstorable)
@@ -584,8 +584,8 @@ func TestAlertConsumerRun_DrainsEveryQueueOnBothCloudsConcurrently(t *testing.T)
 		t.Fatalf("at most %d insert ran at once, want concurrent processing", repo.maxConcurrent)
 	}
 	for _, row := range repo.rows {
-		wantHigh := len(row.MessageID) > 0 && (row.MessageID[:len("servicebus/priority")] == "servicebus/priority" || row.MessageID[:len("sqs/priority")] == "sqs/priority")
-		if wantHigh != (row.Tier == domain.AlertTierHigh) {
+		wantPriority := len(row.MessageID) > 0 && (row.MessageID[:len("servicebus/priority")] == "servicebus/priority" || row.MessageID[:len("sqs/priority")] == "sqs/priority")
+		if wantPriority != (row.Tier == domain.AlertTierPriority) {
 			t.Fatalf("message %s was stored on the %s tier", row.MessageID, row.Tier)
 		}
 	}
@@ -595,7 +595,7 @@ func TestAlertConsumer_ShutdownHandsBufferedMessagesBack(t *testing.T) {
 	priority := newFakeAlertQueue("priority")
 	// Two workers, so the priority buffer has room for both messages.
 	c := newTestConsumer(t, newFakeAlertRepo(), []AlertQueue{priority}, []AlertQueue{newFakeAlertQueue("standard")}, 2, 4)
-	lane := c.lanes[domain.AlertTierHigh]
+	lane := c.lanes[domain.AlertTierPriority]
 	lane.messages <- queuedMessage{message: alertMessage("waiting-1", "servicenow", canonicalAlert), queue: priority}
 	lane.messages <- queuedMessage{message: alertMessage("waiting-2", "servicenow", canonicalAlert), queue: priority}
 
@@ -625,7 +625,7 @@ func lockedFor(m *domain.AlertQueueMessage, d time.Duration) *domain.AlertQueueM
 func TestAlertConsumerHandle_RenewsTheLockOfAMessageThatWaitedInTheBuffer(t *testing.T) {
 	c, priority := singleQueueConsumer(t, newFakeAlertRepo())
 
-	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 5*time.Second))
+	c.handle(context.Background(), domain.AlertTierPriority, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 5*time.Second))
 	if priority.renewCount() == 0 || priority.completedCount() != 1 {
 		t.Fatalf("renewals %d, completed %v; want the near-expiry lock renewed before the message is completed", priority.renewCount(), priority.completed)
 	}
@@ -654,7 +654,7 @@ func TestAlertConsumerHandle_KeepsTheLockDuringSlowProcessing(t *testing.T) {
 	c := newTestConsumer(t, repo, []AlertQueue{priority}, []AlertQueue{newFakeAlertQueue("standard")}, 1, 4)
 	c.lockRenewMargin = 950 * time.Millisecond
 
-	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
+	c.handle(context.Background(), domain.AlertTierPriority, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
 	if priority.completedCount() != 1 {
 		t.Fatalf("completed %v; want the insert to see a renewal while it ran, then the message completed", priority.completed)
 	}
@@ -664,7 +664,7 @@ func TestAlertConsumerHandle_RenewsBeforeSettlingWhenTheLockCannotCoverASlowSett
 	c, priority := singleQueueConsumer(t, newFakeAlertRepo())
 
 	// 20 seconds is past the processing margin but short of a settlement that takes its full timeout.
-	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 20*time.Second))
+	c.handle(context.Background(), domain.AlertTierPriority, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 20*time.Second))
 	if priority.renewCount() == 0 || priority.completedCount() != 1 {
 		t.Fatalf("renewals %d, completed %v; want the lock renewed before settling", priority.renewCount(), priority.completed)
 	}
@@ -674,7 +674,7 @@ func TestAlertConsumerReceive_RenewsTheLockWhileAMessageWaitsInTheBuffer(t *test
 	priority := newFakeAlertQueue("priority", lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
 	c := newTestConsumer(t, newFakeAlertRepo(), []AlertQueue{priority}, nil, 1, 4)
 	c.lockRenewMargin = 950 * time.Millisecond
-	lane := c.lanes[domain.AlertTierHigh]
+	lane := c.lanes[domain.AlertTierPriority]
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -730,7 +730,7 @@ func TestAlertConsumerReceive_OneQueueCannotFillTheTier(t *testing.T) {
 	busy := newFakeAlertQueue("sqs/priority-queue", messages...)
 	idle := newFakeAlertQueue("servicebus/priority-queue")
 	c := newTestConsumer(t, newFakeAlertRepo(), []AlertQueue{busy, idle}, nil, 8, 4)
-	lane := c.lanes[domain.AlertTierHigh]
+	lane := c.lanes[domain.AlertTierPriority]
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -760,7 +760,7 @@ func TestAlertConsumerHandle_SkipsAMessageWhoseLockIsAlreadyLost(t *testing.T) {
 	c, priority := singleQueueConsumer(t, repo)
 	priority.renewErr = errors.New("lock lost")
 
-	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), -time.Second))
+	c.handle(context.Background(), domain.AlertTierPriority, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), -time.Second))
 	if repo.rowCount() != 0 || priority.settledCount() != 0 {
 		t.Fatal("a message whose lock was lost was still processed or settled")
 	}
@@ -784,7 +784,7 @@ func TestAlertConsumerHandle_AcksOnlyAfterTheAlertIsSaved(t *testing.T) {
 	queue := &ackCheckingQueue{fakeAlertQueue: newFakeAlertQueue("priority"), repo: repo}
 	c := newTestConsumer(t, repo, []AlertQueue{queue}, nil, 1, 4)
 
-	c.handle(context.Background(), domain.AlertTierHigh, queue, alertMessage("m-1", "servicenow", canonicalAlert))
+	c.handle(context.Background(), domain.AlertTierPriority, queue, alertMessage("m-1", "servicenow", canonicalAlert))
 	if !queue.completeChecked || queue.rowsAtComplete != 1 {
 		t.Fatalf("completed with %d rows saved (completed %v), want the alert saved before the ack", queue.rowsAtComplete, queue.completeChecked)
 	}
@@ -795,7 +795,7 @@ func TestAlertConsumerHandle_NeverAcksAnAlertThatWasNotSaved(t *testing.T) {
 	repo.failInserts = 99
 	c, priority := singleQueueConsumer(t, repo)
 
-	c.handle(context.Background(), domain.AlertTierHigh, priority, alertMessage("m-1", "servicenow", canonicalAlert))
+	c.handle(context.Background(), domain.AlertTierPriority, priority, alertMessage("m-1", "servicenow", canonicalAlert))
 	if priority.completedCount() != 0 || len(priority.abandoned) != 1 {
 		t.Fatalf("completed %v, abandoned %v; want the unsaved alert handed back, not acked", priority.completed, priority.abandoned)
 	}

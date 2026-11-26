@@ -48,8 +48,8 @@ func drainPicks(t *testing.T, s *scheduler[string], n int) []domain.AlertTier {
 func TestScheduler_HighGoesFirstWhileStandardIsEmpty(t *testing.T) {
 	s := newScheduler(filled(10, "h"), make(chan string), 4)
 	for i, tier := range drainPicks(t, s, 10) {
-		if tier != domain.AlertTierHigh {
-			t.Fatalf("pick %d: got %s, want high", i, tier)
+		if tier != domain.AlertTierPriority {
+			t.Fatalf("pick %d: got %s, want priority", i, tier)
 		}
 	}
 }
@@ -57,7 +57,7 @@ func TestScheduler_HighGoesFirstWhileStandardIsEmpty(t *testing.T) {
 func TestScheduler_StandardGetsOneTurnAfterWeightHighPicks(t *testing.T) {
 	s := newScheduler(filled(12, "h"), filled(3, "s"), 4)
 	got := drainPicks(t, s, 15)
-	want := []domain.AlertTier{"high", "high", "high", "high", "default", "high", "high", "high", "high", "default", "high", "high", "high", "high", "default"}
+	want := []domain.AlertTier{"priority", "priority", "priority", "priority", "standard", "priority", "priority", "priority", "priority", "standard", "priority", "priority", "priority", "priority", "standard"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("pick order = %v, want %v", got, want)
@@ -68,21 +68,21 @@ func TestScheduler_StandardGetsOneTurnAfterWeightHighPicks(t *testing.T) {
 func TestScheduler_StandardRunsFreelyWhenHighIsIdle(t *testing.T) {
 	s := newScheduler(make(chan string), filled(6, "s"), 4)
 	for i, tier := range drainPicks(t, s, 6) {
-		if tier != domain.AlertTierDefault {
+		if tier != domain.AlertTierStandard {
 			t.Fatalf("pick %d: got %s, want default", i, tier)
 		}
 	}
 }
 
 func TestScheduler_HighArrivingLaterJumpsWaitingStandard(t *testing.T) {
-	high := make(chan string, 1)
-	s := newScheduler(high, filled(5, "s"), 4)
-	if _, tier, _ := s.next(context.Background()); tier != domain.AlertTierDefault {
+	priority := make(chan string, 1)
+	s := newScheduler(priority, filled(5, "s"), 4)
+	if _, tier, _ := s.next(context.Background()); tier != domain.AlertTierStandard {
 		t.Fatalf("first pick = %s, want default", tier)
 	}
-	high <- "urgent"
-	if item, tier, _ := s.next(context.Background()); tier != domain.AlertTierHigh || item != "urgent" {
-		t.Fatalf("second pick = %s %q, want the high item that just arrived", tier, item)
+	priority <- "urgent"
+	if item, tier, _ := s.next(context.Background()); tier != domain.AlertTierPriority || item != "urgent" {
+		t.Fatalf("second pick = %s %q, want the priority item that just arrived", tier, item)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestScheduler_BlocksUntilAnItemArrives(t *testing.T) {
 		standard <- "late"
 	}()
 	item, tier, ok := s.next(context.Background())
-	if !ok || item != "late" || tier != domain.AlertTierDefault {
+	if !ok || item != "late" || tier != domain.AlertTierStandard {
 		t.Fatalf("next = %q %s %v, want the late standard item", item, tier, ok)
 	}
 }
@@ -108,11 +108,11 @@ func TestScheduler_StopsWhenContextIsDone(t *testing.T) {
 	}
 }
 
-// Weight 0 is strict priority: standard waits until no high item is left.
+// Weight 0 is strict priority: standard waits until no priority item is left.
 func TestScheduler_WeightZeroIsStrictPriority(t *testing.T) {
 	s := newScheduler(filled(6, "h"), filled(2, "s"), 0)
 	got := drainPicks(t, s, 8)
-	want := []domain.AlertTier{"high", "high", "high", "high", "high", "high", "default", "default"}
+	want := []domain.AlertTier{"priority", "priority", "priority", "priority", "priority", "priority", "standard", "standard"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("pick order = %v, want %v", got, want)
@@ -123,7 +123,7 @@ func TestScheduler_WeightZeroIsStrictPriority(t *testing.T) {
 func TestScheduler_NegativeWeightIsStrictPriority(t *testing.T) {
 	s := newScheduler(filled(3, "h"), filled(1, "s"), -2)
 	got := drainPicks(t, s, 4)
-	want := []domain.AlertTier{"high", "high", "high", "default"}
+	want := []domain.AlertTier{"priority", "priority", "priority", "standard"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("pick order = %v, want %v", got, want)
@@ -132,14 +132,14 @@ func TestScheduler_NegativeWeightIsStrictPriority(t *testing.T) {
 }
 
 func TestScheduler_StopsWhenContextIsDoneEvenWithWaitingItems(t *testing.T) {
-	high, standard := filled(3, "h"), filled(3, "s")
-	s := newScheduler(high, standard, 4)
+	priority, standard := filled(3, "h"), filled(3, "s")
+	s := newScheduler(priority, standard, 4)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, _, ok := s.next(ctx); ok {
 		t.Fatal("next handed out an item after the context was cancelled")
 	}
-	if len(high) != 3 || len(standard) != 3 {
-		t.Fatalf("lanes hold %d and %d items, want both untouched so shutdown can hand them back", len(high), len(standard))
+	if len(priority) != 3 || len(standard) != 3 {
+		t.Fatalf("lanes hold %d and %d items, want both untouched so shutdown can hand them back", len(priority), len(standard))
 	}
 }

@@ -196,14 +196,14 @@ func NewAlertConsumer(
 ) *AlertConsumer {
 	workers := max(cfg.Concurrency, 1)
 	lanes := map[domain.AlertTier]*alertLane{
-		domain.AlertTierHigh:    newAlertLane(domain.AlertTierHigh, priorityQueues, workers),
-		domain.AlertTierDefault: newAlertLane(domain.AlertTierDefault, standardQueues, workers),
+		domain.AlertTierPriority: newAlertLane(domain.AlertTierPriority, priorityQueues, workers),
+		domain.AlertTierStandard: newAlertLane(domain.AlertTierStandard, standardQueues, workers),
 	}
 	return &AlertConsumer{
 		repo:                 repo,
 		transforms:           transforms,
 		lanes:                lanes,
-		scheduler:            newScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
+		scheduler:            newScheduler(lanes[domain.AlertTierPriority].messages, lanes[domain.AlertTierStandard].messages, cfg.PriorityWeight),
 		workers:              workers,
 		now:                  time.Now,
 		sleep:                sleepContext,

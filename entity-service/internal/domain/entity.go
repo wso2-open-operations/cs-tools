@@ -10872,10 +10872,10 @@ type ACPReopenCheckResponse struct {
 // AlertTier is the kind of queue (priority or standard) an SRE alert arrived on, which decides how soon it is processed.
 type AlertTier string
 
-// Alert tiers, matching the tier the alerting gateway stamps on every message.
+// Alert tiers, named after the queues they arrive on: priority-queue and standard-queue.
 const (
-	AlertTierHigh    AlertTier = "high"
-	AlertTierDefault AlertTier = "default"
+	AlertTierPriority AlertTier = "priority"
+	AlertTierStandard AlertTier = "standard"
 )
 
 // NewAlert is one row the alert consumer stores in the alert table: a normalised alert, or the error for a message that could not be normalised.

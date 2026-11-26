@@ -59,7 +59,7 @@ func integrationAlert(id, messageID string, index int) domain.NewAlert {
 		Source:       "azure",
 		Alert:        json.RawMessage(`{"service":"svc-a","metric_name":"cpu"}`),
 		Fingerprint:  "fp-1",
-		Tier:         domain.AlertTierHigh,
+		Tier:         domain.AlertTierPriority,
 		MessageID:    messageID,
 		MessageIndex: index,
 		ReceivedOn:   time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC),
@@ -150,7 +150,7 @@ func TestAlertRepositoryIntegration_KeepsRawBodiesAndErrorRows(t *testing.T) {
 	}
 	// A message with no source that could not be normalised, whose body holds a NUL byte jsonb could not.
 	errorRow := domain.NewAlert{
-		ID: ids[2], Tier: domain.AlertTierDefault, MessageID: "it-alert-4", MessageIndex: 0,
+		ID: ids[2], Tier: domain.AlertTierStandard, MessageID: "it-alert-4", MessageIndex: 0,
 		RawBody: []byte("bad\x00body"), ContentType: "text/plain",
 		ErrorReason: "MissingSource", Error: "the message has no source property",
 		ReceivedOn: time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC),
