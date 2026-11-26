@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/relay"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/sink"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
@@ -39,6 +40,7 @@ import (
 var (
 	_ alertprocessor.Store = (*repository.AlertGroups)(nil)
 	_ alertprocessor.Sink  = sink.Incident{}
+	_ sink.Notes           = (*repository.IncidentNotes)(nil)
 	_ relay.Outbox         = (*repository.AlertOutbox)(nil)
 	_ relay.Publisher      = (*eventbus.Producer)(nil)
 	_ subscriber.Source    = (*eventbus.Consumer)(nil)
@@ -49,7 +51,7 @@ const (
 	alertRelayBatch    = 100
 )
 
-// alertProcessorRetry retries a failing event briefly; after that the event is dropped and the alert stays without an incident for a replay.
+// alertProcessorRetry retries a failing event briefly; after that the alert goes back to the outbox and the relay publishes it again.
 var alertProcessorRetry = eventbus.RetryPolicy{Attempts: 5, Delay: time.Second, MaxDelay: 30 * time.Second}
 
 // startAlertProcessor runs the relay that publishes stored alerts as alert.created and the subscriber that hands them to the processor, and returns the function that stops both.
@@ -61,8 +63,9 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 	scoped := repository.NewScoped(db)
 	apply := cfg.AlertingVersion == config.AlertingVersionV2
 
+	outbox := repository.NewAlertOutbox(scoped)
 	producer := eventbus.NewProducer(bus)
-	publisher := &relay.Relay{Outbox: repository.NewAlertOutbox(scoped), Publisher: producer, Interval: alertRelayInterval, Batch: alertRelayBatch}
+	publisher := &relay.Relay{Outbox: outbox, Publisher: producer, Interval: alertRelayInterval, Batch: alertRelayBatch}
 
 	muteRules := repository.NewAlertMuteRuleRepository(scoped)
 	processor := &alertprocessor.Processor{
@@ -70,6 +73,7 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 		Sink: sink.Incident{
 			Incidents:        incidents,
 			Services:         repository.NewITServiceRepository(db),
+			Notes:            repository.NewIncidentNotes(scoped),
 			CallerID:         cfg.AlertProcessorCallerID,
 			DefaultServiceID: cfg.IncidentDefaultServiceID,
 		},
@@ -82,6 +86,13 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents sink.In
 	}
 	consumer := eventbus.NewConsumer(bus, cfg.AlertProcessorConsumerGroup, alertProcessorRetry)
 	listener := subscriber.New(consumer, processor.Handle, subscriber.Log(), subscriber.Recover())
+	listener.OnExhausted = func(ctx context.Context, e event.Event, cause error) error {
+		requeued, err := outbox.Requeue(ctx, e.AlertID)
+		if err == nil && !requeued {
+			slog.ErrorContext(ctx, "alert processor: gave up on an alert after its requeues; it has no incident", "alertId", e.AlertID, "requeues", repository.MaxAlertRequeues, "err", cause)
+		}
+		return err
+	}
 
 	// The system identity, because alerts and incidents created from them are internal and there is no caller.
 	ctx, cancel := context.WithCancel(repository.WithSystemIdentity(context.Background()))

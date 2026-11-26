@@ -1719,8 +1719,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.SLADataSource == config.SLADataSourceServiceNow && cfg.DataSource != config.DataSourceServiceNow {
 		activeIncidentSvc = service.WithSLASearchDelegate(activeIncidentSvc, service.NewServiceNowIncidentMirrorService(serviceNowIntegrationServiceClient))
 	}
-	// The alert processor creates incidents in-process through the same service the POST /incidents route uses.
-	stopAlertProcessor = startAlertProcessor(cfg, db, activeIncidentSvc)
 	// Which Special Ops team a handoff goes to, and which GitHub repository
 	// its internal issue goes to, is configuration. A value that does not
 	// parse would silently offer no handoff anywhere; refuse to start instead.
@@ -1918,6 +1916,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeProblemSvc = service.NewProblemService(problemRepo)
 	}
 	problemHandler := handler.NewProblemHandler(activeProblemSvc)
+	// Started only now: every setter above configures activeIncidentSvc in place, and the processor creates incidents through it in-process.
+	stopAlertProcessor = startAlertProcessor(cfg, db, activeIncidentSvc)
 
 	// Incident auto-close: closes incidents left RESOLVED for 14 days
 	// (POST /incidents/autoclose, driven by operations/csm-scheduled-tasks'

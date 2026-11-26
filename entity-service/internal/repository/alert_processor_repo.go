@@ -43,7 +43,10 @@ func NewAlertOutbox(db *Scoped) *AlertOutbox {
 	return &AlertOutbox{db: db}
 }
 
-// SKIP LOCKED lets several replicas drain at once without publishing the same row twice.
+// alertOutboxLock serializes drains across replicas, so batches publish in outbox order and a newer alert never overtakes an older one for its fingerprint.
+const alertOutboxLock = `SELECT pg_advisory_xact_lock(hashtextextended('alert_outbox', 0))`
+
+// SKIP LOCKED keeps a drain from waiting on rows another statement holds; the advisory lock above already makes the drainer single.
 const drainAlertOutboxQuery = `SELECT o.alert_id, a.tier, a.received_on, a.alert
 FROM alert_outbox o JOIN alert a ON a.id = o.alert_id
 WHERE o.published_on IS NULL
@@ -57,6 +60,9 @@ const markAlertOutboxQuery = `UPDATE alert_outbox SET published_on = NOW() WHERE
 func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]event.Event) []string) (int, error) {
 	marked := 0
 	err := o.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, alertOutboxLock); err != nil {
+			return fmt.Errorf("lock alert outbox: %w", err)
+		}
 		rows, err := tx.Query(ctx, drainAlertOutboxQuery, limit)
 		if err != nil {
 			return fmt.Errorf("read alert outbox: %w", err)
@@ -76,6 +82,19 @@ func (o *AlertOutbox) Drain(ctx context.Context, limit int, publish func([]event
 		return nil
 	})
 	return marked, err
+}
+
+// MaxAlertRequeues bounds how often an alert whose processing keeps failing goes back to the outbox, so one poison alert cannot cycle forever.
+const MaxAlertRequeues = 10
+
+// Requeue puts a published alert back in the outbox, in its original place, so the relay publishes it again; false means it reached MaxAlertRequeues and stays published.
+func (o *AlertOutbox) Requeue(ctx context.Context, alertID string) (bool, error) {
+	tag, err := o.db.Exec(WithSystemIdentity(ctx),
+		`UPDATE alert_outbox SET published_on = NULL, requeues = requeues + 1 WHERE alert_id = $1 AND requeues < $2`, alertID, MaxAlertRequeues)
+	if err != nil {
+		return false, fmt.Errorf("requeue alert %s: %w", alertID, err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func scanAlertEvent(row pgx.CollectableRow) (event.Event, error) {
@@ -119,10 +138,10 @@ type groupTx struct {
 
 func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
 	g := strategy.Group{Fingerprint: t.fingerprint}
-	var incidentID *string
+	var incidentID, openingAlertID *string
 	err := t.tx.QueryRow(ctx,
-		`SELECT incident_id::text, first_seen_on, last_seen_on, alert_count FROM alert_group WHERE fingerprint = $1`, t.fingerprint,
-	).Scan(&incidentID, &g.FirstSeenOn, &g.LastSeenOn, &g.AlertCount)
+		`SELECT incident_id::text, opening_alert_id, first_seen_on, last_seen_on, alert_count FROM alert_group WHERE fingerprint = $1`, t.fingerprint,
+	).Scan(&incidentID, &openingAlertID, &g.FirstSeenOn, &g.LastSeenOn, &g.AlertCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -132,15 +151,18 @@ func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
 	if incidentID != nil {
 		g.IncidentID = *incidentID
 	}
+	if openingAlertID != nil {
+		g.OpeningAlertID = *openingAlertID
+	}
 	return &g, nil
 }
 
 func (t groupTx) SaveGroup(ctx context.Context, g strategy.Group) error {
-	_, err := t.tx.Exec(ctx, `INSERT INTO alert_group (fingerprint, incident_id, first_seen_on, last_seen_on, alert_count, updated_on)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (fingerprint) DO UPDATE SET incident_id = EXCLUDED.incident_id, first_seen_on = EXCLUDED.first_seen_on,
-	last_seen_on = EXCLUDED.last_seen_on, alert_count = EXCLUDED.alert_count, updated_on = EXCLUDED.updated_on`,
-		t.fingerprint, g.IncidentID, g.FirstSeenOn, g.LastSeenOn, g.AlertCount, time.Now())
+	_, err := t.tx.Exec(ctx, `INSERT INTO alert_group (fingerprint, incident_id, opening_alert_id, first_seen_on, last_seen_on, alert_count, updated_on)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (fingerprint) DO UPDATE SET incident_id = EXCLUDED.incident_id, opening_alert_id = EXCLUDED.opening_alert_id,
+	first_seen_on = EXCLUDED.first_seen_on, last_seen_on = EXCLUDED.last_seen_on, alert_count = EXCLUDED.alert_count, updated_on = EXCLUDED.updated_on`,
+		t.fingerprint, nullIfEmpty(g.IncidentID), nullIfEmpty(g.OpeningAlertID), g.FirstSeenOn, g.LastSeenOn, g.AlertCount, time.Now())
 	if err != nil {
 		return fmt.Errorf("save alert group: %w", err)
 	}
@@ -160,4 +182,25 @@ func (t groupTx) LinkAlert(ctx context.Context, alertID, incidentID string) erro
 		return fmt.Errorf("link alert %s: %w", alertID, err)
 	}
 	return nil
+}
+
+// IncidentNotes finds work notes on incidents; it implements sink.Notes.
+type IncidentNotes struct {
+	db *Scoped
+}
+
+// NewIncidentNotes returns the lookup the alert sink uses to add each alert's note once.
+func NewIncidentNotes(db *Scoped) *IncidentNotes {
+	return &IncidentNotes{db: db}
+}
+
+// HasNote reports whether the incident has a comment containing marker; marker is matched literally.
+func (n *IncidentNotes) HasNote(ctx context.Context, incidentID, marker string) (bool, error) {
+	var found bool
+	err := n.db.QueryRow(WithSystemIdentity(ctx),
+		`SELECT EXISTS (SELECT 1 FROM comment WHERE work_item_id = $1 AND strpos(content, $2) > 0)`, incidentID, marker).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("find note on incident %s: %w", incidentID, err)
+	}
+	return found, nil
 }

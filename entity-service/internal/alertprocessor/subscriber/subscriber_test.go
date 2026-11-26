@@ -33,9 +33,14 @@ type fakeSource struct {
 	errs    []error
 }
 
-func (f *fakeSource) Run(ctx context.Context, handle eventbus.Handle, _ eventbus.OnExhausted) {
+// Run handles each record once and hands a failure straight to onExhausted, like a consumer whose retries ran out.
+func (f *fakeSource) Run(ctx context.Context, handle eventbus.Handle, onExhausted eventbus.OnExhausted) {
 	for _, v := range f.records {
-		f.errs = append(f.errs, handle(ctx, eventbus.Record{Value: v}))
+		err := handle(ctx, eventbus.Record{Value: v})
+		if err != nil && onExhausted != nil {
+			err = onExhausted(ctx, eventbus.Record{Value: v}, err)
+		}
+		f.errs = append(f.errs, err)
 	}
 }
 
@@ -80,5 +85,16 @@ func TestMiddlewareOrderAndRecover(t *testing.T) {
 	want := errors.New("db down")
 	if got := Wrap(func(context.Context, event.Event) error { return want }, Log())(context.Background(), event.Event{}); !errors.Is(got, want) {
 		t.Fatalf("Log changed the error: %v", got)
+	}
+}
+
+func TestSubscriberHandsGivenUpEventsToOnExhausted(t *testing.T) {
+	src := &fakeSource{records: [][]byte{record(t, "A1")}}
+	var kept []string
+	sub := New(src, func(context.Context, event.Event) error { return errors.New("db down") })
+	sub.OnExhausted = func(_ context.Context, e event.Event, _ error) error { kept = append(kept, e.AlertID); return nil }
+	sub.Run(context.Background())
+	if !slices.Equal(kept, []string{"A1"}) {
+		t.Fatalf("kept %v, want A1 handed to OnExhausted", kept)
 	}
 }

@@ -49,14 +49,17 @@ func creationNote(e event.Event) string {
 	return b.String()
 }
 
+// noteMarker is the text every work note about an alert carries, by which a retry finds it.
+func noteMarker(alertID string) string { return "Alert: " + alertID }
+
 // foldNote is the work note for an alert added to an open incident.
 func foldNote(outcome strategy.Outcome, e event.Event) string {
 	kind := "Duplicate"
 	if outcome == strategy.Resolve {
 		kind = "OK"
 	}
-	return fmt.Sprintf("%s alert received.<br>Alert: %s<br>Metric: %s<br>Source: %s",
-		kind, html.EscapeString(e.AlertID), html.EscapeString(orNA(e.Alert.MetricName)), html.EscapeString(orNA(e.Alert.Source)))
+	return fmt.Sprintf("%s alert received.<br>%s<br>Metric: %s<br>Source: %s",
+		kind, html.EscapeString(noteMarker(e.AlertID)), html.EscapeString(orNA(e.Alert.MetricName)), html.EscapeString(orNA(e.Alert.Source)))
 }
 
 func orNA(v string) string {

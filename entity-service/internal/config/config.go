@@ -2095,6 +2095,10 @@ func (c *Config) validateAlertConsumer() error {
 		if !validate.IsUUID(c.AlertProcessorCallerID) {
 			return fmt.Errorf("ALERTING_VERSION v2 needs ALERT_PROCESSOR_CALLER_ID, the user id incidents from alerts are raised by, got %q", c.AlertProcessorCallerID)
 		}
+		// Incidents from alerts must publish incident.created, or the call-escalation ladders never start and nobody is paged.
+		if !c.EventPublishingEnabled || c.EventHubBroker == "" {
+			return fmt.Errorf("ALERTING_VERSION v2 needs EVENT_PUBLISHING_ENABLED=true and EVENT_HUB_BROKER, so incidents opened from alerts publish incident.created")
+		}
 	case AlertingVersionHybrid:
 	default:
 		return fmt.Errorf("ALERTING_VERSION must be v1, v2 or hybrid, got %q", c.AlertingVersion)

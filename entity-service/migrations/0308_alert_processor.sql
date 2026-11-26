@@ -31,6 +31,7 @@ UPDATE alert SET tier = 'standard' WHERE tier = 'default';
 ALTER TABLE alert VALIDATE CONSTRAINT alert_tier_check;
 
 -- Grouping state lives in alert_group and delivery in alert_outbox, so the per-row fingerprint and claim columns go.
+-- Alerts stored before this file are not queued: v2 could not start before it, so every one was stored under hybrid, where alert-core raised its incident; queueing them would page again for old alerts.
 DROP INDEX IF EXISTS alert_unprocessed_idx;
 DROP INDEX IF EXISTS alert_unprocessed_fingerprint_idx;
 -- An alert row has a source and alert and no error; an error row is the message's only row, with an error and no alert.
@@ -52,7 +53,9 @@ SELECT set_config('app.is_internal', '', false);
 CREATE TABLE IF NOT EXISTS alert_outbox (
     alert_id     TEXT        PRIMARY KEY REFERENCES alert(id) ON DELETE CASCADE,
     created_on   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    published_on TIMESTAMPTZ
+    published_on TIMESTAMPTZ,
+    -- How often processing gave up and put the alert back; capped so a poison alert cannot cycle forever.
+    requeues     INTEGER     NOT NULL DEFAULT 0 CHECK (requeues >= 0)
 );
 -- The relay drains the oldest unpublished rows first.
 CREATE INDEX IF NOT EXISTS alert_outbox_unpublished_idx ON alert_outbox (created_on) WHERE published_on IS NULL;
@@ -61,6 +64,8 @@ CREATE INDEX IF NOT EXISTS alert_outbox_unpublished_idx ON alert_outbox (created
 CREATE TABLE IF NOT EXISTS alert_group (
     fingerprint   TEXT        PRIMARY KEY,
     incident_id   UUID        REFERENCES incident(id) ON DELETE SET NULL,
+    -- The alert whose incident is being created, until that incident is recorded, so a later alert finishes the open instead of starting another.
+    opening_alert_id TEXT,
     first_seen_on TIMESTAMPTZ NOT NULL,
     last_seen_on  TIMESTAMPTZ NOT NULL,
     alert_count   INTEGER     NOT NULL DEFAULT 1 CHECK (alert_count > 0),

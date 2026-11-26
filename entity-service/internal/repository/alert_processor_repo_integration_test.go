@@ -18,9 +18,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
@@ -86,9 +89,14 @@ func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
 	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
 		t.Fatal(err)
 	}
+	// Through Scoped, because incident is FORCE ROW LEVEL SECURITY and a raw pool query sees no rows.
 	var incidentID string
-	if err := pool.QueryRow(ctx, `SELECT id::text FROM incident LIMIT 1`).Scan(&incidentID); err != nil {
-		t.Skipf("no incident to link to: %v", err)
+	err = NewScoped(pool).QueryRow(ctx, `SELECT id::text FROM incident LIMIT 1`).Scan(&incidentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		t.Skip("no incident to link to")
+	}
+	if err != nil {
+		t.Fatalf("find an incident: %v", err)
 	}
 	fingerprint := "it-fingerprint-" + ids[0]
 	t.Cleanup(func() {
@@ -102,6 +110,13 @@ func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
 		}
 		if linked, err := tx.AlertLinked(ctx, ids[0]); err != nil || linked {
 			t.Fatalf("AlertLinked = %v, %v; want false", linked, err)
+		}
+		// A pending open: no incident yet, only the alert that is opening one.
+		if err := tx.SaveGroup(ctx, strategy.Group{OpeningAlertID: ids[0], FirstSeenOn: seen, LastSeenOn: seen, AlertCount: 1}); err != nil {
+			return err
+		}
+		if g, err := tx.Group(ctx); err != nil || g.IncidentID != "" || g.OpeningAlertID != ids[0] {
+			t.Fatalf("pending Group = %+v, %v", g, err)
 		}
 		if err := tx.SaveGroup(ctx, strategy.Group{IncidentID: incidentID, FirstSeenOn: seen, LastSeenOn: seen, AlertCount: 1}); err != nil {
 			return err
@@ -125,5 +140,33 @@ func TestAlertGroupsIntegration_KeepsGroupAndLinks(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("InGroup: %v", err)
+	}
+}
+
+func TestAlertOutboxIntegration_RequeueIsCapped(t *testing.T) {
+	pool := newAlertIntegrationPool(t)
+	ctx := WithSystemIdentity(context.Background())
+	repo := NewAlertRepository(NewScoped(pool), true)
+	outbox := NewAlertOutbox(NewScoped(pool))
+	ids, err := repo.ReserveAlertIDs(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := integrationAlert(ids[0], "it-alert-requeue-1", 0)
+	row.RawBody = []byte("{}")
+	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxAlertRequeues; i++ {
+		if got := drainIDs(t, outbox); !slices.Equal(got, ids) {
+			t.Fatalf("drain %d handed %v, want the alert again", i, got)
+		}
+		if ok, err := outbox.Requeue(ctx, ids[0]); err != nil || !ok {
+			t.Fatalf("Requeue %d = %v, %v; want requeued", i, ok, err)
+		}
+	}
+	drainIDs(t, outbox)
+	if ok, err := outbox.Requeue(ctx, ids[0]); err != nil || ok {
+		t.Fatalf("Requeue past the cap = %v, %v; want it left published", ok, err)
 	}
 }

@@ -33,10 +33,15 @@ type Source interface {
 	Run(ctx context.Context, handle eventbus.Handle, onExhausted eventbus.OnExhausted)
 }
 
+// Exhausted is called with an event every retry failed on, before its offset is committed; it should keep the event somewhere durable, such as back in the outbox.
+type Exhausted func(ctx context.Context, e event.Event, cause error) error
+
 // Subscriber connects a Source to a Handler.
 type Subscriber struct {
 	Source  Source
 	Handler Handler
+	// OnExhausted, when set, receives every event the retries gave up on; without it such an event is dropped.
+	OnExhausted Exhausted
 }
 
 // New returns a Subscriber whose handler is wrapped in mw, the first listed outermost.
@@ -46,7 +51,20 @@ func New(source Source, h Handler, mw ...Middleware) *Subscriber {
 
 // Run delivers records until ctx ends.
 func (s *Subscriber) Run(ctx context.Context) {
-	s.Source.Run(ctx, s.handle, nil)
+	var onExhausted eventbus.OnExhausted
+	if s.OnExhausted != nil {
+		onExhausted = s.exhausted
+	}
+	s.Source.Run(ctx, s.handle, onExhausted)
+}
+
+// exhausted hands a decodable record the retries gave up on to OnExhausted.
+func (s *Subscriber) exhausted(ctx context.Context, record eventbus.Record, cause error) error {
+	e, ok, err := event.Decode(record.Value)
+	if err != nil || !ok {
+		return err
+	}
+	return s.OnExhausted(ctx, e, cause)
 }
 
 // handle decodes a record; other event types and records that can never decode are skipped rather than retried.

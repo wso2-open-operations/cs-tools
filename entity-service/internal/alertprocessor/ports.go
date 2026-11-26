@@ -47,6 +47,8 @@ type GroupTx interface {
 type Sink interface {
 	// Open creates the alert's incident and returns its id; it returns the same incident when called again for the same alert.
 	Open(ctx context.Context, e event.Event) (string, error)
+	// Find returns the incident the alert opened, or "" when it opened none.
+	Find(ctx context.Context, alertID string) (string, error)
 	// IsOpen reports whether the incident is still open.
 	IsOpen(ctx context.Context, incidentID string) (bool, error)
 	// Fold records an alert added to the incident, as a Duplicate or OK work note.

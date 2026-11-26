@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -67,6 +68,10 @@ func alert(id, severity string) event.Event {
 	}}
 }
 
+type fakeNotes struct{ has bool }
+
+func (f fakeNotes) HasNote(context.Context, string, string) (bool, error) { return f.has, nil }
+
 type fakeServices map[string]string
 
 func (f fakeServices) SearchITServices(_ context.Context, query string, _, _ int) ([]domain.ITService, int, error) {
@@ -81,7 +86,7 @@ func (f fakeServices) SearchITServices(_ context.Context, query string, _, _ int
 
 func newSink(incidents *fakeIncidents) Incident {
 	return Incident{
-		Incidents: incidents, CallerID: "caller", DefaultServiceID: "svc-default",
+		Incidents: incidents, Notes: fakeNotes{}, CallerID: "caller", DefaultServiceID: "svc-default",
 		Services: fakeServices{"Client-Prod-Alert-Integration": "svc-1", "client-prod-alert-integration-eu": "svc-2"},
 	}
 }
@@ -142,6 +147,33 @@ func TestIncidentSinkIsOpen(t *testing.T) {
 		got, err := newSink(tt.incidents).IsOpen(context.Background(), "inc-1")
 		if err != nil || got != tt.want {
 			t.Errorf("%s: IsOpen = %v, %v; want %v", name, got, err, tt.want)
+		}
+	}
+}
+
+// recordingIncidents counts work notes, to show a note already on the incident is not added again.
+type recordingIncidents struct {
+	fakeIncidents
+	notes int
+}
+
+func (r *recordingIncidents) UpdateIncident(context.Context, domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
+	r.notes++
+	return domain.UpdateIncidentResponse{}, nil
+}
+
+func TestIncidentSinkFoldIsIdempotent(t *testing.T) {
+	for name, tt := range map[string]struct {
+		already bool
+		want    int
+	}{"first time": {false, 1}, "retry after the note was added": {true, 0}} {
+		incidents := &recordingIncidents{}
+		s := Incident{Incidents: incidents, Notes: fakeNotes{has: tt.already}}
+		if err := s.Fold(context.Background(), "inc-1", strategy.Duplicate, alert("A2", "critical")); err != nil {
+			t.Fatal(err)
+		}
+		if incidents.notes != tt.want {
+			t.Errorf("%s: %d notes added, want %d", name, incidents.notes, tt.want)
 		}
 	}
 }

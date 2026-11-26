@@ -47,9 +47,11 @@ func (o Outcome) Folds() bool { return o == Duplicate || o == Resolve }
 type Group struct {
 	Fingerprint string
 	IncidentID  string
-	FirstSeenOn time.Time
-	LastSeenOn  time.Time
-	AlertCount  int
+	// OpeningAlertID is the alert whose incident is being created; set until that incident is recorded, so a later alert can finish the open instead of starting another.
+	OpeningAlertID string
+	FirstSeenOn    time.Time
+	LastSeenOn     time.Time
+	AlertCount     int
 }
 
 // Input is everything a strategy may look at; strategies do no I/O.

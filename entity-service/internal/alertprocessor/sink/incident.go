@@ -38,6 +38,11 @@ type Incidents interface {
 	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
 }
 
+// Notes tells whether an incident already carries a work note, which makes adding one safe to retry.
+type Notes interface {
+	HasNote(ctx context.Context, incidentID, marker string) (bool, error)
+}
+
 // Services finds CMDB services by name.
 type Services interface {
 	SearchITServices(ctx context.Context, searchQuery string, limit, offset int) ([]domain.ITService, int, error)
@@ -47,6 +52,7 @@ type Services interface {
 type Incident struct {
 	Incidents Incidents
 	Services  Services
+	Notes     Notes
 	// CallerID is the user every alert incident is raised by.
 	CallerID string
 	// DefaultServiceID is the service for an alert whose service label matches none.
@@ -58,10 +64,10 @@ const serviceSearchLimit = 50
 
 // Open creates the alert's incident; the alert id is the incident's correlation id, so a retry finds the incident it already created.
 func (s Incident) Open(ctx context.Context, e event.Event) (string, error) {
-	correlationID := "alert:" + e.AlertID
-	if id, err := s.byCorrelationID(ctx, correlationID); err != nil || id != "" {
+	if id, err := s.Find(ctx, e.AlertID); err != nil || id != "" {
 		return id, err
 	}
+	correlation := correlationID(e.AlertID)
 	serviceID, err := s.serviceID(ctx, e.Alert.Service)
 	if err != nil {
 		return "", err
@@ -77,7 +83,7 @@ func (s Incident) Open(ctx context.Context, e event.Event) (string, error) {
 		Urgency:       urgency,
 		Subject:       subject(e),
 		WorkNotes:     &note,
-		CorrelationID: &correlationID,
+		CorrelationID: &correlation,
 	}
 	if env := strings.TrimSpace(e.Alert.Environment); env != "" {
 		req.Environment = &env
@@ -112,16 +118,25 @@ func (s Incident) IsOpen(ctx context.Context, incidentID string) (bool, error) {
 	return true, nil
 }
 
-// Fold adds the alert to the incident as a Duplicate or OK work note.
+// Find returns the incident the alert opened, or "" when it opened none.
+func (s Incident) Find(ctx context.Context, alertID string) (string, error) {
+	return s.byCorrelationID(ctx, correlationID(alertID))
+}
+
+// Fold adds the alert to the incident as a Duplicate or OK work note, once: a retry finds the note by the alert id it names.
 func (s Incident) Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error {
+	noted, err := s.Notes.HasNote(ctx, incidentID, noteMarker(e.AlertID))
+	if err != nil || noted {
+		return err
+	}
 	note := foldNote(outcome, e)
-	_, err := s.Incidents.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
+	_, err = s.Incidents.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: incidentID, WorkNotes: &note})
 	return err
 }
 
-func (s Incident) byCorrelationID(ctx context.Context, correlationID string) (string, error) {
+func (s Incident) byCorrelationID(ctx context.Context, correlation string) (string, error) {
 	resp, err := s.Incidents.SearchIncidents(ctx, domain.SearchIncidentsRequest{
-		Filters:    domain.SearchIncidentsFilters{CorrelationID: &correlationID},
+		Filters:    domain.SearchIncidentsFilters{CorrelationID: &correlation},
 		Pagination: domain.Pagination{Limit: 1},
 		SkipTotal:  true,
 	})
@@ -151,6 +166,9 @@ func (s Incident) serviceID(ctx context.Context, label string) (string, error) {
 	}
 	return s.DefaultServiceID, nil
 }
+
+// correlationID ties an incident to the alert that opened it.
+func correlationID(alertID string) string { return "alert:" + alertID }
 
 // subject is the metric name, or the service when the alert has none.
 func subject(e event.Event) string {
