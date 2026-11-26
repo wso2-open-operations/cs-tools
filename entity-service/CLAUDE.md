@@ -98,7 +98,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `PRODUCT_VULNERABILITY_META_CACHE_TTL` | no | `24h` | Backstop lifetime of the cached product/version options of `GET /products/vulnerabilities/meta`; deleted on a successful vulnerability sync; unparseable or non-positive falls back to `24h` |
 | `INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS` | no | — | Comma-separated `"group"` UUIDs an incident may be created in although they support no service (e.g. the security operations group). Trimmed, empty entries ignored; a non-UUID entry refuses to start. Joins the incident-assignable set (create check + `supportGroupsOnly` picker); never case-alert route options. See "Incident assignment group on create" |
 | `INCIDENT_DEFAULT_SERVICE_ID` | no | — | UUID of the service whose support group a new incident gets when no `assignmentGroupId` is sent and its own service has no support group (logged WARN each time). Unset / missing / groupless: such incidents are created unassigned (logged ERROR). A non-UUID refuses to start; checked at startup, log only. See "Incident assignment group on create" |
-| `ALERTING_VERSION` | no | `v1` | Which alert pipeline runs, for a canary move: `v1` the alert-ingestion and alert-core services only (the queue consumer and alert processor are off); `hybrid` also runs the consumer and the processor in shadow (it records what it would do and raises nothing); `v2` the consumer and the processor live, raising incidents. Any other value refuses to start. `v2` and `hybrid` need the database, `INCIDENT_DEFAULT_SERVICE_ID` (the service an incident gets when its alert names none), and at least one cloud below; `v2` also needs `ALERT_PROCESSOR_CALLER_ID`. See "SRE alert consumer" and "Alert processor" below |
+| `ALERTING_VERSION` | no | `v1` | Which alert pipeline runs, for a canary move: `v1` the alert-ingestion and alert-core services only (the queue consumer and alert processor are off); `hybrid` also runs the consumer and the processor in shadow (it records what it would do and raises nothing); `v2` the consumer and the processor live, raising incidents. Any other value refuses to start. `v2` and `hybrid` need the database, `INCIDENT_DEFAULT_SERVICE_ID` (the service an incident gets when its alert names none), `EVENT_HUB_BROKER` and `EVENT_HUB_CONNECTION_STRING` (for `ALERT_EVENT_HUB_TOPIC`), and at least one cloud below; `v2` also needs `ALERT_PROCESSOR_CALLER_ID`. See "SRE alert consumer" and "Alert processor" below |
 | `ALERT_SERVICEBUS_CONNECTION_STRING` | no | none | A shared access policy's primary connection string for the Azure gateway's Service Bus namespace. Needs local (SAS) auth on the namespace. Unset leaves Azure out |
 | `ALERT_SERVICEBUS_PRIORITY_QUEUES` / `ALERT_SERVICEBUS_STANDARD_QUEUES` | no | `priority-queue` / `standard-queue` | Comma-separated Service Bus queue names for each tier. Adding a queue is adding its name here. No name may appear twice across both lists (names ignore case). The older single-queue `ALERT_SERVICEBUS_PRIORITY_QUEUE` / `ALERT_SERVICEBUS_STANDARD_QUEUE` are read when the list is unset |
 | `ALERT_SQS_PRIORITY_QUEUE_URLS` / `ALERT_SQS_STANDARD_QUEUE_URLS` | no* | none | Comma-separated SQS standard queue URLs for each tier. Adding a queue is adding its URL here. *Both tiers set together; none leaves AWS out. The region is read from the first priority URL, every SQS queue must be in that region, and no queue may appear twice or share another's name. The older single-queue `ALERT_SQS_PRIORITY_QUEUE_URL` / `ALERT_SQS_STANDARD_QUEUE_URL` are read when the list is unset |
@@ -107,8 +107,11 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `ALERT_CONSUMER_CONCURRENCY` | no | `8` | Messages processed at once across both queues; at most 64 and below `DB_POOL_MAX_CONNS` |
 | `ALERT_CONSUMER_PRIORITY_WEIGHT` | no | `0` | `0` is strict priority: a standard alert runs only when no priority alert waits. `n` (at most 1000) lets a waiting standard alert go after `n` priority alerts in a row, an aging valve against starvation. A value out of range uses the default with a warning |
 | `ALERT_PROCESSOR_CALLER_ID` | v2 | none | The `"user"` UUID an alert-born incident is raised by (alert-core's `CALLER_ID`) |
-| `ALERT_PROCESSOR_CONCURRENCY` | no | `4` | Alerts the processor works on at once (1-16). Each worker can hold two pool connections, so `ALERT_CONSUMER_CONCURRENCY` plus twice this must stay below `DB_POOL_MAX_CONNS` |
-| `ALERT_PROCESSOR_POLL_INTERVAL` | no | `5s` | The processor's backstop poll. A committed NEW alert wakes the workers at once (`alert_stored` notification); an idle worker also looks again after this, for a missed notification or a retry falling due |
+| `ALERT_PROCESSOR_CONCURRENCY` | no | `4` | `alert.created` consumers per replica, so alerts it works on at once (1-16); each reads its share of the topic's partitions, so more than the partition count sit idle. Each can hold two pool connections, so `ALERT_CONSUMER_CONCURRENCY` plus the relay's one plus twice this must stay below `DB_POOL_MAX_CONNS` |
+| `ALERT_EVENT_HUB_TOPIC` | no | `alert-events` | The Event Hub the alert relay publishes `alert.created` to and the processor consumes. `v2` and `hybrid` need it, with `EVENT_HUB_BROKER` and `EVENT_HUB_CONNECTION_STRING`. Must differ from every other topic setting: csm-notification-service dead-letters event types it does not know |
+| `ALERT_PROCESSOR_CONSUMER_GROUP` | no | `entity-service-alert-processor` | The processor's consumer group on `ALERT_EVENT_HUB_TOPIC` |
+| `ALERT_RELAY_MAX_IN_FLIGHT` | no | `20` | Backpressure (1-1000): the relay publishes no more while this many alerts are published and undecided, so a backlog waits in the table (priority first), not on the topic |
+| `ALERT_RELAY_POLL_INTERVAL` | no | `5s` | The relay's backstop poll. A committed NEW alert (`alert_stored` notification) and every decision wake it at once; this covers a missed notification, a retry falling due and room freed on another replica |
 | `ALERT_PROCESSOR_MAX_INCIDENT_AGE` | no | `24h` | How old an open incident may be and still take new alerts of its fingerprint; older, a new incident is raised. `0` is no limit |
 | `CR_STRICT_VISIBILITY_FROM` | no | — | RFC 3339 instant **with a zone**: change requests created at or after it are visible to a customer only when designated to them; earlier ones are "legacy" and keep today's visibility. Unset/empty = no cutover, every change request is legacy (the safe default and the rollback; a WARN is logged at startup). An unparsable value refuses to start. Set once per environment at release and never move it — see "Customer visibility and the cutover" |
 | `MIGRATION_CASE_REPORT_HOLD_TAG` | no | `s_mig_hold` | Tag (ignoring case) for the weekly migration scan's "customer requested to hold" table |
@@ -12391,26 +12394,41 @@ Two alerting gateways put every monitoring source's unmodified request body on a
 
 ## Alert processor (the `alert` table to incidents)
 
-`service.AlertProcessor` (`internal/service/alert_processor.go`, rules in `alert_incident_rules.go`, storage in
-`repository/alert_processor_repo.go`, migrations 0309 and 0310) turns the alerts the consumer stored into incidents. It
-is started in `routes.go` wherever the consumer runs and stopped first in `closePublishers`. Design and phase-2 plan:
-`docs/alert-processor.md`.
+`service.AlertRelay` (`internal/service/alert_relay.go`, `repository/alert_relay_repo.go`) hands each alert the consumer
+stored to `service.AlertProcessor` (`internal/service/alert_processor.go`, rules in `alert_incident_rules.go`, storage in
+`repository/alert_processor_repo.go`) as `alert.created` on `ALERT_EVENT_HUB_TOPIC`; the processor turns it into an
+incident. Migrations 0309, 0310 and 0311. Both are started in `server/alert_pipeline.go` (from `routes.go`) wherever the
+consumer runs and stopped first in `closePublishers`. Design and phase-2 plan: `docs/alert-processor.md`.
 
-- **Postgres is the queue; a notification wakes it.** The consumer's insert notifies the `alert_stored` channel in the
-  same statement, once and only when it stored a NEW alert (`repository.AlertStoredChannel`); Postgres delivers it only
-  when that transaction commits, so a rolled-back insert, a redelivered message or an error row wakes nobody.
-  `repository.ListenAlertStored` holds one LISTEN connection, opened from the pool's settings but outside the pool (so
-  the service uses one Postgres connection more than `DB_POOL_MAX_CONNS`), and calls `AlertProcessor.Wake`, which
-  starts every idle worker at once; it reconnects with backoff (1s doubling to 30s) and wakes once after each connect.
-  `ALERT_PROCESSOR_POLL_INTERVAL` (5s) is the backstop for a missed notification, a retry falling due and another
-  replica's expired lease. LISTEN needs a session-level connection: through a pooler in transaction mode nothing
-  arrives and the backstop is the only wake-up. No Event Hubs hop: nothing else reads the alerts, Postgres already gives
-  the ordering, retries and dead letter (FAILED), and a second at-least-once hop would need its own recovery.
-- **Claim.** Each worker claims one alert at a time with `processed_on IS NULL` and no `error_reason` (an error row is
-  never taken), a free or expired claim and a due retry, priority tier first, then oldest (`FOR UPDATE SKIP LOCKED`,
-  `alert_pending_idx`), on a 2-minute lease, so the next alert any worker takes is the most urgent one waiting. A
-  replica that dies leaves its claims to expire. The worker takes its wake-up channel before claiming, so an alert
-  committed between an empty claim and the wait still wakes it.
+- **The alert row is the outbox.** A waiting alert (`processed_on IS NULL`, no `error_reason`) with no `published_on` is
+  still to publish. The relay takes up to 10 at a time, priority tier first, then oldest, whose retry is due
+  (`FOR UPDATE SKIP LOCKED`, `alert_unpublished_idx`), stamps `published_on` and commits at once, so it holds no lock
+  while it publishes. It publishes them in order, keyed by fingerprint (one fingerprint, one partition), with a 5 ms
+  batch wait (`eventbus.Config.BatchTimeout`; kafka-go's default would hold each record a second). At the first failed
+  publish it clears `published_on` on that alert and the rest of the batch, so order is kept, and backs off (1s
+  doubling to 30s). The payload names the alert (id, fingerprint, tier, received time) and carries no alert body: alerts
+  can hold customer details, which the topic would keep for its retention.
+- **Backpressure.** The relay publishes no more while `ALERT_RELAY_MAX_IN_FLIGHT` (20) alerts are published and
+  undecided (`alert_in_flight_idx`). A storm then waits in the table, where priority goes first, instead of on the topic,
+  where a priority alert would queue behind it; only the in-flight few are ahead of it. The count is not locked, so
+  relays on two replicas can go one batch over for a moment.
+- **Wake-ups.** The consumer's insert notifies the `alert_stored` channel in the same statement, once and only when it
+  stored a NEW alert (`repository.AlertStoredChannel`); Postgres delivers it only on commit, so a rolled-back insert, a
+  redelivered message or an error row wakes nobody. `repository.ListenAlertStored` holds one LISTEN connection, opened
+  from the pool's settings but outside the pool (so the service uses one Postgres connection more than
+  `DB_POOL_MAX_CONNS`), and calls `AlertRelay.Wake`; it reconnects with backoff (1s doubling to 30s) and wakes once
+  after each connect. Every decision also wakes the relay (`AlertProcessorConfig.Decided`), since it frees room.
+  `ALERT_RELAY_POLL_INTERVAL` (5s) is the backstop. LISTEN needs a session-level connection: through a pooler in
+  transaction mode nothing arrives and the backstop is the only wake-up.
+- **Stale sweep.** At start and every minute the relay clears `published_on` on alerts published more than 5 minutes
+  ago that are still undecided and not claimed (a lost or dropped event, a crash between marking and publishing, a
+  processor that died), so they are published again. A duplicate event is harmless (next point).
+- **Claim.** `ALERT_PROCESSOR_CONCURRENCY` consumers per replica share `ALERT_PROCESSOR_CONSUMER_GROUP`. For each event
+  the processor claims the alert it names, on a 2-minute lease, only while it is waiting, published, due and not
+  claimed by another; a redelivered or stale event, or one for an alert a failed attempt sent back to the outbox,
+  claims nothing and is acknowledged. Only a failed claim is a handler error: retried 3 times a second apart, then the
+  record is dropped and the sweep republishes the alert. The decision is never retried in place, so a failing alert
+  never holds its partition.
 - **One fingerprint at a time.** The decision runs in one transaction holding
   `pg_advisory_xact_lock(hashtextextended('alert-fingerprint:' || fingerprint, 0))`, so two alerts of one fingerprint
   never both raise an incident.
@@ -12429,7 +12447,8 @@ is started in `routes.go` wherever the consumer runs and stopped first in `close
   repeated. `created_by` is `alert-processor`.
 - **Hybrid.** The same decision is recorded as SHADOWED with `shadow_decision` (WOULD_CREATE / WOULD_ATTACH /
   WOULD_MUTE / WOULD_IGNORE) and `shadow_incident_id`; nothing is raised or linked.
-- **Failures.** A failed attempt counts `attempts`, keeps `last_error` and retries after 5s doubling to 5 min; the 8th,
+- **Failures.** A failed attempt counts `attempts`, keeps `last_error`, clears `published_on` (back to the outbox) and is
+  published again after 5s doubling to 5 min; the 8th,
   an unreadable alert, or a create refused as invalid makes it FAILED, logged at ERROR ("alert FAILED, no incident was
   raised for it"). Nothing pages on it yet (phase 2).
 - **Mute rules** are read at most every 15s. A failed read keeps the last good set for 5 minutes, then muting fails
@@ -12438,9 +12457,11 @@ is started in `routes.go` wherever the consumer runs and stopped first in `close
   its rule ends, the Chat fallback, paging on FAILED and on dead letters. See `docs/alert-processor.md`.
 - **Not audited.** 0309 excludes `alert` from the audit log; its rows carry their own outcome.
 
-Tests: `alert_processor_test.go` (service, fakes, including the wake-up), `alert_processor_repo_integration_test.go` and
-`alert_listener_integration_test.go` (real Postgres with 0306, 0309, 0310 and 100029 applied, skipped without
-`ENTITY_TEST_DATABASE_URL`; the latter checks the notification fires only for a committed NEW alert).
+Tests: `alert_processor_test.go` and `alert_relay_test.go` (service, fakes: the event handler, publish order and keys,
+giving the rest back on a failure, the in-flight limit, the wake-up), `alert_processor_repo_integration_test.go` and
+`alert_listener_integration_test.go` (real Postgres with 0306, 0309, 0310, 0311 and 100029 applied, skipped without
+`ENTITY_TEST_DATABASE_URL`: marking priority first within the limit, claiming only a published alert once, failures
+back to the outbox, the stale sweep, and the notification only for a committed NEW alert).
 
 ## Alert mute rules (`/alert-mute-rules`, Postgres only)
 

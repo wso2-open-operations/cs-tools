@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Runs against a database with migrations 0292, 0306, 0309, 0310 and 100029 applied, and only when
+// Runs against a database with migrations 0292, 0306, 0309, 0310, 0311 and 100029 applied, and only when
 // ENTITY_TEST_DATABASE_URL is set. Every row it writes is removed again.
 
 const (
@@ -87,9 +88,25 @@ func insertIncident(t *testing.T, pool *pgxpool.Pool, id, state, correlationID s
 	}
 }
 
-func TestAlertProcessorRepositoryIntegration_ClaimsPriorityFirstAndOnlyOnce(t *testing.T) {
+func alertIDs(alerts []domain.AlertToPublish) []string {
+	ids := make([]string, 0, len(alerts))
+	for _, a := range alerts {
+		ids = append(ids, a.ID)
+	}
+	return ids
+}
+
+// publishAll marks every waiting alert published, as the relay does before it sends alert.created.
+func publishAll(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := NewAlertRelayRepository(NewScoped(pool)).MarkAlertsToPublish(WithSystemIdentity(context.Background()), 1000, 1000); err != nil {
+		t.Fatalf("MarkAlertsToPublish: %v", err)
+	}
+}
+
+func TestAlertRelayRepositoryIntegration_MarksPriorityFirstOnceAndWithinTheLimit(t *testing.T) {
 	pool := newAlertProcessorIntegrationPool(t)
-	repo := NewAlertProcessorRepository(NewScoped(pool))
+	relay := NewAlertRelayRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 
 	failed := processorAlert("ALT900000001", "it-alert-processor-1", domain.AlertTierHigh)
@@ -101,19 +118,27 @@ func TestAlertProcessorRepositoryIntegration_ClaimsPriorityFirstAndOnlyOnce(t *t
 		failed,
 	)
 
-	first, err := repo.ClaimAlerts(ctx, "worker-a", time.Minute, 2)
+	first, err := relay.MarkAlertsToPublish(ctx, 2, 10)
 	if err != nil {
-		t.Fatalf("ClaimAlerts: %v", err)
+		t.Fatalf("MarkAlertsToPublish: %v", err)
 	}
-	if len(first) != 2 || first[0].ID != "ALT900000003" || first[1].ID != "ALT900000004" || first[0].Tier != domain.AlertTierHigh {
-		t.Fatalf("first claim = %+v, want the two priority alerts, oldest first", first)
+	if got := alertIDs(first); !slices.Equal(got, []string{"ALT900000003", "ALT900000004"}) || first[0].Fingerprint != "fp-it" {
+		t.Fatalf("first batch = %v, want the two priority alerts, oldest first, stopping at 2 in flight", got)
 	}
-	second, err := repo.ClaimAlerts(ctx, "worker-b", time.Minute, 10)
-	if err != nil {
-		t.Fatalf("ClaimAlerts: %v", err)
+	if atLimit, err := relay.MarkAlertsToPublish(ctx, 2, 10); err != nil || len(atLimit) != 0 {
+		t.Fatalf("batch at the limit = %v (%v), want nothing: the backlog waits in the table", alertIDs(atLimit), err)
 	}
-	if len(second) != 1 || second[0].ID != "ALT900000002" || string(second[0].Alert) == "" || second[0].Fingerprint != "fp-it" {
-		t.Fatalf("second claim = %+v, want only the standard alert: claimed and error rows are never handed out", second)
+	second, err := relay.MarkAlertsToPublish(ctx, 10, 10)
+	if err != nil || !slices.Equal(alertIDs(second), []string{"ALT900000002"}) {
+		t.Fatalf("second batch = %v (%v), want only the standard alert: published and error rows are never taken", alertIDs(second), err)
+	}
+
+	if err := relay.UnmarkPublished(ctx, []string{"ALT900000004"}); err != nil {
+		t.Fatalf("UnmarkPublished: %v", err)
+	}
+	again, err := relay.MarkAlertsToPublish(ctx, 10, 10)
+	if err != nil || !slices.Equal(alertIDs(again), []string{"ALT900000004"}) {
+		t.Fatalf("after giving one back = %v (%v), want that alert taken again", alertIDs(again), err)
 	}
 
 	var raw []byte
@@ -123,14 +148,37 @@ func TestAlertProcessorRepositoryIntegration_ClaimsPriorityFirstAndOnlyOnce(t *t
 	}
 }
 
+func TestAlertProcessorRepositoryIntegration_ClaimsOnlyAPublishedWaitingAlertOnce(t *testing.T) {
+	pool := newAlertProcessorIntegrationPool(t)
+	repo := NewAlertProcessorRepository(NewScoped(pool))
+	ctx := WithSystemIdentity(context.Background())
+	insertProcessorAlerts(t, pool, processorAlert("ALT900000005", "it-alert-processor-5", domain.AlertTierHigh))
+
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT900000005", "worker-a", time.Minute); err != nil || ok {
+		t.Fatalf("claim before it is published = %v, %v; want nothing", ok, err)
+	}
+	publishAll(t, pool)
+	claimed, ok, err := repo.ClaimAlert(ctx, "ALT900000005", "worker-a", time.Minute)
+	if err != nil || !ok || claimed.ID != "ALT900000005" || claimed.Fingerprint != "fp-it" || string(claimed.Alert) == "" || claimed.Tier != domain.AlertTierHigh {
+		t.Fatalf("claim = %+v, %v, %v; want the alert with its body", claimed, ok, err)
+	}
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT900000005", "worker-b", time.Minute); err != nil || ok {
+		t.Fatalf("second claim while the first holds = %v, %v; want nothing (a redelivered event)", ok, err)
+	}
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT999999999", "worker-a", time.Minute); err != nil || ok {
+		t.Fatalf("claim of an unknown alert = %v, %v; want nothing", ok, err)
+	}
+}
+
 func TestAlertProcessorRepositoryIntegration_RecordsOutcomesForTheClaimOwnerOnly(t *testing.T) {
 	pool := newAlertProcessorIntegrationPool(t)
 	repo := NewAlertProcessorRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 	insertIncident(t, pool, itProcessorIncidentOpen, "NEW", "[fp:fpitfpitfpit:1]", time.Now())
 	insertProcessorAlerts(t, pool, processorAlert("ALT900000010", "it-alert-processor-10", domain.AlertTierHigh))
-	if _, err := repo.ClaimAlerts(ctx, "worker-a", time.Minute, 1); err != nil {
-		t.Fatalf("ClaimAlerts: %v", err)
+	publishAll(t, pool)
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT900000010", "worker-a", time.Minute); err != nil || !ok {
+		t.Fatalf("ClaimAlert = %v, %v", ok, err)
 	}
 
 	outcome := domain.AlertProcessorOutcome{Status: domain.AlertStatusProcessed, IncidentID: itProcessorIncidentOpen}
@@ -157,27 +205,35 @@ func TestAlertProcessorRepositoryIntegration_RecordsOutcomesForTheClaimOwnerOnly
 	}
 }
 
-func TestAlertProcessorRepositoryIntegration_FailedAttemptsWaitAndThenFail(t *testing.T) {
+func TestAlertProcessorRepositoryIntegration_FailedAttemptsGoBackToTheOutboxAndThenFail(t *testing.T) {
 	pool := newAlertProcessorIntegrationPool(t)
 	repo := NewAlertProcessorRepository(NewScoped(pool))
+	relay := NewAlertRelayRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 	insertProcessorAlerts(t, pool, processorAlert("ALT900000020", "it-alert-processor-20", domain.AlertTierHigh))
+	publishAll(t, pool)
 
-	if _, err := repo.ClaimAlerts(ctx, "worker-a", time.Minute, 1); err != nil {
-		t.Fatalf("ClaimAlerts: %v", err)
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT900000020", "worker-a", time.Minute); err != nil || !ok {
+		t.Fatalf("ClaimAlert = %v, %v", ok, err)
 	}
 	if err := repo.RecordFailure(ctx, "ALT900000020", "worker-a", "connection reset", time.Now().Add(time.Hour), false); err != nil {
 		t.Fatalf("RecordFailure: %v", err)
 	}
-	if again, err := repo.ClaimAlerts(ctx, "worker-a", time.Minute, 1); err != nil || len(again) != 0 {
-		t.Fatalf("claim before the retry is due = %+v (%v), want nothing", again, err)
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT900000020", "worker-a", time.Minute); err != nil || ok {
+		t.Fatalf("claim from the old event after a failure = %v, %v; want nothing: the alert went back to the outbox", ok, err)
+	}
+	if early, err := relay.MarkAlertsToPublish(ctx, 10, 10); err != nil || len(early) != 0 {
+		t.Fatalf("publish before the retry is due = %v (%v), want nothing", alertIDs(early), err)
 	}
 	if _, err := NewScoped(pool).Exec(ctx, `UPDATE alert SET next_attempt_on = now() - interval '1 second' WHERE id = 'ALT900000020'`); err != nil {
 		t.Fatalf("make the retry due: %v", err)
 	}
-	due, err := repo.ClaimAlerts(ctx, "worker-a", time.Minute, 1)
-	if err != nil || len(due) != 1 || due[0].Attempts != 1 {
-		t.Fatalf("claim once due = %+v (%v), want the alert with one attempt counted", due, err)
+	if due, err := relay.MarkAlertsToPublish(ctx, 10, 10); err != nil || !slices.Equal(alertIDs(due), []string{"ALT900000020"}) {
+		t.Fatalf("publish once due = %v (%v), want the alert again", alertIDs(due), err)
+	}
+	claimed, ok, err := repo.ClaimAlert(ctx, "ALT900000020", "worker-a", time.Minute)
+	if err != nil || !ok || claimed.Attempts != 1 {
+		t.Fatalf("claim once republished = %+v, %v, %v; want the alert with one attempt counted", claimed, ok, err)
 	}
 	if err := repo.RecordFailure(ctx, "ALT900000020", "worker-a", "invalid serviceId", time.Now(), true); err != nil {
 		t.Fatalf("RecordFailure: %v", err)
@@ -190,6 +246,33 @@ func TestAlertProcessorRepositoryIntegration_FailedAttemptsWaitAndThenFail(t *te
 	}
 	if status != domain.AlertStatusFailed || attempts != 2 || lastError != "invalid serviceId" {
 		t.Fatalf("row = %s %d %q, want FAILED after 2 attempts with the last error", status, attempts, lastError)
+	}
+}
+
+func TestAlertRelayRepositoryIntegration_RepublishesOnlyStaleUnclaimedAlerts(t *testing.T) {
+	pool := newAlertProcessorIntegrationPool(t)
+	repo := NewAlertProcessorRepository(NewScoped(pool))
+	relay := NewAlertRelayRepository(NewScoped(pool))
+	ctx := WithSystemIdentity(context.Background())
+	insertProcessorAlerts(t, pool,
+		processorAlert("ALT900000030", "it-alert-processor-30", domain.AlertTierHigh),
+		processorAlert("ALT900000031", "it-alert-processor-31", domain.AlertTierHigh),
+		processorAlert("ALT900000032", "it-alert-processor-32", domain.AlertTierHigh),
+	)
+	publishAll(t, pool)
+	if _, ok, err := repo.ClaimAlert(ctx, "ALT900000031", "worker-a", time.Hour); err != nil || !ok {
+		t.Fatalf("ClaimAlert = %v, %v", ok, err)
+	}
+	if _, err := NewScoped(pool).Exec(ctx, `UPDATE alert SET published_on = now() - interval '10 minutes' WHERE id IN ('ALT900000030', 'ALT900000031')`); err != nil {
+		t.Fatalf("age the events: %v", err)
+	}
+
+	n, err := relay.RepublishStale(ctx, 5*time.Minute)
+	if err != nil || n != 1 {
+		t.Fatalf("RepublishStale = %d, %v; want 1: the claimed and the recent alert stay", n, err)
+	}
+	if again, err := relay.MarkAlertsToPublish(ctx, 10, 10); err != nil || !slices.Equal(alertIDs(again), []string{"ALT900000030"}) {
+		t.Fatalf("published again = %v (%v), want the stale unclaimed alert", alertIDs(again), err)
 	}
 }
 

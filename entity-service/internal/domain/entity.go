@@ -10761,6 +10761,14 @@ type ClaimedAlert struct {
 	Attempts    int
 }
 
+// AlertToPublish is one waiting alert the alert relay took to publish as alert.created.
+type AlertToPublish struct {
+	ID          string
+	Fingerprint string
+	Tier        AlertTier
+	ReceivedOn  time.Time
+}
+
 // AlertProcessorOutcome is what the alert processor recorded for one alert.
 type AlertProcessorOutcome struct {
 	Status string

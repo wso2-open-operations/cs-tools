@@ -468,9 +468,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// the WaitGroup at zero, so the wait returns at once.
 	ingestRetryCtx, stopIngestRetry := context.WithCancel(context.Background())
 	var ingestRetryWG sync.WaitGroup
-	// The alert processor, when the queue consumer runs; closePublishers stops it and waits for the alerts in flight.
-	stopAlertProcessor := func() {}
-	var alertProcessorWG sync.WaitGroup
+	// The alert relay and processor, when the queue consumer runs; closePublishers stops them and waits for the alerts
+	// in flight.
+	stopAlertPipeline := func() {}
 
 	// snWritebackDispatcher is the single shared SNWritebackDispatcher for
 	// every DATA_SOURCE=postgres-servicenow-dual-write best-effort mirror
@@ -1701,31 +1701,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	// The alert processor turns the alerts the queue consumer (cmd/api/main.go) stored into incidents, through the
 	// same incident service POST /incidents uses, so an alert-born incident is published and assigned like any other.
-	// It runs wherever the consumer does: in hybrid it only records what it would do, in v2 it raises incidents.
-	// closePublishers stops it first, before the publishers its creates go through are closed.
+	// The relay hands each stored alert to it as alert.created on ALERT_EVENT_HUB_TOPIC (alert_pipeline.go). Both run
+	// wherever the consumer does: in hybrid the processor only records what it would do, in v2 it raises incidents.
+	// closePublishers stops them first, before the publishers its creates go through are closed.
 	if cfg.AlertConsumerEnabled() && db != nil {
-		alertProcessorCtx, cancelAlertProcessor := context.WithCancel(repository.WithSystemIdentity(context.Background()))
-		stopAlertProcessor = cancelAlertProcessor
-		processor := service.NewAlertProcessor(
-			repository.NewAlertProcessorRepository(repository.NewScoped(db)),
-			activeIncidentSvc,
-			repository.NewAlertMuteRuleRepository(repository.NewScoped(db)),
-			service.AlertProcessorConfig{
-				Live:             cfg.AlertProcessorLive(),
-				CallerID:         cfg.AlertProcessorCallerID,
-				DefaultServiceID: cfg.IncidentDefaultServiceID,
-				Concurrency:      cfg.AlertProcessorConcurrency,
-				PollInterval:     cfg.AlertProcessorPollInterval,
-				MaxIncidentAge:   cfg.AlertProcessorMaxIncidentAge,
-				Owner:            alertProcessorOwner(),
-			},
-		)
-		alertProcessorWG.Go(func() { processor.Run(alertProcessorCtx) })
-		// The consumer notifies alert_stored when it commits a NEW alert; the listener wakes the idle workers at once.
-		// PollInterval is the backstop for a missed notification and for retries falling due.
-		alertProcessorWG.Go(func() { repository.ListenAlertStored(alertProcessorCtx, db, processor.Wake) })
-		slog.Info("alert processor running", "live", cfg.AlertProcessorLive(), "alertingVersion", cfg.AlertingVersion,
-			"workers", cfg.AlertProcessorConcurrency, "backstopPoll", cfg.AlertProcessorPollInterval, "maxIncidentAge", cfg.AlertProcessorMaxIncidentAge)
+		stopAlertPipeline = startAlertPipeline(cfg, db, activeIncidentSvc)
 	}
 	// Which Special Ops team a handoff goes to, and which GitHub repository
 	// its internal issue goes to, is configuration. A value that does not
@@ -3027,8 +3007,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// context (retryOne derives from it), so the wait is short.
 	closePublishers := func() {
 		// First: an alert in flight may still be creating an incident, which publishes through the producers below.
-		stopAlertProcessor()
-		alertProcessorWG.Wait()
+		stopAlertPipeline()
 		stopIngestRetry()
 		ingestRetryWG.Wait()
 		// The deferred-write consumers first: a write in flight finishes

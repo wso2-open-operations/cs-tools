@@ -8,17 +8,19 @@ adds before v2 replaces alert-ingestion and alert-core. The operational detail (
 
 ```
 gateways ──► priority queues (Service Bus, SQS) ─┐
-         └─► standard queues (Service Bus, SQS) ─┴─► AlertConsumer ──► alert (raw body + normalised alert)
-                                                                            │
-                                         AlertProcessor (claim, lock, decide)┘──► IncidentService.CreateIncident
+         └─► standard queues (Service Bus, SQS) ─┴─► AlertConsumer ──► alert (raw body + normalised alert, the outbox)
+                                                                            │ pg_notify on commit
+                                     AlertRelay (priority first, backpressure)┘──► Event Hub ALERT_EVENT_HUB_TOPIC
+                                                                                       │ alert.created
+                                         AlertProcessor (claim, lock, decide) ◄───────┘──► IncidentService.CreateIncident
 ```
 
 | Requirement | How |
 |---|---|
 | Any number of clouds and queues | Queues are configuration per tier and cloud; one adapter per provider type |
-| Priority before standard | Strict priority by default in the consumer (`ALERT_CONSUMER_PRIORITY_WEIGHT=0`) and in the processor's claim (priority tier first) |
+| Priority before standard | Strict priority by default in the consumer (`ALERT_CONSUMER_PRIORITY_WEIGHT=0`); the relay publishes priority first and holds a backlog in the table (`ALERT_RELAY_MAX_IN_FLIGHT`), so at most that many alerts are ahead of a priority one on the topic |
 | Raw body kept | `alert.raw_body` on every message's first row; a message that cannot be normalised is an error row (`error_reason`, status `ERROR`), dead-lettered only if even that row is refused |
-| Never lose an alert | ACK only after commit; dedup on `(message_id, message_index)`; claims on a lease; retries, then FAILED |
+| Never lose an alert | ACK only after commit; dedup on `(message_id, message_index)`; the row is the outbox, a lost event is republished by the stale sweep; claims on a lease; retries, then FAILED |
 | One incident : many alerts | `alert.incident_id`; an open incident of the fingerprint takes later alerts |
 | No duplicate incident | Per-fingerprint advisory lock; exact correlation-id lookup before every create |
 | Incidents like alert-core's | Same request mapping, correlation tag and creation note; same mute-rule matcher; same fingerprint |
@@ -26,15 +28,18 @@ gateways ──► priority queues (Service Bus, SQS) ─┐
 
 ### Decisions and why
 
-- **Postgres is the queue, woken by `pg_notify`; in-process create.** The team asked for the processor to act on an
-  alert as soon as it is stored. The consumer's insert notifies `alert_stored` in the same transaction (delivered only on
-  commit) and a LISTEN connection wakes the workers at once; a 5s poll is the backstop. An expert review from four angles
-  (reliability, Postgres, messaging, delivery) preferred this to publishing `alert.created` through an outbox to Event
-  Hubs: nothing else reads the alerts, Postgres already gives exact priority (`ORDER BY tier DESC`), retry timing,
-  dead letter (FAILED) and idempotency, and an Event Hubs hop adds a second at-least-once hop with no per-message ack (it
-  needs a stale sweep), a hard dependency, and as first built about 1s per publish. One table, no `alert_outbox`: the
-  queue state lives on the alert row. The create goes through the same service as `POST /incidents`, so assignment,
-  `incident.created` and SLA clocks are not reimplemented.
+- **Event Hubs hand-off, from the alert row as the outbox; in-process create.** The team asked for the processor to
+  consume a queued hand-off and act on an alert as soon as it is stored. The relay publishes `alert.created` to one
+  topic; the processor consumes it. The expert review from four angles (reliability, Postgres, messaging, delivery)
+  first preferred Postgres alone as the queue; with the hop kept, it set the conditions this follows: one topic, not
+  two (the backlog stays in the priority-ordered table through backpressure, so a second topic and a wait gate are not
+  needed), a batch wait of a few milliseconds (the first build took about 1s per publish on kafka-go's default), no row
+  lock held while publishing (mark and commit first, give back on failure), and a stale sweep, because Event Hubs has
+  no per-message ack or dead letter. The alert row stays the record: the event carries ids only, and the processor
+  decides from the row. One table, no `alert_outbox`: the outbox state (`published_on`) lives on the alert row,
+  written in the same transaction as the rest of its state. `pg_notify` on commit wakes the relay, so the hop adds
+  milliseconds (about 1 ms to publish, 10-15 ms to the decision in a local run). The create goes through the same
+  service as `POST /incidents`, so assignment, `incident.created` and SLA clocks are not reimplemented.
 - **Store, commit, ACK, then decide separately.** Creating the incident before the queue ACK would tie intake to the
   incident path: a slow create expires the queue lock and is created twice, an incident outage uses up the delivery count
   and dead-letters alerts mid-outage, and a half-failed multi-alert message re-raises what already worked.
@@ -75,8 +80,13 @@ gateways ──► priority queues (Service Bus, SQS) ─┐
 - One AWS region and one Service Bus namespace.
 - `CreateIncident` runs inside the fingerprint lock's transaction, so a worker can hold two pool connections; the
   pool-budget check counts them. The LISTEN connection is one more Postgres connection, outside the pool.
-- If production reaches Postgres through a pooler in transaction mode, LISTEN receives nothing and decisions wait for
-  the 5s backstop; confirm before v2.
+- If production reaches Postgres through a pooler in transaction mode, LISTEN receives nothing and publishing waits
+  for the 5s backstop; confirm before v2.
+- Each incident create publishes `incident.created` synchronously through the main event producer, which keeps
+  kafka-go's one-second batch wait, so one consumer raises about one new incident a second (4 a second per replica at
+  the default concurrency, seen in a 60-alert local storm). Joining an open incident is not slowed. A short
+  `BatchTimeout` on the domain-event producers would lift it; that is outside the alert pipeline.
+- The backpressure count is not locked: relays on several replicas can go a batch over `ALERT_RELAY_MAX_IN_FLIGHT`.
 
 ## Phase 2 (to do before v2 replaces v1)
 
@@ -90,7 +100,7 @@ In priority order. Each item names what done looks like.
    `MoreSevere`). Done: a warning incident that turns critical carries critical priority.
 4. **Mute rule end.** Re-check MUTED fingerprints when their rule ends or is ended early; raise the incident if the last
    alert is still firing, as alert-core's `holdMuted` does.
-5. **Observability.** Metrics per tier: queue depth, oldest message age, claim lag (`processed_on - created_on`),
+5. **Observability.** Metrics per tier: queue depth, oldest message age, publish lag (`published_on - created_on`), decision lag (`processed_on - published_on`), alerts in flight,
    counts by status. Alerts on standard-tier oldest age (starvation under strict priority) and on claim lag.
 6. **Chat fallback.** When a create keeps failing, post alert-core's fallback Chat card so the alert is seen.
 7. **Shadow-run gates (in `hybrid`), automated daily**, because alert-core purges its rows after 7 days:

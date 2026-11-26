@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -54,10 +56,10 @@ type fakeProcessorRepo struct {
 	outcomes      map[string]domain.AlertProcessorOutcome
 	failures      []recordedFailure
 	claimLost     bool
-	// waiting is what the next claims hand out, one alert each; claims counts every ClaimAlerts call.
-	waiting []domain.ClaimedAlert
-	claims  int
-	claimed chan struct{}
+	// claimable is what ClaimAlert hands out, by alert id, once each; claims lists every id asked for.
+	claimable map[string]domain.ClaimedAlert
+	claims    []string
+	claimErr  error
 }
 
 type recordedFailure struct {
@@ -75,26 +77,16 @@ func newFakeProcessorRepo() *fakeProcessorRepo {
 	}
 }
 
-func (r *fakeProcessorRepo) ClaimAlerts(_ context.Context, _ string, _ time.Duration, limit int) ([]domain.ClaimedAlert, error) {
+func (r *fakeProcessorRepo) ClaimAlert(_ context.Context, id, _ string, _ time.Duration) (domain.ClaimedAlert, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.claims++
-	if r.claimed != nil {
-		select {
-		case r.claimed <- struct{}{}:
-		default:
-		}
+	r.claims = append(r.claims, id)
+	if r.claimErr != nil {
+		return domain.ClaimedAlert{}, false, r.claimErr
 	}
-	n := min(limit, len(r.waiting))
-	out := r.waiting[:n]
-	r.waiting = r.waiting[n:]
-	return out, nil
-}
-
-func (r *fakeProcessorRepo) claimCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.claims
+	a, ok := r.claimable[id]
+	delete(r.claimable, id)
+	return a, ok, nil
 }
 
 func (r *fakeProcessorRepo) WithFingerprintLock(_ context.Context, fingerprint string, fn func(repository.AlertFingerprintTx) error) error {
@@ -170,7 +162,7 @@ func (f *fakeMuteRules) Active(context.Context, time.Time) ([]domain.AlertMuteRu
 
 func newTestProcessor(live bool, repo *fakeProcessorRepo, creator *fakeIncidentCreator, rules *fakeMuteRules) *AlertProcessor {
 	p := NewAlertProcessor(repo, creator, rules, AlertProcessorConfig{
-		Live: live, CallerID: testAlertCaller, DefaultServiceID: testAlertDefaultService, Concurrency: 1, MaxIncidentAge: 24 * time.Hour,
+		Live: live, CallerID: testAlertCaller, DefaultServiceID: testAlertDefaultService, MaxIncidentAge: 24 * time.Hour,
 	})
 	p.now = func() time.Time { return testAlertReceivedOn.Add(time.Minute) }
 	return p
@@ -524,49 +516,75 @@ func TestAlertMuteRuleMatches(t *testing.T) {
 	}
 }
 
-func TestAlertProcessor_WakeStartsIdleWorkersBeforeThePoll(t *testing.T) {
-	repo, creator := newFakeProcessorRepo(), &fakeIncidentCreator{}
-	repo.claimed = make(chan struct{}, 16)
-	p := NewAlertProcessor(repo, creator, &fakeMuteRules{}, AlertProcessorConfig{
-		Live: true, CallerID: testAlertCaller, DefaultServiceID: testAlertDefaultService, Concurrency: 3, PollInterval: time.Hour,
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { p.Run(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
+// alertCreatedEvent is the record the relay publishes for alert id.
+func alertCreatedEvent(t *testing.T, id string) []byte {
+	t.Helper()
+	payload, err := json.Marshal(events.AlertCreatedPayload{AlertID: id, Fingerprint: testAlertFingerprint, Tier: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := json.Marshal(events.Envelope{Type: events.TypeAlertCreated, EntityID: id, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
 
-	waitClaims := func(n int) {
-		t.Helper()
-		deadline := time.After(5 * time.Second)
-		for repo.claimCount() < n {
-			select {
-			case <-repo.claimed:
-			case <-deadline:
-				t.Fatalf("claims = %d, want at least %d", repo.claimCount(), n)
-			}
+func TestAlertProcessor_HandleEventDecidesTheAlertItNames(t *testing.T) {
+	repo, creator := newFakeProcessorRepo(), &fakeIncidentCreator{}
+	repo.claimable = map[string]domain.ClaimedAlert{"ALT000000050": claimedAlert(t, "ALT000000050", firingAlert)}
+	p := newTestProcessor(true, repo, creator, &fakeMuteRules{})
+	decided := 0
+	p.cfg.Decided = func() { decided++ }
+
+	if err := p.HandleEvent(context.Background(), alertCreatedEvent(t, "ALT000000050")); err != nil {
+		t.Fatalf("HandleEvent = %v, want nil", err)
+	}
+	if !slices.Equal(repo.claims, []string{"ALT000000050"}) {
+		t.Errorf("claims = %v, want the alert the event names", repo.claims)
+	}
+	if o, ok := repo.outcomes["ALT000000050"]; !ok || o.Status != domain.AlertStatusProcessed || len(creator.requests) != 1 {
+		t.Errorf("outcome = %+v (recorded %v), creates %d; want PROCESSED with one incident", o, ok, len(creator.requests))
+	}
+	if decided != 1 {
+		t.Errorf("Decided called %d times, want 1 so the relay uses the room", decided)
+	}
+}
+
+func TestAlertProcessor_HandleEventSkipsWhatHasNothingToDecide(t *testing.T) {
+	repo, creator := newFakeProcessorRepo(), &fakeIncidentCreator{}
+	p := newTestProcessor(true, repo, creator, &fakeMuteRules{})
+	decided := 0
+	p.cfg.Decided = func() { decided++ }
+
+	other, err := json.Marshal(events.Envelope{Type: events.TypeIncidentCreated, EntityID: "ALT000000051"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string][]byte{
+		"already decided or not published": alertCreatedEvent(t, "ALT000000051"),
+		"another event type":               other,
+		"not JSON":                         []byte("not json"),
+		"no alert id":                      alertCreatedEvent(t, ""),
+	} {
+		if err := p.HandleEvent(context.Background(), value); err != nil {
+			t.Errorf("%s: HandleEvent = %v, want nil (acknowledged)", name, err)
 		}
 	}
-	waitClaims(3) // every worker looked once and is now idle for an hour
-	repo.mu.Lock()
-	repo.waiting = []domain.ClaimedAlert{claimedAlert(t, "ALT000000050", firingAlert)}
-	repo.mu.Unlock()
+	if !slices.Equal(repo.claims, []string{"ALT000000051"}) {
+		t.Errorf("claims = %v, want only the alert.created event with an id", repo.claims)
+	}
+	if len(repo.outcomes) != 0 || len(creator.requests) != 0 || decided != 0 {
+		t.Errorf("outcomes %d, creates %d, decided %d; want nothing", len(repo.outcomes), len(creator.requests), decided)
+	}
+}
 
-	p.Wake()
-
-	waitClaims(6)
-	deadline := time.After(5 * time.Second)
-	for {
-		repo.mu.Lock()
-		_, decided := repo.outcomes["ALT000000050"]
-		repo.mu.Unlock()
-		if decided {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("the woken workers did not decide the alert")
-		case <-time.After(10 * time.Millisecond):
-		}
+func TestAlertProcessor_HandleEventReturnsAFailedClaim(t *testing.T) {
+	repo := newFakeProcessorRepo()
+	repo.claimErr = errors.New("database down")
+	p := newTestProcessor(true, repo, &fakeIncidentCreator{}, &fakeMuteRules{})
+	if err := p.HandleEvent(context.Background(), alertCreatedEvent(t, "ALT000000052")); err == nil {
+		t.Fatal("HandleEvent = nil, want the claim error so the consumer retries")
 	}
 }
 
@@ -585,26 +603,5 @@ func TestAlertWaker_BroadcastWakesEveryWaiterOnce(t *testing.T) {
 	case <-w.wait():
 		t.Fatal("a wait taken after the broadcast is already woken")
 	default:
-	}
-}
-
-func TestAlertProcessor_IdleReturnsOnWakeOrPoll(t *testing.T) {
-	p := newTestProcessor(true, newFakeProcessorRepo(), &fakeIncidentCreator{}, &fakeMuteRules{})
-	p.cfg.PollInterval = time.Hour
-	p.sleep = sleepContext
-	woken := p.wake.wait()
-	start := time.Now()
-	go func() { time.Sleep(20 * time.Millisecond); p.Wake() }()
-	if !p.idle(context.Background(), woken) {
-		t.Fatal("idle = false, want true while the context is live")
-	}
-	if waited := time.Since(start); waited > 2*time.Second {
-		t.Fatalf("idle waited %s, want it to end at the wake-up", waited)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if p.idle(ctx, p.wake.wait()) {
-		t.Fatal("idle = true on a cancelled context, want false")
 	}
 }

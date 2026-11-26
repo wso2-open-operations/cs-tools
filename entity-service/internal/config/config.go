@@ -737,11 +737,24 @@ type Config struct {
 	AlertSQSSecretAccessKey string
 	// AlertProcessorCallerID is the user an alert's incident is raised by (ALERT_PROCESSOR_CALLER_ID, a "user" UUID), as alert-core's CALLER_ID; required for v2.
 	AlertProcessorCallerID string
-	// AlertProcessorConcurrency is how many alerts the alert processor works on at once (ALERT_PROCESSOR_CONCURRENCY, default 4).
+	// AlertProcessorConcurrency is how many alert.created consumers each replica runs, so how many alerts it works on at
+	// once (ALERT_PROCESSOR_CONCURRENCY, default 4); each consumer reads its share of the topic's partitions.
 	AlertProcessorConcurrency int
-	// AlertProcessorPollInterval is the alert processor's backstop poll (ALERT_PROCESSOR_POLL_INTERVAL, default 5s): an idle
-	// worker looks again after it even when no alert_stored notification woke it.
-	AlertProcessorPollInterval time.Duration
+	// AlertEventHubTopic is the Event Hub (Kafka topic) the alert relay publishes alert.created to and the alert
+	// processor consumes (ALERT_EVENT_HUB_TOPIC, default alert-events). Never a topic csm-notification-service reads: it
+	// dead-letters event types it does not know.
+	AlertEventHubTopic string
+	// AlertProcessorConsumerGroup is the alert processor's consumer group on AlertEventHubTopic
+	// (ALERT_PROCESSOR_CONSUMER_GROUP, default entity-service-alert-processor).
+	AlertProcessorConsumerGroup string
+	// AlertRelayMaxInFlight is the relay's backpressure (ALERT_RELAY_MAX_IN_FLIGHT, default 20): it publishes no more
+	// while this many alerts are published and still undecided, so a backlog waits in the alert table, where priority
+	// alerts go first, not on the topic, where they would queue behind it.
+	AlertRelayMaxInFlight int
+	// AlertRelayPollInterval is the relay's backstop poll (ALERT_RELAY_POLL_INTERVAL, default 5s): a committed NEW alert
+	// and every decision wake it at once; this covers a missed notification, a retry falling due and room freed by
+	// another replica.
+	AlertRelayPollInterval time.Duration
 	// AlertProcessorMaxIncidentAge is how old an open incident may be and still take a new alert of its fingerprint (ALERT_PROCESSOR_MAX_INCIDENT_AGE, default 24h, 0 = no limit).
 	AlertProcessorMaxIncidentAge time.Duration
 
@@ -1103,7 +1116,10 @@ func Load() *Config {
 		AlertConsumerPriorityWeight:                   envIntInRange("ALERT_CONSUMER_PRIORITY_WEIGHT", 0, 0, maxAlertConsumerPriorityWeight),
 		AlertProcessorCallerID:                        strings.TrimSpace(os.Getenv("ALERT_PROCESSOR_CALLER_ID")),
 		AlertProcessorConcurrency:                     envIntInRange("ALERT_PROCESSOR_CONCURRENCY", 4, 1, maxAlertProcessorConcurrency),
-		AlertProcessorPollInterval:                    envDuration("ALERT_PROCESSOR_POLL_INTERVAL", 5*time.Second),
+		AlertEventHubTopic:                            getEnvOrDefault("ALERT_EVENT_HUB_TOPIC", "alert-events"),
+		AlertProcessorConsumerGroup:                   getEnvOrDefault("ALERT_PROCESSOR_CONSUMER_GROUP", "entity-service-alert-processor"),
+		AlertRelayMaxInFlight:                         envIntInRange("ALERT_RELAY_MAX_IN_FLIGHT", 20, 1, maxAlertRelayMaxInFlight),
+		AlertRelayPollInterval:                        envDuration("ALERT_RELAY_POLL_INTERVAL", 5*time.Second),
 		AlertProcessorMaxIncidentAge:                  envDurationOrOff("ALERT_PROCESSOR_MAX_INCIDENT_AGE", 24*time.Hour),
 		AlertSQSPriorityQueueURLs:                     queueList("ALERT_SQS_PRIORITY_QUEUE_URLS", "ALERT_SQS_PRIORITY_QUEUE_URL", ""),
 		AlertSQSStandardQueueURLs:                     queueList("ALERT_SQS_STANDARD_QUEUE_URLS", "ALERT_SQS_STANDARD_QUEUE_URL", ""),
@@ -1983,6 +1999,45 @@ const maxAlertProcessorConcurrency = 16
 // the fingerprint lock's transaction and the incident create it runs.
 const AlertProcessorConnectionsPerWorker = 2
 
+// AlertRelayConnections is the pool connections the alert relay holds at once: one short transaction to mark a batch.
+const AlertRelayConnections = 1
+
+// maxAlertRelayMaxInFlight bounds ALERT_RELAY_MAX_IN_FLIGHT; more than this lets a storm queue on the topic again.
+const maxAlertRelayMaxInFlight = 1000
+
+// validateAlertTopic checks the Event Hub the relay publishes alert.created to and the processor reads it from: the
+// connection, and a topic of its own, apart from every topic another reader consumes.
+func (c *Config) validateAlertTopic() error {
+	if c.EventHubBroker == "" || c.EventHubConnectionString == "" {
+		return fmt.Errorf("ALERTING_VERSION %s needs EVENT_HUB_BROKER and EVENT_HUB_CONNECTION_STRING: stored alerts reach the alert processor as alert.created events", c.AlertingVersion)
+	}
+	topic := strings.TrimSpace(c.AlertEventHubTopic)
+	if topic == "" {
+		return fmt.Errorf("ALERT_EVENT_HUB_TOPIC must not be empty")
+	}
+	if strings.TrimSpace(c.AlertProcessorConsumerGroup) == "" {
+		return fmt.Errorf("ALERT_PROCESSOR_CONSUMER_GROUP must not be empty")
+	}
+	// alert.created on a topic csm-notification-service or another reader consumes would be dead-lettered there.
+	others := map[string]string{
+		"EVENT_HUB_TOPIC":                    c.EventHubTopic,
+		"INCIDENT_EVENT_HUB_TOPIC":           c.IncidentEventHubTopic,
+		"SRE_EVENT_HUB_TOPIC":                c.SREEventHubTopic,
+		"CR_EVENT_HUB_TOPIC":                 c.CREventHubTopic,
+		"OUTAGE_EVENT_HUB_TOPIC":             c.OutageEventHubTopic,
+		"PROJECT_EVENT_HUB_TOPIC":            c.ProjectEventHubTopic,
+		"SALESFORCE_WRITE_EVENT_HUB_TOPIC":   c.SalesforceWriteEventHubTopic,
+		"SALESFORCE_WRITE_RESULTS_TOPIC":     c.SalesforceWriteResultsTopic,
+		"SALESFORCE_WRITE_RESULTS_DLQ_TOPIC": c.SalesforceWriteResultsDLQTopic,
+	}
+	for name, other := range others {
+		if other != "" && strings.EqualFold(strings.TrimSpace(other), topic) {
+			return fmt.Errorf("ALERT_EVENT_HUB_TOPIC must be its own: %s is %q too", name, other)
+		}
+	}
+	return nil
+}
+
 // AlertProcessorLive reports whether the alert processor raises incidents (v2); in hybrid it only records what it would do.
 func (c *Config) AlertProcessorLive() bool {
 	return c.AlertingVersion == AlertingVersionV2
@@ -2069,11 +2124,14 @@ func (c *Config) validateAlertConsumer() error {
 	if c.AlertConsumerConcurrency > maxAlertConsumerConcurrency || int32(c.AlertConsumerConcurrency) >= c.DBPoolMaxConns { // #nosec G115 -- capped at 64 just before
 		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY must be at most %d and below DB_POOL_MAX_CONNS (%d), got %d", maxAlertConsumerConcurrency, c.DBPoolMaxConns, c.AlertConsumerConcurrency)
 	}
-	// The consumer and the processor share the pool with API traffic, so together they must leave room for it.
-	used := c.AlertConsumerConcurrency + AlertProcessorConnectionsPerWorker*c.AlertProcessorConcurrency
+	if err := c.validateAlertTopic(); err != nil {
+		return err
+	}
+	// The consumer, the relay and the processor share the pool with API traffic, so together they must leave room for it.
+	used := c.AlertConsumerConcurrency + AlertRelayConnections + AlertProcessorConnectionsPerWorker*c.AlertProcessorConcurrency
 	if int64(used) >= int64(c.DBPoolMaxConns) {
-		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY (%d) plus %d connections per ALERT_PROCESSOR_CONCURRENCY worker (%d) must stay below DB_POOL_MAX_CONNS (%d)",
-			c.AlertConsumerConcurrency, AlertProcessorConnectionsPerWorker, c.AlertProcessorConcurrency, c.DBPoolMaxConns)
+		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY (%d) plus the relay's %d connection plus %d connections per ALERT_PROCESSOR_CONCURRENCY worker (%d) must stay below DB_POOL_MAX_CONNS (%d)",
+			c.AlertConsumerConcurrency, AlertRelayConnections, AlertProcessorConnectionsPerWorker, c.AlertProcessorConcurrency, c.DBPoolMaxConns)
 	}
 	// v2 raises real incidents, so it needs the user they are raised by; hybrid only records what it would do.
 	if c.AlertingVersion == AlertingVersionV2 && c.AlertProcessorCallerID == "" {

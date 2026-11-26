@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -32,13 +31,16 @@ import (
 // ErrAlertClaimLost means another processor took the alert over after this one's claim expired; nothing was written.
 var ErrAlertClaimLost = errors.New("alert claim lost")
 
-// AlertProcessorRepository is the alert processor's storage: it claims NEW alerts and records what was decided.
+// AlertProcessorRepository is the alert processor's storage: it claims the alert an alert.created event names and
+// records what was decided.
 type AlertProcessorRepository interface {
-	// ClaimAlerts claims up to limit waiting alerts for owner, for lease, priority tier first and oldest first.
-	ClaimAlerts(ctx context.Context, owner string, lease time.Duration, limit int) ([]domain.ClaimedAlert, error)
+	// ClaimAlert claims alert id for owner, for lease, when it is still waiting, published, due and not claimed by
+	// anyone else; false (and no error) when the event has nothing left to decide.
+	ClaimAlert(ctx context.Context, id, owner string, lease time.Duration) (domain.ClaimedAlert, bool, error)
 	// WithFingerprintLock runs fn in one transaction holding a lock on the fingerprint, so one fingerprint is decided by one worker at a time.
 	WithFingerprintLock(ctx context.Context, fingerprint string, fn func(AlertFingerprintTx) error) error
-	// RecordFailure counts a failed attempt; failed makes it final (FAILED), else the alert is retried at nextAttempt.
+	// RecordFailure counts a failed attempt; failed makes it final (FAILED), else the alert goes back to the outbox and
+	// the relay publishes it again at nextAttempt.
 	RecordFailure(ctx context.Context, alertID, owner, lastError string, nextAttempt time.Time, failed bool) error
 	// ServiceIDByName returns the newest service named name, ignoring case, as alert-core's service lookup picks it.
 	ServiceIDByName(ctx context.Context, name string) (string, bool, error)
@@ -55,21 +57,14 @@ type AlertFingerprintTx interface {
 	RecordOutcome(ctx context.Context, alertID, owner string, outcome domain.AlertProcessorOutcome) error
 }
 
-// claimAlertsQuery takes waiting alerts whose claim is free or expired and whose retry is due; an error row (a message
-// that could not be normalised) is never taken. SKIP LOCKED lets several workers and replicas claim at once without
-// waiting on each other. The first two conditions are alert_pending_idx's predicate (migration 0309).
-const claimAlertsQuery = `WITH picked AS (
-    SELECT id FROM alert
-    WHERE processed_on IS NULL AND error_reason IS NULL
-      AND (claim_expires_on IS NULL OR claim_expires_on < now())
-      AND (next_attempt_on IS NULL OR next_attempt_on <= now())
-    ORDER BY tier DESC, id
-    LIMIT $3
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE alert a SET claimed_by = $1, claim_expires_on = now() + make_interval(secs => $2)
-FROM picked WHERE a.id = picked.id
-RETURNING a.id, a.source, a.alert, a.fingerprint, a.tier, a.received_on, a.attempts`
+// claimAlertQuery takes the alert an event names while it is waiting, published (so not sent back to the outbox by a
+// failed attempt since), due, and its claim is free or expired. An error row (a message that could not be normalised)
+// is never taken. A redelivered or stale event therefore claims nothing.
+const claimAlertQuery = `UPDATE alert SET claimed_by = $2, claim_expires_on = now() + make_interval(secs => $3)
+WHERE id = $1 AND processed_on IS NULL AND error_reason IS NULL AND published_on IS NOT NULL
+  AND (next_attempt_on IS NULL OR next_attempt_on <= now())
+  AND (claim_expires_on IS NULL OR claim_expires_on < now())
+RETURNING id, source, alert, fingerprint, tier, received_on, attempts`
 
 // openIncidentByTagPrefixQuery repeats idx_incident_open_alert_correlation's predicate (migration 0310) word for word,
 // so the planner reads the small partial index instead of the incident table.
@@ -103,7 +98,8 @@ const recordAlertFailureQuery = `UPDATE alert SET
     status = CASE WHEN $5::boolean THEN 'FAILED' ELSE status END,
     processed_on = CASE WHEN $5::boolean THEN now() ELSE NULL END,
     claimed_by = NULL,
-    claim_expires_on = NULL
+    claim_expires_on = NULL,
+    published_on = NULL
 WHERE id = $1 AND claimed_by = $2 AND processed_on IS NULL`
 
 const serviceIDByNameQuery = `SELECT id::text FROM service WHERE LOWER(name) = LOWER($1) ORDER BY created_on DESC, id LIMIT 1`
@@ -128,40 +124,25 @@ func NewAlertProcessorRepository(db *Scoped) AlertProcessorRepository {
 	return &alertProcessorRepository{db: db}
 }
 
-func (r *alertProcessorRepository) ClaimAlerts(ctx context.Context, owner string, lease time.Duration, limit int) ([]domain.ClaimedAlert, error) {
-	if limit <= 0 {
-		return nil, nil
+func (r *alertProcessorRepository) ClaimAlert(ctx context.Context, id, owner string, lease time.Duration) (domain.ClaimedAlert, bool, error) {
+	var a domain.ClaimedAlert
+	var body []byte
+	var fingerprint *string
+	var tier string
+	err := r.db.QueryRow(ctx, claimAlertQuery, id, owner, lease.Seconds()).
+		Scan(&a.ID, &a.Source, &body, &fingerprint, &tier, &a.ReceivedOn, &a.Attempts)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ClaimedAlert{}, false, nil
 	}
-	rows, err := r.db.Query(ctx, claimAlertsQuery, owner, lease.Seconds(), limit)
 	if err != nil {
-		return nil, fmt.Errorf("claim alerts: %w", err)
+		return domain.ClaimedAlert{}, false, fmt.Errorf("claim alert: %w", err)
 	}
-	claimed, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ClaimedAlert, error) {
-		var a domain.ClaimedAlert
-		var body []byte
-		var fingerprint *string
-		var tier string
-		if err := row.Scan(&a.ID, &a.Source, &body, &fingerprint, &tier, &a.ReceivedOn, &a.Attempts); err != nil {
-			return a, err
-		}
-		a.Alert = body
-		if fingerprint != nil {
-			a.Fingerprint = *fingerprint
-		}
-		a.Tier = domain.AlertTier(tier)
-		return a, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("claim alerts: %w", err)
+	a.Alert = body
+	if fingerprint != nil {
+		a.Fingerprint = *fingerprint
 	}
-	// RETURNING has no order; work the priority tier first, then oldest first, as the claim chose them.
-	slices.SortFunc(claimed, func(a, b domain.ClaimedAlert) int {
-		if a.Tier != b.Tier {
-			return strings.Compare(string(b.Tier), string(a.Tier))
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
-	return claimed, nil
+	a.Tier = domain.AlertTier(tier)
+	return a, true, nil
 }
 
 func (r *alertProcessorRepository) WithFingerprintLock(ctx context.Context, fingerprint string, fn func(AlertFingerprintTx) error) error {

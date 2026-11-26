@@ -1716,6 +1716,10 @@ func alertConsumerConfig() Config {
 	c.AlertProcessorConcurrency = 4
 	c.AlertProcessorCallerID = "00000000-0000-4000-8000-000000000002"
 	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
+	c.EventHubBroker = "ns-example.servicebus.windows.net:9093"
+	c.EventHubConnectionString = "Endpoint=sb://ns-example.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=dGVzdA=="
+	c.AlertEventHubTopic = "alert-events"
+	c.AlertProcessorConsumerGroup = "entity-service-alert-processor"
 	return c
 }
 
@@ -1739,8 +1743,15 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "concurrency takes the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 20 }, wantErr: true},
 		{name: "concurrency above the cap", change: func(c *Config) { c.DBPoolMaxConns = 200; c.AlertConsumerConcurrency = 65 }, wantErr: true},
 		{name: "no default service", change: func(c *Config) { c.IncidentDefaultServiceID = "" }, wantErr: true},
-		{name: "consumer and processor together take the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 12 }, wantErr: true},
-		{name: "consumer and processor leave room in the pool", change: func(c *Config) { c.AlertConsumerConcurrency = 11 }},
+		{name: "consumer, relay and processor together take the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 11 }, wantErr: true},
+		{name: "consumer, relay and processor leave room in the pool", change: func(c *Config) { c.AlertConsumerConcurrency = 10 }},
+		{name: "no Event Hub broker", change: func(c *Config) { c.EventHubBroker = "" }, wantErr: true},
+		{name: "no Event Hub connection string", change: func(c *Config) { c.EventHubConnectionString = "" }, wantErr: true},
+		{name: "no alert topic", change: func(c *Config) { c.AlertEventHubTopic = " " }, wantErr: true},
+		{name: "no consumer group", change: func(c *Config) { c.AlertProcessorConsumerGroup = "" }, wantErr: true},
+		{name: "alert topic shared with sre-events", change: func(c *Config) { c.SREEventHubTopic = "Alert-Events" }, wantErr: true},
+		{name: "alert topic shared with the case topic", change: func(c *Config) { c.EventHubTopic = "alert-events" }, wantErr: true},
+		{name: "alert topic apart from the others", change: func(c *Config) { c.SREEventHubTopic, c.EventHubTopic = "sre-events", "case-events" }},
 		{name: "v2 without a caller", change: func(c *Config) { c.AlertingVersion = AlertingVersionV2; c.AlertProcessorCallerID = "" }, wantErr: true},
 		{name: "hybrid without a caller", change: func(c *Config) { c.AlertProcessorCallerID = "" }},
 		{name: "caller that is not a UUID", change: func(c *Config) { c.AlertProcessorCallerID = "alert-core" }, wantErr: true},
@@ -1759,7 +1770,7 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 
 func TestLoad_AlertConsumerDefaults(t *testing.T) {
 	for _, key := range []string{"ALERTING_VERSION", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_SERVICEBUS_PRIORITY_QUEUES", "ALERT_SERVICEBUS_STANDARD_QUEUES", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT",
-		"ALERT_PROCESSOR_CONCURRENCY", "ALERT_PROCESSOR_POLL_INTERVAL", "ALERT_PROCESSOR_MAX_INCIDENT_AGE"} {
+		"ALERT_PROCESSOR_CONCURRENCY", "ALERT_RELAY_POLL_INTERVAL", "ALERT_RELAY_MAX_IN_FLIGHT", "ALERT_EVENT_HUB_TOPIC", "ALERT_PROCESSOR_CONSUMER_GROUP", "ALERT_PROCESSOR_MAX_INCIDENT_AGE"} {
 		t.Setenv(key, "")
 	}
 	c := Load()
@@ -1772,9 +1783,13 @@ func TestLoad_AlertConsumerDefaults(t *testing.T) {
 	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 0 {
 		t.Errorf("concurrency %d and weight %d, want 8 and 0 (strict priority)", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
 	}
-	if c.AlertProcessorConcurrency != 4 || c.AlertProcessorPollInterval != 5*time.Second || c.AlertProcessorMaxIncidentAge != 24*time.Hour {
-		t.Errorf("processor concurrency %d, poll %s, max incident age %s; want 4, 5s and 24h",
-			c.AlertProcessorConcurrency, c.AlertProcessorPollInterval, c.AlertProcessorMaxIncidentAge)
+	if c.AlertProcessorConcurrency != 4 || c.AlertRelayPollInterval != 5*time.Second || c.AlertProcessorMaxIncidentAge != 24*time.Hour {
+		t.Errorf("processor concurrency %d, relay poll %s, max incident age %s; want 4, 5s and 24h",
+			c.AlertProcessorConcurrency, c.AlertRelayPollInterval, c.AlertProcessorMaxIncidentAge)
+	}
+	if c.AlertEventHubTopic != "alert-events" || c.AlertProcessorConsumerGroup != "entity-service-alert-processor" || c.AlertRelayMaxInFlight != 20 {
+		t.Errorf("alert topic %q, group %q, max in flight %d; want alert-events, entity-service-alert-processor and 20",
+			c.AlertEventHubTopic, c.AlertProcessorConsumerGroup, c.AlertRelayMaxInFlight)
 	}
 }
 
@@ -1787,6 +1802,12 @@ func TestLoad_AlertProcessorSettings(t *testing.T) {
 	}
 	if c.AlertProcessorConcurrency != 4 {
 		t.Errorf("concurrency = %d, want the default 4 for a value above the cap", c.AlertProcessorConcurrency)
+	}
+	for value, want := range map[string]int{"50": 50, "5000": 20, "0": 20} {
+		t.Setenv("ALERT_RELAY_MAX_IN_FLIGHT", value)
+		if got := Load().AlertRelayMaxInFlight; got != want {
+			t.Errorf("ALERT_RELAY_MAX_IN_FLIGHT=%s -> %d, want %d", value, got, want)
+		}
 	}
 }
 
