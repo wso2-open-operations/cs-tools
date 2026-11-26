@@ -27,12 +27,12 @@ import {
   MenuItem,
   Select,
   Skeleton,
-  TextField,
   Typography,
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
-import { escapeHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import Editor from "@components/rich-text-editor/Editor";
+import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { useGetCaseUpdateRequestTemplates } from "@features/csm-cases/api/useRequestCaseUpdate";
 import {
   REQUEST_UPDATE_STAGE_LABEL,
@@ -60,9 +60,10 @@ const STAGE_ORDER: BeCaseUpdateRequestStage[] = ["first", "second", "final", "cu
 /**
  * "Request update" dialog: nudge the customer for a response using one of
  * three fixed reminder templates (previewed read-only, exactly as they'll be
- * posted) or a custom message. Adapted from ServiceNow's equivalent "Add
- * Comment Options" modal for this case's own dedicated backend endpoint —
- * see `POST /cases/{id}/request-update` / `GET /case-update-request-templates`.
+ * posted) or a custom message written in the rich-text editor. Adapted from
+ * ServiceNow's equivalent "Add Comment Options" modal for this case's own
+ * dedicated backend endpoint — see `POST /cases/{id}/request-update` /
+ * `GET /case-update-request-templates`.
  */
 export default function RequestUpdateDialog({
   category,
@@ -73,6 +74,7 @@ export default function RequestUpdateDialog({
   const { data: templates, isLoading, isError } =
     useGetCaseUpdateRequestTemplates();
   const [stage, setStage] = useState<BeCaseUpdateRequestStage>("first");
+  // The custom message as the editor's HTML.
   const [customMessage, setCustomMessage] = useState("");
 
   const previewHtml = useMemo(() => {
@@ -80,29 +82,21 @@ export default function RequestUpdateDialog({
     return sanitizeRichTextHtml(templates[category][stage]);
   }, [templates, category, stage]);
 
-  const trimmedCustomMessage = customMessage.trim();
   // A custom message needs no template — it's still sendable even if the
   // template fetch failed or is still loading; only the three fixed stages
   // depend on the templates query having actually resolved.
   const canSubmit =
     stage === "custom"
-      ? trimmedCustomMessage.length > 0
+      ? !isBlankHtml(customMessage)
       : !isLoading && !isError && !!templates?.[category]?.[stage];
 
   const handleSave = (): void => {
     if (!canSubmit) return;
     if (stage === "custom") {
-      // The backend accepts any string as `customContent`, but every stored
-      // comment is rendered as HTML on read (see CsmCaseCommentBubble), so
-      // wrap the plain-text input in escaped paragraphs rather than sending
-      // it unescaped — a literal "<" in the engineer's message must not be
-      // interpreted as markup once it comes back through the feed.
-      const html = trimmedCustomMessage
-        .split(/\n+/)
-        .filter((line) => line.trim().length > 0)
-        .map((line) => `<p>${escapeHtml(line.trim())}</p>`)
-        .join("");
-      onSave({ stage, customContent: html });
+      // The backend posts `customContent` as the comment's HTML unchanged.
+      // Sanitize it with the same pass the comment feed applies on read, so
+      // nothing is stored that the feed would not show.
+      onSave({ stage, customContent: sanitizeRichTextHtml(customMessage) });
       return;
     }
     onSave({ stage });
@@ -146,17 +140,34 @@ export default function RequestUpdateDialog({
           )}
 
           {stage === "custom" ? (
-            <TextField
-              label="Custom message"
-              placeholder="Write the message to post on this case…"
-              multiline
-              minRows={4}
-              fullWidth
-              size="small"
-              value={customMessage}
-              onChange={(e) => setCustomMessage(e.target.value)}
-              disabled={isSaving}
-            />
+            <Box>
+              <Typography
+                id="request-update-custom-message-label"
+                component="label"
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mb: 0.5 }}
+              >
+                Custom message
+              </Typography>
+              <Box
+                role="group"
+                aria-labelledby="request-update-custom-message-label"
+              >
+                {/* No `onImageUpload`, so image insertion is off: this route
+                    posts the comment in one request, with no step that
+                    uploads images first. */}
+                <Editor
+                  value={customMessage}
+                  onChange={setCustomMessage}
+                  placeholder="Write the message to post on this case…"
+                  minHeight={120}
+                  maxHeight={320}
+                  toolbarVariant="full"
+                  disabled={isSaving}
+                />
+              </Box>
+            </Box>
           ) : isLoading ? (
             <Skeleton variant="rounded" width="100%" height={100} />
           ) : (
