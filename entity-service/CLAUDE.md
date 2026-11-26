@@ -250,7 +250,7 @@ Other tables are added in their own migration when wanted. The Salesforce ingest
   SELECT member::regrole FROM pg_auth_members WHERE roleid = 'csm_audit_reader'::regrole;
   ```
 
-- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), apply `0306` (the fail-open trigger, which `make migrate` does for a database that is behind), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
+- **A database that applied an older `0295`** keeps the old functions and INSERT-firing triggers, because an applied migration does not re-run. To convert it: re-run the edited `0295` (safe to repeat), apply `0306` (the fail-open trigger) and then `0307` (a delete as one row), in the schema that holds the audit log (`make migrate` runs both for a database that is behind and skips one already recorded in `csm_migration_applied_migration`; a database that ran the dist script by hand may not have them recorded), rebuild the other tables' triggers, then redo the grants above. Read the registry into an array first: a loop still reading `audit_config` fails on its own row ("being used by active queries").
 
   ```sql
   DO $$

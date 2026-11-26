@@ -29,9 +29,18 @@
 -- message when that is not the schema holding the audit log (a session whose
 -- search_path points elsewhere), instead of creating a second, unused copy there.
 DO $$
+DECLARE
+    found_in TEXT;
 BEGIN
     IF to_regprocedure(format('%I.audit_log_row_change()', current_schema())) IS NULL THEN
-        RAISE EXCEPTION 'audit: audit_log_row_change() is not in schema "%". SET search_path to the schema that holds the audit log (the one 0295 ran in) and run this again.', current_schema();
+        SELECT string_agg(DISTINCT n.nspname, ', ' ORDER BY n.nspname) INTO found_in
+          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE p.proname = 'audit_log_row_change' AND p.pronargs = 0;
+        IF found_in IS NULL THEN
+            RAISE EXCEPTION 'audit: audit_log_row_change() exists in no schema of this database. Apply 0295 first.';
+        END IF;
+        RAISE EXCEPTION 'audit: audit_log_row_change() is not in the current schema "%". It is in: %. SET search_path TO <that schema> and run this again.',
+            current_schema(), found_in;
     END IF;
 END $$;
 
