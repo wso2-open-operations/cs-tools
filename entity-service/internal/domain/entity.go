@@ -10885,9 +10885,9 @@ type NewAlert struct {
 	// ID is the row's UUID, which the database assigns; Number is the ALT id people quote, such as ALT000000042.
 	ID     string
 	Number string
-	// Alert is the normalised alert; each of its fields is a column.
+	// Alert is the normalised alert; each stored field is a column.
 	Alert model.Alert
-	Tier AlertTier
+	Tier  AlertTier
 	// RawBody is the message's body as the source sent it, set on the message's first alert only.
 	RawBody    []byte
 	ReceivedOn time.Time
