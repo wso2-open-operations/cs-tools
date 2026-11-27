@@ -37,7 +37,6 @@ const mockedGet = vi.mocked(useGetSreAlert);
 const ALERT: BeSreAlertDetail = {
   id: "01a21bb0-c1a4-7954-8ee2-f7cb2d4b63f7",
   number: "ALT000000042",
-  route: "azure",
   source: "Azure Monitor",
   service: "svc-a",
   environment: "prod",
@@ -60,10 +59,6 @@ const ALERT: BeSreAlertDetail = {
   uniqueIdentifier: "alarm-7",
   description: "CPU above 90% for 5 minutes",
   assignmentGroup: "",
-  sourceTopic: "",
-  sourceAccount: "",
-  messageId: "servicebus/priority-queue/abc",
-  messageIndex: 0,
   rawBody: '{"alarm":"cpu","value":93}',
 };
 
@@ -144,16 +139,18 @@ describe("SreAlertDetailPage", () => {
     renderPage();
     const alertSection = within(screen.getByRole("region", { name: "Alert" }));
     expect(alertSection.getByText("Azure Monitor")).toBeInTheDocument();
-    expect(alertSection.getByText("azure")).toBeInTheDocument();
     expect(alertSection.getByText("svc-a")).toBeInTheDocument();
     expect(alertSection.getByText("alarm-7")).toBeInTheDocument();
     expect(alertSection.getByText("CPU above 90% for 5 minutes")).toBeInTheDocument();
-    // Assignment group and source topic / account are empty.
-    expect(alertSection.getAllByText("—")).toHaveLength(2);
+    // The assignment group is empty.
+    expect(alertSection.getAllByText("—")).toHaveLength(1);
+    // The gateway route, source topic and account, and the queue message id and index are not stored, so not shown.
+    expect(screen.queryByText("Route")).not.toBeInTheDocument();
+    expect(screen.queryByText("Message ID")).not.toBeInTheDocument();
 
     const delivery = within(screen.getByRole("region", { name: "Delivery" }));
-    expect(delivery.getByText("servicebus/priority-queue/abc")).toBeInTheDocument();
-    expect(delivery.getByText("0")).toBeInTheDocument();
+    expect(delivery.getByText("Received on")).toBeInTheDocument();
+    expect(delivery.getByText("Created on")).toBeInTheDocument();
   });
 
   it("shows the linked incident as a related-record card", () => {

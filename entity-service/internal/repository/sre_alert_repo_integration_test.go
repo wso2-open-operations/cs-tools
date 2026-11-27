@@ -35,29 +35,29 @@ func TestSreAlertRepositoryIntegration_SearchesAndGets(t *testing.T) {
 	}
 	seen := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
 	for i, number := range numbers {
-		row := integrationAlert(number, "it-alert-sre-"+number, 0)
+		row := integrationAlert(number, "it-alert-sre-svc")
 		row.RawBody = []byte(`{"n":` + string(rune('0'+i)) + `}`)
 		row.ReceivedOn = seen.Add(time.Duration(i) * time.Minute)
-		row.Alert.Service = "it-sre-svc"
+		row.Alert.Service = "it-alert-sre-svc"
 		row.Alert.Environment = []string{"prod", "staging", "prod"}[i]
 		row.Alert.Description = "disk 100% full"
-		if _, _, err := store.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
+		if _, err := store.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	repo := NewSreAlertRepository(NewScoped(pool))
 
-	items, total, err := repo.Search(ctx, domain.SreAlertSearchFilters{Services: []string{"it-sre-svc"}, Environments: []string{"prod"}},
+	items, total, err := repo.Search(ctx, domain.SreAlertSearchFilters{Services: []string{"it-alert-sre-svc"}, Environments: []string{"prod"}},
 		domain.SreAlertSort{Field: "receivedOn", Order: "desc"}, 0, 10)
 	if err != nil || total != 2 || len(items) != 2 || items[0].Number != numbers[2] || items[1].Number != numbers[0] || items[0].Incident != nil || len(items[0].ID) != 36 {
 		t.Fatalf("Search = %+v total %d, %v; want the two prod alerts newest first with UUIDs and no incident", items, total, err)
 	}
 	// % in the search matches itself, not anything.
-	if _, total, err := repo.Search(ctx, domain.SreAlertSearchFilters{SearchQuery: "100%", Services: []string{"it-sre-svc"}},
+	if _, total, err := repo.Search(ctx, domain.SreAlertSearchFilters{SearchQuery: "100%", Services: []string{"it-alert-sre-svc"}},
 		domain.SreAlertSort{}, 0, 10); err != nil || total != 3 {
 		t.Fatalf("search 100%% matched %d, %v; want 3", total, err)
 	}
-	if _, total, err := repo.Search(ctx, domain.SreAlertSearchFilters{SearchQuery: "10_%", Services: []string{"it-sre-svc"}},
+	if _, total, err := repo.Search(ctx, domain.SreAlertSearchFilters{SearchQuery: "10_%", Services: []string{"it-alert-sre-svc"}},
 		domain.SreAlertSort{}, 0, 10); err != nil || total != 0 {
 		t.Fatalf("search 10_%% matched %d, %v; want 0, since _ is literal", total, err)
 	}
@@ -87,7 +87,7 @@ func TestSreAlertRepositoryIntegration_SearchesAndGets(t *testing.T) {
 	}
 
 	facets, err := repo.Facets(ctx, seen.Add(-time.Hour), 200)
-	if err != nil || !slices.Contains(facets.Environments, "staging") || !slices.Contains(facets.Services, "it-sre-svc") {
+	if err != nil || !slices.Contains(facets.Environments, "staging") || !slices.Contains(facets.Services, "it-alert-sre-svc") {
 		t.Fatalf("Facets = %+v, %v; want the stored environments and services", facets, err)
 	}
 }

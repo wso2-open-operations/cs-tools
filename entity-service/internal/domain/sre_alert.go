@@ -72,7 +72,6 @@ type SreAlertIncidentRef struct {
 type SreAlertListItem struct {
 	ID          string               `json:"id"`
 	Number      string               `json:"number"`
-	Route       string               `json:"route"`
 	Source      string               `json:"source"`
 	Service     string               `json:"service"`
 	Environment string               `json:"environment"`
@@ -99,10 +98,6 @@ type SreAlertDetail struct {
 	UniqueIdentifier string `json:"uniqueIdentifier"`
 	Description      string `json:"description"`
 	AssignmentGroup  string `json:"assignmentGroup"`
-	SourceTopic      string `json:"sourceTopic"`
-	SourceAccount    string `json:"sourceAccount"`
-	MessageID        string `json:"messageId"`
-	MessageIndex     int    `json:"messageIndex"`
 	// RawBody is the source's request body as text; only the message's first alert keeps it.
 	RawBody *string `json:"rawBody"`
 }

@@ -47,7 +47,6 @@ const mockedFacets = vi.mocked(useSreAlertFacets);
 const LINKED: BeSreAlert = {
   id: "01a21bb0-c1a4-7954-8ee2-f7cb2d4b63f7",
   number: "ALT000000042",
-  route: "azure",
   source: "Azure Monitor",
   service: "svc-a",
   environment: "prod",

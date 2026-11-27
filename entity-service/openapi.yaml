@@ -38063,7 +38063,7 @@ components:
               type: integer
     SreAlertListItem:
       type: object
-      required: [id, number, route, source, service, environment, metricName, severity, category, tier, receivedOn, createdOn, incident]
+      required: [id, number, source, service, environment, metricName, severity, category, tier, receivedOn, createdOn, incident]
       properties:
         id:
           type: string
@@ -38071,9 +38071,6 @@ components:
         number:
           type: string
           example: ALT000000042
-        route:
-          type: string
-          description: The gateway route the alert arrived on.
         source:
           type: string
         service:
@@ -38144,14 +38141,6 @@ components:
               type: string
             assignmentGroup:
               type: string
-            sourceTopic:
-              type: string
-            sourceAccount:
-              type: string
-            messageId:
-              type: string
-            messageIndex:
-              type: integer
             rawBody:
               type: string
               nullable: true

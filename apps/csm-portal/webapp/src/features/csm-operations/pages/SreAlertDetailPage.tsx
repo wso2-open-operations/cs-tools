@@ -303,7 +303,6 @@ export default function SreAlertDetailPage(): JSX.Element {
 
 function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactNode }): JSX.Element {
   const location = useLocation();
-  const source = [alert.sourceTopic, alert.sourceAccount].filter(Boolean).join(" / ");
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       {back}
@@ -330,7 +329,6 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
 
       <Section title="Alert">
         <Field label="Source">{alert.source}</Field>
-        <Field label="Route">{alert.route}</Field>
         <Field label="Service">{alert.service}</Field>
         <Field label="Environment">{alert.environment}</Field>
         <Field label="Metric">{alert.metricName}</Field>
@@ -339,7 +337,6 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
           {alert.uniqueIdentifier}
         </Field>
         <Field label="Assignment group">{alert.assignmentGroup}</Field>
-        <Field label="Source topic / account">{source}</Field>
         <Box sx={{ gridColumn: "1 / -1" }}>
           <Field label="Description">{alert.description}</Field>
         </Box>
@@ -348,10 +345,6 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
       <Section title="Delivery">
         <Field label="Received on">{formatDateTime(alert.receivedOn)}</Field>
         <Field label="Created on">{formatDateTime(alert.createdOn)}</Field>
-        <Field label="Message ID" mono>
-          {alert.messageId}
-        </Field>
-        <Field label="Message index">{String(alert.messageIndex)}</Field>
       </Section>
 
       <LinkedIncidentCard

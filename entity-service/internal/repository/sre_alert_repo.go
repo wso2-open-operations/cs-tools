@@ -57,7 +57,7 @@ func NewSreAlertRepository(db *Scoped) SreAlertRepository {
 }
 
 // sreAlertListColumns are the columns of a list item, then its incident's (NULL when the alert has none); scanSreAlert reads them.
-const sreAlertListColumns = `a.id::text, a.number, coalesce(a.route, ''), coalesce(a.source, ''), coalesce(a.service, ''), coalesce(a.environment, ''),
+const sreAlertListColumns = `a.id::text, a.number, coalesce(a.source, ''), coalesce(a.service, ''), coalesce(a.environment, ''),
 coalesce(a.metric_name, ''), coalesce(a.severity, ''), coalesce(a.category, ''), a.tier, a.received_on, a.created_on,
 i.id::text, w.number, w.subject, i.state::text, i.priority::text, i.impact::text, i.urgency::text, i.opened_on`
 
@@ -90,7 +90,7 @@ func (c *sreAlertIncidentCols) ref() *domain.SreAlertIncidentRef {
 }
 
 func sreAlertListDests(item *domain.SreAlertListItem, inc *sreAlertIncidentCols) []any {
-	return append([]any{&item.ID, &item.Number, &item.Route, &item.Source, &item.Service, &item.Environment,
+	return append([]any{&item.ID, &item.Number, &item.Source, &item.Service, &item.Environment,
 		&item.MetricName, &item.Severity, &item.Category, &item.Tier, &item.ReceivedOn, &item.CreatedOn}, inc.dests()...)
 }
 
@@ -196,9 +196,9 @@ func (r *sreAlertRepository) Get(ctx context.Context, idOrNumber string) (*domai
 	var inc sreAlertIncidentCols
 	var raw []byte
 	dests := append(sreAlertListDests(&d.SreAlertListItem, &inc), &d.UniqueIdentifier, &d.Description, &d.AssignmentGroup,
-		&d.SourceTopic, &d.SourceAccount, &d.MessageID, &d.MessageIndex, &raw)
+		&raw)
 	err := r.db.QueryRow(ctx, `SELECT `+sreAlertListColumns+`, coalesce(a.unique_identifier, ''), coalesce(a.description, ''),
-coalesce(a.assignment_group, ''), coalesce(a.source_topic, ''), coalesce(a.source_account, ''), a.message_id, a.message_index, a.raw_body`+
+coalesce(a.assignment_group, ''), a.raw_body`+
 		sreAlertFrom+` WHERE `+match, idOrNumber).Scan(dests...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

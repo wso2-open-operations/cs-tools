@@ -4034,7 +4034,6 @@ export interface BeSreAlertSearchPayload {
 export interface BeSreAlert {
   id: string;
   number: string;
-  route: string;
   source: string;
   service: string;
   environment: string;
@@ -4065,10 +4064,6 @@ export interface BeSreAlertDetail extends BeSreAlert {
   uniqueIdentifier: string;
   description: string;
   assignmentGroup: string;
-  sourceTopic: string;
-  sourceAccount: string;
-  messageId: string;
-  messageIndex: number;
   /** The source's request body as text; null on every alert of a message but the first. */
   rawBody: string | null;
 }
