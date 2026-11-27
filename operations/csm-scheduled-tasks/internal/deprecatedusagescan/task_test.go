@@ -100,7 +100,7 @@ func TestSendReportSendsOnTheFirstMondayToOwnersAndLeadership(t *testing.T) {
 	if reports.gotAsOf != "2026-11-02" {
 		t.Errorf("asOf = %q, want the run date in Colombo", reports.gotAsOf)
 	}
-	if email.calls != 1 || email.subject != deprecatedusagescan.Subject {
+	if email.calls != 1 || email.subject != "Deprecated Product Version Usage Monthly Report - November 2026" {
 		t.Fatalf("calls=%d subject=%q", email.calls, email.subject)
 	}
 	wantTo := []string{"leadership@example.com", "am.one@example.com", "TO.One@example.com"}
@@ -329,5 +329,36 @@ func TestSendReportDebugListWithoutRecipientsStillSends(t *testing.T) {
 	}
 	if !strings.Contains(email.subject, "[Test copy]") {
 		t.Errorf("subject = %q, want a test copy", email.subject)
+	}
+}
+
+// The mail subject carries the report's month, so each month's mail is its
+// own thread: on a normal send, on the "no usage" note, and on a retry.
+func TestSendReportSubjectNamesTheMonth(t *testing.T) {
+	if got, want := deprecatedusagescan.SubjectFor(time.Date(2026, 12, 7, 0, 0, 0, 0, time.UTC)), "Deprecated Product Version Usage Monthly Report - December 2026"; got != want {
+		t.Errorf("SubjectFor = %q, want %q", got, want)
+	}
+
+	email := &fakeEmail{}
+	handler := deprecatedusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.subject != "Deprecated Product Version Usage Monthly Report - December 2026" {
+		t.Fatalf("report: err=%v subject=%q", err, email.subject)
+	}
+
+	email = &fakeEmail{}
+	handler = deprecatedusagescan.SendReport(&fakeReports{report: deprecatedusagereport.Report{AsOf: "2026-12-07", Regions: []deprecatedusagereport.Region{}}}, email, []string{"lead@example.com"}, nil,
+		deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.subject != "Deprecated Product Version Usage Monthly Report - December 2026" {
+		t.Fatalf("no-usage note: err=%v subject=%q", err, email.subject)
+	}
+
+	// The report is dated the day it runs; a run later in the first week
+	// (9 December, claimed 7 December) is still December.
+	email = &fakeEmail{}
+	handler = deprecatedusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		deprecatedusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 9), Anchor: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.subject != "Deprecated Product Version Usage Monthly Report - December 2026" {
+		t.Fatalf("retry: err=%v subject=%q", err, email.subject)
 	}
 }

@@ -100,7 +100,7 @@ func TestSendReportSendsOnTheFirstMondayToOwnersAndLeadership(t *testing.T) {
 	if reports.gotAsOf != "2026-11-02" {
 		t.Errorf("asOf = %q, want the run date in Colombo", reports.gotAsOf)
 	}
-	if email.calls != 1 || email.subject != eolusagescan.Subject {
+	if email.calls != 1 || email.subject != "EOL Product Version Usage Monthly Report - November 2026" {
 		t.Fatalf("calls=%d subject=%q", email.calls, email.subject)
 	}
 	wantTo := []string{"leadership@example.com", "am.one@example.com", "TO.One@example.com"}
@@ -328,5 +328,36 @@ func TestSendReportDebugListWithoutRecipientsStillSends(t *testing.T) {
 	}
 	if !strings.Contains(email.subject, "[Test copy]") {
 		t.Errorf("subject = %q, want a test copy", email.subject)
+	}
+}
+
+// The mail subject carries the report's month, so each month's mail is its
+// own thread: on a normal send, on the "no usage" note, and on a retry.
+func TestSendReportSubjectNamesTheMonth(t *testing.T) {
+	if got, want := eolusagescan.SubjectFor(time.Date(2026, 12, 7, 0, 0, 0, 0, time.UTC)), "EOL Product Version Usage Monthly Report - December 2026"; got != want {
+		t.Errorf("SubjectFor = %q, want %q", got, want)
+	}
+
+	email := &fakeEmail{}
+	handler := eolusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.subject != "EOL Product Version Usage Monthly Report - December 2026" {
+		t.Fatalf("report: err=%v subject=%q", err, email.subject)
+	}
+
+	email = &fakeEmail{}
+	handler = eolusagescan.SendReport(&fakeReports{report: eolusagereport.Report{AsOf: "2026-12-07", Regions: []eolusagereport.Region{}}}, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.subject != "EOL Product Version Usage Monthly Report - December 2026" {
+		t.Fatalf("no-usage note: err=%v subject=%q", err, email.subject)
+	}
+
+	// A run retried later in the month's first week (claimed 7 December,
+	// clock 9 December) keeps December.
+	email = &fakeEmail{}
+	handler = eolusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 9), Anchor: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.subject != "EOL Product Version Usage Monthly Report - December 2026" {
+		t.Fatalf("retry: err=%v subject=%q", err, email.subject)
 	}
 }
