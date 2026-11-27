@@ -4062,12 +4062,20 @@ export interface BeSreAlertIncident {
   openedOn: string | null;
 }
 
+/** A field an SRE alert's payload did not carry, and the default its source's transform used instead. */
+export interface BeSreAlertDefaultedField {
+  field: "service" | "metric_name" | "severity" | "category" | "environment";
+  value: string;
+}
+
 export interface BeSreAlertDetail extends BeSreAlert {
   uniqueIdentifier: string;
   /** Null when the source sent none. */
   description: string | null;
   /** Null when the source sent none. */
   assignmentGroup: string | null;
+  /** The fields the payload did not carry and the default used for each, in the order filled; empty when it carried them all. */
+  defaultedFields: BeSreAlertDefaultedField[];
   /** The source's request body as text; null on every alert of a message but the first. */
   rawBody: string | null;
 }

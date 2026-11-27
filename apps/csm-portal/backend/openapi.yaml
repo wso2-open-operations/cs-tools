@@ -24319,6 +24319,18 @@ components:
               type: string
               nullable: true
               description: Null when the source sent none.
+            defaultedFields:
+              type: array
+              description: The fields the payload did not carry and the default the source's transform used for each, in the order filled; empty when the payload carried them all.
+              items:
+                type: object
+                required: [field, value]
+                properties:
+                  field:
+                    type: string
+                    enum: [service, metric_name, severity, category, environment]
+                  value:
+                    type: string
             rawBody:
               type: string
               nullable: true

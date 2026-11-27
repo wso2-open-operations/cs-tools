@@ -14,14 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, IconButton, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, ArrowUpRight, Check, Copy, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
-import { Link as RouterLink, useLocation, useParams } from "react-router";
+import { Alert, AlertTitle, Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft, ArrowUpRight, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
+import { useEffect, useMemo, type JSX, type ReactNode } from "react";
+import { Link as RouterLink, useLocation, useNavigate, useParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
-import type { BeSreAlertDetail, BeSreAlertIncident } from "@api/backend/types";
+import type { BeSreAlertDefaultedField, BeSreAlertDetail, BeSreAlertIncident } from "@api/backend/types";
 import {
   incidentPriorityColor,
   incidentPriorityLabel,
@@ -32,7 +32,7 @@ import { incidentPriorityBadge } from "@features/csm-operations/utils/incidentPr
 import { useGetSreAlert } from "@features/csm-operations/api/useSreAlerts";
 import {
   SRE_ALERTS_LIST_PATH,
-  sreAlertIncidentLevelLabel,
+  sreAlertDefaultedMessage,
   sreAlertIncidentState,
   sreAlertSeverityColor,
   sreAlertSeverityLabel,
@@ -43,56 +43,55 @@ function formatDateTime(value: string | null | undefined): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "medium" }) ?? "—";
 }
 
-/** One labelled value in the Overview grid, styled like the incident page's. */
-function Field({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }): JSX.Element {
+/** One labelled value in the Overview grid, styled like the incident page's; `defaulted` marks a value the payload did not carry. */
+function Field({
+  label,
+  children,
+  mono,
+  defaulted,
+}: {
+  label: string;
+  children: ReactNode;
+  mono?: boolean;
+  defaulted?: boolean;
+}): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
       <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
         {label}
       </Typography>
-      <Typography
-        component="div"
-        variant="body2"
-        sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", ...(mono && { fontFamily: "monospace" }) }}
-      >
-        {children === "" || children === null || children === undefined ? "—" : children}
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", minWidth: 0 }}>
+        <Typography
+          component="div"
+          variant="body2"
+          sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", ...(mono && { fontFamily: "monospace" }) }}
+        >
+          {children === "" || children === null || children === undefined ? "—" : children}
+        </Typography>
+        {defaulted && (
+          <Chip size="small" variant="outlined" label="Default" title="Not in the payload: the source's default" sx={{ height: 20, fontSize: 11 }} />
+        )}
+      </Box>
     </Box>
   );
 }
 
-/** The alert's UUID with a copy button; the button confirms for a moment, or says the browser refused. */
-function CopyableId({ id }: { id: string }): JSX.Element {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  useEffect(() => {
-    if (state === "idle") return;
-    const t = setTimeout(() => setState("idle"), 2000);
-    return () => clearTimeout(t);
-  }, [state]);
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(id);
-      setState("copied");
-    } catch {
-      setState("failed");
-    }
-  };
-  const tooltip = state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy. Select the ID instead." : "Copy ID";
+/**
+ * The fields the alert's payload did not carry, each with the default its
+ * source's transform used, one line per field in the same words.
+ */
+function DefaultedFieldsNotice({ fields }: { fields: BeSreAlertDefaultedField[] }): JSX.Element | null {
+  if (fields.length === 0) return null;
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, minWidth: 0 }}>
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        sx={{ fontFamily: "monospace", wordBreak: "break-all" }}
-        data-testid="sre-alert-uuid"
-      >
-        {id}
-      </Typography>
-      <Tooltip title={tooltip}>
-        <IconButton size="small" aria-label="Copy alert ID" onClick={() => void copy()}>
-          {state === "copied" ? <Check size={14} /> : <Copy size={14} />}
-        </IconButton>
-      </Tooltip>
+    <Box component="section" aria-label="Defaults used">
+      <Alert severity="info" role="note">
+        <AlertTitle>Some fields were filled with defaults</AlertTitle>
+        <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+          {fields.map((d) => (
+            <li key={d.field}>{sreAlertDefaultedMessage(d)}</li>
+          ))}
+        </Box>
+      </Alert>
     </Box>
   );
 }
@@ -115,7 +114,7 @@ function IncidentPriority({ priority }: { priority: string | null }): JSX.Elemen
 /**
  * The Overview's Incident section, laid out like the incident page's Runbook
  * section: the incident this alert is linked to (alert.incident_id), with its
- * state, priority, impact, urgency and opened date, and a button that opens
+ * state, priority and opened date, and a button that opens
  * it (its Back returns to this alert).
  */
 function AlertIncidentSection({
@@ -134,11 +133,6 @@ function AlertIncidentSection({
     );
   } else {
     const state = sreAlertIncidentState(incident.state);
-    const details = [
-      `Impact ${sreAlertIncidentLevelLabel(incident.impact) || "—"}`,
-      `Urgency ${sreAlertIncidentLevelLabel(incident.urgency) || "—"}`,
-      `Opened ${formatDateTime(incident.openedOn)}`,
-    ].join(" · ");
     body = (
       <Box
         sx={{
@@ -166,7 +160,7 @@ function AlertIncidentSection({
               {state && <Chip size="small" color={incidentStateColor(state)} label={incidentStateLabel(state)} />}
               <IncidentPriority priority={incident.priority} />
               <Typography variant="body2" color="text.secondary">
-                {details}
+                Opened {formatDateTime(incident.openedOn)}
               </Typography>
             </Box>
           </Box>
@@ -298,10 +292,11 @@ function RawPayload({ rawBody }: { rawBody: string | null }): JSX.Element {
 }
 
 /**
- * One SRE alert (`/operations/alerts/:id`, by UUID or ALT number), laid out
- * like an incident's page: its number and UUID, what fired as the heading,
- * the description, an Overview of its fields with the incident it is linked
- * to, and the source's raw payload. Back returns to `state.from` (the
+ * One SRE alert (`/operations/alerts/:id`, by UUID or ALT number; an ALT
+ * number in the address is replaced by the UUID), laid out
+ * like an incident's page: its number, what fired as the heading, which
+ * fields were filled with defaults, an Overview of its fields with the
+ * incident it is linked to, and the source's raw payload. Back returns to `state.from` (the
  * filtered list it was opened from) with that page's own state.
  */
 export default function SreAlertDetailPage(): JSX.Element {
@@ -312,6 +307,17 @@ export default function SreAlertDetailPage(): JSX.Element {
   const backTarget = nav?.from ?? SRE_ALERTS_LIST_PATH;
   const backState = nav?.parentState ?? undefined;
   const { data: alert, isLoading, isError, error } = useGetSreAlert(id);
+
+  // The address always shows the alert's UUID: one opened by its ALT number is swapped in place, keeping its Back state.
+  const replaceRoute = useNavigate();
+  useEffect(() => {
+    if (alert && id && id !== alert.id) {
+      replaceRoute(
+        { pathname: `${SRE_ALERTS_LIST_PATH}/${encodeURIComponent(alert.id)}`, search: location.search, hash: location.hash },
+        { replace: true, state: location.state },
+      );
+    }
+  }, [alert, id, location.search, location.hash, location.state, replaceRoute]);
 
   const back = (
     <Button
@@ -351,6 +357,7 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
   const location = useLocation();
   // The heading names what fired, as an incident's subject does.
   const title = [alert.metricName, alert.service].filter(Boolean).join(" on ") || "Alert";
+  const defaulted = new Set((alert.defaultedFields ?? []).map((d) => d.field));
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       {back}
@@ -360,10 +367,13 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
           <Typography variant="h6" sx={{ fontFamily: "monospace", fontWeight: 700, letterSpacing: 0.2, lineHeight: 1.2 }}>
             {alert.number || alert.id}
           </Typography>
-          <CopyableId id={alert.id} />
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
             {alert.severity && (
-              <Chip size="small" color={sreAlertSeverityColor(alert.severity)} label={sreAlertSeverityLabel(alert.severity)} />
+              <Chip
+                size="small"
+                color={sreAlertSeverityColor(alert.severity)}
+                label={`${sreAlertSeverityLabel(alert.severity)}${defaulted.has("severity") ? " (default)" : ""}`}
+              />
             )}
             {alert.tier && (
               <Chip
@@ -378,14 +388,7 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
         <Typography variant="h5">{title}</Typography>
       </Box>
 
-      {alert.description && (
-        <Card component="section" aria-label="Description" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1 }}>
-          <Typography variant="subtitle2">Description</Typography>
-          <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {alert.description}
-          </Typography>
-        </Card>
-      )}
+      <DefaultedFieldsNotice fields={alert.defaultedFields ?? []} />
 
       <Card component="section" aria-label="Overview" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Overview</Typography>
@@ -401,10 +404,18 @@ function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactN
           }}
         >
           <Field label="Source">{alert.source}</Field>
-          <Field label="Service">{alert.service}</Field>
-          <Field label="Environment">{alert.environment}</Field>
-          <Field label="Metric">{alert.metricName}</Field>
-          <Field label="Category">{alert.category}</Field>
+          <Field label="Service" defaulted={defaulted.has("service")}>
+            {alert.service}
+          </Field>
+          <Field label="Environment" defaulted={defaulted.has("environment")}>
+            {alert.environment}
+          </Field>
+          <Field label="Metric" defaulted={defaulted.has("metric_name")}>
+            {alert.metricName}
+          </Field>
+          <Field label="Category" defaulted={defaulted.has("category")}>
+            {alert.category}
+          </Field>
           <Field label="Assignment group">{alert.assignmentGroup}</Field>
           <Field label="Unique identifier" mono>
             {alert.uniqueIdentifier}

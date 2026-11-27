@@ -59,6 +59,7 @@ const ALERT: BeSreAlertDetail = {
   uniqueIdentifier: "alarm-7",
   description: "CPU above 90% for 5 minutes",
   assignmentGroup: "",
+  defaultedFields: [],
   rawBody: '{"alarm":"cpu","value":93}',
 };
 
@@ -98,53 +99,91 @@ function renderPage(entry: { pathname: string; state?: unknown } = { pathname: `
   );
 }
 
-const writeText = vi.fn();
-
 beforeEach(() => {
   mockedGet.mockReset();
-  writeText.mockReset();
-  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 });
 
 describe("SreAlertDetailPage", () => {
+  it("shows the alert's UUID in the address when opened by its ALT number, keeping its Back state", async () => {
+    mockAlert({ data: ALERT });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[{ pathname: "/operations/alerts/ALT000000042", state: { from: "/operations/alerts?altTiers=priority" } }]}>
+          <Routes>
+            <Route
+              path="/operations/alerts/:id"
+              element={
+                <>
+                  <SreAlertDetailPage />
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe(
+        `/operations/alerts/${ALERT.id}{"from":"/operations/alerts?altTiers=priority"}`,
+      ),
+    );
+  });
+
   it("looks the alert up by the id in the path", () => {
     mockAlert({ data: ALERT });
     renderPage({ pathname: "/operations/alerts/ALT000000042" });
     expect(mockedGet).toHaveBeenCalledWith("ALT000000042");
   });
 
-  it("shows the ALT number, the UUID, and the severity and tier chips in the header", () => {
+  it("shows the ALT number and the severity and tier chips in the header, not the UUID", () => {
     mockAlert({ data: ALERT });
     renderPage();
     expect(screen.getByRole("heading", { name: "ALT000000042" })).toBeInTheDocument();
-    expect(screen.getByTestId("sre-alert-uuid")).toHaveTextContent(ALERT.id);
     expect(screen.getByText("Critical").closest(".MuiChip-root")?.className).toMatch(/colorError/);
     expect(screen.getByText("Priority tier")).toBeInTheDocument();
+    expect(screen.queryByText(ALERT.id)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy alert ID" })).not.toBeInTheDocument();
   });
 
-  it("copies the UUID", async () => {
-    writeText.mockResolvedValue(undefined);
+  it("says which fields were filled with defaults, one line each, and marks them", () => {
+    mockAlert({
+      data: {
+        ...ALERT,
+        category: "Service Interruption",
+        defaultedFields: [
+          { field: "severity", value: "Critical" },
+          { field: "category", value: "Service Interruption" },
+        ],
+      },
+    });
+    renderPage();
+    const notice = within(screen.getByRole("region", { name: "Defaults used" }));
+    expect(notice.getByText("Some fields were filled with defaults")).toBeInTheDocument();
+    expect(notice.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      'Severity was not in the payload, so the default "Critical" was used.',
+      'Category was not in the payload, so the default "Service Interruption" was used.',
+    ]);
+    expect(screen.getByText("Critical (default)")).toBeInTheDocument();
+    const overview = within(screen.getByRole("region", { name: "Overview" }));
+    expect(within(overview.getByText("Category").parentElement as HTMLElement).getByText("Default")).toBeInTheDocument();
+    expect(within(overview.getByText("Service").parentElement as HTMLElement).queryByText("Default")).not.toBeInTheDocument();
+  });
+
+  it("shows no defaults notice when the payload carried every field", () => {
     mockAlert({ data: ALERT });
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Copy alert ID" }));
-    expect(writeText).toHaveBeenCalledWith(ALERT.id);
-    // The copy icon turns into a check mark once the browser has it.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Copy alert ID" }).querySelector(".lucide-check")).not.toBeNull(),
-    );
+    expect(screen.queryByRole("region", { name: "Defaults used" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
   });
 
-  it("lays the alert out like an incident: what fired as the heading, then its description", () => {
+  it("names what fired as the heading and leaves the description out", () => {
     mockAlert({ data: ALERT });
     renderPage();
     expect(screen.getByRole("heading", { name: "cpu on svc-a" })).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Description" })).getByText("CPU above 90% for 5 minutes")).toBeInTheDocument();
-  });
-
-  it("leaves the description card out when the source sent none", () => {
-    mockAlert({ data: { ...ALERT, description: null } });
-    renderPage();
     expect(screen.queryByRole("region", { name: "Description" })).not.toBeInTheDocument();
+    expect(screen.queryByText("CPU above 90% for 5 minutes")).not.toBeInTheDocument();
   });
 
   it("shows every field in the Overview, with a dash for an empty value", () => {
@@ -171,7 +210,9 @@ describe("SreAlertDetailPage", () => {
     expect(section.getByText("In Progress")).toBeInTheDocument();
     // The incident page's own P1-P5 badge.
     expect(section.getByText("High (P2)")).toBeInTheDocument();
-    expect(section.getByText(/^Impact High · Urgency Medium · Opened /)).not.toHaveTextContent("Opened —");
+    expect(section.getByText(/^Opened /)).not.toHaveTextContent("Opened —");
+    // Impact and urgency are left to the incident's own page.
+    expect(section.queryByText(/Impact|Urgency/)).not.toBeInTheDocument();
     expect(section.getByRole("link", { name: "Open incident" })).toHaveAttribute(
       "href",
       "/operations/incidents/11111111-1111-1111-1111-111111111111",
@@ -179,10 +220,10 @@ describe("SreAlertDetailPage", () => {
   });
 
   it("shows a dash for an incident with no opened date", () => {
-    mockAlert({ data: { ...ALERT, incident: { ...ALERT.incident!, openedOn: null, impact: "" } } });
+    mockAlert({ data: { ...ALERT, incident: { ...ALERT.incident!, openedOn: null } } });
     renderPage();
     const section = within(screen.getByRole("region", { name: "Incident" }));
-    expect(section.getByText("Impact — · Urgency Medium · Opened —")).toBeInTheDocument();
+    expect(section.getByText("Opened —")).toBeInTheDocument();
   });
 
   it("opens the incident, with this alert as the incident's Back target", () => {

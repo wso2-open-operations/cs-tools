@@ -15,6 +15,7 @@
 // under the License.
 
 import type {
+  BeSreAlertDefaultedField,
   BeSreAlertIncidentFilter,
   BeSreAlertSearchPayload,
   BeSreAlertTier,
@@ -233,4 +234,22 @@ export function sreAlertIncidentLevelLabel(value: string | null | undefined): st
   const s = (value ?? "").trim();
   if (!s) return "";
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase().replace(/_/g, " ");
+}
+
+const SRE_ALERT_DEFAULTED_FIELD_LABELS: Record<BeSreAlertDefaultedField["field"], string> = {
+  service: "Service",
+  metric_name: "Metric",
+  severity: "Severity",
+  category: "Category",
+  environment: "Environment",
+};
+
+/** The label of a field an alert's payload did not carry, as the alert page names it. */
+export function sreAlertDefaultedFieldLabel(field: string): string {
+  return SRE_ALERT_DEFAULTED_FIELD_LABELS[field as BeSreAlertDefaultedField["field"]] ?? field;
+}
+
+/** One line saying a field was missing from the payload and which default was used, worded the same for every field. */
+export function sreAlertDefaultedMessage(d: BeSreAlertDefaultedField): string {
+  return `${sreAlertDefaultedFieldLabel(d.field)} was not in the payload, so the default "${d.value}" was used.`;
 }

@@ -196,9 +196,9 @@ func (r *sreAlertRepository) Get(ctx context.Context, idOrNumber string) (*domai
 	var inc sreAlertIncidentCols
 	var raw []byte
 	dests := append(sreAlertListDests(&d.SreAlertListItem, &inc), &d.UniqueIdentifier, &d.Description, &d.AssignmentGroup,
-		&raw)
+		&d.DefaultedFields, &raw)
 	err := r.db.QueryRow(ctx, `SELECT `+sreAlertListColumns+`, coalesce(a.unique_identifier, ''), a.description,
-a.assignment_group, a.raw_body`+
+a.assignment_group, a.defaulted_fields, a.raw_body`+
 		sreAlertFrom+` WHERE `+match, idOrNumber).Scan(dests...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -207,6 +207,9 @@ a.assignment_group, a.raw_body`+
 		return nil, fmt.Errorf("get alert %s: %w", idOrNumber, err)
 	}
 	d.Incident = inc.ref()
+	if d.DefaultedFields == nil {
+		d.DefaultedFields = []domain.SreAlertDefaultedField{}
+	}
 	if raw != nil {
 		// raw_body is bytea; invalid UTF-8 is replaced so the body always travels as JSON text.
 		text := strings.ToValidUTF8(string(raw), "�")

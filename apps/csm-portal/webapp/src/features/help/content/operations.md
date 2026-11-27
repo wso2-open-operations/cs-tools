@@ -415,11 +415,11 @@ to sort by it.
 
 A row opens the alert's page, laid out like an incident's: its number and ID
 (with a button to copy the ID), severity and tier, what fired (metric and
-service) as the heading, and its description. The Overview lists the source,
+service) as the heading, and a note listing any field the payload did not carry with the default used for it. The Overview lists the source,
 service, environment, metric, category, assignment group, unique identifier,
 and the received and created times. Below them, the Incident section shows the
-incident the alert is linked to (its subject, number, state, priority, impact,
-urgency and opened date) with an **Open incident** button, the way an
+incident the alert is linked to (its subject, number, state, priority and
+opened date) with an **Open incident** button, the way an
 incident's Overview shows its runbook. Last comes the raw payload the source
 sent. One message can carry several alerts: only the first alert of a message
 keeps the payload.

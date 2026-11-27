@@ -78,6 +78,15 @@ func TestSreAlertRepositoryIntegration_SearchesAndGets(t *testing.T) {
 	if err != nil || byNumber == nil || byNumber.Environment != "staging" || byNumber.RawBody == nil || *byNumber.RawBody != `{"n":1}` {
 		t.Fatalf("Get(number) = %+v, %v; want the staging alert with its raw body", byNumber, err)
 	}
+	if byNumber.DefaultedFields == nil || len(byNumber.DefaultedFields) != 0 {
+		t.Fatalf("Get(number) defaulted fields %v, want an empty list for an alert that defaulted nothing", byNumber.DefaultedFields)
+	}
+	if _, err := NewScoped(pool).Exec(ctx, `UPDATE alert SET defaulted_fields = '[{"field":"severity","value":"Critical"}]' WHERE number = $1`, numbers[0]); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := repo.Get(ctx, numbers[0]); err != nil || len(d.DefaultedFields) != 1 || d.DefaultedFields[0] != (domain.SreAlertDefaultedField{Field: "severity", Value: "Critical"}) {
+		t.Fatalf("Get defaulted fields = %+v, %v; want severity defaulted to Critical", d, err)
+	}
 	// A field the source sent is a value; one it left empty is nil (null in JSON), not "".
 	if byNumber.Severity == nil || *byNumber.Severity != "critical" || byNumber.Description == nil || *byNumber.Description != "disk 100% full" ||
 		byNumber.Category != nil || byNumber.AssignmentGroup != nil {

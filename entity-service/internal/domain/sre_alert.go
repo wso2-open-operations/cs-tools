@@ -95,12 +95,21 @@ type SearchSreAlertsResponse struct {
 	Limit  int                `json:"limit"`
 }
 
+// SreAlertDefaultedField is a field the alert's payload did not carry and the default its source's transform used instead.
+type SreAlertDefaultedField struct {
+	// Field is the canonical field name: service, metric_name, severity, category or environment.
+	Field string `json:"field"`
+	Value string `json:"value"`
+}
+
 // SreAlertDetail is one alert with every stored field; Description and AssignmentGroup are null when the source sent none.
 type SreAlertDetail struct {
 	SreAlertListItem
 	UniqueIdentifier string  `json:"uniqueIdentifier"`
 	Description      *string `json:"description"`
 	AssignmentGroup  *string `json:"assignmentGroup"`
+	// DefaultedFields lists the fields filled with a default, in the order the transform filled them; empty when the payload carried them all.
+	DefaultedFields []SreAlertDefaultedField `json:"defaultedFields"`
 	// RawBody is the source's request body as text; only the message's first alert keeps it.
 	RawBody *string `json:"rawBody"`
 }
