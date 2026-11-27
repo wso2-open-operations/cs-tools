@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, IconButton, Link, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, Check, Copy } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, Card, Chip, IconButton, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft, ArrowUpRight, Check, Copy, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -43,7 +43,7 @@ function formatDateTime(value: string | null | undefined): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "medium" }) ?? "—";
 }
 
-/** One labelled value in a card's grid, styled like the alert mute rule page's overview. */
+/** One labelled value in the Overview grid, styled like the incident page's. */
 function Field({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
@@ -58,45 +58,6 @@ function Field({ label, children, mono }: { label: string; children: ReactNode; 
         {children === "" || children === null || children === undefined ? "—" : children}
       </Typography>
     </Box>
-  );
-}
-
-/** A titled card; its body is a responsive grid of `Field`s unless `plain`. */
-function Section({ title, children, plain }: { title: string; children: ReactNode; plain?: boolean }): JSX.Element {
-  return (
-    <Card variant="outlined" component="section" aria-label={title} sx={{ backgroundColor: "background.default" }}>
-      <Box sx={{ px: 2, py: 1 }}>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}
-        >
-          {title}
-        </Typography>
-      </Box>
-      <Box
-        sx={{
-          px: 2,
-          pb: 2,
-          pt: 1.5,
-          borderTop: 1,
-          borderColor: "divider",
-          ...(plain
-            ? {}
-            : {
-                display: "grid",
-                gridTemplateColumns: {
-                  xs: "repeat(1, minmax(0, 1fr))",
-                  sm: "repeat(2, minmax(0, 1fr))",
-                  md: "repeat(4, minmax(0, 1fr))",
-                },
-                gap: 2,
-              }),
-        }}
-      >
-        {children}
-      </Box>
-    </Card>
   );
 }
 
@@ -152,63 +113,88 @@ function IncidentPriority({ priority }: { priority: string | null }): JSX.Elemen
 }
 
 /**
- * The incident this alert is linked to, as a related-record card like the
- * incident page's own Linked records: number (opening the incident, whose
- * Back returns here), subject, state, priority, impact, urgency and opened date.
+ * The Overview's Incident section, laid out like the incident page's Runbook
+ * section: the incident this alert is linked to (alert.incident_id), with its
+ * state, priority, impact, urgency and opened date, and a button that opens
+ * it (its Back returns to this alert).
  */
-function LinkedIncidentCard({
+function AlertIncidentSection({
   incident,
   navState,
 }: {
   incident: BeSreAlertIncident | null;
   navState: { from: string; parentState: unknown };
 }): JSX.Element {
+  let body: JSX.Element;
   if (!incident) {
-    return (
-      <Card component="section" aria-label="Incident" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
-        <Typography variant="subtitle2">Incident</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Not linked to an incident
-        </Typography>
-      </Card>
+    body = (
+      <Typography variant="body2" color="text.secondary">
+        This alert is not linked to an incident.
+      </Typography>
     );
-  }
-  const state = sreAlertIncidentState(incident.state);
-  return (
-    <Card component="section" aria-label="Incident" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-      <Typography variant="subtitle2">Incident</Typography>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap", minWidth: 0 }}>
-        <Link
+  } else {
+    const state = sreAlertIncidentState(incident.state);
+    const details = [
+      `Impact ${sreAlertIncidentLevelLabel(incident.impact) || "—"}`,
+      `Urgency ${sreAlertIncidentLevelLabel(incident.urgency) || "—"}`,
+      `Opened ${formatDateTime(incident.openedOn)}`,
+    ].join(" · ");
+    body = (
+      <Box
+        sx={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 1.5,
+          p: 1.5,
+          borderRadius: 1,
+          border: 1,
+          borderColor: "divider",
+          bgcolor: "action.hover",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25, minWidth: 0 }}>
+          <Box sx={{ color: "primary.main", display: "flex", pt: 0.25 }}>
+            <TriangleAlert size={20} />
+          </Box>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75, minWidth: 0 }}>
+            <Typography variant="body1" sx={{ fontWeight: 600, wordBreak: "break-word" }}>
+              {incident.subject || "Incident"} ({incident.number || incident.id})
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              {state && <Chip size="small" color={incidentStateColor(state)} label={incidentStateLabel(state)} />}
+              <IncidentPriority priority={incident.priority} />
+              <Typography variant="body2" color="text.secondary">
+                {details}
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+        <Button
+          variant="contained"
+          size="small"
           component={RouterLink}
           to={`/operations/incidents/${encodeURIComponent(incident.id)}`}
           state={navState}
-          sx={{ fontFamily: "monospace", fontWeight: 700 }}
+          endIcon={<ArrowUpRight size={14} />}
         >
-          {incident.number || incident.id}
-        </Link>
-        {state && <Chip size="small" color={incidentStateColor(state)} label={incidentStateLabel(state)} />}
-        <Typography variant="body2" sx={{ minWidth: 0, wordBreak: "break-word" }}>
-          {incident.subject || "—"}
-        </Typography>
+          Open incident
+        </Button>
       </Box>
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: {
-            xs: "repeat(2, minmax(0, 1fr))",
-            md: "repeat(4, minmax(0, 1fr))",
-          },
-          gap: 2,
-        }}
-      >
-        <Field label="Priority">
-          <IncidentPriority priority={incident.priority} />
-        </Field>
-        <Field label="Impact">{sreAlertIncidentLevelLabel(incident.impact)}</Field>
-        <Field label="Urgency">{sreAlertIncidentLevelLabel(incident.urgency)}</Field>
-        <Field label="Opened">{incident.openedOn ? formatDateTime(incident.openedOn) : ""}</Field>
-      </Box>
-    </Card>
+    );
+  }
+  return (
+    <Box
+      component="section"
+      aria-label="Incident"
+      sx={{ display: "flex", flexDirection: "column", gap: 1, pt: 2, borderTop: 1, borderColor: "divider" }}
+    >
+      <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+        Incident
+      </Typography>
+      {body}
+    </Box>
   );
 }
 
@@ -312,9 +298,10 @@ function RawPayload({ rawBody }: { rawBody: string | null }): JSX.Element {
 }
 
 /**
- * One SRE alert (`/operations/alerts/:id`, by UUID or ALT number): its
- * number and UUID, what raised it, how it was delivered, the incident it is
- * linked to, and the source's raw payload. Back returns to `state.from` (the
+ * One SRE alert (`/operations/alerts/:id`, by UUID or ALT number), laid out
+ * like an incident's page: its number and UUID, what fired as the heading,
+ * the description, an Overview of its fields with the incident it is linked
+ * to, and the source's raw payload. Back returns to `state.from` (the
  * filtered list it was opened from) with that page's own state.
  */
 export default function SreAlertDetailPage(): JSX.Element {
@@ -362,58 +349,79 @@ export default function SreAlertDetailPage(): JSX.Element {
 
 function SreAlertDetail({ alert, back }: { alert: BeSreAlertDetail; back: ReactNode }): JSX.Element {
   const location = useLocation();
+  // The heading names what fired, as an incident's subject does.
+  const title = [alert.metricName, alert.service].filter(Boolean).join(" on ") || "Alert";
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       {back}
 
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-        <Typography variant="h6" sx={{ fontFamily: "monospace", fontWeight: 700, letterSpacing: 0.2, lineHeight: 1.2 }}>
-          {alert.number || alert.id}
-        </Typography>
-        <CopyableId id={alert.id} />
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-          {alert.severity && (
-            <Chip size="small" color={sreAlertSeverityColor(alert.severity)} label={sreAlertSeverityLabel(alert.severity)} />
-          )}
-          {alert.tier && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color={alert.tier === "priority" ? "primary" : "default"}
-              label={`${sreAlertTierLabel(alert.tier)} tier`}
-            />
-          )}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, minWidth: 0 }}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+          <Typography variant="h6" sx={{ fontFamily: "monospace", fontWeight: 700, letterSpacing: 0.2, lineHeight: 1.2 }}>
+            {alert.number || alert.id}
+          </Typography>
+          <CopyableId id={alert.id} />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            {alert.severity && (
+              <Chip size="small" color={sreAlertSeverityColor(alert.severity)} label={sreAlertSeverityLabel(alert.severity)} />
+            )}
+            {alert.tier && (
+              <Chip
+                size="small"
+                variant="outlined"
+                color={alert.tier === "priority" ? "primary" : "default"}
+                label={`${sreAlertTierLabel(alert.tier)} tier`}
+              />
+            )}
+          </Box>
         </Box>
+        <Typography variant="h5">{title}</Typography>
       </Box>
 
-      <Section title="Alert">
-        <Field label="Source">{alert.source}</Field>
-        <Field label="Service">{alert.service}</Field>
-        <Field label="Environment">{alert.environment}</Field>
-        <Field label="Metric">{alert.metricName}</Field>
-        <Field label="Category">{alert.category}</Field>
-        <Field label="Unique identifier" mono>
-          {alert.uniqueIdentifier}
-        </Field>
-        <Field label="Assignment group">{alert.assignmentGroup}</Field>
-        <Box sx={{ gridColumn: "1 / -1" }}>
-          <Field label="Description">{alert.description}</Field>
+      {alert.description && (
+        <Card component="section" aria-label="Description" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1 }}>
+          <Typography variant="subtitle2">Description</Typography>
+          <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {alert.description}
+          </Typography>
+        </Card>
+      )}
+
+      <Card component="section" aria-label="Overview" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+        <Typography variant="subtitle2">Overview</Typography>
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "1fr",
+              sm: "repeat(2, minmax(0, 1fr))",
+              md: "repeat(3, minmax(0, 1fr))",
+            },
+          }}
+        >
+          <Field label="Source">{alert.source}</Field>
+          <Field label="Service">{alert.service}</Field>
+          <Field label="Environment">{alert.environment}</Field>
+          <Field label="Metric">{alert.metricName}</Field>
+          <Field label="Category">{alert.category}</Field>
+          <Field label="Assignment group">{alert.assignmentGroup}</Field>
+          <Field label="Unique identifier" mono>
+            {alert.uniqueIdentifier}
+          </Field>
+          <Field label="Received on">{formatDateTime(alert.receivedOn)}</Field>
+          <Field label="Created on">{formatDateTime(alert.createdOn)}</Field>
         </Box>
-      </Section>
+        <AlertIncidentSection
+          incident={alert.incident}
+          navState={{ from: `${location.pathname}${location.search}`, parentState: location.state ?? null }}
+        />
+      </Card>
 
-      <Section title="Delivery">
-        <Field label="Received on">{formatDateTime(alert.receivedOn)}</Field>
-        <Field label="Created on">{formatDateTime(alert.createdOn)}</Field>
-      </Section>
-
-      <LinkedIncidentCard
-        incident={alert.incident}
-        navState={{ from: `${location.pathname}${location.search}`, parentState: location.state ?? null }}
-      />
-
-      <Section title="Raw payload" plain>
+      <Card component="section" aria-label="Raw payload" sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+        <Typography variant="subtitle2">Raw payload</Typography>
         <RawPayload rawBody={alert.rawBody} />
-      </Section>
+      </Card>
     </Box>
   );
 }

@@ -134,54 +134,61 @@ describe("SreAlertDetailPage", () => {
     );
   });
 
-  it("shows the alert and delivery fields, with a dash for an empty value", () => {
+  it("lays the alert out like an incident: what fired as the heading, then its description", () => {
     mockAlert({ data: ALERT });
     renderPage();
-    const alertSection = within(screen.getByRole("region", { name: "Alert" }));
-    expect(alertSection.getByText("Azure Monitor")).toBeInTheDocument();
-    expect(alertSection.getByText("svc-a")).toBeInTheDocument();
-    expect(alertSection.getByText("alarm-7")).toBeInTheDocument();
-    expect(alertSection.getByText("CPU above 90% for 5 minutes")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "cpu on svc-a" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Description" })).getByText("CPU above 90% for 5 minutes")).toBeInTheDocument();
+  });
+
+  it("leaves the description card out when the source sent none", () => {
+    mockAlert({ data: { ...ALERT, description: null } });
+    renderPage();
+    expect(screen.queryByRole("region", { name: "Description" })).not.toBeInTheDocument();
+  });
+
+  it("shows every field in the Overview, with a dash for an empty value", () => {
+    mockAlert({ data: ALERT });
+    renderPage();
+    const overview = within(screen.getByRole("region", { name: "Overview" }));
+    expect(overview.getByText("Azure Monitor")).toBeInTheDocument();
+    expect(overview.getByText("svc-a")).toBeInTheDocument();
+    expect(overview.getByText("alarm-7")).toBeInTheDocument();
+    expect(overview.getByText("Received on")).toBeInTheDocument();
+    expect(overview.getByText("Created on")).toBeInTheDocument();
     // The assignment group is empty.
-    expect(alertSection.getAllByText("—")).toHaveLength(1);
+    expect(overview.getByText("Assignment group").nextElementSibling).toHaveTextContent("—");
     // The gateway route, source topic and account, and the queue message id and index are not stored, so not shown.
     expect(screen.queryByText("Route")).not.toBeInTheDocument();
     expect(screen.queryByText("Message ID")).not.toBeInTheDocument();
-
-    const delivery = within(screen.getByRole("region", { name: "Delivery" }));
-    expect(delivery.getByText("Received on")).toBeInTheDocument();
-    expect(delivery.getByText("Created on")).toBeInTheDocument();
   });
 
-  it("shows the linked incident as a related-record card", () => {
+  it("shows the linked incident in the Overview like the incident page's runbook", () => {
     mockAlert({ data: ALERT });
     renderPage();
-    const card = within(screen.getByRole("region", { name: "Incident" }));
-    expect(card.getByRole("link", { name: "INC0012345" })).toHaveAttribute(
+    const section = within(screen.getByRole("region", { name: "Incident" }));
+    expect(section.getByText("Gateway CPU saturated (INC0012345)")).toBeInTheDocument();
+    expect(section.getByText("In Progress")).toBeInTheDocument();
+    // The incident page's own P1-P5 badge.
+    expect(section.getByText("High (P2)")).toBeInTheDocument();
+    expect(section.getByText(/^Impact High · Urgency Medium · Opened /)).not.toHaveTextContent("Opened —");
+    expect(section.getByRole("link", { name: "Open incident" })).toHaveAttribute(
       "href",
       "/operations/incidents/11111111-1111-1111-1111-111111111111",
     );
-    expect(card.getByText("Gateway CPU saturated")).toBeInTheDocument();
-    expect(card.getByText("In Progress")).toBeInTheDocument();
-    // The incident page's own P1-P5 badge.
-    expect(card.getByText("High (P2)")).toBeInTheDocument();
-    expect(card.getByText("Impact").nextElementSibling).toHaveTextContent("High");
-    expect(card.getByText("Urgency").nextElementSibling).toHaveTextContent("Medium");
-    expect(card.getByText("Opened").nextElementSibling).not.toHaveTextContent("—");
   });
 
   it("shows a dash for an incident with no opened date", () => {
     mockAlert({ data: { ...ALERT, incident: { ...ALERT.incident!, openedOn: null, impact: "" } } });
     renderPage();
-    const card = within(screen.getByRole("region", { name: "Incident" }));
-    expect(card.getByText("Opened").nextElementSibling).toHaveTextContent("—");
-    expect(card.getByText("Impact").nextElementSibling).toHaveTextContent("—");
+    const section = within(screen.getByRole("region", { name: "Incident" }));
+    expect(section.getByText("Impact — · Urgency Medium · Opened —")).toBeInTheDocument();
   });
 
-  it("links the incident, with this alert as the incident's Back target", () => {
+  it("opens the incident, with this alert as the incident's Back target", () => {
     mockAlert({ data: ALERT });
     renderPage({ pathname: `/operations/alerts/${ALERT.id}`, state: { from: "/operations/alerts?altTiers=priority" } });
-    fireEvent.click(within(screen.getByRole("region", { name: "Incident" })).getByRole("link", { name: "INC0012345" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Incident" })).getByRole("link", { name: "Open incident" }));
     const location = screen.getByTestId("location").textContent ?? "";
     expect(location).toContain("/operations/incidents/11111111-1111-1111-1111-111111111111");
     expect(location).toContain(`"from":"/operations/alerts/${ALERT.id}"`);
@@ -191,7 +198,9 @@ describe("SreAlertDetailPage", () => {
   it("says when the alert isn't linked to an incident", () => {
     mockAlert({ data: { ...ALERT, incident: null } });
     renderPage();
-    expect(within(screen.getByRole("region", { name: "Incident" })).getByText("Not linked to an incident")).toBeInTheDocument();
+    const section = within(screen.getByRole("region", { name: "Incident" }));
+    expect(section.getByText("This alert is not linked to an incident.")).toBeInTheDocument();
+    expect(section.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("pretty-prints a JSON payload", () => {

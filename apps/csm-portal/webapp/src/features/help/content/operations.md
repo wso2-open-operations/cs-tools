@@ -413,13 +413,16 @@ the received date range in UTC. Filters are kept in the address bar, so a
 filtered list can be bookmarked or shared. Click a column header with an arrow
 to sort by it.
 
-A row opens the alert's page: its number and ID (with a button to copy the
-ID), severity and tier, what raised it (source, service, environment, metric,
-category, unique identifier, assignment group, description), when it was
-received and created, the incident it is linked
-to (its number, subject, state, priority, impact, urgency and opened date),
-and the raw payload the source sent. One message can carry several alerts:
-only the first alert of a message keeps the payload.
+A row opens the alert's page, laid out like an incident's: its number and ID
+(with a button to copy the ID), severity and tier, what fired (metric and
+service) as the heading, and its description. The Overview lists the source,
+service, environment, metric, category, assignment group, unique identifier,
+and the received and created times. Below them, the Incident section shows the
+incident the alert is linked to (its subject, number, state, priority, impact,
+urgency and opened date) with an **Open incident** button, the way an
+incident's Overview shows its runbook. Last comes the raw payload the source
+sent. One message can carry several alerts: only the first alert of a message
+keeps the payload.
 
 An incident's own page has an **Alerts** tab listing the alerts linked to it.
 
