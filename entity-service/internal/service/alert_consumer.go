@@ -459,7 +459,7 @@ func (c *AlertConsumer) buildRows(tier domain.AlertTier, message *domain.AlertQu
 	return rows
 }
 
-// alertFieldLengths are the alert table's VARCHAR lengths; a longer value is cut to fit rather than refused.
+// alertFieldLengths are the alert table's VARCHAR lengths; a longer value is cut to fit rather than refused. description is TEXT, so it is not cut.
 var alertFieldLengths = []struct {
 	field  func(*model.Alert) *string
 	length int
@@ -471,12 +471,12 @@ var alertFieldLengths = []struct {
 	{func(a *model.Alert) *string { return &a.UniqueIdentifier }, 255},
 	{func(a *model.Alert) *string { return &a.Severity }, 50},
 	{func(a *model.Alert) *string { return &a.Category }, 100},
-	{func(a *model.Alert) *string { return &a.Description }, 4000},
 	{func(a *model.Alert) *string { return &a.AssignmentGroup }, 255},
 }
 
-// storableAlert cleans every stored field the way storableText does and cuts it to its column's length, so an alert with a NUL character or a long description is stored rather than refused.
+// storableAlert cleans every stored field the way storableText does and cuts each VARCHAR one to its column's length, so an alert with a NUL character or a long field is stored rather than refused.
 func storableAlert(a model.Alert) model.Alert {
+	a.Description = storableText(a.Description)
 	for _, f := range alertFieldLengths {
 		v := f.field(&a)
 		*v = truncateRunes(storableText(*v), f.length)
