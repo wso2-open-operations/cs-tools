@@ -1059,10 +1059,12 @@ together and the engine retries the whole run. Days and months are UTC, so run w
 ## PLG signups from Moesif
 
 **`plg_moesif_sync`** (default `*/15 * * * *`) lands WSO2 Cloud signups in the PLG portal. Moesif is the
-source of truth: a registration event (`metadata.initiating_product`, once per user) and each later
-subscription event (`metadata.product`) become one registration, by company id, user id and product,
+source of truth: a registration event (`metadata.initiating_product`, once per signup) becomes one
+registration, by company id, user id and product (the entry product),
 posted to entity-service's `POST /plg/registrations/ingest`. entity-service maps the product name to a
-portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
+portal product. The subscription events a signup also emits (one per product) are not read by default, so
+each organisation has one registration and every dashboard chart counts organisations once; add
+`cloud-core.billing.select-subscription-plan` to `PLG_MOESIF_SYNC_EVENTS` to read them. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
 
 - **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
   `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only
@@ -1091,9 +1093,12 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
 
 **`plg_registration_validation`** (default `20 * * * *`) fills each product's registration playbook from
 its Moesif activity. **Off unless `PLG_REGISTRATION_VALIDATION_ENABLED=true`**, and a dry run (derive and
-log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. `plgvalidation.Platforms` maps each
-product to its Moesif `metadata.platform`: `AGENT_PLATFORM` `Agent Manager`, `IAM` `Identity Platform`,
-`API_PLATFORM` `API Platform`, `INTEGRATION_PLATFORM` `Integration Platform` (all four by default). Every
+log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. A registration
+is the entry product (`WSO2_CLOUD`, `AGENT_PLATFORM`, `IAM`, `API_PLATFORM` or `INTEGRATION_PLATFORM`, all five by
+default) and is checked against **every** platform, not only its own, so a Cloud signup, which has no platform of
+its own, is validated by its work on any of them. `plgvalidation.Platforms` lists the Moesif `metadata.platform`
+values read: `Agent Manager`, `Identity Platform`, `API Platform`, `Integration Platform`. Each product needs an
+active registration playbook in entity-service, or it is skipped with a warning. Every
 product's action is read from the event's `action_name` (`plgvalidation.ActionField`), the one property
 populated in all of them: `amp.console.onboarding.wizard-step-viewed` (Agent Manager),
 `identity-platform.organization.overview-view`, `apip.admin.landing-page-open`,
@@ -1286,7 +1291,7 @@ the existing logo URLs) exactly as it was before this config existed.
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
-| `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `AGENT_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
+| `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `WSO2_CLOUD,AGENT_PLATFORM,IAM,API_PLATFORM,INTEGRATION_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
 | `CSM_AI_SERVICE_BASE_URL` / `CSM_AI_SERVICE_SCOPES` | No | The CSM AI service, called with the shared `OAUTH2_*` credentials, for the registration validation's email classification |
 | `CLOUD_API_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` / `_USER_EMAIL_PATH` | With `CLOUD_API_BASE_URL` (path default `/users/{userId}/email`) | The Cloud Directory API (the CSM portal's Directory client) for the owner's email. The secret is a Choreo secret: never commit it |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

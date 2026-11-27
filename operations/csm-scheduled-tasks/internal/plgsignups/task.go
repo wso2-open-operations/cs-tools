@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 // Package plgsignups lands WSO2 Cloud signups read from Moesif in the PLG
-// portal. A registration event names the user's entry product; each later
-// subscription event names the next product they try. One registration is
-// sent per event, by company id, user id and product only.
+// portal. Only the registration event is read: it fires once per signup and
+// names the user's entry product. The subscription events a signup also emits
+// (one per product) are left out, so each organisation has one registration.
+// One registration is sent per event, by company id, user id and product only.
 //
 // Each run reads a window of events. Ingest is idempotent, so the overlap
 // between runs only refreshes what is stored, and a failed run is covered by
@@ -39,7 +40,6 @@ import (
 var (
 	DefaultEvents = []string{
 		"cloud-core.org-account-management.register-organization",
-		"cloud-core.billing.select-subscription-plan",
 	}
 	DefaultProductFields = []string{"metadata.initiating_product", "metadata.product"}
 )

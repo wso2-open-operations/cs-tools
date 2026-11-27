@@ -109,12 +109,19 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		return nil, err
 	}
 
+	// One point per UTC day across the period, zeros included, counting each
+	// organisation once (its entry registration) so the line is the day's signups.
 	if out.RegistrationsOverTime, err = r.timeSeries(ctx, `
-		SELECT TO_CHAR(DATE_TRUNC('week', v.registered_on), 'YYYY-MM-DD') AS bucket,
-		       v.product_name AS series, COUNT(*)::INT
-		FROM   plg_org_platform_v v
-		WHERE  v.registered_on BETWEEN $1 AND $2
-		GROUP  BY 1, 2 ORDER BY 1`, from, to); err != nil {
+		SELECT TO_CHAR(d.day, 'YYYY-MM-DD'), 'Choreo Cloud Registrations', COALESCE(c.n, 0)::INT
+		FROM   generate_series(($1::timestamptz AT TIME ZONE 'UTC')::date,
+		                       ($2::timestamptz AT TIME ZONE 'UTC')::date,
+		                       INTERVAL '1 day') AS d (day)
+		LEFT   JOIN (SELECT (op.registered_on AT TIME ZONE 'UTC')::date AS day, COUNT(*) AS n
+		             FROM   plg_org_platform op
+		             WHERE  op.registered_on BETWEEN $1 AND $2
+		               `+entryRegistrationOnly+`
+		             GROUP  BY 1) c ON c.day = d.day::date
+		ORDER  BY d.day`, from, to); err != nil {
 		return nil, err
 	}
 

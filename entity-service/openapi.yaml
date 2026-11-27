@@ -47295,7 +47295,7 @@ components:
         initiatingProduct:
           type: string
           description: >-
-            A Cloud signup's entry point, case-insensitive: wso2cloud or core (WSO2 Cloud),
+            A Cloud signup's entry point, case-insensitive: wso2cloud or core (Choreo Cloud),
             agent-manager, api-platform, integration-platform or identity-platform. Makes the registration a Cloud
             one. Unknown, or naming another product than initiatedPlatform, fails it.
           example: api-platform

@@ -98,7 +98,7 @@ export default function OrganizationsPage() {
           clipped instead of the page scrolling. */}
       <PageHeader
         title="Organisations"
-        subtitle="Every customer that has registered for a WSO2 Cloud platform"
+        subtitle="Every customer that has registered for a Choreo Cloud platform"
       />
 
       <Card sx={{ p: 2, mb: 2 }}>
