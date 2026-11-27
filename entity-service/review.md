@@ -134,3 +134,11 @@ failure class turns up during review that isn't on this list, add it here in the
       rows committed in between (Read Committed gives each statement a new snapshot) — the holiday
       tag cleanup forgot a placement whose tag it never saw, orphaning the tag; a writer acting on
       data read earlier rechecks it (and locks it) in its own transaction.
+- [ ] A queue consumer completes (ACKs) a message only after its rows commit, and renews the message's lock or
+      visibility from pickup through settlement; time a message waits in a local buffer counts against the lock.
+- [ ] A mode or flag that turns on a producer (a consumer storing rows, an outbox relay) also starts whatever acts on
+      its output, or is refused; stored alerts that nothing turns into incidents are silently lost pages.
+- [ ] A SQL parameter whose only uses are in `CASE` branches or next to `NULL` has an explicit cast (`$4::timestamptz`);
+      Postgres infers `text` and the statement fails at runtime, which a unit test with a fake repository never shows.
+- [ ] A kafka-go producer on a latency path sets `eventbus.Config.BatchTimeout` to a few ms: the default holds a lone
+      record for a second (seen in the alert relay's first build, and still in every `incident.created`).

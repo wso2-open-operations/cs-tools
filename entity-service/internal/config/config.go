@@ -118,6 +118,9 @@ const (
 
 // Config holds all environment-driven settings for the service.
 type Config struct {
+	// AlertingConfig is the SRE alert pipeline's configuration (alerting.go).
+	AlertingConfig
+
 	DBHost string
 	DBPort string
 	// AvailabilityTimezone is the zone the availability sweep resolves its
@@ -964,6 +967,7 @@ func Load() *Config {
 		return n
 	}
 	cfg := &Config{
+		AlertingConfig:       loadAlertingConfig(),
 		DBHost:               getEnvOrDefault("DB_HOST", "localhost"),
 		DBPort:               getEnvOrDefault("DB_PORT", "5432"),
 		AvailabilityTimezone: os.Getenv("AVAILABILITY_TIMEZONE"),
@@ -1288,6 +1292,9 @@ func (c *Config) HasDatabase() bool {
 func (c *Config) Validate() error {
 	if c.loadErr != nil {
 		return c.loadErr
+	}
+	if err := c.validateAlerting(); err != nil {
+		return err
 	}
 	for _, t := range []struct {
 		name string

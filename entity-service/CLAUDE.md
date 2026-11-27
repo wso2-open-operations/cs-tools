@@ -98,6 +98,22 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `PRODUCT_VULNERABILITY_META_CACHE_TTL` | no | `24h` | Backstop lifetime of the cached product/version options of `GET /products/vulnerabilities/meta`; deleted on a successful vulnerability sync; unparseable or non-positive falls back to `24h` |
 | `INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS` | no | — | Comma-separated `"group"` UUIDs an incident may be created in although they support no service (e.g. the security operations group). Trimmed, empty entries ignored; a non-UUID entry refuses to start. Joins the incident-assignable set (create check + `supportGroupsOnly` picker); never case-alert route options. See "Incident assignment group on create" |
 | `INCIDENT_DEFAULT_SERVICE_ID` | no | — | UUID of the service whose support group a new incident gets when no `assignmentGroupId` is sent and its own service has no support group (logged WARN each time). Unset / missing / groupless: such incidents are created unassigned (logged ERROR). A non-UUID refuses to start; checked at startup, log only. See "Incident assignment group on create" |
+| `ALERTING_VERSION` | no | `v1` | The SRE alert pipeline: `v1` off (the v1 alert services only); `hybrid` stores and decides every alert and records the decision (SHADOWED), raising nothing; `v2` raises incidents. `hybrid` and `v2` need the database, `INCIDENT_DEFAULT_SERVICE_ID`, `EVENT_HUB_BROKER`, `EVENT_HUB_CONNECTION_STRING` and at least one cloud below; `v2` also `ALERT_PROCESSOR_CALLER_ID`. Any other value refuses to start. See "SRE alert pipeline (v2)" |
+| `ALERT_SERVICEBUS_CONNECTION_STRING` | no | none | A shared access policy's connection string (Listen) for the Azure gateway's Service Bus namespace; never logged. Unset leaves Azure out |
+| `ALERT_SERVICEBUS_PRIORITY_QUEUES` / `ALERT_SERVICEBUS_STANDARD_QUEUES` | with Service Bus | none | Comma-separated queue names per tier; at least one each, no name twice (names ignore case) |
+| `ALERT_SQS_PRIORITY_QUEUE_URLS` / `ALERT_SQS_STANDARD_QUEUE_URLS` | with SQS | none | Comma-separated SQS standard queue URLs per tier; at least one each, all in one region. None leaves AWS out |
+| `ALERT_SQS_REGION` | no | from the first URL | The queues' region, for URLs that name none (a local stand-in) |
+| `ALERT_SQS_ACCESS_KEY_ID` / `ALERT_SQS_SECRET_ACCESS_KEY` | no | default chain | An IAM user's keys, set together, with `sqs:ReceiveMessage`, `DeleteMessage`, `ChangeMessageVisibility`, and `SendMessage` on the dead-letter queue |
+| `ALERT_SQS_DEAD_LETTER_QUEUE_URL` | no | none | Where a message that can never be stored goes, with its reason; unset leaves it to the queue's redrive policy |
+| `ALERT_CONSUMER_CONCURRENCY` | no | `8` | Queue messages stored at once (1-64) |
+| `ALERT_EVENT_HUB_TOPIC` | no | `alert-events` | The Event Hub `alert.created` goes over; must differ from every other topic setting (csm-notification-service dead-letters unknown types) |
+| `ALERT_PROCESSOR_CONSUMER_GROUP` | no | `entity-service-alert-processor` | The processor's consumer group on it |
+| `ALERT_RELAY_MAX_IN_FLIGHT` | no | `20` | Backpressure (1-1000): no more is published while this many alerts are published and undecided |
+| `ALERT_RELAY_POLL_INTERVAL` | no | `5s` | The relay's backstop poll; a committed alert and every decision wake it at once |
+| `ALERT_PROCESSOR_CALLER_ID` | v2 | none | The `"user"` UUID alert-born incidents are raised by (alert-core's `CALLER_ID`) |
+| `ALERT_PROCESSOR_CONCURRENCY` | no | `4` | `alert.created` consumers per replica (1-16). `ALERT_CONSUMER_CONCURRENCY` + 1 + twice this must stay below `DB_POOL_MAX_CONNS` |
+| `ALERT_PROCESSOR_MAX_INCIDENT_AGE` | no | `24h` | How old an open incident may be and still take new alerts of its fingerprint; `0` is no limit |
+| `<SOURCE>_ALERT_CONFIG` | no | per source | Each source transform's own settings, read as alert-ingestion reads them (`internal/alertsource`, `utils.AlertConfigRaw`) |
 | `CR_STRICT_VISIBILITY_FROM` | no | — | RFC 3339 instant **with a zone**: change requests created at or after it are visible to a customer only when designated to them; earlier ones are "legacy" and keep today's visibility. Unset/empty = no cutover, every change request is legacy (the safe default and the rollback; a WARN is logged at startup). An unparsable value refuses to start. Set once per environment at release and never move it — see "Customer visibility and the cutover" |
 | `MIGRATION_CASE_REPORT_HOLD_TAG` | no | `s_mig_hold` | Tag (ignoring case) for the weekly migration scan's "customer requested to hold" table |
 | `MIGRATION_CASE_REPORT_ACCOUNTS_TAG` | no | `s_acc` | Tag (ignoring case) for its "waiting on accounts team" table |
@@ -399,8 +415,9 @@ cannot be merged without two different payloads sharing one name.
 
 **"SRE incident" is not a third thing.** `integrations/sre-alert-ingestion-service`
 turns a vendor alert (Azure, Grafana, Site24x7, OpenSearch) into a platform
-incident by calling the same `POST /incidents` through csm-integration-service,
-so an alert-born incident is exactly the entity the `incident.*` events
+incident by calling the same `POST /incidents` through csm-integration-service
+(and, in v2, this service's own alert processor calls the same incident service
+in-process; see "SRE alert pipeline (v2)"), so an alert-born incident is exactly the entity the `incident.*` events
 describe. csm-notification-service's call-escalation ladder escalates it like
 any other.
 
@@ -449,6 +466,49 @@ just a bool, either `"true"` or not. `NewRouter` returns the constructed
 `EventPublisherService` (nil if unconfigured) alongside the `http.Handler`,
 threaded through `server.New` to `cmd/api/main.go`, which calls `Close()` on
 it during shutdown, after `srv.Shutdown`.
+
+## SRE alert pipeline (v2)
+
+Turns SRE alerts from the alerting gateways' queues into incidents, in `hybrid` (shadow) or `v2` (live); off in `v1`.
+Design, decisions, limits and phase 2: `docs/specs/sre-alerts-v2.md`. Wired in `server/alert_pipeline.go`, started
+from `routes.go` after the incident service is fully built, and stopped first in `closePublishers`.
+
+- **Consumer** (`service/alert_consumer.go`; adapters `internal/alertqueue/servicebus`, `internal/alertqueue/sqs`).
+  Receivers long-poll every configured queue; a free worker takes a priority message before a standard one. A held
+  message's lock (Service Bus) or visibility (SQS) is renewed every 20 s until it is settled. The `source` message
+  property picks the transform in `internal/alertsource` (a copy of alert-ingestion's, kept in step until v1 is
+  retired). Each alert becomes a row with its fingerprint; the message's raw body is kept on its first row. A message
+  with no source, an unknown source, a body the transform refuses or no alerts is one ERROR row and is completed. The
+  message is completed only after its rows commit; a database outage gives it back for redelivery; rows the database
+  refuses become one `StoreRefused` error row, and only if even that is refused is the message dead-lettered.
+- **Store** (`repository/alert_repo.go`, migrations 0308, 100029). `alert` is internal only (RLS); every reader and
+  writer uses the system identity. The stored message id is `<queue>/<message id>`, unique with the alert's index, so a
+  redelivery stores nothing. The insert notifies `alert_stored` once, on commit, when it stored a NEW alert.
+- **Relay** (`service/alert_relay.go`, `repository/alert_relay_repo.go`). The alert row is the outbox: it marks up to
+  10 waiting, unpublished, due alerts (priority first) with `published_on` and commits, then publishes `alert.created`
+  keyed by fingerprint, with a 5 ms batch wait (`eventbus.Config.BatchTimeout`) and no lock held. A failed publish
+  clears `published_on` on the rest of the batch. Backpressure: nothing more while `ALERT_RELAY_MAX_IN_FLIGHT` alerts
+  are published and undecided. Woken by `repository.ListenAlertStored` (one LISTEN connection outside the pool, so one
+  Postgres connection over `DB_POOL_MAX_CONNS`; needs a session-level connection, not a transaction-mode pooler) and
+  by every decision; `ALERT_RELAY_POLL_INTERVAL` is the backstop. A sweep, at start and every minute, republishes
+  alerts published over 5 minutes ago that are undecided and unclaimed. The payload carries ids only, never the body.
+- **Processor** (`service/alert_processor.go`, rules in `alert_incident_rules.go`, `repository/alert_processor_repo.go`,
+  migration 0309). `ALERT_PROCESSOR_CONCURRENCY` consumers per replica share the group. An event claims the alert it
+  names (2-minute lease) only while it is published, due and unclaimed; anything else is acknowledged and skipped.
+  Under `pg_advisory_xact_lock` on the fingerprint: an open incident (NEW, IN_PROGRESS, ON_HOLD) tagged
+  `[fp:<12>:`, within `ALERT_PROCESSOR_MAX_INCIDENT_AGE`, takes the alert; a resolving alert with none is PROCESSED
+  with no incident; otherwise `CreateIncident` (alert-core's request mapping, correlation id `[fp:<12>:<ms>]`, looked up
+  first so a lost create is found, not repeated). `hybrid` records `WOULD_*` (SHADOWED). A failure clears
+  `published_on`, so the relay republishes the alert after 5 s doubling to 5 min; the 8th attempt, an unreadable alert
+  or a create refused as invalid is FAILED (logged at ERROR). `processed_on` is `clock_timestamp()`, the decision's
+  real end. No mute rules yet.
+- **Not audited.** 0308 excludes `alert` from the audit log; its rows carry their own outcome.
+
+Tests: `alert_consumer_test.go`, `alert_processor_test.go`, `alert_relay_test.go` (service, fakes),
+`internal/alertqueue/*/queue_test.go`, `internal/alertsource/...` (the ported transform tests),
+`config/alerting_test.go`, and against real Postgres (skipped without `ENTITY_TEST_DATABASE_URL`; run as a role
+without BYPASSRLS so the RLS test runs) `alert_repo_integration_test.go`, `alert_processor_repo_integration_test.go`,
+`alert_listener_integration_test.go`.
 
 ## Service request events (`sr.*`)
 

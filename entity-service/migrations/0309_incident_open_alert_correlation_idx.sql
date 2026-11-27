@@ -1,0 +1,32 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- Open alert-born incidents by correlation tag ("[fp:<first 12 of the fingerprint>:<ms>]", alert-core's and the alert
+-- processor's format), so the processor finds an open incident of a fingerprint by tag prefix. Partial: only open
+-- incidents raised from an alert, a few rows.
+--
+-- IF NOT EXISTS: safe to run again, and an index already there is left as it is, an INVALID one included. A build that
+-- is cancelled or fails partway leaves an INVALID index of this name, which the next run skips. Before running this
+-- file again, check with
+--   SELECT indexrelid::regclass FROM pg_index
+--    WHERE indexrelid = to_regclass('idx_incident_open_alert_correlation') AND NOT indisvalid;
+-- and drop any index it returns with
+--   DROP INDEX CONCURRENTLY idx_incident_open_alert_correlation;
+--
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block, so this is the only statement in its own file, run
+-- without BEGIN/COMMIT. The query in alert_processor_repo.go repeats this predicate word for word so the planner uses it.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_incident_open_alert_correlation ON incident (correlation_id text_pattern_ops)
+    WHERE correlation_id LIKE '[fp:%' AND state IN ('NEW', 'IN_PROGRESS', 'ON_HOLD');

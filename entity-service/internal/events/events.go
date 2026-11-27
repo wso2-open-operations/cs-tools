@@ -127,6 +127,12 @@ const (
 	// TypeProjectContactRegistered is published when a membership moves into
 	// REGISTERED; csm-notification-service sends the Welcome email.
 	TypeProjectContactRegistered Type = "project_contact.registered"
+	// TypeAlertCreated is published by the alert relay for each stored SRE
+	// alert, to this service's own alert processor, on ALERT_EVENT_HUB_TOPIC,
+	// never on a topic csm-notification-service reads. The key is the
+	// alert's fingerprint, so one fingerprint's alerts stay on one partition.
+	// EntityID is the alert id.
+	TypeAlertCreated Type = "alert.created"
 )
 
 // Envelope is the wire shape of every record on the case-events topic.
@@ -710,4 +716,16 @@ type IncidentPriorityElevatedPayload struct {
 	ABTEligible *bool  `json:"abtEligible,omitempty"`
 	// ElevatedAt is when the priority actually changed, RFC3339.
 	ElevatedAt string `json:"elevatedAt,omitempty"`
+}
+
+// AlertCreatedPayload is alert.created's payload. It names the stored alert
+// and carries no alert body: the processor decides from the alert row, which
+// stays the record, and an alert can carry customer details that the topic
+// would otherwise keep for its retention period.
+type AlertCreatedPayload struct {
+	AlertID     string `json:"alertId"`
+	Fingerprint string `json:"fingerprint"`
+	// Tier is the queue tier the alert arrived on: "high" (priority) or "default" (standard).
+	Tier       string `json:"tier"`
+	ReceivedOn string `json:"receivedOn"`
 }
