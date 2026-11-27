@@ -756,10 +756,8 @@ type Config struct {
 	AlertConsumerConcurrency int
 	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT); 0, the default, is strict priority: standard alerts run only when no priority alert waits.
 	AlertConsumerPriorityWeight int
-	// AlertProcessorEnabled runs the alert processor (ALERT_PROCESSOR_ENABLED): the consumer publishes stored alerts as alert.created before acknowledging them and folded into incidents, which only v2 writes; hybrid logs the decisions.
+	// AlertProcessorEnabled runs the alert processor (ALERT_PROCESSOR_ENABLED): the consumer publishes stored alerts as alert.created on SRE_EVENT_HUB_TOPIC before acknowledging them and folded into incidents, which only v2 writes; hybrid logs the decisions.
 	AlertProcessorEnabled bool
-	// AlertEventHubTopic is the topic alert.created is published to and read from (ALERT_EVENT_HUB_TOPIC); its own, because sre-events consumers reject event types they do not know.
-	AlertEventHubTopic string
 	// AlertProcessorConsumerGroup is the processor's consumer group (ALERT_PROCESSOR_CONSUMER_GROUP).
 	AlertProcessorConsumerGroup string
 	// AlertDedupWindow is how long after an incident's first alert later alerts with its fingerprint still fold into it (ALERT_DEDUP_WINDOW).
@@ -1148,7 +1146,6 @@ func Load() *Config {
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
 		AlertConsumerPriorityWeight:                   envIntInRange("ALERT_CONSUMER_PRIORITY_WEIGHT", 0, 0, maxAlertConsumerPriorityWeight),
 		AlertProcessorEnabled:                         os.Getenv("ALERT_PROCESSOR_ENABLED") == "true",
-		AlertEventHubTopic:                            strings.TrimSpace(getEnvOrDefault("ALERT_EVENT_HUB_TOPIC", "alert-events")),
 		AlertProcessorConsumerGroup:                   strings.TrimSpace(getEnvOrDefault("ALERT_PROCESSOR_CONSUMER_GROUP", "entity-service-alert-processor")),
 		AlertDedupWindow:                              duration("ALERT_DEDUP_WINDOW", 5*time.Minute),
 		AlertProcessorCallerID:                        strings.TrimSpace(os.Getenv("ALERT_PROCESSOR_CALLER_ID")),
@@ -2136,11 +2133,12 @@ func (c *Config) validateAlertProcessor() error {
 	if c.EventHubBroker == "" || c.EventHubConnectionString == "" {
 		return fmt.Errorf("ALERT_PROCESSOR_ENABLED needs EVENT_HUB_BROKER and EVENT_HUB_CONNECTION_STRING")
 	}
-	if c.AlertEventHubTopic == "" || c.AlertProcessorConsumerGroup == "" {
-		return fmt.Errorf("ALERT_EVENT_HUB_TOPIC and ALERT_PROCESSOR_CONSUMER_GROUP must not be empty")
+	// alert.created shares the operations topic; csm-notification-service, which also reads it, skips alert.* events.
+	if strings.TrimSpace(c.SREEventHubTopic) == "" {
+		return fmt.Errorf("ALERT_PROCESSOR_ENABLED needs SRE_EVENT_HUB_TOPIC, the topic alert.created is published to and read from")
 	}
-	if c.AlertEventHubTopic == strings.TrimSpace(c.SREEventHubTopic) {
-		return fmt.Errorf("ALERT_EVENT_HUB_TOPIC must differ from SRE_EVENT_HUB_TOPIC (%q): sre-events consumers reject alert.created", c.AlertEventHubTopic)
+	if c.AlertProcessorConsumerGroup == "" {
+		return fmt.Errorf("ALERT_PROCESSOR_CONSUMER_GROUP must not be empty")
 	}
 	if c.AlertDedupWindow <= 0 {
 		return fmt.Errorf("ALERT_DEDUP_WINDOW must be positive, got %s", c.AlertDedupWindow)

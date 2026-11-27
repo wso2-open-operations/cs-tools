@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,7 +55,7 @@ func startAlertProcessor(cfg *config.Config, db *pgxpool.Pool, incidents inciden
 	if !cfg.AlertProcessorEnabled || !cfg.AlertConsumerEnabled() || db == nil {
 		return func() {}
 	}
-	bus := eventbus.Config{Broker: cfg.EventHubBroker, ConnectionString: cfg.EventHubConnectionString, Topic: cfg.AlertEventHubTopic}
+	bus := eventbus.Config{Broker: cfg.EventHubBroker, ConnectionString: cfg.EventHubConnectionString, Topic: strings.TrimSpace(cfg.SREEventHubTopic)}
 	scoped := repository.NewScoped(db)
 	apply := cfg.AlertingVersion == config.AlertingVersionV2
 

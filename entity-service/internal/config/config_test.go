@@ -1953,7 +1953,7 @@ func alertProcessorConfig() Config {
 	c.AlertProcessorEnabled = true
 	c.AlertProcessorCallerID = "00000000-0000-4000-8000-000000000001"
 	c.EventHubBroker, c.EventHubConnectionString = "ns.servicebus.windows.net:9093", "Endpoint=sb://ns/;SharedAccessKeyName=k;SharedAccessKey=v"
-	c.AlertEventHubTopic, c.AlertProcessorConsumerGroup = "alert-events", "entity-service-alert-processor"
+	c.AlertProcessorConsumerGroup = "entity-service-alert-processor"
 	c.SREEventHubTopic = "sre-events"
 	c.EventPublishingEnabled = true
 	c.AlertDedupWindow = 5 * time.Minute
@@ -1974,7 +1974,7 @@ func TestConfig_Validate_AlertProcessor(t *testing.T) {
 		{name: "no event hub", change: func(c *Config) { c.EventHubBroker = "" }, wantErr: true},
 		{name: "v2 without incident events", change: func(c *Config) { c.EventPublishingEnabled = false }, wantErr: true},
 		{name: "hybrid without incident events", change: func(c *Config) { c.AlertingVersion, c.EventPublishingEnabled = AlertingVersionHybrid, false }},
-		{name: "the sre-events topic", change: func(c *Config) { c.AlertEventHubTopic = "sre-events" }, wantErr: true},
+		{name: "no sre-events topic", change: func(c *Config) { c.SREEventHubTopic = "" }, wantErr: true},
 		{name: "no dedup window", change: func(c *Config) { c.AlertDedupWindow = 0 }, wantErr: true},
 	}
 	for _, tt := range tests {

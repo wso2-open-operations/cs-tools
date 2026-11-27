@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -430,7 +431,7 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	consumerCfg := service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight}
 	if cfg.AlertProcessorEnabled {
 		// Each message's alerts are published as alert.created after they are stored and before the message is acknowledged.
-		producer := eventbus.NewProducer(eventbus.Config{Broker: cfg.EventHubBroker, ConnectionString: cfg.EventHubConnectionString, Topic: cfg.AlertEventHubTopic})
+		producer := eventbus.NewProducer(eventbus.Config{Broker: cfg.EventHubBroker, ConnectionString: cfg.EventHubConnectionString, Topic: strings.TrimSpace(cfg.SREEventHubTopic)})
 		consumerCfg.Publisher = publisher.Publisher{Producer: producer}
 		closers = append(closers, func(context.Context) error { producer.Close(); return nil })
 	}

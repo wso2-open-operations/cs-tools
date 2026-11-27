@@ -34,7 +34,10 @@
 // here.
 package events
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Type identifies which of the event types below Envelope.Payload holds.
 type Type string
@@ -209,6 +212,21 @@ type Envelope struct {
 	Type     Type            `json:"type"`
 	EntityID string          `json:"entityId"`
 	Payload  json.RawMessage `json:"payload"`
+}
+
+// otherServicePrefixes are event families published on a shared topic for another service: entity-service's
+// alert processor reads alert.* from sre-events. This service acknowledges and skips them.
+var otherServicePrefixes = []string{"alert."}
+
+// ForAnotherService reports whether t belongs to another service on a shared topic, so this service skips it
+// instead of treating it as an unknown type.
+func (t Type) ForAnotherService() bool {
+	for _, prefix := range otherServicePrefixes {
+		if strings.HasPrefix(string(t), prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsKnown reports whether t is one of KnownTypes.
