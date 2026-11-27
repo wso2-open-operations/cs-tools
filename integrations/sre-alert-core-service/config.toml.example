@@ -61,6 +61,10 @@ chat_fallback_delay = "25s"
 chat_threading_enabled = true
 # Incidents each replica delivers to CSM/Chat in parallel; each holds one lock connection for its CSM/Chat calls.
 delivery_concurrency = 64
+# How often the active alert mute rules (mute rules) are fetched from CSM, and how often a muted incident is re-checked.
+mute_rule_refresh_interval = "30s"
+# How long the last fetched alert mute rules are still used while fetches fail; after that nothing is muted (fail open).
+mute_rule_max_staleness = "5m"
 
 [server]
 # Bounds how long SIGTERM/SIGINT waits for in-flight work before forcing exit.

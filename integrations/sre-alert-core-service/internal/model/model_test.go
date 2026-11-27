@@ -71,3 +71,41 @@ func TestBuildCreationNote_EscapesHTMLInAlertFields(t *testing.T) {
 		t.Fatalf("expected escaped script tag, got: %s", got)
 	}
 }
+
+func TestMoreSevere(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"critical", "warning", true},
+		{"Major", "minor", true},
+		{"warning", "critical", false},
+		{"warning", "warning", false},
+		{"ok", "warning", false},
+		{"bogus", "warning", false},
+		{"warning", "", true},
+		{"critical", "bogus", false},
+	} {
+		if got := MoreSevere(c.a, c.b); got != c.want {
+			t.Errorf("MoreSevere(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestMoreSevereThanNumeric(t *testing.T) {
+	for _, c := range []struct {
+		a    string
+		n    int
+		want bool
+	}{
+		{"warning", 1, false}, // a legacy critical incident is not downgraded
+		{"critical", 4, true},
+		{"major", 2, false},
+		{"ok", 4, false},
+		{"bogus", 4, false},
+	} {
+		if got := MoreSevereThanNumeric(c.a, c.n); got != c.want {
+			t.Errorf("MoreSevereThanNumeric(%q, %d) = %v, want %v", c.a, c.n, got, c.want)
+		}
+	}
+}

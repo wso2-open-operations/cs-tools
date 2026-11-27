@@ -25,6 +25,8 @@
 package eventbus
 
 import (
+	"time"
+
 	"github.com/segmentio/kafka-go/sasl"
 	"github.com/segmentio/kafka-go/sasl/plain"
 )
@@ -46,6 +48,10 @@ type Config struct {
 	ConnectionString string
 	// Topic is the Event Hub name (Kafka topic) to produce to.
 	Topic string
+	// BatchTimeout is how long the producer waits for more records before it sends a batch that is not full. Zero
+	// keeps kafka-go's default of one second, which a lone Publish waits out in full; a producer whose records must
+	// go at once (the alert relay) sets a few milliseconds.
+	BatchTimeout time.Duration
 }
 
 // saslMechanism builds the SASL/PLAIN credential Event Hub's Kafka endpoint

@@ -18,9 +18,11 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -466,6 +468,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// the WaitGroup at zero, so the wait returns at once.
 	ingestRetryCtx, stopIngestRetry := context.WithCancel(context.Background())
 	var ingestRetryWG sync.WaitGroup
+	// The alert relay and processor, when the queue consumer runs; closePublishers stops them and waits for the alerts
+	// in flight.
+	stopAlertPipeline := func() {}
 
 	// snWritebackDispatcher is the single shared SNWritebackDispatcher for
 	// every DATA_SOURCE=postgres-servicenow-dual-write best-effort mirror
@@ -1694,6 +1699,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.SLADataSource == config.SLADataSourceServiceNow && cfg.DataSource != config.DataSourceServiceNow {
 		activeIncidentSvc = service.WithSLASearchDelegate(activeIncidentSvc, service.NewServiceNowIncidentMirrorService(serviceNowIntegrationServiceClient))
 	}
+	// The alert processor turns the alerts the queue consumer (cmd/api/main.go) stored into incidents, through the
+	// same incident service POST /incidents uses, so an alert-born incident is published and assigned like any other.
+	// The relay hands each stored alert to it as alert.created on ALERT_EVENT_HUB_TOPIC (alert_pipeline.go). Both run
+	// wherever the consumer does: in hybrid the processor only records what it would do, in v2 it raises incidents.
+	// closePublishers stops them first, before the publishers its creates go through are closed.
+	if cfg.AlertConsumerEnabled() && db != nil {
+		stopAlertPipeline = startAlertPipeline(cfg, db, activeIncidentSvc)
+	}
 	// Which Special Ops team a handoff goes to, and which GitHub repository
 	// its internal issue goes to, is configuration. A value that does not
 	// parse would silently offer no handoff anywhere; refuse to start instead.
@@ -2349,6 +2362,27 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// report names customers' cases, accounts and assignees.
 		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
 	}
+	// Alert mute rules (Operations > Alert mute rules, migration 0278): Postgres only. On the
+	// ServiceNow data source every route answers 400 (alert-core, through
+	// csm-integration-service, then mutes nothing). internalOnly: the rules
+	// name internal services and the staff who muted them.
+	var alertMuteRuleHandler *handler.AlertMuteRuleHandler
+	switch {
+	case cfg.DataSource == config.DataSourceServiceNow:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewSNAlertMuteRuleService())
+	case db != nil:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewAlertMuteRuleService(repository.NewAlertMuteRuleRepository(repository.NewScoped(db))))
+	}
+	if alertMuteRuleHandler != nil {
+		mux.HandleFunc("POST /alert-mute-rules/search", internalOnly(accessSvc, alertMuteRuleHandler.SearchAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/active", internalOnly(accessSvc, alertMuteRuleHandler.GetActiveAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.GetAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules", internalOnly(accessSvc, alertMuteRuleHandler.CreateAlertMuteRule))
+		mux.HandleFunc("PATCH /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.UpdateAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules/{id}/extend", internalOnly(accessSvc, alertMuteRuleHandler.ExtendAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules/{id}/end", internalOnly(accessSvc, alertMuteRuleHandler.EndAlertMuteRule))
+		mux.HandleFunc("DELETE /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.DeleteAlertMuteRule))
+	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
 		mux.HandleFunc("GET /runbooks", internalOnly(accessSvc, runbookHandler.ListRunbooks))
@@ -2972,6 +3006,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// gone away. Cancelling its context also cancels the re-run's own
 	// context (retryOne derives from it), so the wait is short.
 	closePublishers := func() {
+		// First: an alert in flight may still be creating an incident, which publishes through the producers below.
+		stopAlertPipeline()
 		stopIngestRetry()
 		ingestRetryWG.Wait()
 		// The deferred-write consumers first: a write in flight finishes
@@ -3076,4 +3112,13 @@ func logCRVisibility(cfg *config.Config) {
 	default:
 		log.Printf("change request customer visibility: strict (designated-only) for change requests created at or after %s; earlier ones are legacy", from.Format(time.RFC3339))
 	}
+}
+
+// alertProcessorOwner names this replica on the alerts it claims, so a stuck claim can be traced to its pod.
+func alertProcessorOwner() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "entity-service"
+	}
+	return fmt.Sprintf("%s/%d", host, os.Getpid())
 }
