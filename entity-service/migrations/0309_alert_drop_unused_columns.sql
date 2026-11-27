@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- Drops what the alert table no longer uses: the claim columns (claimed_by, claim_expires_on, processed_on), the alert JSON now held in columns, the fingerprint now computed from them, and the error rows with error_reason, error and content_type. Safe to run again.
+-- Drops what the alert table no longer uses: the claim columns (claimed_by, claim_expires_on, processed_on), the alert JSON now held in columns, the fingerprint now computed from them, the gateway route, the queue message's id and position, source_topic and source_account, and the error rows with error_reason, error and content_type. Safe to run again.
 -- Run after 0308 and only after the data migration that needs these has finished: dropping a column discards its values, and the error rows are deleted.
 
 -- Error rows are messages the consumer could not normalise before it dead-lettered them; alert is FORCE ROW LEVEL SECURITY, so they are deleted as the internal identity.
@@ -31,7 +31,7 @@ DROP INDEX IF EXISTS alert_unprocessed_idx;
 DROP INDEX IF EXISTS alert_unprocessed_fingerprint_idx;
 DROP INDEX IF EXISTS alert_error_idx;
 
--- Every row is now an alert, so the row-kind check becomes NOT NULL on the columns it required.
+-- Every row is now an alert, so the row-kind check becomes NOT NULL on the fingerprint's columns.
 ALTER TABLE alert
     DROP CONSTRAINT IF EXISTS alert_row_kind,
     DROP COLUMN IF EXISTS claimed_by,
@@ -42,7 +42,11 @@ ALTER TABLE alert
     DROP COLUMN IF EXISTS error_reason,
     DROP COLUMN IF EXISTS error,
     DROP COLUMN IF EXISTS content_type,
-    ALTER COLUMN route SET NOT NULL,
+    DROP COLUMN IF EXISTS route,
+    DROP COLUMN IF EXISTS message_id,
+    DROP COLUMN IF EXISTS message_index,
+    DROP COLUMN IF EXISTS source_topic,
+    DROP COLUMN IF EXISTS source_account,
     ALTER COLUMN source SET NOT NULL,
     ALTER COLUMN service SET NOT NULL,
     ALTER COLUMN metric_name SET NOT NULL,
