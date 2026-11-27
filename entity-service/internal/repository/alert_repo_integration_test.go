@@ -94,12 +94,12 @@ func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testin
 	}
 
 	var rows int
-	var processed *time.Time
-	if err := NewScoped(pool).QueryRow(ctx, `SELECT count(*), max(processed_on) FROM alert WHERE message_id = 'it-alert-1'`).Scan(&rows, &processed); err != nil {
+	var linked *string
+	if err := NewScoped(pool).QueryRow(ctx, `SELECT count(*), max(incident_id::text) FROM alert WHERE message_id = 'it-alert-1'`).Scan(&rows, &linked); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if rows != 2 || processed != nil {
-		t.Fatalf("rows = %d processed = %v, want 2 unprocessed rows", rows, processed)
+	if rows != 2 || linked != nil {
+		t.Fatalf("rows = %d incident = %v, want 2 rows not yet in an incident", rows, linked)
 	}
 }
 
