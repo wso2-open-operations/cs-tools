@@ -2418,21 +2418,6 @@ func TestDispatcher_Handle_UnknownType(t *testing.T) {
 	}
 }
 
-func TestDispatcher_Handle_SkipsAnotherServicesEvents(t *testing.T) {
-	mock := &mockEmailSender{}
-	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
-
-	// entity-service's alert processor publishes alert.created on sre-events; this service must neither retry nor dead-letter it.
-	record := eventbus.Record{Value: []byte(`{"type":"alert.created","entityId":"ALT000000001","payload":{"alertId":"ALT000000001"}}`)}
-
-	if err := d.Handle(context.Background(), record); err != nil {
-		t.Fatalf("Handle(alert.created) = %v, want it acknowledged and skipped", err)
-	}
-	if len(mock.calls) != 0 {
-		t.Error("SendEmail should not be called for another service's event")
-	}
-}
-
 func TestDispatcher_Handle_MalformedEnvelope(t *testing.T) {
 	mock := &mockEmailSender{}
 	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})

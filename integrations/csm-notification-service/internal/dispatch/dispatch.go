@@ -1128,10 +1128,6 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	// Known even when env.Type turns out to be unrecognized or env.Payload
 	// fails events.Validate below — see recordRefFor's own doc comment.
 	ref := recordRefFor(env)
-	// Shared topics carry other services' events too (alert.* on sre-events); they are acknowledged, not retried.
-	if env.Type.ForAnotherService() {
-		return nil
-	}
 	if !env.Type.IsKnown() {
 		return wrapWithRef(fmt.Errorf("dispatch: unknown event type %q", env.Type), ref)
 	}
