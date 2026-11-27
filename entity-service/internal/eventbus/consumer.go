@@ -148,7 +148,7 @@ func NewConsumer(cfg Config, groupID string, policy RetryPolicy) *Consumer {
 				TLS:           &tls.Config{MinVersion: tls.VersionTLS12},
 				SASLMechanism: cfg.saslMechanism(),
 			},
-			StartOffset: kafka.FirstOffset,
+			StartOffset: cfg.startOffset(),
 			// Without this a group that joins while its topic has no
 			// partitions yet (the hub created after the service started, or
 			// auto-created by the first publish) is assigned nothing and

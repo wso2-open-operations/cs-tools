@@ -40,7 +40,7 @@ type Alert struct {
 	SourceAccount string `json:"source_account,omitempty"`
 }
 
-// Fingerprint identifies the alerts of one source, service, metric, environment and identifier; alerts with the same fingerprint fold into one incident.
+// Fingerprint is the key the alert processor folds alerts into incidents by.
 func Fingerprint(a Alert) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{a.Source, a.Service, a.MetricName, a.Environment, a.UniqueIdentifier}, "|")))
 	return hex.EncodeToString(sum[:])
