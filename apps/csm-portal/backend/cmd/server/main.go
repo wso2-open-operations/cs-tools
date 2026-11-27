@@ -976,7 +976,7 @@ func main() {
 	route("PATCH /outages/{id}", handler.PermWrite, outageHandler.PatchOutage)
 	route("POST /outages/{id}/communications", handler.PermWrite, outageHandler.AddOutageCommunication)
 	route("POST /outages/{id}/communications/search", handler.PermViewOperations, outageHandler.SearchOutageCommunications)
-	// Alert mute rules: 1:1 proxies to entity-service. GET /alert-mute-rules/active is
+	// Alert mute rules: 1:1 proxies to entity-service. GET /alert-mute-rules?status=active is
 	// deliberately not exposed here; alert-core reads it via csm-integration-service.
 	route("POST /alert-mute-rules/search", handler.PermViewOperations, alertMuteRuleHandler.SearchAlertMuteRules)
 	route("GET /alert-mute-rules/{id}", handler.PermViewOperations, alertMuteRuleHandler.GetAlertMuteRule)
@@ -985,8 +985,6 @@ func main() {
 	route("GET /alert-mute-rules/muted-counts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedCounts)
 	route("POST /alert-mute-rules", handler.PermWrite, alertMuteRuleHandler.CreateAlertMuteRule)
 	route("PATCH /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.PatchAlertMuteRule)
-	route("POST /alert-mute-rules/{id}/extend", handler.PermWrite, alertMuteRuleHandler.ExtendAlertMuteRule)
-	route("POST /alert-mute-rules/{id}/end", handler.PermWrite, alertMuteRuleHandler.EndAlertMuteRule)
 	route("DELETE /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.DeleteAlertMuteRule)
 	// Called manually today; not yet wired into real incident/case creation.
 	route("POST /notifications/google-chat/alerts", handler.PermWrite, notificationHandler.PostGoogleChatAlert)

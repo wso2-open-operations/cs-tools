@@ -24,7 +24,7 @@ import (
 
 // TestAlertMuteRuleRoutePermissions pins the /alert-mute-rules registrations: reads
 // need PermViewOperations and writes PermWrite, like every other Operations
-// record, and GET /alert-mute-rules/active (alert-core's feed, served by
+// record, and GET /alert-mute-rules?status=active (alert-core's feed, served by
 // csm-integration-service) is never exposed to the portal.
 func TestAlertMuteRuleRoutePermissions(t *testing.T) {
 	src, err := os.ReadFile("main.go")
@@ -39,8 +39,6 @@ func TestAlertMuteRuleRoutePermissions(t *testing.T) {
 		"GET /alert-mute-rules/muted-counts":      "handler.PermViewOperations",
 		"POST /alert-mute-rules":                  "handler.PermWrite",
 		"PATCH /alert-mute-rules/{id}":            "handler.PermWrite",
-		"POST /alert-mute-rules/{id}/extend":      "handler.PermWrite",
-		"POST /alert-mute-rules/{id}/end":         "handler.PermWrite",
 		"DELETE /alert-mute-rules/{id}":           "handler.PermWrite",
 	}
 	got := map[string]string{}
@@ -57,7 +55,7 @@ func TestAlertMuteRuleRoutePermissions(t *testing.T) {
 			t.Errorf("unexpected alert-mute-rule route %s", route)
 		}
 	}
-	if regexp.MustCompile(`"GET /alert-mute-rules/active"`).Match(src) {
-		t.Error("GET /alert-mute-rules/active must not be exposed to the portal")
+	if regexp.MustCompile(`"GET /alert-mute-rules(/active)?"`).Match(src) {
+		t.Error("GET /alert-mute-rules?status=active must not be exposed to the portal")
 	}
 }

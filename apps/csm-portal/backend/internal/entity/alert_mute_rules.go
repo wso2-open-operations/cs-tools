@@ -25,7 +25,7 @@ import (
 
 // Alert mute rules are one-time windows that mute SRE alerts matching a set of
 // conditions. Every method below is a 1:1 passthrough to entity-service; the
-// response is returned as raw JSON. GET /alert-mute-rules/active is deliberately
+// response is returned as raw JSON. GET /alert-mute-rules?status=active is deliberately
 // not here: only alert-core reads it, through csm-integration-service.
 
 // SearchAlertMuteRules calls POST /alert-mute-rules/search on the entity service.
@@ -46,16 +46,6 @@ func (c *CustomerEntityClient) CreateAlertMuteRule(ctx context.Context, body []b
 // PatchAlertMuteRule calls PATCH /alert-mute-rules/{id} on the entity service.
 func (c *CustomerEntityClient) PatchAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/alert-mute-rules/%s", url.PathEscape(id)), body)
-}
-
-// ExtendAlertMuteRule calls POST /alert-mute-rules/{id}/extend on the entity service.
-func (c *CustomerEntityClient) ExtendAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/alert-mute-rules/%s/extend", url.PathEscape(id)), body)
-}
-
-// EndAlertMuteRule calls POST /alert-mute-rules/{id}/end on the entity service.
-func (c *CustomerEntityClient) EndAlertMuteRule(ctx context.Context, id string) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/alert-mute-rules/%s/end", url.PathEscape(id)), nil)
 }
 
 // DeleteAlertMuteRule calls DELETE /alert-mute-rules/{id} on the entity service.

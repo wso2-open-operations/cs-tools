@@ -79,22 +79,6 @@ func alertMuteRuleRoutes() []alertMuteRuleRoute {
 			},
 		},
 		{
-			name: "extend", method: http.MethodPost, path: "/alert-mute-rules/" + testAlertMuteRuleID + "/extend", hasID: true,
-			body: `{"endOn":"2026-11-07T04:00:00Z"}`, okStatus: http.StatusOK, fallback: "Failed to extend alert mute rule.",
-			call: (*AlertMuteRuleHandler).ExtendAlertMuteRule,
-			failWith: func(m *mockEntityAlertMuteRuleClient, err error) {
-				m.extendFn = func(context.Context, string, []byte) ([]byte, error) { return nil, err }
-			},
-		},
-		{
-			name: "end", method: http.MethodPost, path: "/alert-mute-rules/" + testAlertMuteRuleID + "/end", hasID: true,
-			okStatus: http.StatusOK, fallback: "Failed to end alert mute rule.",
-			call: (*AlertMuteRuleHandler).EndAlertMuteRule,
-			failWith: func(m *mockEntityAlertMuteRuleClient, err error) {
-				m.endFn = func(context.Context, string) ([]byte, error) { return nil, err }
-			},
-		},
-		{
 			name: "delete", method: http.MethodDelete, path: "/alert-mute-rules/" + testAlertMuteRuleID, hasID: true,
 			okStatus: http.StatusNoContent, fallback: "Failed to delete alert mute rule.",
 			call: (*AlertMuteRuleHandler).DeleteAlertMuteRule,
@@ -220,42 +204,5 @@ func TestAlertMuteRuleSaveRejectsNonObjectBody(t *testing.T) {
 			assertStatus(t, w, http.StatusBadRequest)
 			assertErrorMessage(t, w, ErrMsgBadRequest)
 		})
-	}
-}
-
-func TestExtendAlertMuteRuleRequiresEndOn(t *testing.T) {
-	for _, body := range []string{`{}`, `{"endOn":""}`, `{"endOn":"  "}`, `{"endOn":5}`} {
-		t.Run(body, func(t *testing.T) {
-			called := false
-			m := &mockEntityAlertMuteRuleClient{extendFn: func(context.Context, string, []byte) ([]byte, error) {
-				called = true
-				return nil, nil
-			}}
-			r := withUser(httptest.NewRequest(http.MethodPost, "/alert-mute-rules/"+testAlertMuteRuleID+"/extend", strings.NewReader(body)))
-			r.SetPathValue("id", testAlertMuteRuleID)
-			w := httptest.NewRecorder()
-			NewAlertMuteRuleHandler(m).ExtendAlertMuteRule(w, r)
-			assertStatus(t, w, http.StatusBadRequest)
-			assertErrorMessage(t, w, "endOn is required.")
-			if called {
-				t.Error("entity service was called for an invalid body")
-			}
-		})
-	}
-}
-
-func TestEndAlertMuteRuleForwardsID(t *testing.T) {
-	var got string
-	m := &mockEntityAlertMuteRuleClient{endFn: func(_ context.Context, id string) ([]byte, error) {
-		got = id
-		return []byte(`{"endedOn":"2026-11-07T01:00:00Z"}`), nil
-	}}
-	r := withUser(httptest.NewRequest(http.MethodPost, "/alert-mute-rules/"+testAlertMuteRuleID+"/end", nil))
-	r.SetPathValue("id", testAlertMuteRuleID)
-	w := httptest.NewRecorder()
-	NewAlertMuteRuleHandler(m).EndAlertMuteRule(w, r)
-	assertStatus(t, w, http.StatusOK)
-	if got != testAlertMuteRuleID {
-		t.Errorf("upstream got id %q", got)
 	}
 }

@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
@@ -33,8 +32,6 @@ type entityAlertMuteRuleClient interface {
 	GetAlertMuteRule(ctx context.Context, id string) ([]byte, error)
 	CreateAlertMuteRule(ctx context.Context, body []byte) ([]byte, error)
 	PatchAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error)
-	ExtendAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error)
-	EndAlertMuteRule(ctx context.Context, id string) ([]byte, error)
 	DeleteAlertMuteRule(ctx context.Context, id string) error
 }
 
@@ -139,7 +136,8 @@ func (h *AlertMuteRuleHandler) CreateAlertMuteRule(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusCreated, result)
 }
 
-// PatchAlertMuteRule handles PATCH /alert-mute-rules/{id}.
+// PatchAlertMuteRule handles PATCH /alert-mute-rules/{id}: edit a scheduled rule, or extend (endOn alone) or end
+// (state "ended" alone) an active one. Entity-service decides which by the rule's state.
 func (h *AlertMuteRuleHandler) PatchAlertMuteRule(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -158,58 +156,6 @@ func (h *AlertMuteRuleHandler) PatchAlertMuteRule(w http.ResponseWriter, r *http
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity PatchAlertMuteRule failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamError(w, err, "Failed to update alert mute rule.")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// ExtendAlertMuteRule handles POST /alert-mute-rules/{id}/extend. The body must carry
-// a non-blank endOn; entity-service checks it is a later, in-limit RFC3339 time.
-func (h *AlertMuteRuleHandler) ExtendAlertMuteRule(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-	id, ok := alertMuteRulePathID(w, r)
-	if !ok {
-		return
-	}
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
-	var req struct {
-		EndOn string `json:"endOn"`
-	}
-	if err := json.Unmarshal(body, &req); err != nil || strings.TrimSpace(req.EndOn) == "" {
-		writeError(w, http.StatusBadRequest, "endOn is required.")
-		return
-	}
-	result, err := h.entity.ExtendAlertMuteRule(r.Context(), id, body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ExtendAlertMuteRule failed", "userID", user.UserID, "id", id, "err", err)
-		mapUpstreamError(w, err, "Failed to extend alert mute rule.")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// EndAlertMuteRule handles POST /alert-mute-rules/{id}/end. It takes no body.
-func (h *AlertMuteRuleHandler) EndAlertMuteRule(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-	id, ok := alertMuteRulePathID(w, r)
-	if !ok {
-		return
-	}
-	result, err := h.entity.EndAlertMuteRule(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity EndAlertMuteRule failed", "userID", user.UserID, "id", id, "err", err)
-		mapUpstreamError(w, err, "Failed to end alert mute rule.")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

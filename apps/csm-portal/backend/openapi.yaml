@@ -10810,8 +10810,11 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Edit a scheduled alert mute rule.
-      description: Same body as create. Only a scheduled alert mute rule can be edited; otherwise 409.
+      summary: Edit a scheduled alert mute rule, or extend or end an active one.
+      description: >-
+        Scheduled rule: a partial edit, only the fields sent change. Active rule: endOn alone extends it (later than
+        the current end, at most 72 hours after the start), and state "ended" alone ends it now. Anything else on an
+        active rule, and any change to an expired or ended rule, is 409.
       operationId: patchAlertMuteRuleById
       parameters:
         - name: id
@@ -10822,11 +10825,11 @@ paths:
             type: string
             format: uuid
       requestBody:
-        description: Alert mute rule save payload.
+        description: The fields to change, or endOn / state alone for an active rule.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+              $ref: '#/components/schemas/PatchAlertMuteRulePayload'
         required: true
       responses:
         "200":
@@ -10918,133 +10921,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
           description: Conflict (the alert mute rule is no longer scheduled). The message says why.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /alert-mute-rules/{id}/extend:
-    post:
-      summary: Move a scheduled or active alert mute rule's end later.
-      description: The new endOn must be after the current one and at most 72h after startOn.
-      operationId: postAlertMuteRuleExtend
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the alert mute rule.
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        description: New end time.
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExtendAlertMuteRulePayload'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertMuteRule'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: Alert mute rule not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "409":
-          description: Conflict (the alert mute rule is not scheduled or active). The message says why.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /alert-mute-rules/{id}/end:
-    post:
-      summary: End an active alert mute rule now.
-      description: Sets endedOn to now and endedBy to the caller. Takes no body.
-      operationId: postAlertMuteRuleEnd
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the alert mute rule.
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertMuteRule'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: Alert mute rule not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "409":
-          description: Conflict (the alert mute rule is not active). The message says why.
           content:
             application/json:
               schema:
@@ -21946,13 +21822,34 @@ components:
           description: Each field at most once; must include service and environment.
           items:
             $ref: '#/components/schemas/AlertMuteRuleCondition'
-    ExtendAlertMuteRulePayload:
+    PatchAlertMuteRulePayload:
       type: object
-      required: [endOn]
+      description: A scheduled rule takes any of the fields; an active rule takes endOn alone (extend) or state alone (end).
       properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
         endOn:
           type: string
           format: date-time
+        conditions:
+          type: array
+          description: Replaces the whole list.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        state:
+          type: string
+          enum: [ended]
+          description: Ends an active rule now. Sent alone.
     AlertMuteRule:
       type: object
       properties:

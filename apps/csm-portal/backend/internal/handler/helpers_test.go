@@ -1429,8 +1429,6 @@ type mockEntityAlertMuteRuleClient struct {
 	getFn    func(ctx context.Context, id string) ([]byte, error)
 	createFn func(ctx context.Context, body []byte) ([]byte, error)
 	patchFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
-	extendFn func(ctx context.Context, id string, body []byte) ([]byte, error)
-	endFn    func(ctx context.Context, id string) ([]byte, error)
 	deleteFn func(ctx context.Context, id string) error
 }
 
@@ -1458,20 +1456,6 @@ func (m *mockEntityAlertMuteRuleClient) CreateAlertMuteRule(ctx context.Context,
 func (m *mockEntityAlertMuteRuleClient) PatchAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
 	if m.patchFn != nil {
 		return m.patchFn(ctx, id, body)
-	}
-	return []byte(`{"id":"` + id + `"}`), nil
-}
-
-func (m *mockEntityAlertMuteRuleClient) ExtendAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
-	if m.extendFn != nil {
-		return m.extendFn(ctx, id, body)
-	}
-	return []byte(`{"id":"` + id + `"}`), nil
-}
-
-func (m *mockEntityAlertMuteRuleClient) EndAlertMuteRule(ctx context.Context, id string) ([]byte, error) {
-	if m.endFn != nil {
-		return m.endFn(ctx, id)
 	}
 	return []byte(`{"id":"` + id + `"}`), nil
 }
