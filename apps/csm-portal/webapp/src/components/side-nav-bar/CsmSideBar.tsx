@@ -18,6 +18,7 @@ import { Box, Link, Sidebar, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { useCallback, useEffect, useMemo, type JSX } from "react";
 import { Link as NavigateLink, useLocation } from "react-router";
 import {
+  type CsmNavNode,
   type CsmNavSection,
   navNodeById,
   navNodeHref,
@@ -28,6 +29,7 @@ import {
   featureState,
   hasVisibleShortcutChild,
   isPreviewedOnly,
+  visibleNavChildren,
   visibleNavSections,
   visibleRailChildren,
   visibleShortcutTo,
@@ -325,7 +327,23 @@ export default function CsmSideBar({
                       {itemPreviewedOnly && (
                         <Sidebar.ItemBadge color="primary">Preview</Sidebar.ItemBadge>
                       )}
-                      {children.map((child) => {
+                      {children.flatMap((child) => {
+                        // A tab's sub-tabs (Alerts under Incidents) are
+                        // listed right after it, indented, while the tab or
+                        // one of them is the current page. They are sibling
+                        // items, not nested ones: an item with nested items
+                        // only toggles in Oxygen, and the tab must still
+                        // navigate.
+                        const subTabs = child.tab
+                          ? visibleNavChildren(child, access, previewOverrides).filter((sub) => Boolean(sub.tab))
+                          : [];
+                        const subTabsShown =
+                          activeItem === child.id || subTabs.some((sub) => sub.id === activeItem);
+                        return [
+                          { node: child, isSubTab: false },
+                          ...(subTabsShown ? subTabs : []).map((sub) => ({ node: sub, isSubTab: true })),
+                        ];
+                      }).map(({ node: child, isSubTab }: { node: CsmNavNode; isSubTab: boolean }) => {
                         const childWip =
                           featureState(child.id, access, previewOverrides) === "wip";
                         const childPreviewedOnly = isPreviewedOnly(
@@ -334,10 +352,15 @@ export default function CsmSideBar({
                           previewOverrides,
                         );
                         return (
-                          <Sidebar.Item id={child.id} key={child.id}>
+                          <Sidebar.Item
+                            id={child.id}
+                            key={child.id}
+                            // Oxygen indents by depth (2 + 2 per level); a sub-tab sits one level deeper.
+                            sx={isSubTab ? { pl: 6 } : undefined}
+                          >
                             {child.icon && (
                               <Sidebar.ItemIcon>
-                                <child.icon size={18} />
+                                <child.icon size={isSubTab ? 16 : 18} />
                               </Sidebar.ItemIcon>
                             )}
                             <Sidebar.ItemLabel>{child.label}</Sidebar.ItemLabel>

@@ -10492,6 +10492,142 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /sre-alerts/search:
+    post:
+      summary: Search SRE alerts, newest received first by default.
+      description: >-
+        SRE alerts are the alerts stored in entity-service's own alert table (not the
+        ServiceNow incident_alert behind /alerts/{id}). The body is forwarded unchanged
+        after its tier, incident, sort, received-date and pagination values are checked.
+      operationId: postSreAlertsSearch
+      requestBody:
+        description: SRE alert search payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSreAlertsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSreAlertsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sre-alerts/facets:
+    get:
+      summary: Distinct filter values of recent SRE alerts.
+      description: >-
+        The environments, services, severities and sources of the alerts received in the
+        last 30 days, at most 200 of each, sorted.
+      operationId: getSreAlertFacets
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SreAlertFacets'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sre-alerts/{id}:
+    get:
+      summary: Get an SRE alert by its UUID or ALT number.
+      operationId: getSreAlertById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The alert's UUID, or its number (ALT followed by nine digits, e.g. ALT000000042).
+          schema:
+            type: string
+            pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|ALT[0-9]{9})$'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SreAlertDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /problems:
     post:
       summary: Create a new problem (ServiceNow data source only).
@@ -24037,6 +24173,189 @@ components:
               type: integer
             limit:
               type: integer
+    SearchSreAlertsPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Matches number, service, metric name, description and unique identifier (case-insensitive).
+            environments:
+              type: array
+              items:
+                type: string
+            services:
+              type: array
+              items:
+                type: string
+            severities:
+              type: array
+              items:
+                type: string
+            sources:
+              type: array
+              description: The alert's source (e.g. Azure Monitor), not its route.
+              items:
+                type: string
+            tiers:
+              type: array
+              items:
+                type: string
+                enum: [priority, standard]
+            incident:
+              type: string
+              enum: [all, linked, unlinked]
+              default: all
+            incidentId:
+              type: string
+              format: uuid
+              description: Only the alerts linked to this incident.
+            receivedFrom:
+              type: string
+              format: date-time
+              description: Inclusive.
+            receivedTo:
+              type: string
+              format: date-time
+              description: Exclusive.
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [receivedOn, number, severity, environment, service]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+            limit:
+              type: integer
+              minimum: 0
+              maximum: 100
+              default: 20
+    SreAlertIncidentRef:
+      type: object
+      description: The incident an SRE alert is linked to (the alert's incident_id).
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: INC0012345
+        subject:
+          type: string
+        state:
+          type: string
+          description: Incident state enum text, e.g. NEW, IN_PROGRESS, RESOLVED, CLOSED, CANCELED.
+        priority:
+          type: string
+        impact:
+          type: string
+        urgency:
+          type: string
+        openedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SreAlert:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: ALT000000042
+        route:
+          type: string
+        source:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+        metricName:
+          type: string
+        severity:
+          type: string
+        category:
+          type: string
+        tier:
+          type: string
+          enum: [priority, standard]
+        receivedOn:
+          type: string
+          format: date-time
+        createdOn:
+          type: string
+          format: date-time
+        incident:
+          allOf:
+            - $ref: '#/components/schemas/SreAlertIncidentRef'
+          nullable: true
+    SreAlertDetail:
+      allOf:
+        - $ref: '#/components/schemas/SreAlert'
+        - type: object
+          properties:
+            uniqueIdentifier:
+              type: string
+            description:
+              type: string
+            assignmentGroup:
+              type: string
+            sourceTopic:
+              type: string
+            sourceAccount:
+              type: string
+            messageId:
+              type: string
+            messageIndex:
+              type: integer
+            rawBody:
+              type: string
+              nullable: true
+              description: The source's request body as text; only the first alert of a message keeps it.
+    SearchSreAlertsResponse:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SreAlert'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+    SreAlertFacets:
+      type: object
+      properties:
+        environments:
+          type: array
+          items:
+            type: string
+        services:
+          type: array
+          items:
+            type: string
+        severities:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
     SearchAlertMuteRulesResponse:
       type: object
       properties:

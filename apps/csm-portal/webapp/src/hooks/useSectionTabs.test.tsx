@@ -112,7 +112,7 @@ describe("usePathSectionTabs", () => {
     renderPathTabsAt("/operations/service-requests");
 
     expect(screen.getByTestId("tab-keys")).toHaveTextContent(
-      "service-requests,change-requests,incidents,alert-mute-rules,problems",
+      "service-requests,change-requests,incidents,alerts,alert-mute-rules,problems",
     );
   });
 
@@ -217,6 +217,7 @@ describe("firstEnabledPathTab / enabledPathTabKeys", () => {
       "service-requests",
       "change-requests",
       "incidents",
+      "alerts",
       "alert-mute-rules",
       "problems",
       "outages",
@@ -231,6 +232,7 @@ describe("firstEnabledPathTab / enabledPathTabKeys", () => {
     expect(enabledPathTabKeys("operations")).toEqual([
       "service-requests",
       "change-requests",
+      // Alerts is a sub-tab of Incidents: hiding Incidents hides it too.
       "alert-mute-rules",
       "problems",
       "outages",

@@ -19,12 +19,15 @@ import {
   CSM_NAV_ITEMS,
   flattenNavNodes,
   navNodeById,
+  navNodeForPath,
   navNodeHref,
   navNodeMatchForPath,
   navNodePath,
   navNodeRoutes,
   navSectionForPath,
+  navTabForSearch,
   navViewForSearch,
+  withSubTabs,
 } from "@config/csmNavItems";
 import { enabledNavChildren, isFeatureVisible, visibleNavSections } from "@config/featureFlags";
 import { getPortalAccess } from "@context/current-user/portalAccess";
@@ -235,6 +238,25 @@ describe("navNodeMatchForPath", () => {
       node: { id: "customers.accounts" },
       prefix: "/customers/accounts",
     });
+  });
+
+  it("nests Alerts under Incidents as a sub-tab of Operations", () => {
+    const alerts = navNodeById("operations.incidents.alerts")!;
+    expect(navNodeById("operations.incidents")!.children).toContain(alerts);
+    expect(navNodeById("operations")!.children).not.toContain(alerts);
+    expect(navNodeHref(alerts)).toBe("/operations/alerts");
+    expect(navNodeMatchForPath("/operations/alerts/ALT000000042")).toMatchObject({
+      node: { id: "operations.incidents.alerts" },
+      prefix: "/operations/alerts",
+    });
+    // Incidents keeps its own pages.
+    expect(navNodeForPath("/operations/incidents/INC0001")?.id).toBe("operations.incidents");
+    expect(navTabForSearch(navNodeById("operations")!, "?tab=alerts")).toBe(alerts);
+    expect(withSubTabs(navNodeById("operations")!.children!).map((n) => n.id)).toEqual(
+      expect.arrayContaining(["operations.incidents", "operations.incidents.alerts"]),
+    );
+    const ids = withSubTabs(navNodeById("operations")!.children!).map((n) => n.id);
+    expect(ids.indexOf("operations.incidents.alerts")).toBe(ids.indexOf("operations.incidents") + 1);
   });
 
   it("puts standard changes under Change requests, not in a tab of their own", () => {

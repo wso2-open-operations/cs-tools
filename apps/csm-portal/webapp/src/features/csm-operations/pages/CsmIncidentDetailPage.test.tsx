@@ -21,7 +21,7 @@ import type { JSX } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type InitialEntry } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { BeIncidentDetail } from "@api/backend/types";
+import type { BeIncidentDetail, BeSreAlert } from "@api/backend/types";
 import type { ChildIncidentRow } from "@features/csm-operations/api/useSearchChildIncidents";
 import { CaseTabsProvider, useCaseTabsController } from "@context/case-tabs/CaseTabsContext";
 import { CaseTabsBehaviorProvider } from "@context/case-tabs/CaseTabsBehaviorContext";
@@ -171,6 +171,23 @@ vi.mock("@features/csm-operations/api/useSearchChildIncidents", () => ({
     dataUpdatedAt: 0,
     refetch: vi.fn(),
   }),
+}));
+
+// The Alerts tab's search: records each payload and returns `sreAlertRows`.
+const sreAlertSearchMock = vi.hoisted(() => vi.fn());
+let sreAlertRows: BeSreAlert[] = [];
+vi.mock("@features/csm-operations/api/useSreAlerts", () => ({
+  useSearchSreAlerts: (payload: unknown) => {
+    sreAlertSearchMock(payload);
+    return {
+      data: { alerts: sreAlertRows, total: sreAlertRows.length, offset: 0, limit: 10 },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      dataUpdatedAt: 0,
+      refetch: vi.fn(),
+    };
+  },
 }));
 
 vi.mock("@api/useSearchUsersByName", () => ({
@@ -436,6 +453,59 @@ describe("CsmIncidentDetailPage — tabs", () => {
     const table = screen.getByTestId("work-item-sla-table");
     expect(table).toHaveAttribute("data-id", "inc-1");
     expect(table).toHaveAttribute("data-label", "incident");
+  });
+
+  it("lists the incident's SRE alerts on its Alerts tab, each opening the alert", () => {
+    sreAlertRows = [
+      {
+        id: "01a21bb0-c1a4-7954-8ee2-f7cb2d4b63f7",
+        number: "ALT000000042",
+        route: "azure",
+        source: "Azure Monitor",
+        service: "svc-a",
+        environment: "prod",
+        metricName: "cpu",
+        severity: "critical",
+        category: "",
+        tier: "priority",
+        receivedOn: "2026-11-27T10:00:00Z",
+        createdOn: "2026-11-27T10:00:01Z",
+        incident: null,
+      },
+    ];
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+    // Lazy: nothing is searched until the tab is opened.
+    expect(sreAlertSearchMock).not.toHaveBeenCalled();
+    goToTab(/^alerts$/i);
+
+    expect(sreAlertSearchMock).toHaveBeenLastCalledWith({
+      filters: { incidentId: "inc-1" },
+      sortBy: { field: "receivedOn", order: "desc" },
+      pagination: { offset: 0, limit: 10 },
+    });
+    expect(screen.getByTestId("search-probe")).toHaveTextContent("tab=alerts");
+    for (const col of ["Number", "Received", "Severity", "Metric", "Environment"]) {
+      expect(screen.getByRole("columnheader", { name: col })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("link", { name: "ALT000000042" })).toHaveAttribute(
+      "href",
+      "/operations/alerts/01a21bb0-c1a4-7954-8ee2-f7cb2d4b63f7",
+    );
+    expect(screen.getByText("Critical")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("cpu"));
+    expect(navigateMock).toHaveBeenLastCalledWith("/operations/alerts/01a21bb0-c1a4-7954-8ee2-f7cb2d4b63f7", {
+      state: { from: "/operations/incidents/inc-1?tab=alerts", parentState: null },
+    });
+    sreAlertRows = [];
+  });
+
+  it("says when no alerts are linked to the incident", () => {
+    sreAlertRows = [];
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage("/operations/incidents/inc-1?tab=alerts");
+    expect(screen.getByText("No alerts are linked to this incident.")).toBeInTheDocument();
   });
 
   it("opens the SLA tab straight from ?tab=sla", () => {

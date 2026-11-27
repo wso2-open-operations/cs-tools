@@ -262,6 +262,36 @@ describe("CsmSideBar — Operations/Security Center submenu", () => {
     expect(lastSidebarProps().expandedMenus?.operations).toBe(true);
   });
 
+  it("lists Alerts indented under Incidents while Incidents is the current page", () => {
+    const { container } = renderAt("/operations/incidents");
+    const incidents = container.querySelector('[data-item-id="operations.incidents"]');
+    const alerts = container.querySelector('[data-item-id="operations.incidents.alerts"]');
+    expect(alerts).not.toBeNull();
+    // A sibling right after its parent tab, not nested inside it: Incidents must still navigate.
+    expect(incidents?.nextElementSibling).toBe(alerts);
+    expect(incidents?.contains(alerts)).toBe(false);
+  });
+
+  it("keeps Alerts listed and highlighted on an alert's own page", () => {
+    const { container } = renderAt("/operations/alerts/01a21bb0-c1a4-7954-8ee2-f7cb2d4b63f7");
+    expect(lastActiveItem()).toBe("operations.incidents.alerts");
+    expect(lastSidebarProps().expandedMenus?.operations).toBe(true);
+    expect(container.querySelector('[data-item-id="operations.incidents.alerts"]')).not.toBeNull();
+    expect(sessionStorage.getItem(LAST_SECTION_KEY)).toBe("operations");
+  });
+
+  it("hides Alerts while another Operations tab is the current page", () => {
+    const { container } = renderAt("/operations/problems");
+    expect(container.querySelector('[data-item-id="operations.incidents"]')).not.toBeNull();
+    expect(container.querySelector('[data-item-id="operations.incidents.alerts"]')).toBeNull();
+  });
+
+  it("navigates to Alerts' own path-segment route when it is selected", () => {
+    renderAt("/operations/incidents");
+    lastSidebarProps().onSelect?.("operations.incidents.alerts");
+    expect(navigateMock).toHaveBeenCalledWith("/operations/alerts");
+  });
+
   it("navigates to the real path-segment route for a selected submenu child, not the legacy ?tab= href", () => {
     renderAt("/dashboard");
     lastSidebarProps().onSelect?.("operations.incidents");

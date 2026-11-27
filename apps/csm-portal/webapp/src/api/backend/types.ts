@@ -4001,6 +4001,94 @@ export interface BeIncidentSearchResponse {
 }
 
 // ---------------------------------------------------------------------------
+// SRE alerts (`/sre-alerts/*`): the alerts stored in entity-service's own alert
+// table, each with a UUID `id` and a human number (`ALT000000042`). Not the
+// ServiceNow incident_alert behind `/alerts/{id}`.
+// ---------------------------------------------------------------------------
+
+export type BeSreAlertTier = "priority" | "standard";
+export type BeSreAlertIncidentFilter = "all" | "linked" | "unlinked";
+export type BeSreAlertSortField = "receivedOn" | "number" | "severity" | "environment" | "service";
+
+export interface BeSreAlertSearchPayload {
+  filters?: {
+    searchQuery?: string;
+    environments?: string[];
+    services?: string[];
+    severities?: string[];
+    sources?: string[];
+    tiers?: BeSreAlertTier[];
+    incident?: BeSreAlertIncidentFilter;
+    /** UUID: only the alerts of this incident. */
+    incidentId?: string;
+    /** RFC3339, inclusive. */
+    receivedFrom?: string;
+    /** RFC3339, exclusive. */
+    receivedTo?: string;
+  };
+  sortBy?: { field: BeSreAlertSortField; order: "asc" | "desc" };
+  pagination?: { offset: number; limit: number };
+}
+
+/** One alert as the list returns it. Source, service, environment and metric name are "" (never null) when unset. */
+export interface BeSreAlert {
+  id: string;
+  number: string;
+  route: string;
+  source: string;
+  service: string;
+  environment: string;
+  metricName: string;
+  severity: string;
+  category: string;
+  tier: BeSreAlertTier;
+  receivedOn: string;
+  createdOn: string;
+  /** The incident the alert was grouped into; null when it isn't linked to one. */
+  incident: BeSreAlertIncident | null;
+}
+
+/** The incident an SRE alert is linked to (the alert's incident_id), as the alert endpoints embed it. */
+export interface BeSreAlertIncident {
+  id: string;
+  number: string;
+  subject: string;
+  /** Incident state enum text, e.g. NEW, IN_PROGRESS, RESOLVED, CLOSED, CANCELED. */
+  state: string;
+  priority: string;
+  impact: string;
+  urgency: string;
+  openedOn: string | null;
+}
+
+export interface BeSreAlertDetail extends BeSreAlert {
+  uniqueIdentifier: string;
+  description: string;
+  assignmentGroup: string;
+  sourceTopic: string;
+  sourceAccount: string;
+  messageId: string;
+  messageIndex: number;
+  /** The source's request body as text; null on every alert of a message but the first. */
+  rawBody: string | null;
+}
+
+export interface BeSreAlertSearchResponse {
+  alerts: BeSreAlert[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+/** Distinct filter values of the alerts received in the last 30 days. */
+export interface BeSreAlertFacets {
+  environments: string[];
+  services: string[];
+  severities: string[];
+  sources: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Problems (SRE-owned; ServiceNow data source only). Enum casing mirrors
 // incidents (UPPER_SNAKE_CASE on the wire), not change requests.
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import {
   Award,
   BarChart3,
   BellOff,
+  BellRing,
   Briefcase,
   BookOpen,
   Bug,
@@ -120,7 +121,27 @@ export interface CsmNavNode {
    */
   views?: CsmNavViews;
   icon?: ComponentType<{ size?: number | string }>;
+  /**
+   * A section's tabs. A query-param tab (`tab` set) may itself have children
+   * that are query-param tabs too: sub-tabs. A sub-tab is a tab of the same
+   * section in every respect (its own `?tab=` value and path segment, see
+   * {@link withSubTabs}); only the sidebar shows it differently, indented
+   * under its parent tab while either one is the current page. It sits under
+   * its parent for the feature overrides and `requires` too, so hiding the
+   * parent hides it. One level only.
+   */
   children?: CsmNavNode[];
+}
+
+/**
+ * `tabs` with each one's sub-tabs (see {@link CsmNavNode.children}) right after
+ * it: the full, flat tab set of a section, in nav order.
+ */
+export function withSubTabs(tabs: readonly CsmNavNode[]): CsmNavNode[] {
+  return tabs.flatMap((tab) => [
+    tab,
+    ...(tab.tab ? (tab.children ?? []).filter((child) => Boolean(child.tab)) : []),
+  ]);
 }
 
 /** See {@link CsmNavNode.views}. */
@@ -273,6 +294,18 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         tab: "incidents",
         routes: ["/operations/incidents", "/operations/incident-tasks"],
         icon: AlertTriangle,
+        // A sub-tab: its own page in the section's tab set (`/operations/alerts`),
+        // shown in the sidebar indented under Incidents. See `CsmNavNode.children`.
+        children: [
+          {
+            id: "operations.incidents.alerts",
+            label: "Alerts",
+            href: "/operations?tab=alerts",
+            tab: "alerts",
+            routes: ["/operations/alerts"],
+            icon: BellRing,
+          },
+        ],
       },
       {
         id: "operations.alert-mute-rules",
@@ -795,7 +828,7 @@ export function navTabForSearch(
 ): CsmNavNode | undefined {
   const tab = new URLSearchParams(search).get("tab");
   if (!tab) return undefined;
-  return node.children?.find((child) => child.tab === tab);
+  return withSubTabs(node.children ?? []).find((child) => child.tab === tab);
 }
 
 /**

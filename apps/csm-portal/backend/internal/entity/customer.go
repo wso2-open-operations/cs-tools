@@ -1062,6 +1062,26 @@ func (c *CustomerEntityClient) GetSmartAlert(ctx context.Context, id string) ([]
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/smart-alerts/%s", url.PathEscape(id)), nil)
 }
 
+// SearchSreAlerts calls POST /sre-alerts/search on the entity service: the SRE
+// alerts stored in entity-service's own alert table (not the ServiceNow
+// incident_alert behind GetAlert). Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchSreAlerts(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/sre-alerts/search", body)
+}
+
+// GetSreAlert calls GET /sre-alerts/{id} on the entity service, where id is the
+// alert's UUID or its ALT number. Response is returned as raw JSON.
+func (c *CustomerEntityClient) GetSreAlert(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/sre-alerts/%s", url.PathEscape(id)), nil)
+}
+
+// GetSreAlertFacets calls GET /sre-alerts/facets on the entity service: the
+// distinct environments, services, severities and sources of recent SRE alerts,
+// for the list's filter bar. Response is returned as raw JSON.
+func (c *CustomerEntityClient) GetSreAlertFacets(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sre-alerts/facets", nil)
+}
+
 // CreateOutage calls POST /outages on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) CreateOutage(ctx context.Context, body []byte) ([]byte, error) {

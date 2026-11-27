@@ -43,6 +43,7 @@ import {
   isNavShortcut,
   navNodeById,
   navNodeForPath,
+  withSubTabs,
 } from "@config/csmNavItems";
 import type { ComponentType } from "react";
 import type { PortalAccess } from "@context/current-user/portalAccess";
@@ -477,6 +478,31 @@ export function enabledNavChildren(
 ): CsmNavNode[] {
   return (node.children ?? []).filter(
     (child) => !isNavShortcut(child) && isFeatureEnabled(child.id, access, previewOverrides),
+  );
+}
+
+/**
+ * {@link visibleNavChildren} with each tab's visible sub-tabs right after it
+ * (see `CsmNavNode.children`): every tab of the section's tab set.
+ */
+export function visibleSectionTabs(
+  node: CsmNavNode,
+  access?: PortalAccess,
+  previewOverrides?: Record<string, boolean>,
+): CsmNavNode[] {
+  return withSubTabs(visibleNavChildren(node, access, previewOverrides)).filter((tab) =>
+    isFeatureVisible(tab.id, access, previewOverrides),
+  );
+}
+
+/** {@link enabledNavChildren} with each tab's usable sub-tabs right after it. */
+export function enabledSectionTabs(
+  node: CsmNavNode,
+  access?: PortalAccess,
+  previewOverrides?: Record<string, boolean>,
+): CsmNavNode[] {
+  return withSubTabs(enabledNavChildren(node, access, previewOverrides)).filter((tab) =>
+    isFeatureEnabled(tab.id, access, previewOverrides),
   );
 }
 

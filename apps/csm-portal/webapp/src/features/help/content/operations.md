@@ -400,6 +400,29 @@ tied to, if any) without leaving the page. A reference to an alert that's
 since been removed shows a "could no longer be found" message in the popup
 instead of an error.
 
+## Alerts
+
+The Alerts tab lists the SRE alerts the alerting pipeline has received, newest
+first. In the sidebar it sits under **Incidents**, shown while you are on
+Incidents or Alerts. Each alert has a number (**ALT** followed by nine digits) and an ID (a
+UUID); either one opens it. Search matches the number, service, metric,
+description and unique identifier. The filters are environment, service,
+severity and source (their choices are the values seen in the last 30 days),
+tier (priority or standard), whether the alert is linked to an incident, and
+the received date range in UTC. Filters are kept in the address bar, so a
+filtered list can be bookmarked or shared. Click a column header with an arrow
+to sort by it.
+
+A row opens the alert's page: its number and ID (with a button to copy the
+ID), severity and tier, what raised it (source, route, service, environment,
+metric, category, unique identifier, description), how it was delivered
+(received and created times, message ID and index), the incident it is linked
+to (its number, subject, state, priority, impact, urgency and opened date),
+and the raw payload the source sent. One message can carry several alerts:
+only the first alert of a message keeps the payload.
+
+An incident's own page has an **Alerts** tab listing the alerts linked to it.
+
 ## Problem management
 
 The Problem management tab lists problems with server-side search,

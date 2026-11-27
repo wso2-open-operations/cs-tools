@@ -22,6 +22,7 @@ import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ChangeRequestsArea from "@features/csm-operations/components/ChangeRequestsArea";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import AlertMuteRulesTab from "@features/csm-operations/components/AlertMuteRulesTab";
+import SreAlertsTab from "@features/csm-operations/components/SreAlertsTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import RunbooksTab from "@features/csm-operations/components/RunbooksTab";
@@ -130,6 +131,8 @@ export default function OperationsPage(): JSX.Element {
       {activeTab === "change-requests" && <ChangeRequestsArea />}
 
       {activeTab === "incidents" && <IncidentsTab />}
+
+      {activeTab === "alerts" && <SreAlertsTab />}
 
       {activeTab === "alert-mute-rules" && <AlertMuteRulesTab />}
 
