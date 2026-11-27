@@ -59,7 +59,7 @@ ALTER TABLE alert
     ADD COLUMN IF NOT EXISTS severity          VARCHAR(50),
     ADD COLUMN IF NOT EXISTS category          VARCHAR(100),
     ADD COLUMN IF NOT EXISTS unique_identifier VARCHAR(255),
-    ADD COLUMN IF NOT EXISTS description       VARCHAR(4000),
+    ADD COLUMN IF NOT EXISTS description       TEXT,
     ADD COLUMN IF NOT EXISTS assignment_group  VARCHAR(255);
 
 -- The steps up to the row check read columns 0309 drops (message_id, message_index, error_reason, the alert JSON), so they run only while the alert JSON column is still there.
@@ -84,7 +84,7 @@ BEGIN
             OR (error_reason IS NOT NULL AND incident_id IS NULL)
         ) NOT VALID;
 
-    -- Fills the columns of alerts stored before them from their JSON, cut to each column's length: a fingerprint field is '' when empty, any other field NULL.
+    -- Fills the columns of alerts stored before them from their JSON, cut to each VARCHAR column's length (description is TEXT, kept whole): a fingerprint field is '' when empty, any other field NULL.
     UPDATE alert SET
         source            = left(coalesce(alert.alert->>'source', ''), 255),
         service           = left(coalesce(alert.alert->>'service', ''), 255),
@@ -93,14 +93,14 @@ BEGIN
         severity          = left(nullif(alert.alert->>'severity', ''), 50),
         category          = left(nullif(alert.alert->>'category', ''), 100),
         unique_identifier = left(coalesce(alert.alert->>'unique_identifier', ''), 255),
-        description       = left(nullif(alert.alert->>'description', ''), 4000),
+        description       = nullif(alert.alert->>'description', ''),
         assignment_group  = left(nullif(alert.alert->>'assignment_group', ''), 255)
     WHERE alert.alert IS NOT NULL AND alert.unique_identifier IS NULL;
 
     ALTER TABLE alert VALIDATE CONSTRAINT alert_row_kind;
 END $$;
 
--- VARCHAR rather than TEXT for the columns the consumer writes; also converts a column an earlier run of this file added as TEXT.
+-- VARCHAR rather than TEXT for the columns the consumer writes, except description, which stays TEXT so a long one is kept whole; also converts a column an earlier run of this file added as TEXT.
 ALTER TABLE alert
     ALTER COLUMN number            TYPE VARCHAR(20),
     ALTER COLUMN tier              TYPE VARCHAR(20),
@@ -111,7 +111,7 @@ ALTER TABLE alert
     ALTER COLUMN severity          TYPE VARCHAR(50),
     ALTER COLUMN category          TYPE VARCHAR(100),
     ALTER COLUMN unique_identifier TYPE VARCHAR(255),
-    ALTER COLUMN description       TYPE VARCHAR(4000),
+    ALTER COLUMN description       TYPE TEXT,
     ALTER COLUMN assignment_group  TYPE VARCHAR(255);
 
 SELECT set_config('app.is_internal', '', false);
