@@ -15382,6 +15382,130 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /sre-alerts/search:
+    post:
+      summary: Search the SRE alerts the alert consumer stored.
+      description: >
+        Alerts from the alert table, newest received first by default. Every filter list is any-of;
+        filters.searchQuery matches, ignoring case, the number, service, metric name, description and
+        unique identifier. filters.incident is all, linked or unlinked. Internal callers only.
+      operationId: searchSreAlerts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSreAlertsRequest'
+      responses:
+        "200":
+          description: A page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSreAlertsResponse'
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /sre-alerts/facets:
+    get:
+      summary: Values the alert filters offer.
+      description: Distinct environments, services, severities and sources of the alerts received in the last 30 days, at most 200 each. Internal callers only.
+      operationId: getSreAlertFacets
+      responses:
+        "200":
+          description: The filter values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SreAlertFacets'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /sre-alerts/{id}:
+    get:
+      summary: One SRE alert.
+      description: The alert with every stored field and its raw payload. id is the alert's UUID or its ALT number. Internal callers only.
+      operationId: getSreAlert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The alert's UUID or its number, such as ALT000000042.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The alert.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SreAlertDetail'
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Alert not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /alert-mute-rules/search:
     post:
       summary: Search alert mute rules.
@@ -37876,6 +38000,181 @@ components:
         endOn:
           type: string
           format: date-time
+    SearchSreAlertsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+            environments:
+              type: array
+              items:
+                type: string
+            services:
+              type: array
+              items:
+                type: string
+            severities:
+              type: array
+              items:
+                type: string
+            sources:
+              type: array
+              items:
+                type: string
+            tiers:
+              type: array
+              items:
+                type: string
+                enum: [priority, standard]
+            incident:
+              type: string
+              enum: [all, linked, unlinked]
+            incidentId:
+              type: string
+              format: uuid
+              description: Only the alerts of this incident.
+            receivedFrom:
+              type: string
+              format: date-time
+              description: Inclusive.
+            receivedTo:
+              type: string
+              format: date-time
+              description: Exclusive.
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [receivedOn, number, severity, environment, service]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          type: object
+          description: limit defaults to 20 and is capped at 100.
+          properties:
+            offset:
+              type: integer
+            limit:
+              type: integer
+    SreAlertListItem:
+      type: object
+      required: [id, number, route, source, service, environment, metricName, severity, category, tier, receivedOn, createdOn, incident]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: ALT000000042
+        route:
+          type: string
+          description: The gateway route the alert arrived on.
+        source:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+        metricName:
+          type: string
+        severity:
+          type: string
+        category:
+          type: string
+        tier:
+          type: string
+          enum: [priority, standard]
+        receivedOn:
+          type: string
+          format: date-time
+        createdOn:
+          type: string
+          format: date-time
+        incident:
+          type: object
+          nullable: true
+          description: The incident the alert belongs to (alert.incident_id), or null.
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            subject:
+              type: string
+            state:
+              type: string
+            priority:
+              type: string
+            impact:
+              type: string
+            urgency:
+              type: string
+            openedOn:
+              type: string
+              format: date-time
+              nullable: true
+    SearchSreAlertsResponse:
+      type: object
+      required: [alerts, total, offset, limit]
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SreAlertListItem'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+    SreAlertDetail:
+      allOf:
+        - $ref: '#/components/schemas/SreAlertListItem'
+        - type: object
+          properties:
+            uniqueIdentifier:
+              type: string
+            description:
+              type: string
+            assignmentGroup:
+              type: string
+            sourceTopic:
+              type: string
+            sourceAccount:
+              type: string
+            messageId:
+              type: string
+            messageIndex:
+              type: integer
+            rawBody:
+              type: string
+              nullable: true
+              description: The source's request body as text; only the first alert of a message keeps it.
+    SreAlertFacets:
+      type: object
+      properties:
+        environments:
+          type: array
+          items:
+            type: string
+        services:
+          type: array
+          items:
+            type: string
+        severities:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
     SearchAlertMuteRulesRequest:
       type: object
       properties:

@@ -2967,6 +2967,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /incidents/autoclose", internalOnly(accessSvc, incidentAutocloseHandler.Autoclose))
 	mux.HandleFunc("GET /specialist-handoff-teams", internalOnly(accessSvc, incidentHandler.ListSpecialistHandoffTeams))
 
+	// SRE alerts the alert consumer stored (Operations > Alerts, migrations 0306 and 0308): Postgres
+	// only, read-only, and internal only twice over: internalOnly on the route and alert's own RLS.
+	// /sre-alerts, because /alerts/{id} is ServiceNow's incident alert.
+	if db != nil {
+		sreAlertHandler := handler.NewSreAlertHandler(service.NewSreAlertService(repository.NewSreAlertRepository(repository.NewScoped(db))))
+		mux.HandleFunc("POST /sre-alerts/search", internalOnly(accessSvc, sreAlertHandler.SearchSreAlerts))
+		mux.HandleFunc("GET /sre-alerts/facets", internalOnly(accessSvc, sreAlertHandler.GetSreAlertFacets))
+		mux.HandleFunc("GET /sre-alerts/{id}", internalOnly(accessSvc, sreAlertHandler.GetSreAlert))
+	}
+
 	// Postgres-backed, and deliberately separate from outageHandler above:
 	// that one is the ServiceNow-backed outage entity API, this is only the
 	// internal-stakeholder notification sweep. They will converge when the
