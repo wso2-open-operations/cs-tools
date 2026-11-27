@@ -27,15 +27,20 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
-// defaults mirror "edge.api.aws.alert.config" so its JSON can be pasted into AWS_ALERT_CONFIG unchanged.
-var defaults = map[string]string{
-	"source":      "AWS",
-	"environment": "Unknown",
-	"service":     "",
-	"category":    "service_interruption",
-	"severity":    "critical",
-	"metric_name": "Unknown Metric",
-}
+// source identifies alerts produced by this adapter.
+const source = "AWS"
+
+// Built-in defaults for a field the payload does not carry; an empty default leaves the field empty.
+const (
+	defaultMetricName  = "Metric Name Not Available"
+	defaultService     = ""
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Unknown"
+	defaultSeverity    = "Critical"
+)
+
+// parseErrorMetricName is the deliberate metric name of an SNS message that is not JSON; it is not a default.
+const parseErrorMetricName = "SNS Message Parse Error"
 
 // ErrMissingBody is returned when the webhook is called with no body, or a body that isn't valid JSON at all.
 var ErrMissingBody = errors.New("missing or invalid request body")
@@ -46,11 +51,8 @@ var ErrUnsupportedType = errors.New("unsupported SNS message type")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides, keyed lowercase like the ServiceNow "edge.api.aws.alert.config" property; empty fields fall back to defaults.
-type Config map[string]string
-
-// Transform parses a raw inbound SNS notification of a CloudWatch alarm and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound SNS notification of a CloudWatch alarm and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody
 	}
@@ -63,26 +65,28 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 		return Alert{}, fmt.Errorf("%w %q", ErrUnsupportedType, t)
 	}
 
-	base := Alert{
-		Service:     configValue(cfg, "service"),
-		MetricName:  configValue(cfg, "metric_name"),
-		Severity:    configValue(cfg, "severity"),
-		Category:    configValue(cfg, "category"),
-		Environment: configValue(cfg, "environment"),
-		Source:      configValue(cfg, "source"),
-		// Where the notification came from, known even when the Message itself cannot be parsed.
-		SourceTopic:   fieldvalue.Str(envelope, "TopicArn"),
-		SourceAccount: arnAccount(fieldvalue.Str(envelope, "TopicArn")),
-	}
+	// Where the notification came from, known even when the Message itself cannot be parsed.
+	topicArn := fieldvalue.Str(envelope, "TopicArn")
 
+	var d model.Defaults
 	messageRaw := fieldvalue.Str(envelope, "Message")
 	var messageObj map[string]any
 	if err := jsonnum.Unmarshal([]byte(messageRaw), &messageObj); err != nil {
 		// SNS Message isn't valid JSON; still produces a real alert, matching the reference script's own fallback.
-		base.MetricName = "SNS Message Parse Error"
-		// A non-JSON SNS Message is the human-readable text itself; the raw body is kept in raw_alerts.
-		base.Description = strings.TrimSpace(messageRaw)
-		return base, nil
+		alert := Alert{
+			Service:     d.Or("service", "", defaultService),
+			MetricName:  parseErrorMetricName,
+			Severity:    d.Or("severity", "", defaultSeverity),
+			Category:    d.Or("category", "", defaultCategory),
+			Environment: d.Or("environment", "", defaultEnvironment),
+			Source:      source,
+			// A non-JSON SNS Message is the human-readable text itself; the raw body is kept in raw_alerts.
+			Description:   strings.TrimSpace(messageRaw),
+			SourceTopic:   topicArn,
+			SourceAccount: arnAccount(topicArn),
+		}
+		alert.Defaulted = d.List()
+		return alert, nil
 	}
 
 	// AlarmDescription optionally carries a JSON object of field overrides; invalid JSON there degrades to no overrides, not an error.
@@ -94,30 +98,31 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 		}
 	}
 
-	// A recovered alarm (NewStateValue "OK") always forces severity "ok", overriding AlarmDescription's own override.
+	// A recovered alarm (NewStateValue "OK") always forces severity "OK", the label every source uses, overriding AlarmDescription's own override.
 	if fieldvalue.Str(messageObj, "NewStateValue") == "OK" {
-		alarmDesc["severity"] = "ok"
+		alarmDesc["severity"] = "OK"
 	}
 
 	alert := Alert{
-		Service:          fieldvalue.FirstNonEmpty(fieldvalue.Str(alarmDesc, "service"), base.Service),
-		MetricName:       fieldvalue.FirstNonEmpty(fieldvalue.Str(messageObj, "AlarmName"), base.MetricName),
-		Severity:         fieldvalue.FirstNonEmpty(fieldvalue.Str(alarmDesc, "severity"), base.Severity),
-		Category:         fieldvalue.FirstNonEmpty(fieldvalue.Str(alarmDesc, "category"), base.Category),
-		Environment:      fieldvalue.FirstNonEmpty(fieldvalue.Str(alarmDesc, "environment"), base.Environment),
-		Source:           base.Source,
+		Service:          d.Or("service", fieldvalue.Str(alarmDesc, "service"), defaultService),
+		MetricName:       d.Or("metric_name", fieldvalue.Str(messageObj, "AlarmName"), defaultMetricName),
+		Severity:         d.Or("severity", fieldvalue.Str(alarmDesc, "severity"), defaultSeverity),
+		Category:         d.Or("category", fieldvalue.Str(alarmDesc, "category"), defaultCategory),
+		Environment:      d.Or("environment", fieldvalue.Str(alarmDesc, "environment"), defaultEnvironment),
+		Source:           source,
 		UniqueIdentifier: fieldvalue.Str(messageObj, "AlarmArn"),
 		// The alarm's state reason, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.Str(messageObj, "NewStateReason"),
 		// An alarm may name its own CSM assignment group in AlarmDescription, which beats every other routing signal.
 		AssignmentGroup: strings.TrimSpace(fieldvalue.Str(alarmDesc, "assignment_group")),
-		SourceTopic:     base.SourceTopic,
+		SourceTopic:     topicArn,
 		SourceAccount: fieldvalue.FirstNonEmpty(
 			fieldvalue.Str(messageObj, "AWSAccountId"),
 			arnAccount(fieldvalue.Str(messageObj, "AlarmArn")),
-			base.SourceAccount,
+			arnAccount(topicArn),
 		),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
@@ -128,9 +133,4 @@ func arnAccount(arn string) string {
 		return ""
 	}
 	return parts[4]
-}
-
-// configValue applies the 2-tier resolution: operator config, then the hardcoded default.
-func configValue(cfg Config, field string) string {
-	return fieldvalue.FirstNonEmpty(cfg[field], defaults[field])
 }

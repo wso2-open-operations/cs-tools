@@ -38,6 +38,36 @@ type Alert struct {
 	// SourceTopic and SourceAccount optionally say where the alert came from, such as the AWS SNS TopicArn and account id.
 	SourceTopic   string `json:"source_topic,omitempty"`
 	SourceAccount string `json:"source_account,omitempty"`
+	// Defaulted lists the fields the payload did not carry, which the transform filled with the source's default; it is not part of the fingerprint.
+	Defaulted []Defaulted `json:"defaulted,omitempty"`
+}
+
+// Defaulted is one field the payload did not carry and the value the transform used instead.
+type Defaulted struct {
+	// Field is the canonical field name: service, metric_name, severity, category or environment.
+	Field string `json:"field"`
+	Value string `json:"value"`
+}
+
+// Defaults collects the fields a transform fills with a default; the zero value is ready to use.
+type Defaults struct {
+	used []Defaulted
+}
+
+// Or returns value when it is not empty; otherwise it returns def and, when def is not empty, notes field as defaulted to it.
+func (d *Defaults) Or(field, value, def string) string {
+	if value != "" {
+		return value
+	}
+	if def != "" {
+		d.used = append(d.used, Defaulted{Field: field, Value: def})
+	}
+	return def
+}
+
+// List returns the defaulted fields in the order they were filled, or nil when there are none.
+func (d *Defaults) List() []Defaulted {
+	return d.used
 }
 
 // Fingerprint identifies the alerts of one source, service, metric, environment and identifier; alerts with the same fingerprint fold into one incident.

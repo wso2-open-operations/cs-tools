@@ -16,37 +16,73 @@
 
 package azure
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
+)
 
 func TestTransform_SeverityOutsideSevNPassesThrough(t *testing.T) {
-	noSeverity := []byte(`{"data":{"essentials":{"alertId":"a1","monitorCondition":"Fired"}}}`)
-	cases := []struct {
-		name string
-		cfg  Config
-		want string
-	}{
-		{"built-in default", Config{}, "Critical"},
-		{"operator override", Config{"severity": "Major"}, "Major"},
+	a, err := Transform([]byte(`{"data":{"essentials":{"alertId":"a1","severity":"Sev9","monitorCondition":"Fired"}}}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			a, err := Transform(noSeverity, c.cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if a.Severity != c.want {
-				t.Errorf("severity = %q, want %q", a.Severity, c.want)
-			}
-		})
+	if a.Severity != "Sev9" {
+		t.Errorf("severity = %q, want Sev9 unchanged", a.Severity)
 	}
 }
 
 func TestTransform_SevNStillMapped(t *testing.T) {
-	a, err := Transform([]byte(`{"data":{"essentials":{"alertId":"a1","severity":"Sev2","monitorCondition":"Fired"}}}`), Config{})
+	a, err := Transform([]byte(`{"data":{"essentials":{"alertId":"a1","severity":"Sev2","monitorCondition":"Fired"}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.Severity != "Minor" {
 		t.Errorf("severity = %q, want Minor", a.Severity)
+	}
+}
+
+// A field the payload leaves out takes the built-in default and is listed in Defaulted; a payload carrying every field lists nothing.
+func TestTransform_Defaults(t *testing.T) {
+	cases := []struct {
+		name                                                 string
+		raw                                                  string
+		service, metricName, severity, category, environment string
+		defaulted                                            []model.Defaulted
+	}{
+		{
+			name: "missing fields", raw: `{"data":{"essentials":{"alertId":"a1","monitorCondition":"Fired"}}}`,
+			service: "Managed Services", metricName: "Metric Name Not Available", severity: "Critical", category: "Service Interruption", environment: "Unknown",
+			defaulted: []model.Defaulted{
+				{Field: "service", Value: "Managed Services"},
+				{Field: "metric_name", Value: "Metric Name Not Available"},
+				{Field: "severity", Value: "Critical"},
+				{Field: "category", Value: "Service Interruption"},
+				{Field: "environment", Value: "Unknown"},
+			},
+		},
+		{
+			name: "resolved severity is not a default", raw: `{"data":{"essentials":{"alertId":"a1","alertRule":"rt","monitorCondition":"Resolved"},"customProperties":{"service":"api","category":"Performance","environment":"Staging"}}}`,
+			service: "api", metricName: "rt", severity: "OK", category: "Performance", environment: "Staging",
+		},
+		{
+			name: "every field", raw: `{"data":{"essentials":{"alertId":"a1","alertRule":"rt","severity":"Sev1","monitorCondition":"Fired"},"customProperties":{"service":"api","category":"Performance","environment":"Staging"}}}`,
+			service: "api", metricName: "rt", severity: "Major", category: "Performance", environment: "Staging",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, err := Transform([]byte(c.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.Source != "Azure" || a.Service != c.service || a.MetricName != c.metricName || a.Severity != c.severity || a.Category != c.category || a.Environment != c.environment {
+				t.Errorf("alert = %+v, want service %q, metric name %q, severity %q, category %q, environment %q", a, c.service, c.metricName, c.severity, c.category, c.environment)
+			}
+			if !reflect.DeepEqual(a.Defaulted, c.defaulted) {
+				t.Errorf("Defaulted = %+v, want %+v", a.Defaulted, c.defaulted)
+			}
+		})
 	}
 }

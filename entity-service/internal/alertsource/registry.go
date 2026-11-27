@@ -42,47 +42,45 @@ type Registry struct {
 	transforms map[string]Transform
 }
 
-// New builds every source's transform with its built-in defaults, as alert-ingestion runs with no <SOURCE>_ALERT_CONFIG set.
+// New builds every source's transform with its built-in defaults.
 func New() *Registry {
 	return &Registry{transforms: map[string]Transform{
 		"aws": func(raw []byte) ([]model.Alert, error) {
-			a, err := aws.Transform(raw, aws.Config{})
+			a, err := aws.Transform(raw)
 			return one(err, a)
 		},
 		"azure": func(raw []byte) ([]model.Alert, error) {
-			a, err := azure.Transform(raw, azure.Config{})
+			a, err := azure.Transform(raw)
 			return one(err, a)
 		},
 		"datadog": func(raw []byte) ([]model.Alert, error) {
-			a, err := datadog.Transform(raw, datadog.Config{})
+			a, err := datadog.Transform(raw)
 			return one(err, a)
 		},
 		"elasticsearch": func(raw []byte) ([]model.Alert, error) {
-			a, err := elasticsearch.Transform(raw, elasticsearch.Config{})
+			a, err := elasticsearch.Transform(raw)
 			return one(err, a)
 		},
 		"gcp": func(raw []byte) ([]model.Alert, error) {
-			a, err := gcp.Transform(raw, gcp.Config{})
+			a, err := gcp.Transform(raw)
 			return one(err, a)
 		},
 		"icinga": func(raw []byte) ([]model.Alert, error) {
-			a, err := icinga.Transform(raw, icinga.Config{})
+			a, err := icinga.Transform(raw)
 			return one(err, a)
 		},
 		"openobserve": func(raw []byte) ([]model.Alert, error) {
-			a, err := openobserve.Transform(raw, openobserve.Config{})
+			a, err := openobserve.Transform(raw)
 			return one(err, fromOpenObserve(a))
 		},
 		"opensearch": func(raw []byte) ([]model.Alert, error) {
-			a, err := opensearch.Transform(raw, opensearch.Config{})
+			a, err := opensearch.Transform(raw)
 			return one(err, a)
 		},
-		"prometheus": func(raw []byte) ([]model.Alert, error) {
-			return prometheus.Transform(raw, prometheus.Config{})
-		},
+		"prometheus": prometheus.Transform,
 		"servicenow": servicenow.Transform,
 		"site24x7": func(raw []byte) ([]model.Alert, error) {
-			a, err := site24x7.Transform(raw, site24x7.Config{})
+			a, err := site24x7.Transform(raw)
 			return one(err, a)
 		},
 	}}
@@ -111,7 +109,7 @@ func one(err error, a model.Alert) ([]model.Alert, error) {
 	return []model.Alert{a}, nil
 }
 
-// fromOpenObserve keeps the eight canonical fields and drops the ServiceNow Incident fields OpenObserve's transform also produces.
+// fromOpenObserve keeps the eight canonical fields and the defaulted list, and drops the ServiceNow Incident fields OpenObserve's transform also produces.
 func fromOpenObserve(a openobserve.Alert) model.Alert {
 	return model.Alert{
 		Service:          a.Service,
@@ -122,5 +120,6 @@ func fromOpenObserve(a openobserve.Alert) model.Alert {
 		Source:           a.Source,
 		UniqueIdentifier: a.UniqueIdentifier,
 		Description:      a.Description,
+		Defaulted:        a.Defaulted,
 	}
 }

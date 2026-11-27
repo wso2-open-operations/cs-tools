@@ -20,22 +20,23 @@ package openobserve
 import (
 	"errors"
 	"fmt"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/fieldvalue"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/jsonnum"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
 // source identifies alerts produced by this adapter.
 const source = "OpenObserve"
 
-// defaults are used when a field is absent from both the payload and the operator config; SHORT_DESCRIPTION and DESCRIPTION have no fallback.
-var defaults = map[string]string{
-	"URGENCY":     "3",
-	"IMPACT":      "3",
-	"CALLER_ID":   "openobserve",
-	"CATEGORY":    "service_interruption",
-	"SERVICE":     "managed_services",
-	"ENVIRONMENT": "production",
-}
+// Built-in defaults for a field the payload does not carry; severity takes its default only when neither urgency nor impact maps to one.
+const (
+	defaultMetricName  = "OpenObserve Alert"
+	defaultService     = "Managed Services"
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Production"
+	defaultSeverity    = "Critical"
+)
 
 // prioritySeverityMap maps ServiceNow's native urgency/impact scale (1=High...3=Low) to the canonical severity labels; unmapped resolves to "".
 var prioritySeverityMap = map[string]string{
@@ -62,13 +63,12 @@ type Alert struct {
 	Impact           string `json:"impact"`
 	CorrelationID    string `json:"correlation_id"`
 	CallerID         string `json:"caller_id"`
+	// Defaulted lists the fields filled with the built-in default, as on model.Alert.
+	Defaulted []model.Defaulted `json:"defaulted,omitempty"`
 }
 
-// Config holds operator overrides mirroring "edge.api.openobserve.alert.config"; any field left empty falls back to the default.
-type Config map[string]string
-
-// Transform parses a raw inbound OpenObserve webhook and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound OpenObserve webhook and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {
 		return Alert{}, fmt.Errorf("%w: %v", ErrInvalidStructure, err)
@@ -83,25 +83,22 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	description := fieldvalue.Str(payload, "description")
 	correlationID := fieldvalue.Str(payload, "correlation_id")
 
-	rawUrgency := configValue(cfg, "URGENCY", fieldvalue.Str(payload, "urgency"))
-	rawImpact := configValue(cfg, "IMPACT", fieldvalue.Str(payload, "impact"))
-	callerID := configValue(cfg, "CALLER_ID", fieldvalue.Str(payload, "caller_id"))
+	rawUrgency := fieldvalue.Str(payload, "urgency")
+	rawImpact := fieldvalue.Str(payload, "impact")
 
-	// metric_name has no config/default fallback; it's built directly from the payload, or left empty.
-	metricName := buildMetricName(shortDescription, correlationID)
+	var d model.Defaults
+	service := d.Or("service", fieldvalue.Str(payload, "service"), defaultService)
+	metricName := d.Or("metric_name", buildMetricName(shortDescription, correlationID), defaultMetricName)
 
-	// Severity maps off urgency first, falling back to impact; an unmapped pair resolves to an empty severity.
-	severity := mapSeverity(rawUrgency)
-	if severity == "" {
-		severity = mapSeverity(rawImpact)
-	}
+	// Severity maps off urgency first, falling back to impact; when neither maps it takes the default.
+	severity := d.Or("severity", fieldvalue.FirstNonEmpty(mapSeverity(rawUrgency), mapSeverity(rawImpact)), defaultSeverity)
 
 	alert := Alert{
-		Service:          configValue(cfg, "SERVICE", fieldvalue.Str(payload, "service")),
+		Service:          service,
 		MetricName:       metricName,
 		Severity:         severity,
-		Category:         configValue(cfg, "CATEGORY", fieldvalue.Str(payload, "category")),
-		Environment:      configValue(cfg, "ENVIRONMENT", fieldvalue.Str(payload, "environment")),
+		Category:         d.Or("category", fieldvalue.Str(payload, "category"), defaultCategory),
+		Environment:      d.Or("environment", fieldvalue.Str(payload, "environment"), defaultEnvironment),
 		Source:           source,
 		UniqueIdentifier: correlationID,
 		ShortDescription: fieldvalue.FirstNonEmpty(shortDescription, metricName),
@@ -110,8 +107,9 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 		Urgency:       rawUrgency,
 		Impact:        rawImpact,
 		CorrelationID: correlationID,
-		CallerID:      callerID,
+		CallerID:      fieldvalue.Str(payload, "caller_id"),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
@@ -132,9 +130,4 @@ func mapSeverity(rawValue string) string {
 		return ""
 	}
 	return prioritySeverityMap[rawValue]
-}
-
-// configValue applies the 3-tier resolution: payload value, then operator config, then the default.
-func configValue(cfg Config, field, payloadValue string) string {
-	return fieldvalue.FirstNonEmpty(payloadValue, cfg[field], defaults[field])
 }
