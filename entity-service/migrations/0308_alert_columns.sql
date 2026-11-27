@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- The alert processor (internal/alertprocessor) folds stored alerts into incidents from the alert.created events the consumer publishes; incident_id marks an alert done. Each alert gets a UUID id next to its ALT number, and its fields become columns. Safe to run again.
+-- The alert table's final shape for the consumer: tiers named after their queues, a UUID id next to each alert's ALT number, and every alert field in its own column. Safe to run again.
 -- Stop the alert consumer (ALERTING_VERSION=v1) before running this and start the new build after it: the old build writes high/default tiers and the id and source columns, which this file retires and renames, so its inserts would fail.
 
 -- alert is FORCE ROW LEVEL SECURITY, so the updates below see its rows only as the internal identity.
@@ -62,7 +62,7 @@ ALTER TABLE alert
     ADD COLUMN IF NOT EXISTS source_topic      TEXT,
     ADD COLUMN IF NOT EXISTS source_account    TEXT;
 
--- The consumer no longer writes the alert JSON, the fingerprint or error rows (a message it cannot normalise is dead-lettered), so the row check moves to the columns. The fingerprint is source, service, metric_name, environment and unique_identifier, matched with =, so they are never NULL on an alert. Error rows stored before this stay valid until 0309 removes them.
+-- The consumer no longer writes the alert JSON, the fingerprint or error rows (a message it cannot normalise is dead-lettered), so the row check moves to the columns. The fingerprint is computed from source, service, metric_name, environment and unique_identifier, so they are never NULL on an alert ('' when empty). Error rows stored before this stay valid until 0309 removes them.
 ALTER TABLE alert
     DROP CONSTRAINT IF EXISTS alert_row_kind,
     ADD CONSTRAINT alert_row_kind CHECK (
@@ -90,9 +90,6 @@ ALTER TABLE alert VALIDATE CONSTRAINT alert_row_kind;
 
 SELECT set_config('app.is_internal', '', false);
 
--- The processor reads a fingerprint's alerts by its five columns to find the incident they fold into.
-DROP INDEX IF EXISTS alert_fingerprint_idx;
-CREATE INDEX IF NOT EXISTS alert_identity_idx ON alert (source, service, metric_name, environment, unique_identifier, received_on);
 -- The portal lists alerts newest first, and finds them by environment or service.
 CREATE INDEX IF NOT EXISTS alert_received_on_idx ON alert (received_on DESC);
 CREATE INDEX IF NOT EXISTS alert_environment_idx ON alert (environment, received_on DESC);

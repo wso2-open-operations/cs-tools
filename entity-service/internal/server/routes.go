@@ -826,7 +826,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// Released by closePublishers.
 	var salesforceWritePublisher service.EventPublisherService
 	var stopSalesforceWriteConsumers func()
-	stopAlertProcessor := func() {}
 	if db != nil && cfg.HasPortalMembershipWrites() && salesEntityClient != nil {
 		writeDeps := service.MembershipWriteDeps{
 			Memberships: repository.NewProjectMembershipRepository(repository.NewScoped(db)),
@@ -1916,8 +1915,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeProblemSvc = service.NewProblemService(problemRepo)
 	}
 	problemHandler := handler.NewProblemHandler(activeProblemSvc)
-	// Started only now: every setter above configures activeIncidentSvc in place, and the processor creates incidents through it in-process.
-	stopAlertProcessor = startAlertProcessor(cfg, db, activeIncidentSvc)
 
 	// Incident auto-close: closes incidents left RESOLVED for 14 days
 	// (POST /incidents/autoclose, driven by operations/csm-scheduled-tasks'
@@ -3105,8 +3102,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// gone away. Cancelling its context also cancels the re-run's own
 	// context (retryOne derives from it), so the wait is short.
 	closePublishers := func() {
-		// The alert processor first: an event in flight finishes before the incident service's publishers go.
-		stopAlertProcessor()
 		stopIngestRetry()
 		ingestRetryWG.Wait()
 		// The deferred-write consumers first: a write in flight finishes

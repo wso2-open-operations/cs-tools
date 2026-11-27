@@ -25,7 +25,6 @@
 package eventbus
 
 import (
-	"github.com/segmentio/kafka-go"
 	"github.com/segmentio/kafka-go/sasl"
 	"github.com/segmentio/kafka-go/sasl/plain"
 )
@@ -47,8 +46,6 @@ type Config struct {
 	ConnectionString string
 	// Topic is the Event Hub name (Kafka topic) to produce to.
 	Topic string
-	// StartAtLatest makes a consumer group with no committed offset start at the newest record instead of the oldest retained one; publishers ignore it.
-	StartAtLatest bool
 }
 
 // saslMechanism builds the SASL/PLAIN credential Event Hub's Kafka endpoint
@@ -60,12 +57,4 @@ func (c Config) saslMechanism() sasl.Mechanism {
 		Username: "$ConnectionString",
 		Password: c.ConnectionString,
 	}
-}
-
-// startOffset is where a consumer group with no committed offset begins.
-func (c Config) startOffset() int64 {
-	if c.StartAtLatest {
-		return kafka.LastOffset
-	}
-	return kafka.FirstOffset
 }
