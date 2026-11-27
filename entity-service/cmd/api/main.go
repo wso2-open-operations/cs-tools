@@ -358,7 +358,7 @@ func waitForAlertSchema(ctx context.Context, pool *pgxpool.Pool) bool {
 		case err != nil:
 			slog.ErrorContext(ctx, "alert consumer: could not check the alert table, not receiving yet", "retryIn", alertSchemaRetry, "err", err)
 		case schema.Problem() != "":
-			slog.ErrorContext(ctx, "alert consumer: alert store not reachable, not receiving yet; apply migrations 0306 and 100029 where this connection looks", "problem", schema.Problem(), "where", schema.Where(), "retryIn", alertSchemaRetry)
+			slog.ErrorContext(ctx, "alert consumer: alert store not reachable, not receiving yet; apply migrations 0306, 0308 and 100029 where this connection looks", "problem", schema.Problem(), "where", schema.Where(), "retryIn", alertSchemaRetry)
 		default:
 			log.Printf("alert consumer: storing alerts in %s", schema.Where())
 			return true
