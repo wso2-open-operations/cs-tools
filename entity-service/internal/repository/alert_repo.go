@@ -18,6 +18,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -58,12 +59,12 @@ func alertFieldDests(a *model.Alert) []any {
 		&a.Severity, &a.Category, &a.Description, &a.AssignmentGroup}
 }
 
-// insertAlertsQuery stores a message's alerts and returns them as stored, in the order given.
+// insertAlertsQuery stores a message's alerts and returns them as stored, in the order given; $14 holds each alert's defaulted fields as JSON.
 const insertAlertsQuery = `INSERT INTO alert (number, tier, raw_body, received_on,
-	source, service, metric_name, environment, unique_identifier, severity, category, description, assignment_group)
+	source, service, metric_name, environment, unique_identifier, severity, category, description, assignment_group, defaulted_fields)
 SELECT * FROM unnest($1::varchar[], $2::varchar[], $3::bytea[], $4::timestamptz[],
-	$5::varchar[], $6::varchar[], $7::varchar[], $8::varchar[], $9::varchar[], $10::varchar[], $11::varchar[], $12::varchar[], $13::varchar[])
-RETURNING id::text, number, tier, received_on, ` + alertFieldColumns
+	$5::varchar[], $6::varchar[], $7::varchar[], $8::varchar[], $9::varchar[], $10::varchar[], $11::varchar[], $12::varchar[], $13::varchar[], $14::jsonb[])
+RETURNING id::text, number, tier, received_on, defaulted_fields, ` + alertFieldColumns
 
 type alertRepository struct {
 	db *Scoped
@@ -109,6 +110,7 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 	numbers, tiers := make([]string, n), make([]string, n)
 	rawBodies := make([][]byte, n)
 	receivedOn := make([]time.Time, n)
+	defaulted := make([][]byte, n)
 	// One array per alert field, in alertFieldColumns order.
 	fields := make([][]*string, len(alertFieldDests(&model.Alert{})))
 	for f := range fields {
@@ -117,6 +119,10 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 	for i, a := range alerts {
 		numbers[i], tiers[i], rawBodies[i], receivedOn[i] = a.Number, string(a.Tier), a.RawBody, a.ReceivedOn
 		alert := a.Alert
+		var err error
+		if defaulted[i], err = defaultedJSON(alert.Defaulted); err != nil {
+			return nil, fmt.Errorf("insert alerts: %w", err)
+		}
 		for f, dest := range alertFieldDests(&alert) {
 			value := *dest.(*string)
 			if f < fingerprintFields {
@@ -131,18 +137,26 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 	for _, f := range fields {
 		args = append(args, f)
 	}
-	rows, err := r.db.Query(ctx, insertAlertsQuery, args...)
-	if err != nil {
-		return nil, fmt.Errorf("insert alerts: %w", err)
-	}
-	stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
-		var a domain.NewAlert
-		var tier string
-		if err := row.Scan(append([]any{&a.ID, &a.Number, &tier, &a.ReceivedOn}, alertFieldDests(&a.Alert)...)...); err != nil {
-			return domain.NewAlert{}, err
+	args = append(args, defaulted)
+	// The rows are returned only after the commit succeeds, so a failed commit is never reported as stored alerts.
+	stored, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) ([]domain.NewAlert, error) {
+		rows, err := tx.Query(ctx, insertAlertsQuery, args...)
+		if err != nil {
+			return nil, err
 		}
-		a.Tier = domain.AlertTier(tier)
-		return a, nil
+		return pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
+			var a domain.NewAlert
+			var tier string
+			var defaultedFields []model.Defaulted
+			if err := row.Scan(append([]any{&a.ID, &a.Number, &tier, &a.ReceivedOn, &defaultedFields}, alertFieldDests(&a.Alert)...)...); err != nil {
+				return domain.NewAlert{}, err
+			}
+			a.Tier = domain.AlertTier(tier)
+			if len(defaultedFields) > 0 {
+				a.Alert.Defaulted = defaultedFields
+			}
+			return a, nil
+		})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("insert alerts: %w", err)
@@ -150,4 +164,12 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 	// Numbers are reserved in ascending order, so sorting by number restores the message's order.
 	slices.SortFunc(stored, func(a, b domain.NewAlert) int { return strings.Compare(a.Number, b.Number) })
 	return stored, nil
+}
+
+// defaultedJSON is the defaulted_fields value for an alert: its defaulted fields as a JSON array, [] when there are none.
+func defaultedJSON(fields []model.Defaulted) ([]byte, error) {
+	if len(fields) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(fields)
 }

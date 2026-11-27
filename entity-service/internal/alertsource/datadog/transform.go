@@ -37,14 +37,14 @@ const (
 	stateError     = "ERROR"
 )
 
-// defaults are used when a field is absent from the payload, every tag alias, and the operator config, keyed by canonical field name.
-var defaults = map[string]string{
-	"METRIC_NAME": "DatadogAlert",
-	"SERVICE":     "managed_services",
-	"CATEGORY":    "service_interruption",
-	"ENVIRONMENT": "production",
-	"SEVERITY":    "1",
-}
+// Built-in defaults for a field absent from the payload and every tag alias; an empty default leaves the field empty.
+const (
+	defaultMetricName  = "Datadog Alert"
+	defaultService     = ""
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Production"
+	defaultSeverity    = "Critical"
+)
 
 // numericSeverityMap maps Datadog's numeric monitor tag severity to the canonical severity labels.
 var numericSeverityMap = map[string]string{
@@ -72,11 +72,8 @@ var ErrInvalidStructure = errors.New("invalid datadog alert payload structure")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.datadog.alert.config"; any field left empty falls back to the default.
-type Config map[string]string
-
-// Transform parses a raw inbound Datadog webhook and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound Datadog webhook and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {
 		return Alert{}, fmt.Errorf("%w: %v", ErrInvalidStructure, err)
@@ -97,17 +94,19 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	metricNameValue := fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "metric_name"), buildMetricName(eventName, triggerName))
 	uniqueIdentifier := fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "unique_identifier"), alertID)
 
+	var d model.Defaults
 	alert := Alert{
-		Service:          configValue(cfg, tags, "SERVICE", fieldvalue.Str(payload, "service")),
-		MetricName:       configValue(cfg, tags, "METRIC_NAME", metricNameValue),
-		Severity:         resolveSeverity(state, configValue(cfg, tags, "SEVERITY", fieldvalue.Str(payload, "severity"))),
-		Category:         configValue(cfg, tags, "CATEGORY", fieldvalue.Str(payload, "category")),
-		Environment:      configValue(cfg, tags, "ENVIRONMENT", fieldvalue.Str(payload, "environment")),
+		Service:          d.Or("service", payloadValue(tags, "SERVICE", fieldvalue.Str(payload, "service")), defaultService),
+		MetricName:       d.Or("metric_name", payloadValue(tags, "METRIC_NAME", metricNameValue), defaultMetricName),
+		Severity:         resolveSeverity(&d, state, payloadValue(tags, "SEVERITY", fieldvalue.Str(payload, "severity"))),
+		Category:         d.Or("category", payloadValue(tags, "CATEGORY", fieldvalue.Str(payload, "category")), defaultCategory),
+		Environment:      d.Or("environment", payloadValue(tags, "ENVIRONMENT", fieldvalue.Str(payload, "environment")), defaultEnvironment),
 		Source:           source,
 		UniqueIdentifier: uniqueIdentifier,
 		// Datadog's message text ($EVENT_MSG), never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "body"), fieldvalue.Str(payload, "text_only_msg"), fieldvalue.Str(payload, "event_msg")),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
@@ -123,8 +122,8 @@ func resolveState(payload map[string]any) string {
 	return stateActive
 }
 
-// resolveSeverity maps the lifecycle state and resolved severity to a canonical label: COMPLETED is always OK, ERROR is always Critical.
-func resolveSeverity(state, rawSeverity string) string {
+// resolveSeverity maps the lifecycle state and payload severity to a canonical label: COMPLETED is always OK, ERROR is always Critical, no severity takes the default.
+func resolveSeverity(d *model.Defaults, state, rawSeverity string) string {
 	switch state {
 	case stateCompleted:
 		return "OK"
@@ -132,7 +131,7 @@ func resolveSeverity(state, rawSeverity string) string {
 		return "Critical"
 	}
 	if rawSeverity == "" {
-		rawSeverity = defaults["SEVERITY"]
+		return d.Or("severity", "", defaultSeverity)
 	}
 	if mapped, ok := numericSeverityMap[rawSeverity]; ok {
 		return mapped
@@ -190,7 +189,7 @@ func buildMetricName(eventName, triggerName string) string {
 	return "Datadog Alert: " + strings.Join(parts, " / ")
 }
 
-// configValue applies the 4-tier resolution: payload value, then tag alias, then operator config, then the default.
-func configValue(cfg Config, tags map[string]string, field, payloadValue string) string {
-	return fieldvalue.FirstNonEmpty(payloadValue, tagValue(tags, field), cfg[field], defaults[field])
+// payloadValue returns the payload's own value, else the first tag alias, or "" when the payload carries neither.
+func payloadValue(tags map[string]string, field, value string) string {
+	return fieldvalue.FirstNonEmpty(value, tagValue(tags, field))
 }

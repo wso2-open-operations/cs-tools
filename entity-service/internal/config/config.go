@@ -759,7 +759,7 @@ type Config struct {
 	// AlertSQSPriorityQueueURLs and AlertSQSStandardQueueURLs are the SQS standard queue URLs of each tier (ALERT_SQS_PRIORITY_QUEUE_URLS, ALERT_SQS_STANDARD_QUEUE_URLS, comma separated); none leaves AWS out.
 	AlertSQSPriorityQueueURLs []string
 	AlertSQSStandardQueueURLs []string
-	// AlertSQSDeadLetterQueueURL is where an SQS message that can never be stored is moved with its reason; empty leaves it to the redrive policy.
+	// AlertSQSDeadLetterQueueURL is where an SQS message that can never be stored is moved with its reason; required whenever SQS queues are set.
 	AlertSQSDeadLetterQueueURL string
 	// AlertSQSAccessKeyID and AlertSQSSecretAccessKey sign in to SQS; empty uses the default AWS credential chain.
 	AlertSQSAccessKeyID     string
@@ -2129,6 +2129,10 @@ func (c *Config) validateAlertSQS() error {
 	if (c.AlertSQSAccessKeyID == "") != (c.AlertSQSSecretAccessKey == "") {
 		return fmt.Errorf("ALERT_SQS_ACCESS_KEY_ID and ALERT_SQS_SECRET_ACCESS_KEY must be set together")
 	}
+	// Without a dead-letter queue a rejected message is released and received again until a redrive policy, which config cannot see, removes it.
+	if c.AlertSQSDeadLetterQueueURL == "" {
+		return fmt.Errorf("ALERT_SQS_DEAD_LETTER_QUEUE_URL must be set with the SQS queues, or a message that can never be stored is received again without end")
+	}
 	type namedURL struct{ name, url string }
 	var inputs []namedURL
 	for _, u := range c.AlertSQSPriorityQueueURLs {
@@ -2142,10 +2146,7 @@ func (c *Config) validateAlertSQS() error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", inputs[0].name, err)
 	}
-	checks := inputs
-	if c.AlertSQSDeadLetterQueueURL != "" {
-		checks = append(append([]namedURL{}, inputs...), namedURL{"ALERT_SQS_DEAD_LETTER_QUEUE_URL", c.AlertSQSDeadLetterQueueURL})
-	}
+	checks := append(append([]namedURL{}, inputs...), namedURL{"ALERT_SQS_DEAD_LETTER_QUEUE_URL", c.AlertSQSDeadLetterQueueURL})
 	for _, q := range checks {
 		other, err := SQSRegionFromQueueURL(q.url)
 		if err != nil {
@@ -2170,7 +2171,7 @@ func (c *Config) validateAlertSQS() error {
 				return fmt.Errorf("SQS queue %q is listed more than once across ALERT_SQS_PRIORITY_QUEUE_URLS and ALERT_SQS_STANDARD_QUEUE_URLS", b.url)
 			}
 		}
-		if c.AlertSQSDeadLetterQueueURL != "" && sameSQSQueue(c.AlertSQSDeadLetterQueueURL, a.url) {
+		if sameSQSQueue(c.AlertSQSDeadLetterQueueURL, a.url) {
 			return fmt.Errorf("ALERT_SQS_DEAD_LETTER_QUEUE_URL must not name an input queue, or every rejected message would be received again")
 		}
 	}

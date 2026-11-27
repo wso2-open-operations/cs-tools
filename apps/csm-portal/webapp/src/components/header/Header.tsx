@@ -35,10 +35,10 @@ export default function Header({
 }: HeaderProps): JSX.Element {
   return (
     <HeaderUI>
+      <BackToHost />
       {!hideProjectControls && (
         <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
       )}
-      <BackToHost />
       <Brand />
       {!hideProjectControls && <QuickNav />}
       {!hideProjectControls && <PinnedTabs />}

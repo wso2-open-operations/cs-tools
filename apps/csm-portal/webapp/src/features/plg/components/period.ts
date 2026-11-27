@@ -8,17 +8,14 @@
  */
 
 export const RANGE_OPTIONS = [
+  { label: "Last 7 days", days: 7 },
+  { label: "Last 14 days", days: 14 },
   { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
-  { label: "Last 180 days", days: 180 },
-  { label: "Last 12 months", days: 365 },
 ];
 
-export const DEFAULT_RANGE_DAYS = 180;
+export const DEFAULT_RANGE_DAYS = 30;
 
-/** ISO date `days` ago, for the `from` query parameter. */
+/** ISO (UTC) date that starts a window of `days` days ending today, for the `from` query parameter. */
 export function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
 }

@@ -28,7 +28,7 @@ import (
 )
 
 // source identifies alerts produced by this adapter.
-const source = "ElasticSearch"
+const source = "Elasticsearch"
 
 // Alert-state values Elasticsearch sends in the "state" field.
 const (
@@ -36,14 +36,14 @@ const (
 	stateError     = "ERROR"
 )
 
-// defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
-var defaults = map[string]string{
-	"METRIC_NAME": "ElasticSearchAlert",
-	"SERVICE":     "managed_services",
-	"CATEGORY":    "service_interruption",
-	"ENVIRONMENT": "production",
-	"SEVERITY":    "1",
-}
+// Built-in defaults for a field the payload does not carry.
+const (
+	defaultMetricName  = "Elasticsearch Alert"
+	defaultService     = "Managed Services"
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Production"
+	defaultSeverity    = "Critical"
+)
 
 // numericSeverityMap maps Elasticsearch/Watcher numeric severities to the canonical severity labels.
 var numericSeverityMap = map[string]string{
@@ -60,11 +60,8 @@ var ErrInvalidStructure = errors.New("invalid elasticsearch alert payload struct
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.elasticsearch.alert.config"; any field left empty falls back to the default.
-type Config map[string]string
-
-// Transform parses a raw inbound Elasticsearch alert and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound Elasticsearch alert and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {
 		return Alert{}, fmt.Errorf("%w: %v", ErrInvalidStructure, err)
@@ -79,22 +76,24 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	triggerName := fieldvalue.Str(payload, "trigger_name")
 	state := fieldvalue.Str(payload, "state")
 
+	var d model.Defaults
 	alert := Alert{
-		Service:          configValue(cfg, "SERVICE", fieldvalue.Str(payload, "service")),
-		MetricName:       configValue(cfg, "METRIC_NAME", buildMetricName(ruleName, triggerName)),
-		Severity:         resolveSeverity(state, fieldvalue.Str(payload, "severity"), cfg),
-		Category:         configValue(cfg, "CATEGORY", fieldvalue.Str(payload, "category")),
-		Environment:      configValue(cfg, "ENVIRONMENT", ""), // never taken from payload
+		Service:          d.Or("service", fieldvalue.Str(payload, "service"), defaultService),
+		MetricName:       d.Or("metric_name", buildMetricName(ruleName, triggerName), defaultMetricName),
+		Severity:         resolveSeverity(&d, state, fieldvalue.Str(payload, "severity")),
+		Category:         d.Or("category", fieldvalue.Str(payload, "category"), defaultCategory),
+		Environment:      d.Or("environment", "", defaultEnvironment), // never taken from payload
 		Source:           source,
 		UniqueIdentifier: fieldvalue.Str(payload, "alert_id"),
 		// The trigger's message text, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "message"), fieldvalue.Str(payload, "description")),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
-// resolveSeverity maps the alert state and raw severity to a canonical label: COMPLETED is always OK, ERROR is always Critical.
-func resolveSeverity(state, rawSeverity string, cfg Config) string {
+// resolveSeverity maps the alert state and raw severity to a canonical label: COMPLETED is always OK, ERROR is always Critical, no severity takes the default.
+func resolveSeverity(d *model.Defaults, state, rawSeverity string) string {
 	switch state {
 	case stateCompleted:
 		return "OK"
@@ -102,8 +101,7 @@ func resolveSeverity(state, rawSeverity string, cfg Config) string {
 		return "Critical"
 	}
 	if rawSeverity == "" {
-		// Mirror the reference default chain: config SEVERITY, then the hardcoded default.
-		rawSeverity = fieldvalue.FirstNonEmpty(cfg["SEVERITY"], defaults["SEVERITY"])
+		return d.Or("severity", "", defaultSeverity)
 	}
 	if mapped, ok := numericSeverityMap[rawSeverity]; ok {
 		return mapped
@@ -123,9 +121,4 @@ func buildMetricName(ruleName, triggerName string) string {
 		return ""
 	}
 	return "ElasticSearch Alert: " + strings.Join(parts, " / ")
-}
-
-// configValue applies the 3-tier resolution: payload value, then operator config, then the default.
-func configValue(cfg Config, field, payloadValue string) string {
-	return fieldvalue.FirstNonEmpty(payloadValue, cfg[field], defaults[field])
 }

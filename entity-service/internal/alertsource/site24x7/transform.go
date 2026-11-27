@@ -27,8 +27,23 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
-// source identifies alerts produced by this adapter; unlike every other source, it is not overridable via config.
+// source identifies alerts produced by this adapter.
 const source = "Site24x7"
+
+// tagList maps a canonical field to the TAGS prefix that carries it, such as "Service:checkout".
+var tagList = map[string]string{
+	"Service":     "Service",
+	"Environment": "Environment",
+	"Category":    "Category",
+}
+
+// Built-in defaults for a field the payload does not carry; an empty default leaves the field empty.
+const (
+	defaultService     = ""
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Production"
+	defaultSeverity    = "Critical"
+)
 
 // severityMap maps Site24x7's monitor status to the canonical severity labels.
 var severityMap = map[string]string{
@@ -41,20 +56,11 @@ var severityMap = map[string]string{
 // ErrMissingBody is returned when the webhook is called with no body, or a body that isn't valid JSON at all.
 var ErrMissingBody = errors.New("missing or invalid request body")
 
-// ErrMissingStatus is returned when neither the payload's STATUS field nor a configured Defaults.Severity is present.
-var ErrMissingStatus = errors.New("missing required field STATUS")
-
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config is the operator-supplied "edge.api.site24x7.alert.config" system property: TagList maps a canonical field to its tag prefix, Defaults is the fallback value per field.
-type Config struct {
-	TagList  map[string]string `json:"TagList"`
-	Defaults map[string]string `json:"Defaults"`
-}
-
-// Transform parses a raw inbound Site24x7 alert and produces the canonical Alert, cfg supplying the tag-prefix mapping and defaults.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound Site24x7 alert and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody
 	}
@@ -67,28 +73,26 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 		return Alert{}, fmt.Errorf("%w: body is not a JSON object", ErrMissingBody)
 	}
 
-	status := fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "STATUS"), cfg.Defaults["Severity"])
-	if status == "" {
-		return Alert{}, ErrMissingStatus
-	}
+	extracted := extractTags(strSlice(payload, "TAGS"), tagList)
 
-	extracted := extractTags(strSlice(payload, "TAGS"), cfg.TagList)
-
+	var d model.Defaults
 	alert := Alert{
-		Service:          fieldvalue.FirstNonEmpty(extracted["Service"], cfg.Defaults["Service"]),
-		MetricName:       fieldvalue.Str(payload, "MONITORNAME"),
-		Severity:         mapSeverity(status, cfg.Defaults["Severity"]),
-		Category:         fieldvalue.FirstNonEmpty(extracted["Category"], cfg.Defaults["Category"]),
-		Environment:      fieldvalue.FirstNonEmpty(extracted["Environment"], cfg.Defaults["Environment"]),
+		Service:    d.Or("service", extracted["Service"], defaultService),
+		MetricName: fieldvalue.Str(payload, "MONITORNAME"),
+		// A missing or unrecognised STATUS takes the default severity rather than the raw status.
+		Severity:         d.Or("severity", severityMap[fieldvalue.Str(payload, "STATUS")], defaultSeverity),
+		Category:         d.Or("category", extracted["Category"], defaultCategory),
+		Environment:      d.Or("environment", extracted["Environment"], defaultEnvironment),
 		Source:           source,
 		UniqueIdentifier: fieldvalue.Str(payload, "MONITOR_ID"),
 		// Site24x7's reason text, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.Str(payload, "INCIDENT_REASON"),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
-// extractTags scans each tag for a configured prefix; a tag with more than one colon loses everything after the second segment, matching the reference script's quirk.
+// extractTags scans each tag for a tagList prefix; a tag with more than one colon loses everything after the second segment, matching the reference script's quirk.
 func extractTags(tags []string, tagList map[string]string) map[string]string {
 	result := make(map[string]string)
 	for _, tag := range tags {
@@ -106,11 +110,6 @@ func extractTags(tags []string, tagList map[string]string) map[string]string {
 		}
 	}
 	return result
-}
-
-// mapSeverity maps a Site24x7 monitor status to a canonical severity, falling back to the configured default rather than the raw status.
-func mapSeverity(status, defaultSeverity string) string {
-	return fieldvalue.FirstNonEmpty(severityMap[status], defaultSeverity)
 }
 
 // strSlice reads a payload field expected to be a JSON array of strings.

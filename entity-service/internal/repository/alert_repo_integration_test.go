@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Runs against a database with migrations 0306, 0308 and 100029 applied, and only when ENTITY_TEST_DATABASE_URL is set.
+// Runs against a database with migrations 0306, 0308, 0309, 0311 and 100029 applied, and only when ENTITY_TEST_DATABASE_URL is set.
 func newAlertIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
@@ -136,8 +137,18 @@ func TestAlertRepositoryIntegration_KeepsTheRawBodyAndAlertColumns(t *testing.T)
 	first.RawBody = []byte(`[{"a":1},{"a":2}]`)
 	second := integrationAlert(ids[1], "it-alert-3")
 	second.Alert.Environment, second.Alert.Severity = "", ""
-	if stored, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, second}); err != nil || len(stored) != 2 {
-		t.Fatalf("insert batch stored %d (%v), want 2", len(stored), err)
+	first.Alert.Defaulted = []model.Defaulted{{Field: "severity", Value: "Critical"}, {Field: "category", Value: "Service Interruption"}}
+	got, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, second})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("insert batch stored %d (%v), want 2", len(got), err)
+	}
+	// The defaulted fields come back as stored; an alert that defaulted nothing has none.
+	if !reflect.DeepEqual(got[0].Alert.Defaulted, first.Alert.Defaulted) || got[1].Alert.Defaulted != nil {
+		t.Fatalf("defaulted = %+v and %+v, want the first alert's two and none", got[0].Alert.Defaulted, got[1].Alert.Defaulted)
+	}
+	var defaultedJSON string
+	if err := NewScoped(pool).QueryRow(ctx, `SELECT defaulted_fields::text FROM alert WHERE number = $1`, ids[1]).Scan(&defaultedJSON); err != nil || defaultedJSON != "[]" {
+		t.Fatalf("second row defaulted_fields = %q (%v), want []", defaultedJSON, err)
 	}
 
 	type stored struct {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -712,14 +713,33 @@ func TestAlertConsumerSettle_DeadLettersWithTheReason(t *testing.T) {
 	}
 }
 
-// A field longer than its column is cut to the column's length, so the alert is stored rather than refused.
+// A field longer than its VARCHAR column is cut to the column's length, so the alert is stored rather than refused; description is TEXT and kept whole.
 func TestAlertConsumerProcess_CutsALongFieldToItsColumn(t *testing.T) {
 	repo := newFakeAlertRepo()
 	c, _ := singleQueueConsumer(t, repo)
-	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","description":"` + strings.Repeat("é", 5000) + `"}`
+	body := `{"service":"` + strings.Repeat("s", 300) + `","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","description":"` + strings.Repeat("é", 5000) + `"}`
 
 	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", body))
-	if got := []rune(repo.row(0).Alert.Description); decision.settlement != alertComplete || len(got) != 4000 {
-		t.Fatalf("decision = %+v, description of %d characters; want the alert stored with 4000", decision, len(got))
+	row := repo.row(0)
+	if decision.settlement != alertComplete || len([]rune(row.Alert.Service)) != 255 || len([]rune(row.Alert.Description)) != 5000 {
+		t.Fatalf("decision = %+v, service of %d and description of %d characters; want service cut to 255 and description kept at 5000",
+			decision, len([]rune(row.Alert.Service)), len([]rune(row.Alert.Description)))
+	}
+}
+
+// The fields a payload did not carry reach the stored row with the default each was given.
+func TestAlertConsumerProcess_KeepsTheDefaultedFields(t *testing.T) {
+	repo := newFakeAlertRepo()
+	c, _ := singleQueueConsumer(t, repo)
+	body := `{"data":{"essentials":{"alertRule":"cpu-high","alertId":"/subscriptions/s/alerts/1","severity":"Sev1"}}}`
+
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "azure", body))
+	want := []model.Defaulted{
+		{Field: "service", Value: "Managed Services"},
+		{Field: "category", Value: "Service Interruption"},
+		{Field: "environment", Value: "Unknown"},
+	}
+	if got := repo.row(0).Alert.Defaulted; decision.settlement != alertComplete || !reflect.DeepEqual(got, want) {
+		t.Fatalf("decision = %+v, defaulted %+v; want the alert stored with %+v", decision, got, want)
 	}
 }

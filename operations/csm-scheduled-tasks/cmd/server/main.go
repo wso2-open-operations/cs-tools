@@ -453,12 +453,12 @@ func main() {
 	} else if plgValidationEnabled {
 		slog.Warn("plg registration validation: email classification is off; set CSM_AI_SERVICE_BASE_URL and CLOUD_API_BASE_URL")
 	}
-	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM,IAM,API_PLATFORM,INTEGRATION_PLATFORM"))
+	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "WSO2_CLOUD,AGENT_PLATFORM,IAM,API_PLATFORM,INTEGRATION_PLATFORM"))
 	if plgValidationEnabled {
 		for i, p := range plgValidationProducts {
 			plgValidationProducts[i] = strings.ToUpper(p)
-			if _, ok := plgvalidation.Platforms[plgValidationProducts[i]]; !ok {
-				slog.Error("PLG_REGISTRATION_VALIDATION_PRODUCTS names a product with no Moesif platform", "product", p)
+			if !plgvalidation.KnownProduct(plgValidationProducts[i]) {
+				slog.Error("PLG_REGISTRATION_VALIDATION_PRODUCTS names a product that cannot be validated", "product", p)
 				os.Exit(1)
 			}
 		}

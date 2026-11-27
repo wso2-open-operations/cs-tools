@@ -39,14 +39,14 @@ const grafanaReceiver = "grafana-default-email"
 // grafanaAlertPrefix prefixes a Grafana alert's metric name.
 const grafanaAlertPrefix = "Grafana Alert: "
 
-// defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
-var defaults = map[string]string{
-	"METRIC_NAME": "PrometheusAlert",
-	"SERVICE":     "Managed Services",
-	"CATEGORY":    "Software",
-	"ENVIRONMENT": "Production",
-	"SEVERITY":    "Critical",
-}
+// Built-in defaults for a field the payload does not carry.
+const (
+	defaultMetricName  = "Metric Name Not Available"
+	defaultService     = "Managed Services"
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Unknown"
+	defaultSeverity    = "Critical"
+)
 
 // severityMap maps Prometheus/Grafana's lowercase severity label to the canonical severity labels; an unmapped value passes through as-is.
 var severityMap = map[string]string{
@@ -63,11 +63,8 @@ var ErrInvalidStructure = errors.New("invalid prometheus alert payload structure
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.prometheus.alert.config"; unlike other fields, "severity" and "source" are looked up lowercase.
-type Config map[string]string
-
-// Transform parses a raw inbound Alertmanager-shaped webhook and produces one canonical Alert per entry in its "alerts" array.
-func Transform(raw []byte, cfg Config) ([]Alert, error) {
+// Transform parses a raw inbound Alertmanager-shaped webhook and produces one canonical Alert per entry in its "alerts" array, each with its own defaults.
+func Transform(raw []byte) ([]Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidStructure, err)
@@ -87,17 +84,17 @@ func Transform(raw []byte, cfg Config) ([]Alert, error) {
 		if !ok {
 			continue
 		}
-		alerts = append(alerts, transformOne(alertMap, cfg, receiver, batchStatus))
+		alerts = append(alerts, transformOne(alertMap, receiver, batchStatus))
 	}
 	return alerts, nil
 }
 
-func transformOne(alert map[string]any, cfg Config, receiver, batchStatus string) Alert {
+func transformOne(alert map[string]any, receiver, batchStatus string) Alert {
 	labels, _ := alert["labels"].(map[string]any)
 	annotations, _ := alert["annotations"].(map[string]any)
 
 	isGrafana := fieldvalue.Str(labels, "grafana_folder") != "" || receiver == grafanaReceiver
-	alertSource := fieldvalue.FirstNonEmpty(cfg["source"], source)
+	alertSource := source
 	if isGrafana {
 		alertSource = grafanaSource
 	}
@@ -109,29 +106,33 @@ func transformOne(alert map[string]any, cfg Config, receiver, batchStatus string
 	}
 	alertStatus = fieldvalue.FirstNonEmpty(alertStatus, batchStatus)
 
-	rawSeverity := fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "severity"), cfg["severity"], defaults["SEVERITY"])
+	rawSeverity := fieldvalue.Str(labels, "severity")
+
+	var d model.Defaults
+	service := d.Or("service", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "service"), fieldvalue.Str(labels, "component"), fieldvalue.Str(labels, "job")), defaultService)
+	metricName := d.Or("metric_name", buildMetricName(isGrafana, labels, annotations), defaultMetricName)
 
 	var severity string
 	if alertStatus == "resolved" {
 		severity = "OK"
 	} else {
-		severity = severityMap[strings.ToLower(rawSeverity)]
-		if severity == "" {
-			severity = rawSeverity
-		}
+		// An unmapped label passes through as-is; no label at all takes the default.
+		severity = d.Or("severity", fieldvalue.FirstNonEmpty(severityMap[strings.ToLower(rawSeverity)], rawSeverity), defaultSeverity)
 	}
 
-	return Alert{
-		Service:          configValue(cfg, "SERVICE", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "service"), fieldvalue.Str(labels, "component"), fieldvalue.Str(labels, "job"))),
-		MetricName:       configValue(cfg, "METRIC_NAME", buildMetricName(isGrafana, labels, annotations)),
+	a := Alert{
+		Service:          service,
+		MetricName:       metricName,
 		Severity:         severity,
-		Category:         configValue(cfg, "CATEGORY", fieldvalue.Str(labels, "category")),
-		Environment:      configValue(cfg, "ENVIRONMENT", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "environment"), fieldvalue.Str(labels, "cluster"))),
+		Category:         d.Or("category", fieldvalue.Str(labels, "category"), defaultCategory),
+		Environment:      d.Or("environment", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "environment"), fieldvalue.Str(labels, "cluster")), defaultEnvironment),
 		Source:           alertSource,
 		UniqueIdentifier: fieldvalue.Str(alert, "fingerprint"),
 		// The alert's own annotation text, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.FirstNonEmpty(fieldvalue.Str(annotations, "description"), fieldvalue.Str(annotations, "summary")),
 	}
+	a.Defaulted = d.List()
+	return a
 }
 
 // buildMetricName mirrors the reference script: a Grafana alert with an annotations.title uses that, prefixed; otherwise labels.alertname.
@@ -143,9 +144,4 @@ func buildMetricName(_ bool, labels, annotations map[string]any) string {
 		}
 	}
 	return fieldvalue.Str(labels, "alertname")
-}
-
-// configValue applies the 3-tier resolution: payload value, then operator config, then the default.
-func configValue(cfg Config, field, payloadValue string) string {
-	return fieldvalue.FirstNonEmpty(payloadValue, cfg[field], defaults[field])
 }

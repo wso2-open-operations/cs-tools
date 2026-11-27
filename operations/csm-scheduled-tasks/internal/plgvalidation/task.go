@@ -44,6 +44,27 @@ var Platforms = map[string]string{
 	"INTEGRATION_PLATFORM": "Integration Platform",
 }
 
+// CloudProduct is the entry product of a signup on the Cloud itself. It has no
+// platform of its own, so it is validated like the others, against every platform.
+const CloudProduct = "WSO2_CLOUD"
+
+// KnownProduct reports whether a registration entering through code can be validated.
+func KnownProduct(code string) bool {
+	_, ok := Platforms[code]
+	return ok || code == CloudProduct
+}
+
+// platformNames are the Moesif platforms read for every registration, whatever its
+// entry product: a registration is active if its owner did real work on any of them.
+func platformNames() []string {
+	names := make([]string, 0, len(Platforms))
+	for _, n := range Platforms {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
+}
+
 // ActionField is the Moesif field every product's events name their action in:
 // created-agent style for Agent Manager, identity-platform.organization.overview-view,
 // apip.admin.landing-page-open or integration-platform.console.navigation.page-view
@@ -84,7 +105,7 @@ type Entity interface {
 
 // Options configure a run.
 type Options struct {
-	Products   []string      // portal product codes, each in Platforms
+	Products   []string      // entry products to validate: each in Platforms, or CloudProduct
 	Window     time.Duration // activity counted after signup
 	Thresholds Thresholds
 	Grace      time.Duration // how long a closed window stays in the queue
@@ -139,7 +160,7 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 	if err != nil {
 		return nil, fmt.Errorf("plg registration validation: %s queue: %w", product, err)
 	}
-	events, err := readEvents(ctx, src, opts, Platforms[product], items, now)
+	events, err := readEvents(ctx, src, opts, platformNames(), items, now)
 	if err != nil {
 		return nil, fmt.Errorf("plg registration validation: %s: read Moesif events: %w", product, err)
 	}
@@ -240,7 +261,7 @@ func classify(ctx context.Context, opts Options, it QueueItem) (string, bool) {
 }
 
 // readEvents reads the platform's events for the queued companies, grouped by company id.
-func readEvents(ctx context.Context, src Searcher, opts Options, platform string, items []QueueItem, now time.Time) (map[string][]plgactivity.Event, error) {
+func readEvents(ctx context.Context, src Searcher, opts Options, platforms []string, items []QueueItem, now time.Time) (map[string][]plgactivity.Event, error) {
 	byCompany := map[string][]plgactivity.Event{}
 	for start := 0; start < len(items); start += opts.BatchSize {
 		batch := items[start:min(start+opts.BatchSize, len(items))]
@@ -256,7 +277,7 @@ func readEvents(ctx context.Context, src Searcher, opts Options, platform string
 		hits, more, err := src.SearchEvents(ctx, moesif.Query{
 			From:     from,
 			To:       minTime(to, now),
-			Filter:   platformFilter(platform, ids),
+			Filter:   platformFilter(platforms, ids),
 			Fields:   []string{"company_id", "request.time", ActionField},
 			MaxPages: opts.MaxPages,
 		})
@@ -278,9 +299,9 @@ func readEvents(ctx context.Context, src Searcher, opts Options, platform string
 	return byCompany, nil
 }
 
-func platformFilter(platform string, companyIDs []string) map[string]any {
+func platformFilter(platforms []string, companyIDs []string) map[string]any {
 	return map[string]any{"bool": map[string]any{"must": []map[string]any{
-		{"term": map[string]any{"metadata.platform.raw": platform}},
+		{"terms": map[string]any{"metadata.platform.raw": platforms}},
 		{"terms": map[string]any{"company_id.raw": companyIDs}},
 		{"exists": map[string]any{"field": ActionField}},
 	}}}

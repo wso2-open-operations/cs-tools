@@ -19,7 +19,10 @@ package aws
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
 func snsEnvelope(message any) []byte {
@@ -52,7 +55,7 @@ func TestTransform_CarriesRoutingSignals(t *testing.T) {
 		"AlarmDescription": `{"service":"choreo","assignment_group":" SRE - Apollo "}`,
 		"AWSAccountId":     "111122223333",
 	})
-	a, err := Transform(snsEnvelope(alarm), Config{})
+	a, err := Transform(snsEnvelope(alarm))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +72,7 @@ func TestTransform_CarriesRoutingSignals(t *testing.T) {
 
 // Without AWSAccountId the account comes from the AlarmArn; without a usable Message, from the TopicArn.
 func TestTransform_SourceAccountFallsBack(t *testing.T) {
-	a, err := Transform(snsEnvelope(sampleAlarm(nil)), Config{})
+	a, err := Transform(snsEnvelope(sampleAlarm(nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +81,7 @@ func TestTransform_SourceAccountFallsBack(t *testing.T) {
 	}
 
 	raw := []byte(`{"Type":"Notification","TopicArn":"arn:aws:sns:eu-west-1:444455556666:sre-artemis","Message":"not json"}`)
-	a, err = Transform(raw, Config{})
+	a, err = Transform(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +106,7 @@ func TestArnAccount(t *testing.T) {
 func TestTransform_RejectsNonNotificationTypes(t *testing.T) {
 	for _, typ := range []string{"UnsubscribeConfirmation", "SomethingNew"} {
 		raw := []byte(`{"Type":"` + typ + `","TopicArn":"arn:aws:sns:us-east-1:123456789012:alerts","Message":"You have chosen to deactivate subscription."}`)
-		if _, err := Transform(raw, Config{}); !errors.Is(err, ErrUnsupportedType) {
+		if _, err := Transform(raw); !errors.Is(err, ErrUnsupportedType) {
 			t.Errorf("%s: err = %v, want ErrUnsupportedType", typ, err)
 		}
 	}
@@ -111,17 +114,69 @@ func TestTransform_RejectsNonNotificationTypes(t *testing.T) {
 
 func TestTransform_NoTypeStillTransforms(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"Message": `{"AlarmName":"HighCPUAlarm","NewStateValue":"ALARM"}`})
-	if a, err := Transform(raw, Config{}); err != nil || a.MetricName != "HighCPUAlarm" {
+	if a, err := Transform(raw); err != nil || a.MetricName != "HighCPUAlarm" {
 		t.Errorf("alert = %+v, err = %v", a, err)
 	}
 }
 
 func TestTransform_NullAlarmDescriptionOnRecovery(t *testing.T) {
-	a, err := Transform(snsEnvelope(sampleAlarm(map[string]any{"AlarmDescription": "null", "NewStateValue": "OK"})), Config{})
+	a, err := Transform(snsEnvelope(sampleAlarm(map[string]any{"AlarmDescription": "null", "NewStateValue": "OK"})))
 	if err != nil {
 		t.Fatalf("Transform: %v", err)
 	}
-	if a.Severity != "ok" {
-		t.Errorf("severity = %q, want ok for a recovered alarm", a.Severity)
+	if a.Severity != "OK" {
+		t.Errorf("severity = %q, want OK for a recovered alarm", a.Severity)
+	}
+}
+
+// A field the payload leaves out takes the built-in default and is listed in Defaulted; a payload carrying every field lists nothing.
+func TestTransform_Defaults(t *testing.T) {
+	cases := []struct {
+		name                                                 string
+		raw                                                  []byte
+		service, metricName, severity, category, environment string
+		defaulted                                            []model.Defaulted
+	}{
+		{
+			name: "missing fields", raw: snsEnvelope(map[string]any{"AlarmArn": "arn:a", "NewStateValue": "ALARM"}),
+			metricName: "Metric Name Not Available", severity: "Critical", category: "Service Interruption", environment: "Unknown",
+			defaulted: []model.Defaulted{
+				{Field: "metric_name", Value: "Metric Name Not Available"},
+				{Field: "severity", Value: "Critical"},
+				{Field: "category", Value: "Service Interruption"},
+				{Field: "environment", Value: "Unknown"},
+			},
+		},
+		{
+			name: "every field", raw: snsEnvelope(sampleAlarm(map[string]any{"AlarmDescription": `{"service":"choreo","severity":"Major","category":"Performance","environment":"Staging"}`})),
+			service: "choreo", metricName: "HighCPUAlarm", severity: "Major", category: "Performance", environment: "Staging",
+		},
+		{
+			name: "recovered alarm is not a default", raw: snsEnvelope(map[string]any{"AlarmName": "HighCPUAlarm", "NewStateValue": "OK", "AlarmDescription": `{"service":"choreo","category":"Performance","environment":"Staging"}`}),
+			service: "choreo", metricName: "HighCPUAlarm", severity: "OK", category: "Performance", environment: "Staging",
+		},
+		{
+			name: "parse error metric name is not a default", raw: []byte(`{"Type":"Notification","TopicArn":"arn:aws:sns:us-east-1:1:t","Message":"not json"}`),
+			metricName: "SNS Message Parse Error", severity: "Critical", category: "Service Interruption", environment: "Unknown",
+			defaulted: []model.Defaulted{
+				{Field: "severity", Value: "Critical"},
+				{Field: "category", Value: "Service Interruption"},
+				{Field: "environment", Value: "Unknown"},
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, err := Transform(c.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.Source != "AWS" || a.Service != c.service || a.MetricName != c.metricName || a.Severity != c.severity || a.Category != c.category || a.Environment != c.environment {
+				t.Errorf("alert = %+v, want service %q, metric name %q, severity %q, category %q, environment %q", a, c.service, c.metricName, c.severity, c.category, c.environment)
+			}
+			if !reflect.DeepEqual(a.Defaulted, c.defaulted) {
+				t.Errorf("Defaulted = %+v, want %+v", a.Defaulted, c.defaulted)
+			}
+		})
 	}
 }

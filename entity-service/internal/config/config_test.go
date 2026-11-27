@@ -1820,6 +1820,7 @@ func sqsOnlyConfig() Config {
 	c.AlertServiceBusConnectionString = ""
 	c.AlertSQSPriorityQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue"}
 	c.AlertSQSStandardQueueURLs = []string{"https://sqs.us-east-1.amazonaws.com/123456789012/standard-queue"}
+	c.AlertSQSDeadLetterQueueURL = "https://sqs.us-east-1.amazonaws.com/123456789012/alerts-dead-letter"
 	return c
 }
 
@@ -1841,6 +1842,7 @@ func TestConfig_Validate_AlertConsumerClouds(t *testing.T) {
 		{name: "only one SQS queue", change: func(c *Config) { c.AlertSQSStandardQueueURLs = nil }, wantErr: true},
 		{name: "the same SQS queue twice", change: func(c *Config) { c.AlertSQSStandardQueueURLs = c.AlertSQSPriorityQueueURLs }, wantErr: true},
 		{name: "half a key pair", change: func(c *Config) { c.AlertSQSAccessKeyID = "id" }, wantErr: true},
+		{name: "no dead-letter queue", change: func(c *Config) { c.AlertSQSDeadLetterQueueURL = "" }, wantErr: true},
 		{name: "not a queue url", change: func(c *Config) { c.AlertSQSPriorityQueueURLs = []string{"priority-queue"} }, wantErr: true},
 		{name: "queues in two regions", change: func(c *Config) {
 			c.AlertSQSStandardQueueURLs = []string{"https://sqs.eu-west-1.amazonaws.com/123456789012/standard-queue"}
