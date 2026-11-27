@@ -1215,6 +1215,9 @@ version rule differs. A deprecated version whose EOL date has passed is in both 
   the first Monday" check uses the period key. (The EOL report differs on purpose: its date drives its query.)
 - **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
   audience agreed with CS. It is internal only.
+- **Subject.** `deprecatedusagescan.SubjectFor`: the report name and the month it runs, e.g. "Deprecated Product Version
+  Usage Monthly Report - December 2026" (the report is dated the day it runs), on the report and on the "no usage" note,
+  so each month's mail is its own thread. A run-now or debug copy keeps its "[Test copy]" prefix.
 - **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
   account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
   To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
@@ -1292,6 +1295,10 @@ spanning its versions.
 - **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
   audience agreed with CS (account managers, technical owners and leadership see the same list). It is internal
   only.
+- **Subject.** `eolusagescan.SubjectFor`: the report name and the report date's month (the run's first Monday), e.g.
+  "EOL Product Version Usage Monthly Report - December 2026", on the report and on the "no usage" note, so each month's
+  mail is its own thread; a retry later in the week keeps the month. A run-now or debug copy keeps its "[Test copy]"
+  prefix.
 - **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
   account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
   To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves

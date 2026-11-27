@@ -46,9 +46,17 @@ const TaskName = "eol_product_usage_report"
 // sends only when the date is the 1st to the 7th (see SendReport).
 const DefaultSchedule = "30 4 * * 1"
 
-// Subject is the report's mail subject, the subject the previous system's report
-// had.
+// Subject is the report's name, the subject the previous system's report had.
+// The mail subject adds the report's month: see SubjectFor.
 const Subject = "EOL Product Version Usage Monthly Report"
+
+// SubjectFor is the mail subject for a report dated date: Subject and the
+// month, e.g. "EOL Product Version Usage Monthly Report - December 2026", so
+// each month's mail is its own thread. The date is the report date (the
+// run's first Monday), so a retry later in the week keeps the same month.
+func SubjectFor(date time.Time) string {
+	return Subject + " - " + date.Format("January 2006")
+}
 
 // Timezone is the zone the run date is taken in: the report's date, and
 // whether today is in the month's first week. Colombo keeps India Standard
@@ -141,6 +149,7 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			return nil
 		}
 		date := asOf.Format("2006-01-02")
+		subject := SubjectFor(asOf)
 
 		report, err := reports.Report(ctx, date)
 		if err != nil {
@@ -151,7 +160,7 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			slog.Info("sending the EOL product usage report: no customers on EOL versions",
 				"asOf", report.AsOf, "to", len(to), "cc", len(cc))
 			body := notify.RenderEolProductUsageReport(report, opts.PortalBaseURL)
-			if err := email.SendEmail(ctx, to, Cc(to, cc), Subject, body); err != nil {
+			if err := email.SendEmail(ctx, to, Cc(to, cc), subject, body); err != nil {
 				return fmt.Errorf("eolusagescan: send report: %w", err)
 			}
 			return nil
@@ -166,7 +175,7 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			"asOf", report.AsOf, "versions", report.TotalVersions, "accounts", report.TotalAccounts,
 			"to", len(audience), "cc", len(cc))
 		body := notify.RenderEolProductUsageReport(report, opts.PortalBaseURL)
-		if err := email.SendEmail(ctx, audience, Cc(audience, cc), Subject, body); err != nil {
+		if err := email.SendEmail(ctx, audience, Cc(audience, cc), subject, body); err != nil {
 			return fmt.Errorf("eolusagescan: send report: %w", err)
 		}
 		return nil
