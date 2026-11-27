@@ -30,14 +30,14 @@ import (
 // source identifies alerts produced by this adapter.
 const source = "GCP"
 
-// defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
-var defaults = map[string]string{
-	"METRIC_NAME": "GCPCloudAlert",
-	"SERVICE":     "Managed Services",
-	"CATEGORY":    "Service Interruption",
-	"ENVIRONMENT": "Unknown",
-	"SEVERITY":    "critical",
-}
+// Built-in defaults for a field the payload does not carry.
+const (
+	defaultMetricName  = "Metric Name Not Available"
+	defaultService     = "Managed Services"
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Unknown"
+	defaultSeverity    = "Critical"
+)
 
 // severityMap maps GCP Monitoring's condition severity to the canonical severity labels ("info" maps to "Informational", not "OK").
 var severityMap = map[string]string{
@@ -53,11 +53,8 @@ var ErrMissingBody = errors.New("missing or invalid request body")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.gcp.alert.config"; unlike other fields, "severity" is looked up lowercase.
-type Config map[string]string
-
-// Transform parses a raw inbound GCP Monitoring notification and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound GCP Monitoring notification and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody
 	}
@@ -75,30 +72,30 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	userLabels, _ := incident["policy_user_labels"].(map[string]any)
 
 	state := fieldvalue.FirstNonEmpty(fieldvalue.Str(incident, "state"), "open")
-	rawSeverity := fieldvalue.FirstNonEmpty(fieldvalue.Str(incident, "severity"), cfg["severity"], defaults["SEVERITY"])
+	rawSeverity := fieldvalue.Str(incident, "severity")
+
+	var d model.Defaults
+	service := d.Or("service", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "service"), fieldvalue.Str(userLabels, "service")), defaultService)
+	metricName := d.Or("metric_name", fieldvalue.FirstNonEmpty(fieldvalue.Str(incident, "policy_name"), fieldvalue.Str(incident, "condition_name")), defaultMetricName)
 
 	var severity string
 	if state == "closed" {
 		severity = "OK"
 	} else {
-		severity = fieldvalue.FirstNonEmpty(severityMap[strings.ToLower(rawSeverity)], rawSeverity)
+		severity = d.Or("severity", fieldvalue.FirstNonEmpty(severityMap[strings.ToLower(rawSeverity)], rawSeverity), defaultSeverity)
 	}
 
 	alert := Alert{
-		Service:          configValue(cfg, "SERVICE", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "service"), fieldvalue.Str(userLabels, "service"))),
-		MetricName:       fieldvalue.FirstNonEmpty(fieldvalue.Str(incident, "policy_name"), fieldvalue.Str(incident, "condition_name"), defaults["METRIC_NAME"]),
+		Service:          service,
+		MetricName:       metricName,
 		Severity:         severity,
-		Category:         configValue(cfg, "CATEGORY", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "category"), fieldvalue.Str(userLabels, "category"))),
-		Environment:      configValue(cfg, "ENVIRONMENT", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "environment"), fieldvalue.Str(userLabels, "environment"))),
+		Category:         d.Or("category", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "category"), fieldvalue.Str(userLabels, "category")), defaultCategory),
+		Environment:      d.Or("environment", fieldvalue.FirstNonEmpty(fieldvalue.Str(labels, "environment"), fieldvalue.Str(userLabels, "environment")), defaultEnvironment),
 		Source:           source,
 		UniqueIdentifier: fieldvalue.Str(incident, "incident_id"),
 		// The incident summary or the policy's documentation, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.FirstNonEmpty(fieldvalue.Str(incident, "summary"), fieldvalue.Str(documentation, "content")),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
-}
-
-// configValue applies the 3-tier resolution: payload value, then operator config, then the default.
-func configValue(cfg Config, field, payloadValue string) string {
-	return fieldvalue.FirstNonEmpty(payloadValue, cfg[field], defaults[field])
 }

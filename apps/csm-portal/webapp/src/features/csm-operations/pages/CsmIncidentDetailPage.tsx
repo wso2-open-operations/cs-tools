@@ -19,6 +19,7 @@ import { Box, Button, Card, Chip, Skeleton, Tab, Tabs, Tooltip, Typography } fro
 import {
   Activity,
   ArrowLeft,
+  BellRing,
   Clock,
   Eye,
   FileText,
@@ -68,6 +69,7 @@ import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
 import IncidentTasksWidget from "@features/csm-operations/components/IncidentTasksWidget";
 import ChildIncidentsWidget from "@features/csm-operations/components/ChildIncidentsWidget";
+import IncidentSreAlertsWidget from "@features/csm-operations/components/IncidentSreAlertsWidget";
 import { useSearchChildIncidents } from "@features/csm-operations/api/useSearchChildIncidents";
 import { INCIDENT_RESOLUTION_CODE_LABELS } from "@features/csm-operations/utils/incidentResolution";
 import IncidentRunbookSection from "@features/csm-operations/components/IncidentRunbookSection";
@@ -311,6 +313,7 @@ type IncidentTabId =
   | "activities"
   | "details"
   | "related"
+  | "alerts"
   | "sla"
   | "watchers"
   | "attachments";
@@ -319,6 +322,8 @@ const TAB_DEFS: Array<{ id: IncidentTabId; label: string; icon: JSX.Element }> =
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <FileText size={16} /> },
   { id: "related", label: "Related", icon: <LinkIcon size={16} /> },
+  // The SRE alerts linked to this incident (each alert's incident_id).
+  { id: "alerts", label: "Alerts", icon: <BellRing size={16} /> },
   { id: "sla", label: "SLA", icon: <Clock size={16} /> },
   { id: "watchers", label: "Watchers", icon: <Eye size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
@@ -1322,6 +1327,11 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             )}
           </Box>
         </Box>
+      )}
+
+      {activeTab === "alerts" && (
+        // Mounted only while this tab is active, so the alert search is lazy.
+        <IncidentSreAlertsWidget incidentId={incident.id as string} />
       )}
 
       {activeTab === "sla" && (

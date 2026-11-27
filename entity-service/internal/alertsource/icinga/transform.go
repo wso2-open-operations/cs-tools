@@ -30,13 +30,14 @@ import (
 // source identifies alerts produced by this adapter.
 const source = "Icinga"
 
-// defaults are used when a field is absent from both the payload and the operator config; SEVERITY is absent since it comes from the state maps below.
-var defaults = map[string]string{
-	"METRIC_NAME": "IcingaAlert",
-	"SERVICE":     "managed_services",
-	"CATEGORY":    "service_interruption",
-	"ENVIRONMENT": "development",
-}
+// Built-in defaults for a field the payload does not carry; severity takes its default only when the state maps below yield none.
+const (
+	defaultMetricName  = "Metric Name Not Available"
+	defaultService     = "Managed Services"
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Unknown"
+	defaultSeverity    = "Critical"
+)
 
 // serviceStateMap maps an Icinga service check's state to the canonical severity labels.
 var serviceStateMap = map[string]string{
@@ -59,11 +60,8 @@ var ErrInvalidStructure = errors.New("invalid icinga alert payload structure")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.icinga.alert.config"; any field left empty falls back to the default.
-type Config map[string]string
-
-// Transform parses a raw inbound Icinga notification and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound Icinga notification and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {
 		return Alert{}, fmt.Errorf("%w: %v", ErrInvalidStructure, err)
@@ -86,11 +84,15 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	// Custom vars, passed from Icinga host/service vars.
 	vars, _ := payload["vars"].(map[string]any)
 
+	var d model.Defaults
+	service := d.Or("service", fieldvalue.FirstNonEmpty(fieldvalue.Str(vars, "service"), fieldvalue.Str(payload, "service")), defaultService)
+	metricName := d.Or("metric_name", buildMetricName(hostDisplayName, serviceName), defaultMetricName)
+
 	var severity string
 	if notificationType == "RECOVERY" {
 		severity = "OK"
 	} else {
-		severity = mapSeverity(serviceState, hostState, serviceName)
+		severity = d.Or("severity", mapSeverity(serviceState, hostState, serviceName), defaultSeverity)
 	}
 
 	// Icinga uses the host!service pattern as the natural unique key.
@@ -100,16 +102,17 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	}
 
 	alert := Alert{
-		Service:          configValue(cfg, "SERVICE", fieldvalue.FirstNonEmpty(fieldvalue.Str(vars, "service"), fieldvalue.Str(payload, "service"))),
-		MetricName:       configValue(cfg, "METRIC_NAME", buildMetricName(hostDisplayName, serviceName)),
+		Service:          service,
+		MetricName:       metricName,
 		Severity:         severity,
-		Category:         configValue(cfg, "CATEGORY", fieldvalue.FirstNonEmpty(fieldvalue.Str(vars, "category"), fieldvalue.Str(payload, "category"))),
-		Environment:      configValue(cfg, "ENVIRONMENT", fieldvalue.FirstNonEmpty(fieldvalue.Str(vars, "environment"), fieldvalue.Str(payload, "environment"))),
+		Category:         d.Or("category", fieldvalue.FirstNonEmpty(fieldvalue.Str(vars, "category"), fieldvalue.Str(payload, "category")), defaultCategory),
+		Environment:      d.Or("environment", fieldvalue.FirstNonEmpty(fieldvalue.Str(vars, "environment"), fieldvalue.Str(payload, "environment")), defaultEnvironment),
 		Source:           source,
 		UniqueIdentifier: uniqueIdentifier,
 		// The check's plugin output, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "service_output"), fieldvalue.Str(payload, "host_output")),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
@@ -133,9 +136,4 @@ func buildMetricName(hostDisplayName, serviceName string) string {
 		return ""
 	}
 	return "Icinga Alert: " + strings.Join(parts, " / ")
-}
-
-// configValue applies the 3-tier resolution: payload value, then operator config, then the default.
-func configValue(cfg Config, field, payloadValue string) string {
-	return fieldvalue.FirstNonEmpty(payloadValue, cfg[field], defaults[field])
 }

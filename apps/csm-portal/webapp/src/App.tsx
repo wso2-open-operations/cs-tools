@@ -85,6 +85,7 @@ import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage"
 import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
 import AlertMuteRuleFormPage from "@features/csm-operations/pages/AlertMuteRuleFormPage";
 import AlertMuteRuleDetailPage from "@features/csm-operations/pages/AlertMuteRuleDetailPage";
+import SreAlertDetailPage from "@features/csm-operations/pages/SreAlertDetailPage";
 import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
 import StandardChangeTemplateDetailPage from "@features/csm-operations/pages/StandardChangeTemplateDetailPage";
 import StandardChangeProposalPage from "@features/csm-operations/pages/StandardChangeProposalPage";
@@ -621,6 +622,7 @@ export default function App(): JSX.Element {
                       element={<CaseDetailRouteSync kind="incident" paramName="id" />}
                     />
                     <Route path="incident-tasks/:id" element={<IncidentTaskDetailPage />} />
+                    <Route path="alerts/:id" element={<SreAlertDetailPage />} />
                     <Route
                       path="alert-mute-rules/new"
                       element={

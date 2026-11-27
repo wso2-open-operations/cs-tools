@@ -30,14 +30,14 @@ import (
 // source identifies alerts produced by this adapter.
 const source = "Azure"
 
-// defaults mirror "edge.api.azure.alert.config" so its JSON can be pasted into AZURE_ALERT_CONFIG unchanged.
-var defaults = map[string]string{
-	"metric_name": "AzureCloudAlert",
-	"service":     "Managed Services",
-	"category":    "Service Interruption",
-	"environment": "Unknown",
-	"severity":    "Critical",
-}
+// Built-in defaults for a field the payload does not carry.
+const (
+	defaultMetricName  = "Metric Name Not Available"
+	defaultService     = "Managed Services"
+	defaultCategory    = "Service Interruption"
+	defaultEnvironment = "Unknown"
+	defaultSeverity    = "Critical"
+)
 
 // severityMap maps Azure Monitor's Sev0-Sev4 severity to the canonical severity labels.
 var severityMap = map[string]string{
@@ -54,11 +54,8 @@ var ErrMissingBody = errors.New("missing or invalid request body")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides, keyed the same way as defaults; any field left empty falls back to the default.
-type Config map[string]string
-
-// Transform parses a raw inbound Azure Monitor Common Alert Schema webhook and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound Azure Monitor Common Alert Schema webhook and produces the canonical Alert, filling gaps with the built-in defaults.
+func Transform(raw []byte) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody
 	}
@@ -74,28 +71,33 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	// Cost alerts don't include a customProperties field, so default to an empty object.
 	props, _ := data["customProperties"].(map[string]any)
 
-	rawSeverity := fieldvalue.FirstNonEmpty(fieldvalue.Str(essentials, "severity"), cfg["severity"], defaults["severity"])
+	rawSeverity := fieldvalue.Str(essentials, "severity")
 	monitorCondition := fieldvalue.Str(essentials, "monitorCondition")
 
-	var mappedSeverity string
+	var d model.Defaults
+	service := d.Or("service", payloadValue(props, "service", ""), defaultService)
+	metricName := d.Or("metric_name", payloadValue(props, "metric_name", resolveMetricName(essentials, alertContext)), defaultMetricName)
+
+	var severity string
 	if monitorCondition == "Resolved" {
-		mappedSeverity = severityMap["Sev4"] // "OK"
+		severity = severityMap["Sev4"] // "OK"
 	} else {
-		// A value outside Sev0-Sev4, such as the "Critical" default, passes through unchanged.
-		mappedSeverity = fieldvalue.FirstNonEmpty(severityMap[rawSeverity], rawSeverity)
+		// A value outside Sev0-Sev4 passes through unchanged; no severity at all takes the default.
+		severity = d.Or("severity", fieldvalue.FirstNonEmpty(severityMap[rawSeverity], rawSeverity), defaultSeverity)
 	}
 
 	alert := Alert{
-		Service:          configValue(cfg, props, "service", ""),
-		MetricName:       configValue(cfg, props, "metric_name", resolveMetricName(essentials, alertContext)),
-		Severity:         mappedSeverity,
-		Category:         configValue(cfg, props, "category", ""),
-		Environment:      configValue(cfg, props, "environment", ""),
-		Source:           fieldvalue.FirstNonEmpty(cfg["source"], source),
+		Service:          service,
+		MetricName:       metricName,
+		Severity:         severity,
+		Category:         d.Or("category", payloadValue(props, "category", ""), defaultCategory),
+		Environment:      d.Or("environment", payloadValue(props, "environment", ""), defaultEnvironment),
+		Source:           source,
 		UniqueIdentifier: fieldvalue.Str(essentials, "alertId"),
 		// The rule's own text, never the payload; the raw body is kept in raw_alerts.
 		Description: fieldvalue.Str(essentials, "description"),
 	}
+	alert.Defaulted = d.List()
 	return alert, nil
 }
 
@@ -110,11 +112,7 @@ func resolveMetricName(essentials, alertContext map[string]any) string {
 	return fieldvalue.Str(essentials, "alertRule")
 }
 
-// configValue applies the 3-tier resolution: a direct value, else customProperties, then operator config, then the default.
-func configValue(cfg Config, props map[string]any, field, directValue string) string {
-	payloadValue := directValue
-	if payloadValue == "" {
-		payloadValue = fieldvalue.Str(props, field)
-	}
-	return fieldvalue.FirstNonEmpty(payloadValue, cfg[field], defaults[field])
+// payloadValue returns a direct value, else the field from customProperties, or "" when the payload carries neither.
+func payloadValue(props map[string]any, field, directValue string) string {
+	return fieldvalue.FirstNonEmpty(directValue, fieldvalue.Str(props, field))
 }

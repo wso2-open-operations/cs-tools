@@ -202,6 +202,7 @@ func main() {
 	problemHandler := handler.NewProblemHandler(customerEntityClient)
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
+	sreAlertHandler := handler.NewSreAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
 	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
 	// Muted alerts live in sre-alert-core-service's database, read through its "Alert Core Read API" with this
@@ -989,6 +990,9 @@ func main() {
 	route("GET /specialist-handoff-teams", handler.PermViewOperations, incidentHandler.ListSpecialistHandoffTeams)
 	route("GET /alerts/{id}", handler.PermViewOperations, alertHandler.GetAlert)
 	route("GET /smart-alerts/{id}", handler.PermViewOperations, alertHandler.GetSmartAlert)
+	route("POST /sre-alerts/search", handler.PermViewOperations, sreAlertHandler.SearchSreAlerts)
+	route("GET /sre-alerts/facets", handler.PermViewOperations, sreAlertHandler.GetSreAlertFacets)
+	route("GET /sre-alerts/{id}", handler.PermViewOperations, sreAlertHandler.GetSreAlert)
 	route("POST /change-requests/{id}/comments", handler.PermWrite, changeRequestHandler.CreateChangeRequestComment)
 	route("POST /change-requests/{id}/comments/search", handler.PermViewOperations, changeRequestHandler.SearchChangeRequestComments)
 	route("POST /problems", handler.PermWrite, problemHandler.CreateProblem)

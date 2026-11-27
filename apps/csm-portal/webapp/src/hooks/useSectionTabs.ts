@@ -45,9 +45,10 @@ import {
 import {
   type FeatureState,
   enabledNavChildren,
+  enabledSectionTabs,
   featureState,
   isPreviewedOnly,
-  visibleNavChildren,
+  visibleSectionTabs,
 } from "@config/featureFlags";
 import { useFeaturePreviewOverrides } from "@config/featurePreview";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -103,7 +104,8 @@ function tabsFor(
 ): SectionTab[] {
   const section = navNodeById(sectionId);
   if (!section) return [];
-  return visibleNavChildren(section, access, previewOverrides).map((node) => ({
+  // Sub-tabs (Alerts under Incidents) are tabs of the section like any other.
+  return visibleSectionTabs(section, access, previewOverrides).map((node) => ({
     key: keyOf(node),
     label: node.label,
     state: featureState(node.id, access, previewOverrides),
@@ -189,7 +191,7 @@ export function firstEnabledPathTab(sectionId: string): string | undefined {
 export function enabledPathTabKeys(sectionId: string): string[] {
   const section = navNodeById(sectionId);
   if (!section) return [];
-  return enabledNavChildren(section).map(pathTabKey);
+  return enabledSectionTabs(section).map(pathTabKey);
 }
 
 /**

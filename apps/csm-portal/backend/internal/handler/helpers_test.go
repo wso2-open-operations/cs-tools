@@ -1437,3 +1437,32 @@ func (m *mockEntityAlertMuteRuleClient) DeleteAlertMuteRule(ctx context.Context,
 	}
 	return nil
 }
+
+// ----- mockEntitySreAlertClient -----
+
+type mockEntitySreAlertClient struct {
+	searchFn func(ctx context.Context, body []byte) ([]byte, error)
+	getFn    func(ctx context.Context, id string) ([]byte, error)
+	facetsFn func(ctx context.Context) ([]byte, error)
+}
+
+func (m *mockEntitySreAlertClient) SearchSreAlerts(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchFn != nil {
+		return m.searchFn(ctx, body)
+	}
+	return []byte(`{"alerts":[],"total":0,"offset":0,"limit":20}`), nil
+}
+
+func (m *mockEntitySreAlertClient) GetSreAlert(ctx context.Context, id string) ([]byte, error) {
+	if m.getFn != nil {
+		return m.getFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntitySreAlertClient) GetSreAlertFacets(ctx context.Context) ([]byte, error) {
+	if m.facetsFn != nil {
+		return m.facetsFn(ctx)
+	}
+	return []byte(`{"environments":[],"services":[],"severities":[],"sources":[]}`), nil
+}

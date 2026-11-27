@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -723,5 +724,22 @@ func TestAlertConsumerProcess_CutsALongFieldToItsColumn(t *testing.T) {
 	if decision.settlement != alertComplete || len([]rune(row.Alert.Service)) != 255 || len([]rune(row.Alert.Description)) != 5000 {
 		t.Fatalf("decision = %+v, service of %d and description of %d characters; want service cut to 255 and description kept at 5000",
 			decision, len([]rune(row.Alert.Service)), len([]rune(row.Alert.Description)))
+	}
+}
+
+// The fields a payload did not carry reach the stored row with the default each was given.
+func TestAlertConsumerProcess_KeepsTheDefaultedFields(t *testing.T) {
+	repo := newFakeAlertRepo()
+	c, _ := singleQueueConsumer(t, repo)
+	body := `{"data":{"essentials":{"alertRule":"cpu-high","alertId":"/subscriptions/s/alerts/1","severity":"Sev1"}}}`
+
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "azure", body))
+	want := []model.Defaulted{
+		{Field: "service", Value: "Managed Services"},
+		{Field: "category", Value: "Service Interruption"},
+		{Field: "environment", Value: "Unknown"},
+	}
+	if got := repo.row(0).Alert.Defaulted; decision.settlement != alertComplete || !reflect.DeepEqual(got, want) {
+		t.Fatalf("decision = %+v, defaulted %+v; want the alert stored with %+v", decision, got, want)
 	}
 }

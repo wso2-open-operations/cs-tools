@@ -17,20 +17,21 @@
 package alertsource
 
 import (
-	"errors"
+	"reflect"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/site24x7"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
-// A field the source left out takes the source's own built-in default, as in alert-ingestion, so the fingerprint matches v1.
+// A field the source left out takes the source's own built-in default.
 func TestRegistry_FillsGapsWithAlertIngestionDefaults(t *testing.T) {
 	r := New()
 	cases := map[string]struct {
 		route, body, service, metricName, severity string
 	}{
-		"azure":      {"azure", `{"data":{"essentials":{"alertId":"a1","monitorCondition":"Fired"}}}`, "Managed Services", "AzureCloudAlert", "Critical"},
-		"aws":        {"aws", `{"Type":"Notification","TopicArn":"arn:aws:sns:us-east-1:1:t","Message":"{\"AlarmArn\":\"arn:a\",\"NewStateValue\":\"ALARM\"}"}`, "", "Unknown Metric", "critical"},
+		"azure":      {"azure", `{"data":{"essentials":{"alertId":"a1","monitorCondition":"Fired"}}}`, "Managed Services", "Metric Name Not Available", "Critical"},
+		"aws":        {"aws", `{"Type":"Notification","TopicArn":"arn:aws:sns:us-east-1:1:t","Message":"{\"AlarmArn\":\"arn:a\",\"NewStateValue\":\"ALARM\"}"}`, "", "Metric Name Not Available", "Critical"},
+		"site24x7":   {"site24x7", `{"MONITOR_ID":"1"}`, "", "", "Critical"},
 		"servicenow": {"servicenow", `{"description":"disk full"}`, "", "", ""},
 	}
 	for name, tc := range cases {
@@ -60,10 +61,27 @@ func TestRegistry_KeepsWhatTheSourceSent(t *testing.T) {
 	}
 }
 
-// With no SITE24X7_ALERT_CONFIG, alert-ingestion rejects a Site24x7 alert without STATUS, and so does the consumer.
-func TestRegistry_RejectsASite24x7AlertWithoutStatus(t *testing.T) {
-	transform, _ := New().Lookup("site24x7")
-	if _, err := transform([]byte(`{"MONITOR_ID":"1"}`)); !errors.Is(err, site24x7.ErrMissingStatus) {
-		t.Fatalf("err = %v, want ErrMissingStatus", err)
+// OpenObserve's defaulted list survives the conversion to the canonical alert.
+func TestRegistry_KeepsOpenObserveDefaulted(t *testing.T) {
+	transform, _ := New().Lookup("openobserve")
+	alerts, err := transform([]byte(`{"short_description":"p99 high","correlation_id":"c1","service":"api","urgency":"1","category":"Performance","environment":"Staging"}`))
+	if err != nil || len(alerts) != 1 {
+		t.Fatalf("transform = %v, %v", alerts, err)
+	}
+	if alerts[0].Severity != "Critical" || alerts[0].Defaulted != nil {
+		t.Fatalf("alert = %+v, want severity Critical from urgency and nothing defaulted", alerts[0])
+	}
+	alerts, err = transform([]byte(`{"correlation_id":"c1"}`))
+	if err != nil || len(alerts) != 1 {
+		t.Fatalf("transform = %v, %v", alerts, err)
+	}
+	want := []model.Defaulted{
+		{Field: "service", Value: "Managed Services"},
+		{Field: "severity", Value: "Critical"},
+		{Field: "category", Value: "Service Interruption"},
+		{Field: "environment", Value: "Production"},
+	}
+	if !reflect.DeepEqual(alerts[0].Defaulted, want) {
+		t.Fatalf("Defaulted = %+v, want %+v", alerts[0].Defaulted, want)
 	}
 }
