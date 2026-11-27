@@ -141,7 +141,7 @@ function useInvalidate(): () => Promise<void> {
   return () => queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.ALERT_MUTE_RULES] });
 }
 
-const path = (id: string, action = ""): string => `/alert-mute-rules/${encodeURIComponent(id)}${action}`;
+const path = (id: string): string => `/alert-mute-rules/${encodeURIComponent(id)}`;
 
 export function usePostAlertMuteRule(): UseMutationResult<AlertMuteRule, Error, AlertMuteRuleInput> {
   const api = useBackendApi();
@@ -152,7 +152,7 @@ export function usePostAlertMuteRule(): UseMutationResult<AlertMuteRule, Error, 
   });
 }
 
-/** Changes a rule that hasn't started (the backend refuses any other). */
+/** Changes a rule that hasn't started (`PATCH`; the backend refuses an edit of any other). */
 export function usePatchAlertMuteRule(): UseMutationResult<AlertMuteRule, Error, { id: string; input: AlertMuteRuleInput }> {
   const api = useBackendApi();
   const invalidate = useInvalidate();
@@ -162,20 +162,22 @@ export function usePatchAlertMuteRule(): UseMutationResult<AlertMuteRule, Error,
   });
 }
 
+/** Moves a rule's end later (`PATCH` with `endOn` alone). */
 export function useExtendAlertMuteRule(): UseMutationResult<AlertMuteRule, Error, { id: string; endOn: string }> {
   const api = useBackendApi();
   const invalidate = useInvalidate();
   return useMutation<AlertMuteRule, Error, { id: string; endOn: string }>({
-    mutationFn: ({ id, endOn }) => api.post<{ endOn: string }, AlertMuteRule>(path(id, "/extend"), { endOn }),
+    mutationFn: ({ id, endOn }) => api.patch<{ endOn: string }, AlertMuteRule>(path(id), { endOn }),
     onSuccess: invalidate,
   });
 }
 
+/** Ends an active rule now (`PATCH` with `state: "ended"` alone). */
 export function useEndAlertMuteRule(): UseMutationResult<AlertMuteRule, Error, string> {
   const api = useBackendApi();
   const invalidate = useInvalidate();
   return useMutation<AlertMuteRule, Error, string>({
-    mutationFn: (id) => api.postEmpty<AlertMuteRule>(path(id, "/end")),
+    mutationFn: (id) => api.patch<{ state: "ended" }, AlertMuteRule>(path(id), { state: "ended" }),
     onSuccess: invalidate,
   });
 }

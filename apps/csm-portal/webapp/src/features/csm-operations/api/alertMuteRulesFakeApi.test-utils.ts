@@ -94,10 +94,23 @@ export function createFakeAlertMuteRulesApi(actor = "engineer@example.test") {
         rules = [...rules, rule];
         return rule as TRes;
       }
-      if (path.endsWith("/extend")) {
-        const rule = find(path);
-        const state = alertMuteRuleState(rule, Date.now());
-        if (state !== "scheduled" && state !== "active") throw new Error("only a scheduled or active alert mute rule can be extended");
+      throw new Error(`unexpected POST ${path}`);
+    },
+    // PATCH as entity-service serves it: state "ended" alone ends an active rule, endOn alone extends an active one,
+    // and anything else edits a scheduled one.
+    patch: async <TReq, TRes>(path: string, body: TReq): Promise<TRes> => {
+      const rule = find(path);
+      const state = alertMuteRuleState(rule, Date.now());
+      const fields = Object.keys(body as object);
+      if (fields.includes("state")) {
+        if ((body as { state?: string }).state !== "ended" || fields.length !== 1) throw new Error('state "ended" is sent alone');
+        if (state !== "active") throw new Error("only an active alert mute rule can be ended");
+        return save({ ...rule, endedBy: actor, endedOn: stamp() }) as TRes;
+      }
+      if (state === "active") {
+        if (fields.length !== 1 || fields[0] !== "endOn") {
+          throw new Error('an active alert mute rule can only be extended (endOn alone) or ended (state "ended")');
+        }
         const endOn = (body as { endOn: string }).endOn;
         const end = Date.parse(endOn);
         if (!(end > Date.parse(rule.endOn))) throw new Error("endOn must be later than the alert mute rule's current end");
@@ -106,16 +119,7 @@ export function createFakeAlertMuteRulesApi(actor = "engineer@example.test") {
         }
         return save({ ...rule, endOn, updatedBy: actor, updatedOn: stamp() }) as TRes;
       }
-      throw new Error(`unexpected POST ${path}`);
-    },
-    postEmpty: async <TRes,>(path: string): Promise<TRes> => {
-      const rule = find(path);
-      if (alertMuteRuleState(rule, Date.now()) !== "active") throw new Error("only an active alert mute rule can be ended");
-      return save({ ...rule, endedBy: actor, endedOn: stamp() }) as TRes;
-    },
-    patch: async <TReq, TRes>(path: string, body: TReq): Promise<TRes> => {
-      const rule = find(path);
-      if (alertMuteRuleState(rule, Date.now()) !== "scheduled") throw new Error("only a scheduled alert mute rule can be edited");
+      if (state !== "scheduled") throw new Error("only a scheduled alert mute rule can be edited");
       return save({ ...rule, ...(body as AlertMuteRuleInput), updatedBy: actor, updatedOn: stamp() }) as TRes;
     },
     delete: async (path: string): Promise<void> => {
