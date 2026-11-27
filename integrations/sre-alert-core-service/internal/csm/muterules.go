@@ -47,7 +47,7 @@ type activeAlertMuteRulesResponse struct {
 
 // ActiveAlertMuteRules returns the alert mute rules active right now (not ended, started, not yet expired).
 func (c *Client) ActiveAlertMuteRules(ctx context.Context) ([]AlertMuteRule, error) {
-	body, err := c.do(ctx, http.MethodGet, "/alert-mute-rules/active", nil)
+	body, err := c.do(ctx, http.MethodGet, "/alert-mute-rules?status=active", nil)
 	if err != nil {
 		return nil, err
 	}

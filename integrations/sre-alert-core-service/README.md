@@ -70,7 +70,7 @@ notifications independently until they're actually delivered.
 - **Alert mute rules (muting).** An alert mute rule is a one-time mute rule created in the CSM
   portal: a time window plus conditions on the alert's `service`, `environment`,
   `source`, `metric_name`, `severity`, `category` or `unique_identifier`. Every
-  replica fetches the active rules from `GET /alert-mute-rules/active` on
+  replica fetches the active rules from `GET /alert-mute-rules?status=active` on
   csm-integration-service at startup and every `notify.mute_rule_refresh_interval`
   (30s). An incident matches a rule when every condition matches its first alert:
   `environment` by group (`prod`/`production`/`prd`/`live`, `stg`/`stage`/`staging`,
