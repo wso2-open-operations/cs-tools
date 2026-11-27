@@ -30,13 +30,5 @@ ALTER TABLE alert VALIDATE CONSTRAINT alert_tier_check;
 
 SELECT set_config('app.is_internal', '', false);
 
--- The processor works from events and incident_id, so the claim columns go.
-DROP INDEX IF EXISTS alert_unprocessed_idx;
-DROP INDEX IF EXISTS alert_unprocessed_fingerprint_idx;
-ALTER TABLE alert
-    DROP COLUMN IF EXISTS claimed_by,
-    DROP COLUMN IF EXISTS claim_expires_on,
-    DROP COLUMN IF EXISTS processed_on;
-
 -- The processor reads a fingerprint's alerts, newest first, to find the incident they fold into.
 CREATE INDEX IF NOT EXISTS alert_fingerprint_idx ON alert (fingerprint, received_on) WHERE fingerprint IS NOT NULL;
