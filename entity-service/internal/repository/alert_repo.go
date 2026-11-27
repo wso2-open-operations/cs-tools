@@ -131,18 +131,21 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 	for _, f := range fields {
 		args = append(args, f)
 	}
-	rows, err := r.db.Query(ctx, insertAlertsQuery, args...)
-	if err != nil {
-		return nil, fmt.Errorf("insert alerts: %w", err)
-	}
-	stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
-		var a domain.NewAlert
-		var tier string
-		if err := row.Scan(append([]any{&a.ID, &a.Number, &tier, &a.ReceivedOn}, alertFieldDests(&a.Alert)...)...); err != nil {
-			return domain.NewAlert{}, err
+	// The rows are returned only after the commit succeeds, so a failed commit is never reported as stored alerts.
+	stored, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) ([]domain.NewAlert, error) {
+		rows, err := tx.Query(ctx, insertAlertsQuery, args...)
+		if err != nil {
+			return nil, err
 		}
-		a.Tier = domain.AlertTier(tier)
-		return a, nil
+		return pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
+			var a domain.NewAlert
+			var tier string
+			if err := row.Scan(append([]any{&a.ID, &a.Number, &tier, &a.ReceivedOn}, alertFieldDests(&a.Alert)...)...); err != nil {
+				return domain.NewAlert{}, err
+			}
+			a.Tier = domain.AlertTier(tier)
+			return a, nil
+		})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("insert alerts: %w", err)
