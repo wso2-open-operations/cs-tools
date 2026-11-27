@@ -124,11 +124,11 @@ func (q *fakeAlertQueue) settledCount() int {
 	return len(q.completed) + len(q.abandoned) + len(q.deadLettered)
 }
 
-// fakeAlertRepo stores rows in memory with the table's unique message key, and can fail its first calls.
+// fakeAlertRepo stores rows in memory in the order they arrive, and can fail its first calls.
 type fakeAlertRepo struct {
 	mu          sync.Mutex
 	seq         int64
-	rows        map[string]domain.NewAlert
+	rows        []domain.NewAlert
 	failInserts int
 	// refuseInserts fails that many inserts with a data exception, which fails the same way on every attempt.
 	refuseInserts int
@@ -139,7 +139,7 @@ type fakeAlertRepo struct {
 }
 
 func newFakeAlertRepo() *fakeAlertRepo {
-	return &fakeAlertRepo{rows: map[string]domain.NewAlert{}}
+	return &fakeAlertRepo{}
 }
 
 func (r *fakeAlertRepo) ReserveAlertIDs(_ context.Context, n int) ([]string, error) {
@@ -157,18 +157,18 @@ func (r *fakeAlertRepo) ReserveAlertIDs(_ context.Context, n int) ([]string, err
 	return ids, nil
 }
 
-func (r *fakeAlertRepo) InsertAlerts(_ context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
+func (r *fakeAlertRepo) InsertAlerts(_ context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, error) {
 	r.mu.Lock()
 	r.insertCalls++
 	if r.failInserts > 0 {
 		r.failInserts--
 		r.mu.Unlock()
-		return nil, 0, errors.New("connection reset")
+		return nil, errors.New("connection reset")
 	}
 	if r.refuseInserts > 0 {
 		r.refuseInserts--
 		r.mu.Unlock()
-		return nil, 0, fmt.Errorf("insert alerts: %w", sqlStateError("22P05"))
+		return nil, fmt.Errorf("insert alerts: %w", sqlStateError("22P05"))
 	}
 	r.inFlight++
 	r.maxConcurrent = max(r.maxConcurrent, r.inFlight)
@@ -179,21 +179,24 @@ func (r *fakeAlertRepo) InsertAlerts(_ context.Context, alerts []domain.NewAlert
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.inFlight--
-	var inserted int64
 	stored := make([]domain.NewAlert, len(alerts))
 	for i, a := range alerts {
-		key := fmt.Sprintf("%s/%d", a.MessageID, a.MessageIndex)
-		if existing, exists := r.rows[key]; exists {
-			stored[i] = existing
-			continue
-		}
 		// The database gives each row its UUID.
 		a.ID = fmt.Sprintf("00000000-0000-7000-8000-%012d", len(r.rows)+1)
-		r.rows[key] = a
+		r.rows = append(r.rows, a)
 		stored[i] = a
-		inserted++
 	}
-	return stored, inserted, nil
+	return stored, nil
+}
+
+// row is the i-th stored row, or the zero row when there are fewer.
+func (r *fakeAlertRepo) row(i int) domain.NewAlert {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if i >= len(r.rows) {
+		return domain.NewAlert{}
+	}
+	return r.rows[i]
 }
 
 // sqlStateError is a database error carrying a SQLSTATE, as pgconn.PgError does.
@@ -247,9 +250,9 @@ func TestAlertConsumerProcess_StoresAlertLikeIngestion(t *testing.T) {
 	if decision.settlement != alertComplete || decision.stored != 1 {
 		t.Fatalf("decision = %+v, want complete with one stored alert", decision)
 	}
-	row := repo.rows["priority/m-1/0"]
-	if row.Number != "ALT000000001" || row.ID == "" || row.Route != "servicenow" || row.Tier != domain.AlertTierPriority {
-		t.Fatalf("row = %+v, want ALT000000001 with a UUID, from servicenow on the priority tier", row)
+	row := repo.row(0)
+	if row.Number != "ALT000000001" || row.ID == "" || row.Tier != domain.AlertTierPriority {
+		t.Fatalf("row = %+v, want ALT000000001 with a UUID on the priority tier", row)
 	}
 	stored := row.Alert
 	if stored.Service == "" || stored.Environment == "" || stored.MetricName == "" {
@@ -272,7 +275,7 @@ func TestAlertConsumerProcess_FallsBackToTheQueueTime(t *testing.T) {
 	message.EnqueuedOn = &enqueuedOn
 
 	c.process(context.Background(), domain.AlertTierPriority, "priority", message)
-	if got := repo.rows["priority/m-1/0"].ReceivedOn; !got.Equal(enqueuedOn) {
+	if got := repo.row(0).ReceivedOn; !got.Equal(enqueuedOn) {
 		t.Fatalf("received_on = %s, want the queue's %s", got, enqueuedOn)
 	}
 }
@@ -283,7 +286,7 @@ func TestAlertConsumerProcess_KeepsSourceIdentifier(t *testing.T) {
 	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","unique_identifier":"alarm-7"}`
 
 	c.process(context.Background(), domain.AlertTierStandard, "priority", alertMessage("m-1", "servicenow", body))
-	if stored := repo.rows["priority/m-1/0"].Alert; stored.UniqueIdentifier != "alarm-7" {
+	if stored := repo.row(0).Alert; stored.UniqueIdentifier != "alarm-7" {
 		t.Fatalf("unique_identifier = %q, want the source's own alarm-7", stored.UniqueIdentifier)
 	}
 }
@@ -296,7 +299,7 @@ func TestAlertConsumerProcess_StoresEveryAlertOfABatch(t *testing.T) {
 	if decision.stored != 2 || repo.rowCount() != 2 {
 		t.Fatalf("stored %d rows, want 2", repo.rowCount())
 	}
-	if repo.rows["priority/m-1/0"].Number == repo.rows["priority/m-1/1"].Number {
+	if repo.row(0).Number == repo.row(1).Number {
 		t.Fatal("two alerts of one message share a number")
 	}
 }
@@ -308,41 +311,12 @@ func TestAlertConsumerProcess_KeepsTheRawBodyOnTheFirstRow(t *testing.T) {
 	message := alertMessage("m-1", "servicenow", body)
 
 	c.process(context.Background(), domain.AlertTierStandard, "priority", message)
-	first, second := repo.rows["priority/m-1/0"], repo.rows["priority/m-1/1"]
+	first, second := repo.row(0), repo.row(1)
 	if string(first.RawBody) != body {
 		t.Fatalf("first row raw body %q, want the message's", first.RawBody)
 	}
 	if second.RawBody != nil {
 		t.Fatalf("second row raw body %q, want none, so a batch keeps one copy", second.RawBody)
-	}
-}
-
-func TestAlertConsumerProcess_SameMessageIDOnAnotherQueueIsStoredToo(t *testing.T) {
-	repo := newFakeAlertRepo()
-	c, _ := singleQueueConsumer(t, repo)
-
-	first := c.process(context.Background(), domain.AlertTierPriority, "sqs/priority-queue", alertMessage("m-1", "servicenow", canonicalAlert))
-	second := c.process(context.Background(), domain.AlertTierPriority, "servicebus/priority-queue", alertMessage("m-1", "servicenow", canonicalAlert))
-	if first.stored != 1 || second.stored != 1 || repo.rowCount() != 2 {
-		t.Fatalf("stored %d and %d (%d rows), want each queue's message stored", first.stored, second.stored, repo.rowCount())
-	}
-	if _, ok := repo.rows["sqs/priority-queue/m-1/0"]; !ok {
-		t.Fatalf("rows = %v, want the message id prefixed with its queue", repo.rows)
-	}
-}
-
-func TestAlertConsumerProcess_RedeliveryStoresNothingNew(t *testing.T) {
-	repo := newFakeAlertRepo()
-	c, _ := singleQueueConsumer(t, repo)
-	message := alertMessage("m-1", "servicenow", "["+canonicalAlert+","+canonicalAlert+"]")
-
-	c.process(context.Background(), domain.AlertTierStandard, "priority", message)
-	again := c.process(context.Background(), domain.AlertTierStandard, "priority", message)
-	if again.settlement != alertComplete || again.stored != 0 {
-		t.Fatalf("redelivery decision = %+v, want complete with nothing new stored", again)
-	}
-	if repo.rowCount() != 2 {
-		t.Fatalf("rows = %d after a redelivery, want 2", repo.rowCount())
 	}
 }
 
@@ -411,8 +385,8 @@ func TestAlertConsumerProcess_RetriesAShortStoreOutage(t *testing.T) {
 
 func TestAlertConsumerProcess_AbandonsWhenTheStoreStaysDown(t *testing.T) {
 	for name, repo := range map[string]*fakeAlertRepo{
-		"reserve": {rows: map[string]domain.NewAlert{}, failReserves: 99},
-		"insert":  {rows: map[string]domain.NewAlert{}, failInserts: 99},
+		"reserve": {failReserves: 99},
+		"insert":  {failInserts: 99},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, _ := singleQueueConsumer(t, repo)
@@ -442,7 +416,7 @@ func TestAlertConsumerProcess_StoresAnAlertWithANULCharacter(t *testing.T) {
 	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","description":"bad \u0000 byte"}`
 
 	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", body))
-	row := repo.rows["priority/m-1/0"]
+	row := repo.row(0)
 	if decision.settlement != alertComplete || row.Alert.Description != "bad  byte" {
 		t.Fatalf("decision = %+v, description %q; want the alert stored without the NUL", decision, row.Alert.Description)
 	}
@@ -509,11 +483,14 @@ func TestAlertConsumerRun_DrainsEveryQueueOnBothCloudsConcurrently(t *testing.T)
 	if repo.maxConcurrent < 2 {
 		t.Fatalf("at most %d insert ran at once, want concurrent processing", repo.maxConcurrent)
 	}
+	priority := 0
 	for _, row := range repo.rows {
-		wantPriority := len(row.MessageID) > 0 && (row.MessageID[:len("servicebus/priority")] == "servicebus/priority" || row.MessageID[:len("sqs/priority")] == "sqs/priority")
-		if wantPriority != (row.Tier == domain.AlertTierPriority) {
-			t.Fatalf("message %s was stored on the %s tier", row.MessageID, row.Tier)
+		if row.Tier == domain.AlertTierPriority {
+			priority++
 		}
+	}
+	if priority != 2*perQueue {
+		t.Fatalf("%d alerts on the priority tier, want the %d from the two priority queues", priority, 2*perQueue)
 	}
 }
 
@@ -537,7 +514,7 @@ type slowAlertRepo struct {
 	delay time.Duration
 }
 
-func (r slowAlertRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
+func (r slowAlertRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, error) {
 	time.Sleep(r.delay)
 	return r.fakeAlertRepo.InsertAlerts(ctx, alerts)
 }
@@ -563,11 +540,11 @@ type renewalGatedRepo struct {
 	queue *fakeAlertQueue
 }
 
-func (r renewalGatedRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
+func (r renewalGatedRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for r.queue.renewCount() == 0 {
 		if time.Now().After(deadline) {
-			return nil, 0, errors.New("no lock renewal while the insert ran")
+			return nil, errors.New("no lock renewal while the insert ran")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -732,5 +709,17 @@ func TestAlertConsumerSettle_DeadLettersWithTheReason(t *testing.T) {
 	c.settle(context.Background(), priority, alertMessage("m-1", "nagios", canonicalAlert), alertDeadLetterDecision(alertErrorUnknownSource, "no transform"))
 	if priority.deadLettered["m-1"] != alertErrorUnknownSource {
 		t.Fatalf("dead-lettered = %v, want m-1 with %s", priority.deadLettered, alertErrorUnknownSource)
+	}
+}
+
+// A field longer than its column is cut to the column's length, so the alert is stored rather than refused.
+func TestAlertConsumerProcess_CutsALongFieldToItsColumn(t *testing.T) {
+	repo := newFakeAlertRepo()
+	c, _ := singleQueueConsumer(t, repo)
+	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","description":"` + strings.Repeat("é", 5000) + `"}`
+
+	decision := c.process(context.Background(), domain.AlertTierPriority, "priority", alertMessage("m-1", "servicenow", body))
+	if got := []rune(repo.row(0).Alert.Description); decision.settlement != alertComplete || len(got) != 4000 {
+		t.Fatalf("decision = %+v, description of %d characters; want the alert stored with 4000", decision, len(got))
 	}
 }

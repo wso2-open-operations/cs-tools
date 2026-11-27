@@ -10885,14 +10885,10 @@ type NewAlert struct {
 	// ID is the row's UUID, which the database assigns; Number is the ALT id people quote, such as ALT000000042.
 	ID     string
 	Number string
-	// Route is the gateway route the message arrived on, such as azure or prometheus; Alert.Source is the monitoring source the alert names.
-	Route string
 	// Alert is the normalised alert; each of its fields is a column.
 	Alert model.Alert
-	Tier         AlertTier
-	MessageID    string
-	MessageIndex int
-	// RawBody is the message's body as the source sent it, set on its first row (MessageIndex 0) only.
+	Tier AlertTier
+	// RawBody is the message's body as the source sent it, set on the message's first alert only.
 	RawBody    []byte
 	ReceivedOn time.Time
 }

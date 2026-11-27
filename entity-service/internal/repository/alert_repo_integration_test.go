@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func newAlertIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	// Row-level security hides the table from anyone but the system identity, so cleanup runs as it too.
 	clean := func() {
-		if _, err := NewScoped(pool).Exec(WithSystemIdentity(ctx), `DELETE FROM alert WHERE message_id LIKE 'it-alert-%'`); err != nil {
+		if _, err := NewScoped(pool).Exec(WithSystemIdentity(ctx), `DELETE FROM alert WHERE service LIKE 'it-alert-%'`); err != nil {
 			t.Fatalf("clean alerts: %v", err)
 		}
 	}
@@ -53,49 +54,37 @@ func newAlertIntegrationPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func integrationAlert(id, messageID string, index int) domain.NewAlert {
+// integrationAlert is an alert of service tag, which the tests find and clean up by.
+func integrationAlert(number, tag string) domain.NewAlert {
 	return domain.NewAlert{
-		Number:       id,
-		Route:        "azure",
-		Alert:        model.Alert{Source: "Azure Monitor", Service: "svc-a", MetricName: "cpu", Environment: "prod", Severity: "critical", UniqueIdentifier: id},
-		Tier:         domain.AlertTierPriority,
-		MessageID:    messageID,
-		MessageIndex: index,
-		ReceivedOn:   time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC),
+		Number:     number,
+		Alert:      model.Alert{Source: "Azure Monitor", Service: tag, MetricName: "cpu", Environment: "prod", Severity: "critical", UniqueIdentifier: number},
+		Tier:       domain.AlertTierPriority,
+		ReceivedOn: time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC),
 	}
 }
 
-func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testing.T) {
+func TestAlertRepositoryIntegration_StoresAlertsWithTheirUUIDs(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
 	repo := NewAlertRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 
-	ids, err := repo.ReserveAlertIDs(ctx, 4)
+	ids, err := repo.ReserveAlertIDs(ctx, 2)
 	if err != nil {
 		t.Fatalf("ReserveAlertIDs: %v", err)
 	}
-	if len(ids) != 4 || len(ids[0]) != len("ALT000000001") {
-		t.Fatalf("ids = %v, want four ALT ids", ids)
-	}
-	for i := 1; i < len(ids); i++ {
-		if ids[i-1] >= ids[i] {
-			t.Fatalf("ids = %v, want each id strictly after the one before", ids)
-		}
+	if len(ids) != 2 || len(ids[0]) != len("ALT000000001") || ids[0] >= ids[1] {
+		t.Fatalf("ids = %v, want two ascending ALT numbers", ids)
 	}
 
-	stored, first, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-1", 0), integrationAlert(ids[1], "it-alert-1", 1)})
-	if err != nil || first != 2 || len(stored) != 2 || stored[0].Number != ids[0] || stored[1].Number != ids[1] || len(stored[0].ID) != 36 {
-		t.Fatalf("first insert stored %d %v (%v), want 2 with their ids", first, stored, err)
-	}
-	// A redelivery stores nothing new, and returns the rows stored the first time so the consumer can publish them again.
-	restored, again, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[2], "it-alert-1", 0), integrationAlert(ids[3], "it-alert-1", 1)})
-	if err != nil || again != 0 || len(restored) != 2 || restored[0].Number != ids[0] || restored[1].Number != ids[1] || restored[0].ID != stored[0].ID || restored[0].Alert.Environment != "prod" {
-		t.Fatalf("redelivered insert stored %d, returned %+v (%v); want 0 new and the first rows back", again, restored, err)
+	stored, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-1"), integrationAlert(ids[1], "it-alert-1")})
+	if err != nil || len(stored) != 2 || stored[0].Number != ids[0] || stored[1].Number != ids[1] || len(stored[0].ID) != 36 || stored[0].ID == stored[1].ID || stored[0].Alert.Environment != "prod" {
+		t.Fatalf("InsertAlerts = %+v, %v; want both alerts back in order, each with its own UUID", stored, err)
 	}
 
 	var rows int
 	var linked *string
-	if err := NewScoped(pool).QueryRow(ctx, `SELECT count(*), max(incident_id::text) FROM alert WHERE message_id = 'it-alert-1'`).Scan(&rows, &linked); err != nil {
+	if err := NewScoped(pool).QueryRow(ctx, `SELECT count(*), max(incident_id::text) FROM alert WHERE service = 'it-alert-1'`).Scan(&rows, &linked); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if rows != 2 || linked != nil {
@@ -119,13 +108,13 @@ func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing
 	if err != nil {
 		t.Fatalf("ReserveAlertIDs: %v", err)
 	}
-	if _, _, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-2", 0)}); err != nil {
+	if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-2")}); err != nil {
 		t.Fatalf("InsertAlerts: %v", err)
 	}
 
 	// A plain pool query carries no app.is_internal setting, the same as a customer request.
 	var rows int
-	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM alert WHERE message_id = 'it-alert-2'`).Scan(&rows); err != nil {
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM alert WHERE service = 'it-alert-2'`).Scan(&rows); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if rows != 0 {
@@ -142,32 +131,32 @@ func TestAlertRepositoryIntegration_KeepsTheRawBodyAndAlertColumns(t *testing.T)
 		t.Fatalf("ReserveAlertIDs: %v", err)
 	}
 
-	// A batch keeps the body once, on its first row; the second alert leaves its environment and severity empty.
-	first := integrationAlert(ids[0], "it-alert-3", 0)
+	// A batch keeps the body once, on its first alert; the second alert leaves its environment and severity empty.
+	first := integrationAlert(ids[0], "it-alert-3")
 	first.RawBody = []byte(`[{"a":1},{"a":2}]`)
-	second := integrationAlert(ids[1], "it-alert-3", 1)
+	second := integrationAlert(ids[1], "it-alert-3")
 	second.Alert.Environment, second.Alert.Severity = "", ""
-	if _, n, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, second}); err != nil || n != 2 {
-		t.Fatalf("insert batch stored %d (%v), want 2", n, err)
+	if stored, err := repo.InsertAlerts(ctx, []domain.NewAlert{first, second}); err != nil || len(stored) != 2 {
+		t.Fatalf("insert batch stored %d (%v), want 2", len(stored), err)
 	}
 
 	type stored struct {
-		raw                                  []byte
-		route, source, environment, severity *string
+		raw                           []byte
+		source, environment, severity *string
 	}
-	read := func(index int) stored {
+	read := func(number string) stored {
 		var s stored
-		if err := NewScoped(pool).QueryRow(ctx, `SELECT raw_body, route, source, environment, severity FROM alert WHERE message_id = 'it-alert-3' AND message_index = $1`, index).
-			Scan(&s.raw, &s.route, &s.source, &s.environment, &s.severity); err != nil {
-			t.Fatalf("read it-alert-3/%d: %v", index, err)
+		if err := NewScoped(pool).QueryRow(ctx, `SELECT raw_body, source, environment, severity FROM alert WHERE number = $1`, number).
+			Scan(&s.raw, &s.source, &s.environment, &s.severity); err != nil {
+			t.Fatalf("read %s: %v", number, err)
 		}
 		return s
 	}
-	if s := read(0); string(s.raw) != `[{"a":1},{"a":2}]` || s.route == nil || *s.route != "azure" || s.source == nil || *s.source != "Azure Monitor" || s.environment == nil || *s.environment != "prod" {
-		t.Fatalf("first row = %+v, want the body, route, source and environment", s)
+	if s := read(ids[0]); string(s.raw) != `[{"a":1},{"a":2}]` || s.source == nil || *s.source != "Azure Monitor" || s.environment == nil || *s.environment != "prod" {
+		t.Fatalf("first row = %+v, want the body, source and environment", s)
 	}
 	// A fingerprint field is matched with =, so an empty one is ''; any other empty field is NULL.
-	if s := read(1); s.raw != nil || s.environment == nil || *s.environment != "" || s.severity != nil {
+	if s := read(ids[1]); s.raw != nil || s.environment == nil || *s.environment != "" || s.severity != nil {
 		t.Fatalf("second row = %+v, want no body, an empty environment and a NULL severity", s)
 	}
 }
@@ -180,13 +169,13 @@ func TestAlertRepositoryIntegration_RefusesWhatCanNeverBeStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReserveAlertIDs: %v", err)
 	}
-	nul := integrationAlert(ids[0], "it-alert-5", 0)
+	nul := integrationAlert(ids[0], "it-alert-5")
 	nul.Alert.Description = "bad \x00 byte"
-	// An alert with no route breaks the row-kind check.
-	unrouted := integrationAlert(ids[1], "it-alert-6", 0)
-	unrouted.Route = ""
-	for name, row := range map[string]domain.NewAlert{"NUL in text": nul, "alert with no route": unrouted} {
-		_, _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row})
+	// The consumer cuts fields to their column's length; one that reaches the database longer is refused.
+	long := integrationAlert(ids[1], "it-alert-6")
+	long.Alert.Severity = strings.Repeat("x", 51)
+	for name, row := range map[string]domain.NewAlert{"NUL in text": nul, "severity longer than its column": long} {
+		_, err := repo.InsertAlerts(ctx, []domain.NewAlert{row})
 		var sqlErr interface{ SQLState() string }
 		if !errors.As(err, &sqlErr) || (sqlErr.SQLState()[:2] != "22" && sqlErr.SQLState()[:2] != "23") {
 			t.Fatalf("%s: err = %v, want a class 22 or 23 error the consumer treats as permanent", name, err)
