@@ -181,6 +181,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Broker:           cfg.EventHubBroker,
 				ConnectionString: cfg.EventHubConnectionString,
 				Topic:            cfg.EventHubTopic,
+				// incident.created (and every case event) is published inside the request or the alert processor's
+				// decision; kafka-go's default would hold each one for a second.
+				BatchTimeout: eventbus.PromptBatchTimeout,
 			}),
 			eventPublishFailureSvc,
 		)
@@ -218,6 +221,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Broker:           cfg.EventHubBroker,
 				ConnectionString: cfg.EventHubConnectionString,
 				Topic:            cfg.IncidentEventHubTopic,
+				BatchTimeout:     eventbus.PromptBatchTimeout,
 			}),
 			eventPublishFailureSvc,
 		)
@@ -466,6 +470,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// the WaitGroup at zero, so the wait returns at once.
 	ingestRetryCtx, stopIngestRetry := context.WithCancel(context.Background())
 	var ingestRetryWG sync.WaitGroup
+	// The SRE alert pipeline (alert_pipeline.go), in hybrid and v2; closePublishers stops it first.
+	stopAlertPipeline := func() {}
 
 	// snWritebackDispatcher is the single shared SNWritebackDispatcher for
 	// every DATA_SOURCE=postgres-servicenow-dual-write best-effort mirror
@@ -1846,6 +1852,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// just leaves such incidents unassigned.
 	activeIncidentSvc = service.WithIncidentDefaultService(activeIncidentSvc, cfg.IncidentDefaultServiceID)
 	activeIncidentSvc = service.WithIncidentExtraAssignmentGroups(activeIncidentSvc, cfg.IncidentExtraAssignmentGroupIDs)
+	// The SRE alert pipeline raises incidents through this same incident service, so an alert-born incident is
+	// assigned, published and given SLA clocks like one raised through POST /incidents.
+	if cfg.AlertConsumerEnabled() && db != nil {
+		stopAlertPipeline = startAlertPipeline(cfg, db, activeIncidentSvc)
+	}
 	if cfg.IncidentDefaultServiceID != "" && (db != nil || cfg.DataSource == config.DataSourceServiceNow) {
 		go service.CheckIncidentDefaultService(context.Background(), activeIncidentSvc, cfg.IncidentDefaultServiceID)
 	}
@@ -2972,6 +2983,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// gone away. Cancelling its context also cancels the re-run's own
 	// context (retryOne derives from it), so the wait is short.
 	closePublishers := func() {
+		// First: an alert in flight may still be creating an incident, which publishes through the producers below.
+		stopAlertPipeline()
 		stopIngestRetry()
 		ingestRetryWG.Wait()
 		// The deferred-write consumers first: a write in flight finishes
