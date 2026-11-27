@@ -19,22 +19,24 @@ package repository
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // AlertRepository stores the SRE alert messages the alert consumer receives.
 type AlertRepository interface {
-	// ReserveAlertIDs returns n new alert ids, in ascending order.
+	// ReserveAlertIDs returns n new ALT numbers, in ascending order.
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	// InsertAlerts stores alert and error rows in one statement and returns how many were new; a row whose message was already stored is skipped.
-	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
+	// InsertAlerts stores a message's alerts in one statement and returns the message's rows as stored, with how many were new; a redelivered message returns the rows stored the first time.
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error)
 }
 
-// Alert ids are ALT plus nine digits, the format alert-ingestion writes, so they sort in arrival order.
+// Alert numbers are ALT plus nine digits, the format alert-ingestion writes, so they sort in arrival order.
 const (
 	alertIDPrefix = "ALT"
 	alertIDWidth  = 9
@@ -42,9 +44,26 @@ const (
 
 const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1, $1)`
 
-const insertAlertsQuery = `INSERT INTO alert (id, source, alert, fingerprint, tier, message_id, message_index, raw_body, content_type, error_reason, error, received_on)
-SELECT * FROM unnest($1::text[], $2::text[], $3::jsonb[], $4::text[], $5::text[], $6::text[], $7::int[], $8::bytea[], $9::text[], $10::text[], $11::text[], $12::timestamptz[])
-ON CONFLICT (message_id, message_index) DO NOTHING`
+// alertFieldColumns are the normalised alert's columns, the fingerprint's five first; alertFieldDests gives their scan targets in the same order.
+const alertFieldColumns = `coalesce(source, ''), coalesce(service, ''), coalesce(metric_name, ''), coalesce(environment, ''), coalesce(unique_identifier, ''),
+coalesce(severity, ''), coalesce(category, ''), coalesce(description, ''), coalesce(assignment_group, ''), coalesce(source_topic, ''), coalesce(source_account, '')`
+
+// fingerprintFields is how many of alertFieldColumns make up the fingerprint: source, service, metric_name, environment and unique_identifier.
+const fingerprintFields = 5
+
+// alertFieldDests are the scan targets for alertFieldColumns.
+func alertFieldDests(a *model.Alert) []any {
+	return []any{&a.Source, &a.Service, &a.MetricName, &a.Environment, &a.UniqueIdentifier,
+		&a.Severity, &a.Category, &a.Description, &a.AssignmentGroup, &a.SourceTopic, &a.SourceAccount}
+}
+
+// insertAlertsQuery stores a message's rows and returns them as stored. A redelivered message conflicts on (message_id, message_index); the no-op update makes RETURNING hand back the row stored the first time, so the consumer can publish it again without a second query. inserted is true only for a row this statement created.
+const insertAlertsQuery = `INSERT INTO alert (number, route, tier, message_id, message_index, raw_body, received_on,
+	source, service, metric_name, environment, unique_identifier, severity, category, description, assignment_group, source_topic, source_account)
+SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::int[], $6::bytea[], $7::timestamptz[],
+	$8::text[], $9::text[], $10::text[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[])
+ON CONFLICT (message_id, message_index) DO UPDATE SET message_index = EXCLUDED.message_index
+RETURNING id::text, number, coalesce(route, ''), tier, message_id, message_index, received_on, ` + alertFieldColumns + `, (xmax = 0)`
 
 type alertRepository struct {
 	db *Scoped
@@ -82,43 +101,69 @@ func (r *alertRepository) ReserveAlertIDs(ctx context.Context, n int) ([]string,
 	return ids, nil
 }
 
-func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error) {
+func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
 	if len(alerts) == 0 {
-		return 0, nil
+		return nil, 0, nil
 	}
-	ids := make([]string, len(alerts))
-	sources := make([]*string, len(alerts))
-	bodies := make([]*string, len(alerts))
-	fingerprints := make([]*string, len(alerts))
-	tiers := make([]string, len(alerts))
-	messageIDs := make([]string, len(alerts))
-	indexes := make([]int32, len(alerts))
-	rawBodies := make([][]byte, len(alerts))
-	contentTypes := make([]*string, len(alerts))
-	errorReasons := make([]*string, len(alerts))
-	errorTexts := make([]*string, len(alerts))
-	receivedOn := make([]time.Time, len(alerts))
+	n := len(alerts)
+	numbers, tiers, messageIDs := make([]string, n), make([]string, n), make([]string, n)
+	// route is NULL when empty, so the database refuses an alert without one.
+	routes := make([]*string, n)
+	indexes := make([]int32, n)
+	rawBodies := make([][]byte, n)
+	receivedOn := make([]time.Time, n)
+	// One array per alert field, in alertFieldColumns order; an empty field is stored as NULL.
+	fields := make([][]*string, 11)
+	for f := range fields {
+		fields[f] = make([]*string, n)
+	}
 	for i, a := range alerts {
-		ids[i] = a.ID
-		sources[i] = nullIfEmpty(a.Source)
-		bodies[i] = nullIfEmpty(string(a.Alert))
-		fingerprints[i] = nullIfEmpty(a.Fingerprint)
-		tiers[i] = string(a.Tier)
-		messageIDs[i] = a.MessageID
+		numbers[i], tiers[i], messageIDs[i] = a.Number, string(a.Tier), a.MessageID
+		routes[i] = nullIfEmpty(a.Route)
 		indexes[i] = int32(a.MessageIndex) // #nosec G115 -- the consumer caps alerts per message far below MaxInt32
 		rawBodies[i] = a.RawBody
 		if a.MessageIndex == 0 && rawBodies[i] == nil {
 			// An empty body is still the first row's body, so it is stored as empty rather than NULL.
 			rawBodies[i] = []byte{}
 		}
-		contentTypes[i] = nullIfEmpty(a.ContentType)
-		errorReasons[i] = nullIfEmpty(a.ErrorReason)
-		errorTexts[i] = nullIfEmpty(a.Error)
 		receivedOn[i] = a.ReceivedOn
+		alert := a.Alert
+		for f, dest := range alertFieldDests(&alert) {
+			value := *dest.(*string)
+			if f < fingerprintFields {
+				// The fingerprint's fields are matched with =, so an empty one is stored as '' and never NULL.
+				fields[f][i] = &value
+				continue
+			}
+			fields[f][i] = nullIfEmpty(value)
+		}
 	}
-	tag, err := r.db.Exec(ctx, insertAlertsQuery, ids, sources, bodies, fingerprints, tiers, messageIDs, indexes, rawBodies, contentTypes, errorReasons, errorTexts, receivedOn)
+	args := []any{numbers, routes, tiers, messageIDs, indexes, rawBodies, receivedOn}
+	for _, f := range fields {
+		args = append(args, f)
+	}
+	rows, err := r.db.Query(ctx, insertAlertsQuery, args...)
 	if err != nil {
-		return 0, fmt.Errorf("insert alerts: %w", err)
+		return nil, 0, fmt.Errorf("insert alerts: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	var inserted int64
+	stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
+		var a domain.NewAlert
+		var tier string
+		var isNew bool
+		dests := append([]any{&a.ID, &a.Number, &a.Route, &tier, &a.MessageID, &a.MessageIndex, &a.ReceivedOn}, alertFieldDests(&a.Alert)...)
+		if err := row.Scan(append(dests, &isNew)...); err != nil {
+			return domain.NewAlert{}, err
+		}
+		a.Tier = domain.AlertTier(tier)
+		if isNew {
+			inserted++
+		}
+		return a, nil
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("insert alerts: %w", err)
+	}
+	slices.SortFunc(stored, func(a, b domain.NewAlert) int { return a.MessageIndex - b.MessageIndex })
+	return stored, inserted, nil
 }

@@ -23,20 +23,20 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// scheduler gives each free worker a waiting high item first. With weight 0 (strict priority) a standard item goes only when no high item waits; with weight n, after n high items in a row a waiting standard item goes next, so standard gets at least 1 in n+1 picks.
+// scheduler gives each free worker a waiting priority item first. With weight 0 (strict priority) a standard item goes only when no priority item waits; with weight n, after n high items in a row a waiting standard item goes next, so standard gets at least 1 in n+1 picks.
 type scheduler[T any] struct {
 	mu       sync.Mutex
-	high     <-chan T
+	priority <-chan T
 	standard <-chan T
 	weight   int
 	streak   int
 }
 
-func newScheduler[T any](high, standard <-chan T, weight int) *scheduler[T] {
+func newScheduler[T any](priority, standard <-chan T, weight int) *scheduler[T] {
 	if weight < 0 {
 		weight = 0
 	}
-	return &scheduler[T]{high: high, standard: standard, weight: weight}
+	return &scheduler[T]{priority: priority, standard: standard, weight: weight}
 }
 
 // next blocks until an item is available and returns it with its tier, or returns false once ctx is done.
@@ -52,27 +52,27 @@ func (s *scheduler[T]) next(ctx context.Context) (T, domain.AlertTier, bool) {
 	if s.weight > 0 && s.streak >= s.weight {
 		select {
 		case item := <-s.standard:
-			return s.picked(item, domain.AlertTierDefault)
+			return s.picked(item, domain.AlertTierStandard)
 		default:
 		}
 	}
 	select {
-	case item := <-s.high:
-		return s.picked(item, domain.AlertTierHigh)
+	case item := <-s.priority:
+		return s.picked(item, domain.AlertTierPriority)
 	default:
 	}
 	select {
 	case item := <-s.standard:
-		return s.picked(item, domain.AlertTierDefault)
+		return s.picked(item, domain.AlertTierStandard)
 	default:
 	}
 
 	// Both lanes are empty, so whichever lane delivers first is the right pick.
 	select {
-	case item := <-s.high:
-		return s.picked(item, domain.AlertTierHigh)
+	case item := <-s.priority:
+		return s.picked(item, domain.AlertTierPriority)
 	case item := <-s.standard:
-		return s.picked(item, domain.AlertTierDefault)
+		return s.picked(item, domain.AlertTierStandard)
 	case <-ctx.Done():
 		var zero T
 		return zero, "", false
@@ -80,7 +80,7 @@ func (s *scheduler[T]) next(ctx context.Context) (T, domain.AlertTier, bool) {
 }
 
 func (s *scheduler[T]) picked(item T, tier domain.AlertTier) (T, domain.AlertTier, bool) {
-	if tier == domain.AlertTierHigh {
+	if tier == domain.AlertTierPriority {
 		s.streak++
 	} else {
 		s.streak = 0

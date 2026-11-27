@@ -17,9 +17,7 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -51,7 +49,13 @@ type AlertQueue interface {
 // AlertStore is the storage the alert consumer writes to; repository.AlertRepository satisfies it.
 type AlertStore interface {
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
+	// InsertAlerts stores a message's rows and returns them as stored, with how many are new; a redelivered message returns the rows stored the first time.
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error)
+}
+
+// AlertPublisher announces stored alerts to the alert processor; a message is acknowledged only after its alerts are published.
+type AlertPublisher interface {
+	Publish(ctx context.Context, alerts []domain.NewAlert) error
 }
 
 // AlertTransforms finds the transform for a gateway route; *alertsource.Registry satisfies it.
@@ -65,6 +69,8 @@ type AlertConsumerConfig struct {
 	Concurrency int
 	// PriorityWeight is how many priority alerts may be processed in a row while a standard alert waits; 0 is strict priority.
 	PriorityWeight int
+	// Publisher, when set, publishes each message's alerts after they are stored and before the message is acknowledged.
+	Publisher AlertPublisher
 }
 
 // Message properties the alerting gateway sets on every message.
@@ -73,7 +79,7 @@ const (
 	alertPropertyReceivedAt = "received_at"
 )
 
-// Reasons a message could not be normalised, stored as the error row's error_reason, and the dead-letter reason when even that row cannot be stored.
+// Reasons a message could not be normalised, given as its dead-letter reason; the dead-letter queue keeps the body.
 const (
 	alertErrorMissingSource   = "MissingSource"
 	alertErrorUnknownSource   = "UnknownSource"
@@ -82,12 +88,6 @@ const (
 	alertErrorNoAlerts        = "NoAlerts"
 	alertErrorUnstorable      = "UnstorableAlert"
 )
-
-// errUnstorableAlert marks an alert PostgreSQL refuses on every attempt, so it is stored as an error row instead of retried.
-var errUnstorableAlert = errors.New("the alert holds a NUL character, which PostgreSQL jsonb cannot store")
-
-// maxAlertErrorText bounds the error text kept on an error row.
-const maxAlertErrorText = 4096
 
 // maxAlertsPerMessage bounds one message's alerts, far above any real batch but low enough for one insert.
 const maxAlertsPerMessage = 1000
@@ -176,6 +176,7 @@ func newAlertLane(tier domain.AlertTier, queues []AlertQueue, workers int) *aler
 // AlertConsumer streams alerts from the priority and standard queues of every configured cloud into the alert table.
 type AlertConsumer struct {
 	repo            AlertStore
+	publisher       AlertPublisher
 	transforms      AlertTransforms
 	lanes           map[domain.AlertTier]*alertLane
 	scheduler       *scheduler[queuedMessage]
@@ -196,14 +197,15 @@ func NewAlertConsumer(
 ) *AlertConsumer {
 	workers := max(cfg.Concurrency, 1)
 	lanes := map[domain.AlertTier]*alertLane{
-		domain.AlertTierHigh:    newAlertLane(domain.AlertTierHigh, priorityQueues, workers),
-		domain.AlertTierDefault: newAlertLane(domain.AlertTierDefault, standardQueues, workers),
+		domain.AlertTierPriority: newAlertLane(domain.AlertTierPriority, priorityQueues, workers),
+		domain.AlertTierStandard: newAlertLane(domain.AlertTierStandard, standardQueues, workers),
 	}
 	return &AlertConsumer{
 		repo:                 repo,
+		publisher:            cfg.Publisher,
 		transforms:           transforms,
 		lanes:                lanes,
-		scheduler:            newScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
+		scheduler:            newScheduler(lanes[domain.AlertTierPriority].messages, lanes[domain.AlertTierStandard].messages, cfg.PriorityWeight),
 		workers:              workers,
 		now:                  time.Now,
 		sleep:                sleepContext,
@@ -374,26 +376,26 @@ func (c *AlertConsumer) keepLock(ctx context.Context, queue AlertQueue, message 
 	}
 }
 
-// process stores a message's alerts, or one error row when it cannot be normalised, and decides how to settle it.
+// process stores a message's alerts and decides how to settle it; a message that cannot be normalised is dead-lettered.
 func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage) alertDecision {
 	source := strings.ToLower(strings.TrimSpace(message.Properties[alertPropertySource]))
 	if source == "" {
-		return c.storeError(ctx, tier, queueName, message, "", alertErrorMissingSource, "the message has no source property")
+		return c.reject(ctx, queueName, message, alertErrorMissingSource, "the message has no source property")
 	}
 	transform, ok := c.transforms.Lookup(source)
 	if !ok {
-		return c.storeError(ctx, tier, queueName, message, source, alertErrorUnknownSource, fmt.Sprintf("no transform for source %q", source))
+		return c.reject(ctx, queueName, message, alertErrorUnknownSource, fmt.Sprintf("no transform for source %q", source))
 	}
 	alerts, err := safeTransform(transform, message.Body)
 	if err != nil {
-		return c.storeError(ctx, tier, queueName, message, source, alertErrorTransformFailed, err.Error())
+		return c.reject(ctx, queueName, message, alertErrorTransformFailed, err.Error())
 	}
 	if len(alerts) > maxAlertsPerMessage {
-		return c.storeError(ctx, tier, queueName, message, source, alertErrorTooManyAlerts, fmt.Sprintf("%d alerts in one message, at most %d are accepted", len(alerts), maxAlertsPerMessage))
+		return c.reject(ctx, queueName, message, alertErrorTooManyAlerts, fmt.Sprintf("%d alerts in one message, at most %d are accepted", len(alerts), maxAlertsPerMessage))
 	}
 	if len(alerts) == 0 {
-		// Such as an Alertmanager batch whose entries are all non-objects; keep the body rather than complete with no record.
-		return c.storeError(ctx, tier, queueName, message, source, alertErrorNoAlerts, "the message holds no alert")
+		// Such as an Alertmanager batch whose entries are all non-objects; dead-lettered rather than completed with no record.
+		return c.reject(ctx, queueName, message, alertErrorNoAlerts, "the message holds no alert")
 	}
 
 	var ids []string
@@ -405,62 +407,33 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 
-	rows, err := c.buildRows(source, tier, queueName, message, alerts, ids)
-	if errors.Is(err, errUnstorableAlert) {
-		return c.storeError(ctx, tier, queueName, message, source, alertErrorUnstorable, err.Error())
-	}
-	if err != nil {
-		return c.storeError(ctx, tier, queueName, message, source, alertErrorTransformFailed, err.Error())
-	}
-	var stored int64
+	rows := c.buildRows(source, tier, queueName, message, alerts, ids)
+	var stored []domain.NewAlert
+	var inserted int64
 	if err := c.withStoreRetry(ctx, func() (err error) {
-		stored, err = c.repo.InsertAlerts(ctx, rows)
+		stored, inserted, err = c.repo.InsertAlerts(ctx, rows)
 		return err
 	}); err != nil {
 		if isPermanentStoreError(err) {
-			return c.storeError(ctx, tier, queueName, message, source, alertErrorUnstorable, err.Error())
+			return c.reject(ctx, queueName, message, alertErrorUnstorable, err.Error())
 		}
 		slog.ErrorContext(ctx, "alert consumer: could not store alerts, the message will be redelivered", "messageId", message.ID, "err", err)
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
-	return alertDecision{settlement: alertComplete, stored: stored, alerts: len(alerts)}
+	// Published after storing and before acknowledging: a failed publish leaves the message to be redelivered, and the redelivery publishes the rows stored the first time.
+	if c.publisher != nil {
+		if err := c.withStoreRetry(ctx, func() error { return c.publisher.Publish(ctx, stored) }); err != nil {
+			slog.ErrorContext(ctx, "alert consumer: could not publish stored alerts, the message will be redelivered", "messageId", message.ID, "err", err)
+			return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
+		}
+	}
+	return alertDecision{settlement: alertComplete, stored: inserted, alerts: len(alerts)}
 }
 
-// storeError stores one error row holding the raw body and why it could not be normalised, so the alert is visible in the database; only a row the database refuses outright is dead-lettered.
-func (c *AlertConsumer) storeError(ctx context.Context, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, source, reason, description string) alertDecision {
-	var ids []string
-	if err := c.withStoreRetry(ctx, func() (err error) {
-		ids, err = c.repo.ReserveAlertIDs(ctx, 1)
-		return err
-	}); err != nil {
-		slog.ErrorContext(ctx, "alert consumer: could not reserve an alert id, the message will be redelivered", "messageId", message.ID, "err", err)
-		return alertDecision{settlement: alertAbandon, alerts: 1}
-	}
-	row := domain.NewAlert{
-		ID:           ids[0],
-		Source:       storableText(source),
-		Tier:         tier,
-		MessageID:    alertMessageKey(queueName, message.ID),
-		MessageIndex: 0,
-		RawBody:      message.Body,
-		ContentType:  storableText(message.ContentType),
-		ErrorReason:  reason,
-		Error:        storableText(truncateRunes(description, maxAlertErrorText)),
-		ReceivedOn:   c.receivedOn(message),
-	}
-	var stored int64
-	if err := c.withStoreRetry(ctx, func() (err error) {
-		stored, err = c.repo.InsertAlerts(ctx, []domain.NewAlert{row})
-		return err
-	}); err != nil {
-		if isPermanentStoreError(err) {
-			return alertDeadLetterDecision(reason, description)
-		}
-		slog.ErrorContext(ctx, "alert consumer: could not store an error row, the message will be redelivered", "messageId", message.ID, "err", err)
-		return alertDecision{settlement: alertAbandon, alerts: 1}
-	}
-	slog.WarnContext(ctx, "alert consumer: stored a message that could not be normalised", "messageId", message.ID, "queue", queueName, "reason", reason)
-	return alertDecision{settlement: alertComplete, stored: stored, alerts: 1}
+// reject dead-letters a message that can never be stored, with why; the dead-letter queue keeps its body for replay.
+func (c *AlertConsumer) reject(ctx context.Context, queueName string, message *domain.AlertQueueMessage, reason, description string) alertDecision {
+	slog.WarnContext(ctx, "alert consumer: message could not be normalised", "messageId", message.ID, "queue", queueName, "reason", reason, "detail", description)
+	return alertDeadLetterDecision(reason, description)
 }
 
 // storableText drops what a PostgreSQL text column refuses: NUL characters and invalid UTF-8.
@@ -488,27 +461,20 @@ func safeTransform(transform alertsource.Transform, body []byte) (alerts []model
 	return transform(body)
 }
 
-// buildRows gives each alert its id and fingerprint the way alert-ingestion does: an alert with no identifier takes its own id.
-func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
+// buildRows gives each alert its ALT number the way alert-ingestion does: an alert with no identifier takes its own number.
+func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) []domain.NewAlert {
 	messageKey := alertMessageKey(queueName, message.ID)
 	receivedOn := c.receivedOn(message)
 	rows := make([]domain.NewAlert, len(alerts))
 	for i, alert := range alerts {
+		alert = storableAlert(alert)
 		if alert.UniqueIdentifier == "" {
 			alert.UniqueIdentifier = ids[i]
 		}
-		body, err := json.Marshal(alert)
-		if err != nil {
-			return nil, fmt.Errorf("encode alert %d: %w", i, err)
-		}
-		if hasEscapedNUL(body) {
-			return nil, fmt.Errorf("alert %d: %w", i, errUnstorableAlert)
-		}
 		rows[i] = domain.NewAlert{
-			ID:           ids[i],
-			Source:       source,
-			Alert:        body,
-			Fingerprint:  model.Fingerprint(alert),
+			Number:       ids[i],
+			Route:        source,
+			Alert:        alert,
 			Tier:         tier,
 			MessageID:    messageKey,
 			MessageIndex: i,
@@ -517,27 +483,21 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueNam
 	}
 	// The message's body travels on its first row only, so a batch does not repeat it once per alert.
 	rows[0].RawBody = message.Body
-	rows[0].ContentType = storableText(message.ContentType)
-	return rows, nil
+	return rows
+}
+
+// storableAlert cleans every field the way storableText does, so an alert with a NUL character is stored rather than refused.
+func storableAlert(a model.Alert) model.Alert {
+	for _, field := range []*string{&a.Service, &a.MetricName, &a.Severity, &a.Category, &a.Environment, &a.Source,
+		&a.UniqueIdentifier, &a.Description, &a.AssignmentGroup, &a.SourceTopic, &a.SourceAccount} {
+		*field = storableText(*field)
+	}
+	return a
 }
 
 // alertMessageKey is the stored message id: the queue's name and the message's own id, so a redelivery from one queue matches its earlier rows while the same id from another queue never collides with them.
 func alertMessageKey(queueName, messageID string) string {
 	return queueName + "/" + messageID
-}
-
-// hasEscapedNUL reports whether encoded JSON holds a \u0000 escape, skipping escaped backslashes so a literal "\\u0000" does not count.
-func hasEscapedNUL(body []byte) bool {
-	for i := 0; i < len(body); i++ {
-		if body[i] != '\\' {
-			continue
-		}
-		if bytes.HasPrefix(body[i+1:], []byte("u0000")) {
-			return true
-		}
-		i++
-	}
-	return false
 }
 
 // receivedOn is when the gateway accepted the request, falling back to when the queue stored the message.

@@ -24,11 +24,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/publisher"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
@@ -358,7 +360,7 @@ func waitForAlertSchema(ctx context.Context, pool *pgxpool.Pool) bool {
 		case err != nil:
 			slog.ErrorContext(ctx, "alert consumer: could not check the alert table, not receiving yet", "retryIn", alertSchemaRetry, "err", err)
 		case schema.Problem() != "":
-			slog.ErrorContext(ctx, "alert consumer: alert store not reachable, not receiving yet; apply migrations 0306 and 100029 where this connection looks", "problem", schema.Problem(), "where", schema.Where(), "retryIn", alertSchemaRetry)
+			slog.ErrorContext(ctx, "alert consumer: alert store not reachable, not receiving yet; apply migrations 0306, 0308 and 100029 where this connection looks", "problem", schema.Problem(), "where", schema.Where(), "retryIn", alertSchemaRetry)
 		default:
 			log.Printf("alert consumer: storing alerts in %s", schema.Where())
 			return true
@@ -426,11 +428,18 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 		log.Printf("alert consumer: AWS SQS %v in %s", names, cfg.AlertSQSRegion())
 	}
 
+	consumerCfg := service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight}
+	if cfg.AlertProcessorEnabled {
+		// Each message's alerts are published as alert.created after they are stored and before the message is acknowledged.
+		producer := eventbus.NewProducer(eventbus.Config{Broker: cfg.EventHubBroker, ConnectionString: cfg.EventHubConnectionString, Topic: strings.TrimSpace(cfg.SREEventHubTopic)})
+		consumerCfg.Publisher = publisher.Publisher{Producer: producer}
+		closers = append(closers, func(context.Context) error { producer.Close(); return nil })
+	}
 	consumer := service.NewAlertConsumer(
 		repository.NewAlertRepository(repository.NewScoped(pool)),
 		transforms,
 		priorityQueues, standardQueues,
-		service.AlertConsumerConfig{Concurrency: cfg.AlertConsumerConcurrency, PriorityWeight: cfg.AlertConsumerPriorityWeight},
+		consumerCfg,
 	)
 	// The system identity, because the alert table is internal only and there is no caller.
 	ctx, cancel := context.WithCancel(repository.WithSystemIdentity(context.Background()))

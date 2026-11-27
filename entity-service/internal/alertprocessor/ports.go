@@ -1,0 +1,57 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package alertprocessor
+
+import (
+	"context"
+	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
+)
+
+// The processor depends only on these ports; the repository and incident writer implement them.
+
+// Store reads a fingerprint's group from its alerts and links each alert to its incident. A fingerprint is the alert's source, service, metric_name, environment and unique_identifier.
+type Store interface {
+	// InGroup runs fn in one transaction that holds the lock of the alert's fingerprint, so one fingerprint is decided by one worker at a time.
+	InGroup(ctx context.Context, alert model.Alert, fn func(GroupTx) error) error
+}
+
+// GroupTx is the transaction InGroup hands to its function.
+type GroupTx interface {
+	// Group is the fingerprint's current incident, from the latest of its alerts linked to one, or nil when none is.
+	Group(ctx context.Context) (*strategy.Group, error)
+	// Unlinked lists the fingerprint's other alerts received in [since, until] that belong to no incident, oldest first.
+	Unlinked(ctx context.Context, since, until time.Time, except string) ([]event.Event, error)
+	// AlertLinked reports whether the alert (by its ALT number) already belongs to an incident, which makes a redelivered event a no-op.
+	AlertLinked(ctx context.Context, alertNumber string) (bool, error)
+	LinkAlert(ctx context.Context, alertNumber, incidentID string) error
+}
+
+// IncidentWriter creates incidents and adds alerts to them.
+type IncidentWriter interface {
+	// Open creates the alert's incident and returns its id; it returns the same incident when called again for the same alert.
+	Open(ctx context.Context, e event.Event) (string, error)
+	// Find returns the incident the alert opened, or "" when it opened none.
+	Find(ctx context.Context, alertID string) (string, error)
+	// IsOpen reports whether the incident is still open.
+	IsOpen(ctx context.Context, incidentID string) (bool, error)
+	// Fold records an alert added to the incident, as a Duplicate or OK work note.
+	Fold(ctx context.Context, incidentID string, outcome strategy.Outcome, e event.Event) error
+}
