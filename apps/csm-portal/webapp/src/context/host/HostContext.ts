@@ -22,6 +22,9 @@ export interface Host {
   name: string;
   /** Leaves the portal and returns to the host's own pages. */
   onExit: () => void;
+  /** Opens or closes the host application launcher at the supplied button. */
+  onToggleAppSwitcher?: (anchor: HTMLElement) => void;
+  appSwitcherOpen?: boolean;
   /**
    * Tokens for the portal's backend, exchanged by the host from its own.
    * `idToken` is absent when the identity provider issued none.
