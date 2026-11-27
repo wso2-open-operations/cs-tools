@@ -214,31 +214,15 @@ check whether the underlying entity-service operation is ServiceNow-backed
 Postgres-only (works fine over M2M unconditionally) before documenting a new
 endpoint one way or the other.
 
-## `GET /alert-mute-rules/active` is functional today
+## `GET /alert-mute-rules?status=active` is functional today
 
-It proxies entity-service's Postgres-only `GET /alert-mute-rules/active` (the alert
+It proxies entity-service's Postgres-only `GET /alert-mute-rules?status=active` (the alert
 rules whose window contains now and that were not ended early) for
-`sre-alert-core-service`, which mutes alerts matching them. No forwarded
-identity is needed. Alert mute rules are created and changed only through the CSM
-Portal; this service exposes nothing else about them.
-
-## Alert-core reads: muted alerts and alert field values
-
-`GET /alert-mute-rules/{id}/muted-incidents`, `GET /alert-mute-rules/muted-counts` and
-`GET /alert-field-values` (`internal/handler/alert_core.go`) proxy
-sre-alert-core-service's read API for the CSM portal, through `internal/alertcore`, not
-entity-service. This service calls alert-core's `read-api` endpoint (Organization
-visibility, an https internal URL) through the Choreo gateway with its own OAuth2 app
-(the `ENTITY_*` client credentials, plus optional `ALERT_CORE_SCOPES`), which must be
-subscribed to the "Alert Core Read API" (the gateway checks the token; alert-core does
-no authentication of its own on these routes). Callers of these routes authenticate at this service's
-gateway like every other route. The base URL must be https (http only for loopback), so
-the access token is never sent in plaintext, and redirects are not followed. Only the
-documented query parameters are forwarded, and they are checked here against alert-core's own
-rules before the call (rule ids as UUIDs, `limit` 1-100, `offset` >= 0, a known `field`, `q` at most
-255 characters); an absent or empty `limit`/`offset` is passed on for alert-core's default.
-`ALERT_CORE_BASE_URL` unset: these routes answer 503 and the service otherwise starts as
-normal. `ALERT_CORE_API_TOKEN` (the shared secret this used before) is no longer read.
+`sre-alert-core-service`, which mutes alerts matching them. `active` is the only status
+served (anything else is a 400). No forwarded identity is needed. Alert mute rules are
+created and changed only through the CSM Portal; this service exposes nothing else about
+them. It does not call sre-alert-core-service: alert-core calls this service, and the CSM
+portal backend reads alert-core's muted-alert data directly.
 
 ## Contacts and opportunity reads on `DATA_SOURCE=postgres`
 

@@ -23,14 +23,14 @@ import (
 	"testing"
 )
 
-func TestListActiveAlertMuteRules(t *testing.T) {
+func TestListAlertMuteRules(t *testing.T) {
 	t.Run("returns upstream response unchanged", func(t *testing.T) {
 		upstream := `{"alertMuteRules":[{"id":"11111111-1111-1111-1111-111111111111","number":"AMR0000001","conditions":[{"field":"service","value":"svc"},{"field":"environment","value":"prod"}]}]}`
 		h := NewAlertMuteRuleHandler(&mockEntityAlertMuteRuleClient{
 			listActiveAlertMuteRulesFn: func(context.Context) ([]byte, error) { return []byte(upstream), nil },
 		})
 		w := httptest.NewRecorder()
-		h.ListActiveAlertMuteRules(w, httptest.NewRequest(http.MethodGet, "/alert-mute-rules/active", nil))
+		h.ListAlertMuteRules(w, httptest.NewRequest(http.MethodGet, "/alert-mute-rules?status=active", nil))
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
 		if w.Body.String() != upstream {
@@ -46,11 +46,27 @@ func TestListActiveAlertMuteRules(t *testing.T) {
 					listActiveAlertMuteRulesFn: func(context.Context) ([]byte, error) { return nil, tc.err },
 				})
 				w := httptest.NewRecorder()
-				h.ListActiveAlertMuteRules(w, httptest.NewRequest(http.MethodGet, "/alert-mute-rules/active", nil))
+				h.ListAlertMuteRules(w, httptest.NewRequest(http.MethodGet, "/alert-mute-rules?status=active", nil))
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")
 			})
+		}
+	})
+
+	t.Run("only status=active is served", func(t *testing.T) {
+		called := false
+		h := NewAlertMuteRuleHandler(&mockEntityAlertMuteRuleClient{
+			listActiveAlertMuteRulesFn: func(context.Context) ([]byte, error) { called = true; return []byte(`{}`), nil },
+		})
+		for _, target := range []string{"/alert-mute-rules", "/alert-mute-rules?status=expired", "/alert-mute-rules?status=Active"} {
+			w := httptest.NewRecorder()
+			h.ListAlertMuteRules(w, httptest.NewRequest(http.MethodGet, target, nil))
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, errMsgStatusActiveRequired)
+		}
+		if called {
+			t.Fatal("entity service called for a status other than active")
 		}
 	})
 }

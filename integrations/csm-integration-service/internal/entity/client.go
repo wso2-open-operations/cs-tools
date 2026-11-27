@@ -49,12 +49,6 @@ func correlationIDFromContext(ctx context.Context) string {
 	return v
 }
 
-// CorrelationIDFromContext returns the correlation ID WithCorrelationID stored, for
-// the other upstream clients (alertcore) to forward too; "" when there is none.
-func CorrelationIDFromContext(ctx context.Context) string {
-	return correlationIDFromContext(ctx)
-}
-
 // Config holds the configuration for the entity service client.
 type Config struct {
 	BaseURL      string

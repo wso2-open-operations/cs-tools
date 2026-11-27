@@ -41,9 +41,17 @@ func NewAlertMuteRuleHandler(entity entityAlertMuteRuleClient) *AlertMuteRuleHan
 	return &AlertMuteRuleHandler{entity: entity}
 }
 
-// ListActiveAlertMuteRules handles GET /alert-mute-rules/active, returning
-// entity-service's {"alertMuteRules":[...]} unchanged.
-func (h *AlertMuteRuleHandler) ListActiveAlertMuteRules(w http.ResponseWriter, r *http.Request) {
+// errMsgStatusActiveRequired answers a list request for anything but the active rules.
+const errMsgStatusActiveRequired = "The 'status' query parameter must be 'active'."
+
+// ListAlertMuteRules handles GET /alert-mute-rules?status=active, returning
+// entity-service's {"alertMuteRules":[...]} unchanged. Active is the only status
+// served: it is what sre-alert-core-service needs, and nothing else lists rules here.
+func (h *AlertMuteRuleHandler) ListAlertMuteRules(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("status") != "active" {
+		writeError(w, http.StatusBadRequest, errMsgStatusActiveRequired)
+		return
+	}
 	result, err := h.entity.ListActiveAlertMuteRules(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ListActiveAlertMuteRules failed", "err", summarizeErr(err))

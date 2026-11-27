@@ -255,11 +255,11 @@ func (c *Client) SearchITServices(ctx context.Context, body []byte) ([]byte, err
 	return c.do(ctx, http.MethodPost, "/services/search", body)
 }
 
-// ListActiveAlertMuteRules calls GET /alert-mute-rules/active on the entity service:
+// ListActiveAlertMuteRules calls GET /alert-mute-rules?status=active on the entity service:
 // the alert mute rules muting SRE alerts right now. A Postgres-only operation, so
 // it works over this service's M2M identity. Response is returned as raw JSON.
 func (c *Client) ListActiveAlertMuteRules(ctx context.Context) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, "/alert-mute-rules/active", nil)
+	return c.do(ctx, http.MethodGet, "/alert-mute-rules?status=active", nil)
 }
 
 // SearchProducts calls POST /products/search on the entity service.

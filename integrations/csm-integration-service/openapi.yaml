@@ -1903,17 +1903,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /alert-mute-rules/active:
+  /alert-mute-rules:
     get:
       summary: List the alert mute rules muting SRE alerts right now.
       description: >
-        Returns every alert mute rule that has not been ended early and whose
-        window contains the current time (startOn <= now < endOn). An alert
-        matching every condition of any of them is muted by
-        sre-alert-core-service. Alert mute rules are created and managed in the
-        CSM Portal. Postgres-backed, so it works over this service's M2M
-        identity.
-      operationId: listActiveAlertMuteRules
+        With status=active (the only status served; anything else is a 400):
+        every alert mute rule that has not been ended early and whose window
+        contains the current time (startOn <= now < endOn). An alert matching
+        every condition of any of them is muted by sre-alert-core-service.
+        Alert mute rules are created and managed in the CSM Portal.
+        Postgres-backed, so it works over this service's M2M identity.
+      operationId: listAlertMuteRules
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [active]
       responses:
         "200":
           description: The active alert mute rules.
@@ -1947,207 +1954,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /alert-mute-rules/{id}/muted-incidents:
-    get:
-      summary: List the incidents an alert mute rule muted.
-      description: >
-        Proxies sre-alert-core-service's read API (called with this service's
-        OAuth2 app through the Choreo gateway): one page of the
-        incidents the rule muted, newest first, plus counts by outcome over all
-        of them. Alert-core keeps them for 30 days. For the CSM portal's rule
-        page.
-      operationId: listAlertMuteRuleMutedIncidents
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-      responses:
-        "200":
-          description: One page of the rule's muted incidents.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertMuteRuleMutedIncidentsResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized (upstream reported an authentication failure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Forbidden (upstream reported an authorization failure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (ALERT_CORE_BASE_URL not set, or alert-core unavailable)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /alert-mute-rules/muted-counts:
-    get:
-      summary: Count the incidents each alert mute rule muted.
-      description: >
-        Proxies sre-alert-core-service: how many incidents each of up to 100
-        rules muted (0 when none), for the CSM portal's rule list.
-      operationId: countAlertMuteRuleMutedIncidents
-      parameters:
-        - name: ids
-          in: query
-          required: true
-          description: Comma-separated alert mute rule ids (UUIDs), at most 100.
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The count per requested rule id.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertMuteRuleMutedCountsResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized (upstream reported an authentication failure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Forbidden (upstream reported an authorization failure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (ALERT_CORE_BASE_URL not set, or alert-core unavailable)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /alert-field-values:
-    get:
-      summary: List the values real alerts carry in one field.
-      description: >
-        Proxies sre-alert-core-service: the distinct values alerts carried in
-        the field over the last 30 days that contain q, most recently seen
-        first. The CSM portal offers them while an engineer writes an alert mute
-        rule's conditions.
-      operationId: listAlertFieldValues
-      parameters:
-        - name: field
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [service, environment, source, metric_name, category, severity, unique_identifier]
-        - name: q
-          in: query
-          schema:
-            type: string
-            maxLength: 255
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
-      responses:
-        "200":
-          description: The matching values.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertFieldValuesResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized (upstream reported an authentication failure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Forbidden (upstream reported an authorization failure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (ALERT_CORE_BASE_URL not set, or alert-core unavailable)
           content:
             application/json:
               schema:
@@ -2630,56 +2436,6 @@ components:
           type: string
           format: date-time
           nullable: true
-    AlertMuteRuleMutedIncident:
-      type: object
-      properties:
-        id: {type: integer, format: int64}
-        service: {type: string}
-        environment: {type: string}
-        source: {type: string}
-        metricName: {type: string}
-        category: {type: string}
-        severity: {type: string}
-        uniqueIdentifier: {type: string}
-        alertCount: {type: integer}
-        firstSeen: {type: string, format: date-time}
-        lastSeen: {type: string, format: date-time}
-        mutedAt: {type: string, format: date-time, nullable: true}
-        unmutedAt: {type: string, format: date-time, nullable: true}
-        outcome:
-          type: string
-          enum: [muted, incident, closed_quietly, delivering]
-        incidentNumber:
-          type: string
-          description: The CSM incident number once the outcome is incident; empty otherwise.
-    AlertMuteRuleMutedIncidentsResponse:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AlertMuteRuleMutedIncident'
-        total: {type: integer}
-        limit: {type: integer}
-        offset: {type: integer}
-        summary:
-          type: object
-          description: Count of all the rule's muted incidents by outcome.
-          additionalProperties: {type: integer}
-    AlertMuteRuleMutedCountsResponse:
-      type: object
-      properties:
-        counts:
-          type: object
-          description: Rule id to the number of incidents it muted.
-          additionalProperties: {type: integer}
-    AlertFieldValuesResponse:
-      type: object
-      properties:
-        field: {type: string}
-        values:
-          type: array
-          items: {type: string}
     ListActiveAlertMuteRulesResponse:
       type: object
       properties:
