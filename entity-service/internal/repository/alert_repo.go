@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,8 +33,8 @@ import (
 type AlertRepository interface {
 	// ReserveAlertIDs returns n new ALT numbers, in ascending order.
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	// InsertAlerts stores a message's alerts in one statement and returns the message's rows as stored, with how many were new; a redelivered message returns the rows stored the first time.
-	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error)
+	// InsertAlerts stores a message's alerts in one statement and returns them as stored, with the UUID each was given.
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, error)
 }
 
 // Alert numbers are ALT plus nine digits, the format alert-ingestion writes, so they sort in arrival order.
@@ -46,7 +47,7 @@ const reserveAlertIDsQuery = `SELECT nextval('alert_seq') FROM generate_series(1
 
 // alertFieldColumns are the normalised alert's columns, the fingerprint's five first; alertFieldDests gives their scan targets in the same order.
 const alertFieldColumns = `coalesce(source, ''), coalesce(service, ''), coalesce(metric_name, ''), coalesce(environment, ''), coalesce(unique_identifier, ''),
-coalesce(severity, ''), coalesce(category, ''), coalesce(description, ''), coalesce(assignment_group, ''), coalesce(source_topic, ''), coalesce(source_account, '')`
+coalesce(severity, ''), coalesce(category, ''), coalesce(description, ''), coalesce(assignment_group, '')`
 
 // fingerprintFields is how many of alertFieldColumns make up the fingerprint: source, service, metric_name, environment and unique_identifier.
 const fingerprintFields = 5
@@ -54,16 +55,15 @@ const fingerprintFields = 5
 // alertFieldDests are the scan targets for alertFieldColumns.
 func alertFieldDests(a *model.Alert) []any {
 	return []any{&a.Source, &a.Service, &a.MetricName, &a.Environment, &a.UniqueIdentifier,
-		&a.Severity, &a.Category, &a.Description, &a.AssignmentGroup, &a.SourceTopic, &a.SourceAccount}
+		&a.Severity, &a.Category, &a.Description, &a.AssignmentGroup}
 }
 
-// insertAlertsQuery stores a message's rows and returns them as stored. A redelivered message conflicts on (message_id, message_index); the no-op update makes RETURNING hand back the row stored the first time, so the consumer can publish it again without a second query. inserted is true only for a row this statement created.
-const insertAlertsQuery = `INSERT INTO alert (number, route, tier, message_id, message_index, raw_body, received_on,
-	source, service, metric_name, environment, unique_identifier, severity, category, description, assignment_group, source_topic, source_account)
-SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::int[], $6::bytea[], $7::timestamptz[],
-	$8::text[], $9::text[], $10::text[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[])
-ON CONFLICT (message_id, message_index) DO UPDATE SET message_index = EXCLUDED.message_index
-RETURNING id::text, number, coalesce(route, ''), tier, message_id, message_index, received_on, ` + alertFieldColumns + `, (xmax = 0)`
+// insertAlertsQuery stores a message's alerts and returns them as stored, in the order given.
+const insertAlertsQuery = `INSERT INTO alert (number, tier, raw_body, received_on,
+	source, service, metric_name, environment, unique_identifier, severity, category, description, assignment_group)
+SELECT * FROM unnest($1::varchar[], $2::varchar[], $3::bytea[], $4::timestamptz[],
+	$5::varchar[], $6::varchar[], $7::varchar[], $8::varchar[], $9::varchar[], $10::varchar[], $11::varchar[], $12::varchar[], $13::varchar[])
+RETURNING id::text, number, tier, received_on, ` + alertFieldColumns
 
 type alertRepository struct {
 	db *Scoped
@@ -101,32 +101,21 @@ func (r *alertRepository) ReserveAlertIDs(ctx context.Context, n int) ([]string,
 	return ids, nil
 }
 
-func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error) {
+func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, error) {
 	if len(alerts) == 0 {
-		return nil, 0, nil
+		return nil, nil
 	}
 	n := len(alerts)
-	numbers, tiers, messageIDs := make([]string, n), make([]string, n), make([]string, n)
-	// route is NULL when empty, so the database refuses an alert without one.
-	routes := make([]*string, n)
-	indexes := make([]int32, n)
+	numbers, tiers := make([]string, n), make([]string, n)
 	rawBodies := make([][]byte, n)
 	receivedOn := make([]time.Time, n)
-	// One array per alert field, in alertFieldColumns order; an empty field is stored as NULL.
-	fields := make([][]*string, 11)
+	// One array per alert field, in alertFieldColumns order.
+	fields := make([][]*string, len(alertFieldDests(&model.Alert{})))
 	for f := range fields {
 		fields[f] = make([]*string, n)
 	}
 	for i, a := range alerts {
-		numbers[i], tiers[i], messageIDs[i] = a.Number, string(a.Tier), a.MessageID
-		routes[i] = nullIfEmpty(a.Route)
-		indexes[i] = int32(a.MessageIndex) // #nosec G115 -- the consumer caps alerts per message far below MaxInt32
-		rawBodies[i] = a.RawBody
-		if a.MessageIndex == 0 && rawBodies[i] == nil {
-			// An empty body is still the first row's body, so it is stored as empty rather than NULL.
-			rawBodies[i] = []byte{}
-		}
-		receivedOn[i] = a.ReceivedOn
+		numbers[i], tiers[i], rawBodies[i], receivedOn[i] = a.Number, string(a.Tier), a.RawBody, a.ReceivedOn
 		alert := a.Alert
 		for f, dest := range alertFieldDests(&alert) {
 			value := *dest.(*string)
@@ -138,32 +127,27 @@ func (r *alertRepository) InsertAlerts(ctx context.Context, alerts []domain.NewA
 			fields[f][i] = nullIfEmpty(value)
 		}
 	}
-	args := []any{numbers, routes, tiers, messageIDs, indexes, rawBodies, receivedOn}
+	args := []any{numbers, tiers, rawBodies, receivedOn}
 	for _, f := range fields {
 		args = append(args, f)
 	}
 	rows, err := r.db.Query(ctx, insertAlertsQuery, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("insert alerts: %w", err)
+		return nil, fmt.Errorf("insert alerts: %w", err)
 	}
-	var inserted int64
 	stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.NewAlert, error) {
 		var a domain.NewAlert
 		var tier string
-		var isNew bool
-		dests := append([]any{&a.ID, &a.Number, &a.Route, &tier, &a.MessageID, &a.MessageIndex, &a.ReceivedOn}, alertFieldDests(&a.Alert)...)
-		if err := row.Scan(append(dests, &isNew)...); err != nil {
+		if err := row.Scan(append([]any{&a.ID, &a.Number, &tier, &a.ReceivedOn}, alertFieldDests(&a.Alert)...)...); err != nil {
 			return domain.NewAlert{}, err
 		}
 		a.Tier = domain.AlertTier(tier)
-		if isNew {
-			inserted++
-		}
 		return a, nil
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("insert alerts: %w", err)
+		return nil, fmt.Errorf("insert alerts: %w", err)
 	}
-	slices.SortFunc(stored, func(a, b domain.NewAlert) int { return a.MessageIndex - b.MessageIndex })
-	return stored, inserted, nil
+	// Numbers are reserved in ascending order, so sorting by number restores the message's order.
+	slices.SortFunc(stored, func(a, b domain.NewAlert) int { return strings.Compare(a.Number, b.Number) })
+	return stored, nil
 }
