@@ -1063,8 +1063,11 @@ source of truth: a registration event (`metadata.initiating_product`, once per s
 registration, by company id, user id and product (the entry product),
 posted to entity-service's `POST /plg/registrations/ingest`. entity-service maps the product name to a
 portal product. The subscription events a signup also emits (one per product) are not read by default, so
-each organisation has one registration and every dashboard chart counts organisations once; add
-`cloud-core.billing.select-subscription-plan` to `PLG_MOESIF_SYNC_EVENTS` to read them. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
+each organisation gets one registration; add `cloud-core.billing.select-subscription-plan` to
+`PLG_MOESIF_SYNC_EVENTS` to read them. The six Overview charts (trend, entry product, UTM, email,
+qualification, qualified by UTM) count each organisation once, by its earliest registration. The API's
+summary total, registrations by product, lifecycle stage and subscription mix count registrations
+(pairings), so they also include pairings earlier syncs stored from subscription events until those are cleared. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
 
 - **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
   `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only

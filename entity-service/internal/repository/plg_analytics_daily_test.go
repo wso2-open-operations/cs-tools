@@ -18,6 +18,7 @@ package repository
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -38,10 +39,14 @@ func TestRegistrationsOverTimeIsOneDailyTotalPerOrganisation(t *testing.T) {
 		t.Fatalf("dashboard before: %v", err)
 	}
 
+	// Unique per run, so a repeat run in the same database starts from its own baseline.
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	companyA, companyB := "daily-company-a-"+suffix, "daily-company-b-"+suffix
+
 	// Organisation A has two pairings, B one: three rows, two organisations.
 	for company, products := range map[string][]string{
-		"daily-company-a": {"identity-platform", "api-platform"},
-		"daily-company-b": {"integration-platform"},
+		companyA: {"identity-platform", "api-platform"},
+		companyB: {"integration-platform"},
 	} {
 		for _, p := range products {
 			if _, err := ingest.Register(ctx, domain.Registration{CompanyID: company, UserID: owner, InitiatingProduct: p}, nil); err != nil {
@@ -53,8 +58,8 @@ func TestRegistrationsOverTimeIsOneDailyTotalPerOrganisation(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		UPDATE plg_org_platform op SET registered_on = $1
 		FROM plg_organization o
-		WHERE o.id = op.organization_id AND o.moesif_company_id IN ('daily-company-a', 'daily-company-b')`,
-		day.Add(10*time.Hour)); err != nil {
+		WHERE o.id = op.organization_id AND o.moesif_company_id IN ($2, $3)`,
+		day.Add(10*time.Hour), companyA, companyB); err != nil {
 		t.Fatal(err)
 	}
 
