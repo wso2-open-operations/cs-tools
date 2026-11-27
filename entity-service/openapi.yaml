@@ -38081,8 +38081,12 @@ components:
           type: string
         severity:
           type: string
+          nullable: true
+          description: Null when the source sent none.
         category:
           type: string
+          nullable: true
+          description: Null when the source sent none.
         tier:
           type: string
           enum: [priority, standard]
@@ -38108,6 +38112,7 @@ components:
               type: string
             priority:
               type: string
+              nullable: true
             impact:
               type: string
             urgency:
@@ -38139,8 +38144,12 @@ components:
               type: string
             description:
               type: string
+              nullable: true
+              description: Null when the source sent none.
             assignmentGroup:
               type: string
+              nullable: true
+              description: Null when the source sent none.
             rawBody:
               type: string
               nullable: true

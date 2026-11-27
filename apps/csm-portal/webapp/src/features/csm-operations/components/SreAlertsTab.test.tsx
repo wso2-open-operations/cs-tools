@@ -161,7 +161,8 @@ describe("SreAlertsTab", () => {
     const unlinkedRow = screen.getByRole("row", { name: /View alert ALT000000043/ });
     expect(within(unlinkedRow).getByText("Warning")).toBeInTheDocument();
     expect(within(unlinkedRow).getByText("Standard")).toBeInTheDocument();
-    expect(within(unlinkedRow).queryByRole("link")).not.toBeInTheDocument();
+    // Its only link is its own number: there is no incident to open.
+    expect(within(unlinkedRow).getAllByRole("link").map((l) => l.textContent)).toEqual(["ALT000000043"]);
     // No metric and no incident each show a dash.
     expect(within(unlinkedRow).getAllByText("—")).toHaveLength(2);
   });
@@ -207,6 +208,24 @@ describe("SreAlertsTab", () => {
     expect(location).toContain('"from":"/operations/alerts?altTiers=priority"');
   });
 
+  it("opens the alert from its number, a link the keyboard can reach", () => {
+    mockSearch();
+    renderTab("/operations/alerts?altTiers=priority");
+    const link = screen.getByRole("link", { name: "ALT000000042" });
+    expect(link).toHaveAttribute("href", `/operations/alerts/${LINKED.id}`);
+    fireEvent.click(link);
+    const location = screen.getByTestId("location").textContent ?? "";
+    expect(location).toContain(`/operations/alerts/${LINKED.id}`);
+    expect(location).toContain('"from":"/operations/alerts?altTiers=priority"');
+  });
+
+  it("shows a dash for a severity the source didn't send", () => {
+    mockSearch({ data: { alerts: [{ ...UNLINKED, severity: null, category: null }], total: 1, offset: 0, limit: 20 } });
+    renderTab();
+    const row = screen.getByRole("row", { name: /View alert ALT000000043/ });
+    expect(within(row).getAllByText("—")).toHaveLength(3);
+  });
+
   it("opens the linked incident, not the alert, from the incident link", () => {
     mockSearch();
     renderTab();
@@ -249,6 +268,32 @@ describe("SreAlertsTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     await waitFor(() => expect(screen.getByTestId("location").textContent).not.toContain("altIncident"));
+  });
+
+  it("keeps the state the list was opened with when a filter changes", async () => {
+    mockSearch();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[{ pathname: "/operations/alerts", state: { from: "/dashboard" } }]}>
+          <Routes>
+            <Route
+              path="/operations/alerts"
+              element={
+                <>
+                  <SreAlertsTab />
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.mouseDown(screen.getByLabelText("Incident"));
+    fireEvent.click(await screen.findByRole("option", { name: "Linked to an incident" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("altIncident=linked"));
+    expect(screen.getByTestId("location").textContent).toContain('{"from":"/dashboard"}');
   });
 
   it("searches after the user stops typing", async () => {

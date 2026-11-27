@@ -414,9 +414,9 @@ filtered list can be bookmarked or shared. Click a column header with an arrow
 to sort by it.
 
 A row opens the alert's page: its number and ID (with a button to copy the
-ID), severity and tier, what raised it (source, route, service, environment,
-metric, category, unique identifier, description), how it was delivered
-(received and created times, message ID and index), the incident it is linked
+ID), severity and tier, what raised it (source, service, environment, metric,
+category, unique identifier, assignment group, description), when it was
+received and created, the incident it is linked
 to (its number, subject, state, priority, impact, urgency and opened date),
 and the raw payload the source sent. One message can carry several alerts:
 only the first alert of a message keeps the payload.

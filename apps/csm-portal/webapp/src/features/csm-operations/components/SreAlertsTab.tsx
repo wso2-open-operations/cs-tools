@@ -139,9 +139,10 @@ export default function SreAlertsTab(): JSX.Element {
       const merged = new URLSearchParams(searchParams);
       SRE_ALERT_FILTER_PARAM_KEYS.forEach((k) => merged.delete(k));
       writeSreAlertFiltersToUrl(next).forEach((v, k) => merged.append(k, v));
-      setSearchParams(merged, { replace: true });
+      // Keep the state the list was opened with, so an alert opened after a filter change can still go back to where the list came from.
+      setSearchParams(merged, { replace: true, state: location.state });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, location.state],
   );
 
   const handleSort = (next: ListSort<BeSreAlertSortField>): void => {
@@ -159,8 +160,9 @@ export default function SreAlertsTab(): JSX.Element {
     parentState: location.state ?? null,
   };
 
+  const alertPath = (alert: BeSreAlert): string => `/operations/alerts/${encodeURIComponent(alert.id)}`;
   const openAlert = (alert: BeSreAlert): void => {
-    navigate(`/operations/alerts/${encodeURIComponent(alert.id)}`, { state: navState });
+    navigate(alertPath(alert), { state: navState });
   };
 
   return (
@@ -234,7 +236,18 @@ export default function SreAlertsTab(): JSX.Element {
                     sx={{ cursor: "pointer" }}
                     aria-label={`View alert ${alert.number}`}
                   >
-                    <TableCell sx={{ fontFamily: "monospace", whiteSpace: "nowrap" }}>{alert.number || "—"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {/* A link, so the alert can be opened from the keyboard; the row's click would open it a second time. */}
+                      <Link
+                        component={RouterLink}
+                        to={alertPath(alert)}
+                        state={navState}
+                        onClick={(e: MouseEvent) => e.stopPropagation()}
+                        sx={{ fontFamily: "monospace" }}
+                      >
+                        {alert.number || alert.id}
+                      </Link>
+                    </TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{formatReceived(alert.receivedOn)}</TableCell>
                     <TableCell>
                       {alert.severity ? (

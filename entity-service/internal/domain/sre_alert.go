@@ -43,7 +43,10 @@ type SreAlertSearchFilters struct {
 	ReceivedTo   *time.Time `json:"receivedTo,omitempty"`
 }
 
-// SreAlertSort orders a search; Field is receivedOn, number, severity, environment or service, Order asc or desc.
+// SreAlertSortFields are the fields a search can be sorted by.
+var SreAlertSortFields = []string{"receivedOn", "number", "severity", "environment", "service"}
+
+// SreAlertSort orders a search; Field is one of SreAlertSortFields, Order asc or desc.
 type SreAlertSort struct {
 	Field string `json:"field"`
 	Order string `json:"order"`
@@ -56,19 +59,19 @@ type SearchSreAlertsRequest struct {
 	Pagination *Pagination           `json:"pagination,omitempty"`
 }
 
-// SreAlertIncidentRef is the incident an alert belongs to (alert.incident_id), with what a reader needs to recognise it.
+// SreAlertIncidentRef is the incident an alert belongs to (alert.incident_id), with what a reader needs to recognise it; Priority is null when the incident has none.
 type SreAlertIncidentRef struct {
 	ID       string     `json:"id"`
 	Number   string     `json:"number"`
 	Subject  string     `json:"subject"`
 	State    string     `json:"state"`
-	Priority string     `json:"priority"`
+	Priority *string    `json:"priority"`
 	Impact   string     `json:"impact"`
 	Urgency  string     `json:"urgency"`
 	OpenedOn *time.Time `json:"openedOn"`
 }
 
-// SreAlertListItem is one alert in a search result: its UUID, ALT number and the fields a list shows.
+// SreAlertListItem is one alert in a search result: its UUID, ALT number and the fields a list shows; Severity and Category are null when the source sent none.
 type SreAlertListItem struct {
 	ID          string               `json:"id"`
 	Number      string               `json:"number"`
@@ -76,8 +79,8 @@ type SreAlertListItem struct {
 	Service     string               `json:"service"`
 	Environment string               `json:"environment"`
 	MetricName  string               `json:"metricName"`
-	Severity    string               `json:"severity"`
-	Category    string               `json:"category"`
+	Severity    *string              `json:"severity"`
+	Category    *string              `json:"category"`
 	Tier        AlertTier            `json:"tier"`
 	ReceivedOn  time.Time            `json:"receivedOn"`
 	CreatedOn   time.Time            `json:"createdOn"`
@@ -92,12 +95,12 @@ type SearchSreAlertsResponse struct {
 	Limit  int                `json:"limit"`
 }
 
-// SreAlertDetail is one alert with every stored field.
+// SreAlertDetail is one alert with every stored field; Description and AssignmentGroup are null when the source sent none.
 type SreAlertDetail struct {
 	SreAlertListItem
-	UniqueIdentifier string `json:"uniqueIdentifier"`
-	Description      string `json:"description"`
-	AssignmentGroup  string `json:"assignmentGroup"`
+	UniqueIdentifier string  `json:"uniqueIdentifier"`
+	Description      *string `json:"description"`
+	AssignmentGroup  *string `json:"assignmentGroup"`
 	// RawBody is the source's request body as text; only the message's first alert keeps it.
 	RawBody *string `json:"rawBody"`
 }

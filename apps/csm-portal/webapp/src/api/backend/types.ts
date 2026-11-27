@@ -4038,8 +4038,10 @@ export interface BeSreAlert {
   service: string;
   environment: string;
   metricName: string;
-  severity: string;
-  category: string;
+  /** Null when the source sent none. */
+  severity: string | null;
+  /** Null when the source sent none. */
+  category: string | null;
   tier: BeSreAlertTier;
   receivedOn: string;
   createdOn: string;
@@ -4054,7 +4056,7 @@ export interface BeSreAlertIncident {
   subject: string;
   /** Incident state enum text, e.g. NEW, IN_PROGRESS, RESOLVED, CLOSED, CANCELED. */
   state: string;
-  priority: string;
+  priority: string | null;
   impact: string;
   urgency: string;
   openedOn: string | null;
@@ -4062,8 +4064,10 @@ export interface BeSreAlertIncident {
 
 export interface BeSreAlertDetail extends BeSreAlert {
   uniqueIdentifier: string;
-  description: string;
-  assignmentGroup: string;
+  /** Null when the source sent none. */
+  description: string | null;
+  /** Null when the source sent none. */
+  assignmentGroup: string | null;
   /** The source's request body as text; null on every alert of a message but the first. */
   rawBody: string | null;
 }

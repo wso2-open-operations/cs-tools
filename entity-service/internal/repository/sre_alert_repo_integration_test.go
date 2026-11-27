@@ -78,6 +78,12 @@ func TestSreAlertRepositoryIntegration_SearchesAndGets(t *testing.T) {
 	if err != nil || byNumber == nil || byNumber.Environment != "staging" || byNumber.RawBody == nil || *byNumber.RawBody != `{"n":1}` {
 		t.Fatalf("Get(number) = %+v, %v; want the staging alert with its raw body", byNumber, err)
 	}
+	// A field the source sent is a value; one it left empty is nil (null in JSON), not "".
+	if byNumber.Severity == nil || *byNumber.Severity != "critical" || byNumber.Description == nil || *byNumber.Description != "disk 100% full" ||
+		byNumber.Category != nil || byNumber.AssignmentGroup != nil {
+		t.Fatalf("Get(number) severity %v category %v description %v assignment group %v; want critical, nil, the description, nil",
+			byNumber.Severity, byNumber.Category, byNumber.Description, byNumber.AssignmentGroup)
+	}
 	byID, err := repo.Get(ctx, byNumber.ID)
 	if err != nil || byID == nil || byID.Number != numbers[1] {
 		t.Fatalf("Get(uuid) = %+v, %v; want the same alert", byID, err)

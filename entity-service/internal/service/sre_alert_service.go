@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func (s *sreAlertService) Search(ctx context.Context, req domain.SearchSreAlerts
 	sort := domain.SreAlertSort{Field: "receivedOn", Order: "desc"}
 	if req.SortBy != nil {
 		if req.SortBy.Field != "" {
-			if _, ok := repository.SreAlertSortColumns[req.SortBy.Field]; !ok {
+			if !slices.Contains(domain.SreAlertSortFields, req.SortBy.Field) {
 				return domain.SearchSreAlertsResponse{}, &apierror.ValidationError{Msg: "sortBy.field must be receivedOn, number, severity, environment or service"}
 			}
 			sort.Field = req.SortBy.Field

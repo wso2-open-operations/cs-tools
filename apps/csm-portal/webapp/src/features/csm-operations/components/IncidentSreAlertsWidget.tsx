@@ -57,6 +57,12 @@ export default function IncidentSreAlertsWidget({ incidentId }: IncidentSreAlert
   const location = useLocation();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  // Another incident starts from its first page.
+  const [pageIncidentId, setPageIncidentId] = useState(incidentId);
+  if (pageIncidentId !== incidentId) {
+    setPageIncidentId(incidentId);
+    setPage(0);
+  }
   const payload = useMemo<BeSreAlertSearchPayload>(
     () => ({
       filters: { incidentId },
@@ -68,6 +74,11 @@ export default function IncidentSreAlertsWidget({ incidentId }: IncidentSreAlert
   const { data, isLoading, isError, isFetching, refetch, dataUpdatedAt } = useSearchSreAlerts(payload);
   const alerts = data?.alerts ?? [];
   const total = data?.total ?? 0;
+  // A refresh that leaves fewer alerts than the page starts at moves back to the last page that has some.
+  const lastPage = data ? Math.max(0, Math.ceil(data.total / rowsPerPage) - 1) : page;
+  if (page > lastPage) {
+    setPage(lastPage);
+  }
   // Back from the alert returns to this tab, with whatever state brought us to the incident.
   const navState = { from: `${location.pathname}${location.search}`, parentState: location.state ?? null };
 
@@ -107,7 +118,7 @@ export default function IncidentSreAlertsWidget({ incidentId }: IncidentSreAlert
               </TableHead>
               <TableBody>
                 {isLoading ? (
-                  [0, 1].map((i) => (
+                  Array.from({ length: rowsPerPage }, (_, i) => (
                     <TableRow key={i}>
                       {COLUMNS.map((col) => (
                         <TableCell key={col}>

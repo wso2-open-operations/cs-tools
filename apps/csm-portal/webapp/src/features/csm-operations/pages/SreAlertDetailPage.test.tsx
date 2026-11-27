@@ -200,6 +200,14 @@ describe("SreAlertDetailPage", () => {
     expect(screen.getByTestId("sre-alert-raw-payload").textContent).toBe('{\n  "alarm": "cpu",\n  "value": 93\n}');
   });
 
+  it("keeps every value of a JSON payload as the source sent it", () => {
+    mockAlert({ data: { ...ALERT, rawBody: '{"eventId":9007199254740993,"ratio":1.50,"tags":[],"note":"a, b: {c}"}' } });
+    renderPage();
+    expect(screen.getByTestId("sre-alert-raw-payload").textContent).toBe(
+      '{\n  "eventId": 9007199254740993,\n  "ratio": 1.50,\n  "tags": [],\n  "note": "a, b: {c}"\n}',
+    );
+  });
+
   it("shows a payload that isn't JSON as it came", () => {
     mockAlert({ data: { ...ALERT, rawBody: "alarm=cpu value=93" } });
     renderPage();

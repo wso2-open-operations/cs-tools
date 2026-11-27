@@ -137,7 +137,7 @@ function CopyableId({ id }: { id: string }): JSX.Element {
 }
 
 /** The incident's priority as the incident page shows it: the P1–P5 badge when known, else a plain chip. */
-function IncidentPriority({ priority }: { priority: string }): JSX.Element {
+function IncidentPriority({ priority }: { priority: string | null }): JSX.Element {
   if (!priority) return <>—</>;
   const badge = incidentPriorityBadge(priority);
   return badge ? (
@@ -212,13 +212,72 @@ function LinkedIncidentCard({
   );
 }
 
-/** The raw body pretty-printed when it is JSON, else as it came. */
+/**
+ * The raw body indented when it is JSON, else as it came. The text is
+ * re-indented rather than parsed and serialised again, so every value stays
+ * exactly as the source sent it (JSON.parse would round an integer above
+ * 2^53).
+ */
 function formatRawBody(raw: string): string {
   try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
+    JSON.parse(raw);
   } catch {
     return raw;
   }
+  let out = "";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  const newline = (): string => `\n${"  ".repeat(depth)}`;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    switch (c) {
+      case '"':
+        inString = true;
+        out += c;
+        break;
+      case " ":
+      case "\t":
+      case "\n":
+      case "\r":
+        break;
+      case "{":
+      case "[": {
+        const close = c === "{" ? "}" : "]";
+        let next = i + 1;
+        while (next < raw.length && " \t\n\r".includes(raw[next])) next++;
+        if (raw[next] === close) {
+          out += c + close;
+          i = next;
+        } else {
+          depth++;
+          out += c + newline();
+        }
+        break;
+      }
+      case "}":
+      case "]":
+        depth--;
+        out += newline() + c;
+        break;
+      case ",":
+        out += "," + newline();
+        break;
+      case ":":
+        out += ": ";
+        break;
+      default:
+        out += c;
+    }
+  }
+  return out;
 }
 
 function RawPayload({ rawBody }: { rawBody: string | null }): JSX.Element {

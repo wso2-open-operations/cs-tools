@@ -38,8 +38,8 @@ type SreAlertRepository interface {
 	Facets(ctx context.Context, since time.Time, limit int) (domain.SreAlertFacets, error)
 }
 
-// SreAlertSortColumns maps the sort fields the API accepts to their columns.
-var SreAlertSortColumns = map[string]string{
+// sreAlertSortColumns maps domain.SreAlertSortFields to their columns.
+var sreAlertSortColumns = map[string]string{
 	"receivedOn":  "a.received_on",
 	"number":      "a.number",
 	"severity":    "a.severity",
@@ -58,7 +58,7 @@ func NewSreAlertRepository(db *Scoped) SreAlertRepository {
 
 // sreAlertListColumns are the columns of a list item, then its incident's (NULL when the alert has none); scanSreAlert reads them.
 const sreAlertListColumns = `a.id::text, a.number, coalesce(a.source, ''), coalesce(a.service, ''), coalesce(a.environment, ''),
-coalesce(a.metric_name, ''), coalesce(a.severity, ''), coalesce(a.category, ''), a.tier, a.received_on, a.created_on,
+coalesce(a.metric_name, ''), a.severity, a.category, a.tier, a.received_on, a.created_on,
 i.id::text, w.number, w.subject, i.state::text, i.priority::text, i.impact::text, i.urgency::text, i.opened_on`
 
 // sreAlertFrom joins each alert to its incident (alert.incident_id) and the incident's work item, which holds its number and subject.
@@ -86,7 +86,7 @@ func (c *sreAlertIncidentCols) ref() *domain.SreAlertIncidentRef {
 		return *p
 	}
 	return &domain.SreAlertIncidentRef{ID: *c.id, Number: deref(c.number), Subject: deref(c.subject), State: deref(c.state),
-		Priority: deref(c.priority), Impact: deref(c.impact), Urgency: deref(c.urgency), OpenedOn: c.openedOn}
+		Priority: c.priority, Impact: deref(c.impact), Urgency: deref(c.urgency), OpenedOn: c.openedOn}
 }
 
 func sreAlertListDests(item *domain.SreAlertListItem, inc *sreAlertIncidentCols) []any {
@@ -100,9 +100,9 @@ func (r *sreAlertRepository) Search(ctx context.Context, f domain.SreAlertSearch
 	if err := r.db.QueryRow(ctx, `SELECT count(*)`+sreAlertFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count alerts: %w", err)
 	}
-	column, ok := SreAlertSortColumns[sort.Field]
+	column, ok := sreAlertSortColumns[sort.Field]
 	if !ok {
-		column = SreAlertSortColumns["receivedOn"]
+		column = sreAlertSortColumns["receivedOn"]
 	}
 	order := "DESC"
 	if sort.Order == "asc" {
@@ -197,8 +197,8 @@ func (r *sreAlertRepository) Get(ctx context.Context, idOrNumber string) (*domai
 	var raw []byte
 	dests := append(sreAlertListDests(&d.SreAlertListItem, &inc), &d.UniqueIdentifier, &d.Description, &d.AssignmentGroup,
 		&raw)
-	err := r.db.QueryRow(ctx, `SELECT `+sreAlertListColumns+`, coalesce(a.unique_identifier, ''), coalesce(a.description, ''),
-coalesce(a.assignment_group, ''), a.raw_body`+
+	err := r.db.QueryRow(ctx, `SELECT `+sreAlertListColumns+`, coalesce(a.unique_identifier, ''), a.description,
+a.assignment_group, a.raw_body`+
 		sreAlertFrom+` WHERE `+match, idOrNumber).Scan(dests...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
