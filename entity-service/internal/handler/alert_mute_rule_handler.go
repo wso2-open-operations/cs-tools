@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -54,8 +55,13 @@ func (h *AlertMuteRuleHandler) SearchAlertMuteRules(w http.ResponseWriter, r *ht
 	writeAlertMuteRuleJSON(w, http.StatusOK, resp)
 }
 
-// GetActiveAlertMuteRules handles GET /alert-mute-rules/active.
-func (h *AlertMuteRuleHandler) GetActiveAlertMuteRules(w http.ResponseWriter, r *http.Request) {
+// ListAlertMuteRules handles GET /alert-mute-rules?status=active: every rule muting alerts now, for alert-core. Active
+// is the only status served here; the CSM portal lists rules with POST /alert-mute-rules/search.
+func (h *AlertMuteRuleHandler) ListAlertMuteRules(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("status") != string(domain.AlertMuteRuleStateActive) {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: `status must be "active"`})
+		return
+	}
 	resp, err := h.svc.Active(r.Context())
 	if err != nil {
 		writeServiceError(w, r, err)
@@ -88,37 +94,14 @@ func (h *AlertMuteRuleHandler) CreateAlertMuteRule(w http.ResponseWriter, r *htt
 	writeAlertMuteRuleJSON(w, http.StatusCreated, b)
 }
 
-// UpdateAlertMuteRule handles PATCH /alert-mute-rules/{id}.
+// UpdateAlertMuteRule handles PATCH /alert-mute-rules/{id}: edit a scheduled rule, or extend (endOn) or end
+// (state "ended") an active one.
 func (h *AlertMuteRuleHandler) UpdateAlertMuteRule(w http.ResponseWriter, r *http.Request) {
 	var req domain.PatchAlertMuteRuleRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
 	b, err := h.svc.Update(r.Context(), r.PathValue("id"), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	writeAlertMuteRuleJSON(w, http.StatusOK, b)
-}
-
-// ExtendAlertMuteRule handles POST /alert-mute-rules/{id}/extend.
-func (h *AlertMuteRuleHandler) ExtendAlertMuteRule(w http.ResponseWriter, r *http.Request) {
-	var req domain.ExtendAlertMuteRuleRequest
-	if !decodeRequest(w, r, &req) {
-		return
-	}
-	b, err := h.svc.Extend(r.Context(), r.PathValue("id"), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	writeAlertMuteRuleJSON(w, http.StatusOK, b)
-}
-
-// EndAlertMuteRule handles POST /alert-mute-rules/{id}/end.
-func (h *AlertMuteRuleHandler) EndAlertMuteRule(w http.ResponseWriter, r *http.Request) {
-	b, err := h.svc.End(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

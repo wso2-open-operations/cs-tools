@@ -110,12 +110,30 @@ func (s *alertMuteRuleService) Create(ctx context.Context, req domain.SaveAlertM
 	return s.repo.Create(ctx, actorOf(ctx), w)
 }
 
+// Update is PATCH /alert-mute-rules/{id}: state "ended" ends an active rule, endOn alone extends an active one, and
+// anything else edits a scheduled one (see domain.PatchAlertMuteRuleRequest).
 func (s *alertMuteRuleService) Update(ctx context.Context, id string, req domain.PatchAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
 	current, err := s.Get(ctx, id)
 	if err != nil {
 		return domain.AlertMuteRule{}, err
 	}
 	now := s.now()
+	if req.State != nil {
+		if *req.State != string(domain.AlertMuteRuleStateEnded) {
+			return domain.AlertMuteRule{}, &apierror.ValidationError{Msg: `state can only be set to "ended"`}
+		}
+		if req.HasEdits() {
+			return domain.AlertMuteRule{}, &apierror.ValidationError{Msg: `state "ended" is sent alone, with no other field`}
+		}
+		return s.end(ctx, id, now)
+	}
+	if current.StateAt(now) == domain.AlertMuteRuleStateActive {
+		if !req.OnlyEndOn() {
+			return domain.AlertMuteRule{}, &apierror.ConflictError{
+				Msg: `an active alert mute rule can only be extended (endOn alone) or ended (state "ended")`}
+		}
+		return s.extend(ctx, id, current, *req.EndOn, now)
+	}
 	const wrongState = "only a scheduled alert mute rule can be edited"
 	// The state first: a started rule is a 409 whatever the edit, not a 400 from the
 	// past-start check below. The repository's guard still catches a rule that starts
@@ -168,20 +186,13 @@ func mergeAlertMuteRulePatch(current domain.AlertMuteRule, req domain.PatchAlert
 	return merged
 }
 
-func (s *alertMuteRuleService) Extend(ctx context.Context, id string, req domain.ExtendAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
-	current, err := s.Get(ctx, id)
+// extend moves an active rule's end later (PATCH with endOn alone).
+func (s *alertMuteRuleService) extend(ctx context.Context, id string, current domain.AlertMuteRule, rawEndOn string, now time.Time) (domain.AlertMuteRule, error) {
+	endOn, err := parseAlertMuteRuleTime("endOn", rawEndOn)
 	if err != nil {
 		return domain.AlertMuteRule{}, err
 	}
-	endOn, err := parseAlertMuteRuleTime("endOn", req.EndOn)
-	if err != nil {
-		return domain.AlertMuteRule{}, err
-	}
-	now := s.now()
 	const wrongState = "only a scheduled or active alert mute rule can be extended"
-	if st := current.StateAt(now); st != domain.AlertMuteRuleStateScheduled && st != domain.AlertMuteRuleStateActive {
-		return domain.AlertMuteRule{}, &apierror.ConflictError{Msg: wrongState}
-	}
 	if !endOn.After(current.EndOn) {
 		return domain.AlertMuteRule{}, &apierror.ValidationError{Msg: "endOn must be later than the alert mute rule's current end"}
 	}
@@ -213,11 +224,9 @@ func (s *alertMuteRuleService) lostRace(ctx context.Context, id, verb, wrongStat
 	return &apierror.ConflictError{Msg: wrongState}
 }
 
-func (s *alertMuteRuleService) End(ctx context.Context, id string) (domain.AlertMuteRule, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.AlertMuteRule{}, err
-	}
-	b, err := s.repo.End(ctx, actorOf(ctx), id, s.now())
+// end ends an active rule now (PATCH with state "ended").
+func (s *alertMuteRuleService) end(ctx context.Context, id string, now time.Time) (domain.AlertMuteRule, error) {
+	b, err := s.repo.End(ctx, actorOf(ctx), id, now)
 	return s.guarded(ctx, id, b, err, "only an active alert mute rule can be ended")
 }
 

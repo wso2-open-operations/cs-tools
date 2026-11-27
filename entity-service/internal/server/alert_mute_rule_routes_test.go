@@ -35,8 +35,8 @@ func TestAlertMuteRuleRoutesAreInternalOnly(t *testing.T) {
 	}
 	re := regexp.MustCompile(`HandleFunc\("([A-Z]+ /alert-mute-rules[^"]*)",\s*([^\n]+)`)
 	matches := re.FindAllStringSubmatch(string(src), -1)
-	if len(matches) < 8 {
-		t.Fatalf("found %d alert mute rule routes in routes.go, want at least 8", len(matches))
+	if len(matches) < 6 {
+		t.Fatalf("found %d alert mute rule routes in routes.go, want at least 6", len(matches))
 	}
 	for _, m := range matches {
 		if !strings.HasPrefix(strings.TrimSpace(m[2]), "internalOnly(") {

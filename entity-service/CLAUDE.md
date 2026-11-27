@@ -12313,9 +12313,12 @@ over `alert_mute_rule` (migration 0278, RLS internal-only in 100028; the reposit
 ServiceNow data source `snAlertMuteRuleService` answers every route 400. Every route is `internalOnly`; the actor
 (`createdBy`/`updatedBy`/`endedBy`) is `actorOf` (the token's email).
 
-- **Routes.** `POST /alert-mute-rules/search`, `GET|PATCH|DELETE /alert-mute-rules/{id}`, `POST /alert-mute-rules`,
-  `POST /alert-mute-rules/{id}/extend`, `POST /alert-mute-rules/{id}/end`, and `GET /alert-mute-rules/active` (alert-core polls it
-  through csm-integration-service; the CSM portal BFF does not expose it).
+- **Routes.** `POST /alert-mute-rules/search`, `GET|PATCH|DELETE /alert-mute-rules/{id}`, `POST /alert-mute-rules`, and
+  `GET /alert-mute-rules?status=active` (`active` is the only status served; alert-core polls it through
+  csm-integration-service; the CSM portal BFF does not expose it).
+- **PATCH does edit, extend and end**, by the rule's state: a scheduled rule takes any fields (a partial edit); an
+  active rule takes `endOn` alone (extend) or `state: "ended"` alone (end now). Anything else on an active rule is a
+  409; `state` takes only `"ended"`, alone (400).
 - **State is derived, never stored** (`domain.AlertMuteRule.StateAt`): `ended` if `ended_on` is set, else `scheduled` before
   `start_on`, `active` until `end_on`, then `expired`. The search's `expired` filter also returns rules ended early.
 - **Writes are state-guarded in their own `WHERE`** (edit and delete: scheduled; extend: scheduled or active; end:

@@ -189,7 +189,11 @@ func TestAlertMuteRuleGuardedWrites_NotFoundVersusWrongState(t *testing.T) {
 			})
 			return err
 		},
-		"end":    func(s *alertMuteRuleService) error { _, err := s.End(ctx, alertMuteRuleTestID); return err },
+		"end": func(s *alertMuteRuleService) error {
+			ended := "ended"
+			_, err := s.Update(ctx, alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{State: &ended})
+			return err
+		},
 		"delete": func(s *alertMuteRuleService) error { return s.Delete(ctx, alertMuteRuleTestID) },
 	}
 	for name, call := range calls {
@@ -215,7 +219,7 @@ func TestAlertMuteRuleExtend(t *testing.T) {
 	expired := &domain.AlertMuteRule{ID: alertMuteRuleTestID, StartOn: alertMuteRuleTestNow.Add(-3 * time.Hour), EndOn: alertMuteRuleTestNow.Add(-time.Hour)}
 
 	repo := &fakeAlertMuteRuleRepo{stored: active, written: active}
-	if _, err := newTestAlertMuteRuleService(repo).Extend(ctx, alertMuteRuleTestID, domain.ExtendAlertMuteRuleRequest{EndOn: "2026-11-06T13:00:00+01:00"}); err != nil {
+	if _, err := newTestAlertMuteRuleService(repo).Update(ctx, alertMuteRuleTestID, patchEndOn("2026-11-06T13:00:00+01:00")); err != nil {
 		t.Fatalf("Extend: %v", err)
 	}
 	if want := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC); !repo.extendTo.Equal(want) {
@@ -236,7 +240,7 @@ func TestAlertMuteRuleExtend(t *testing.T) {
 		{"bad timestamp", active, "tomorrow", isValidation},
 	} {
 		repo := &fakeAlertMuteRuleRepo{stored: tc.stored, written: tc.stored}
-		_, err := newTestAlertMuteRuleService(repo).Extend(ctx, alertMuteRuleTestID, domain.ExtendAlertMuteRuleRequest{EndOn: tc.endOn})
+		_, err := newTestAlertMuteRuleService(repo).Update(ctx, alertMuteRuleTestID, patchEndOn(tc.endOn))
 		if !tc.check(err) {
 			t.Errorf("%s: unexpected error %v", tc.name, err)
 		}
@@ -304,8 +308,8 @@ func TestAlertMuteRuleUpdate_AStartedRuleIsAConflictWhateverTheEdit(t *testing.T
 	name := "renamed"
 	_, err := newTestAlertMuteRuleService(repo).Update(context.Background(), alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{Name: &name})
 	var ce *apierror.ConflictError
-	if !errors.As(err, &ce) || ce.Msg != "only a scheduled alert mute rule can be edited" || repo.calls != 0 {
-		t.Fatalf("got %v (writes %d), want the scheduled-only conflict and no write", err, repo.calls)
+	if !errors.As(err, &ce) || ce.Msg != `an active alert mute rule can only be extended (endOn alone) or ended (state "ended")` || repo.calls != 0 {
+		t.Fatalf("got %v (writes %d), want the active-rule conflict and no write", err, repo.calls)
 	}
 }
 
@@ -325,9 +329,50 @@ func TestAlertMuteRuleUpdate_LostRaceOnAStillEditableRule(t *testing.T) {
 func TestAlertMuteRuleExtend_LostRaceOnAStillExtendableRule(t *testing.T) {
 	active := &domain.AlertMuteRule{ID: alertMuteRuleTestID, StartOn: alertMuteRuleTestNow.Add(-time.Hour), EndOn: alertMuteRuleTestNow.Add(time.Hour)}
 	repo := &fakeAlertMuteRuleRepo{stored: active} // written nil: the guarded UPDATE matched nothing
-	_, err := newTestAlertMuteRuleService(repo).Extend(context.Background(), alertMuteRuleTestID, domain.ExtendAlertMuteRuleRequest{EndOn: "2026-11-06T12:00:00Z"})
+	_, err := newTestAlertMuteRuleService(repo).Update(context.Background(), alertMuteRuleTestID, patchEndOn("2026-11-06T12:00:00Z"))
 	var ce *apierror.ConflictError
 	if !errors.As(err, &ce) || ce.Msg != "the alert mute rule changed while it was being extended; reload it and try again" {
 		t.Fatalf("got %v, want the changed-while-extending conflict", err)
+	}
+}
+
+func patchEndOn(endOn string) domain.PatchAlertMuteRuleRequest {
+	return domain.PatchAlertMuteRuleRequest{EndOn: &endOn}
+}
+
+// PATCH on an active rule: state "ended" alone ends it, endOn alone extends it, anything else is refused without a write.
+func TestAlertMuteRulePatch_ActiveRule(t *testing.T) {
+	ctx := context.Background()
+	active := &domain.AlertMuteRule{ID: alertMuteRuleTestID, StartOn: alertMuteRuleTestNow.Add(-time.Hour), EndOn: alertMuteRuleTestNow.Add(time.Hour)}
+	ended, other, name := "ended", "expired", "renamed"
+	endOn := "2026-11-06T12:00:00Z"
+
+	repo := &fakeAlertMuteRuleRepo{stored: active, written: active}
+	if _, err := newTestAlertMuteRuleService(repo).Update(ctx, alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{State: &ended}); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if repo.calls != 1 {
+		t.Fatalf("end wrote %d times, want 1", repo.calls)
+	}
+
+	conflict := func(err error) bool { var e *apierror.ConflictError; return errors.As(err, &e) }
+	for _, tc := range []struct {
+		name  string
+		patch domain.PatchAlertMuteRuleRequest
+		check func(error) bool
+	}{
+		{"another state", domain.PatchAlertMuteRuleRequest{State: &other}, isValidation},
+		{"state with another field", domain.PatchAlertMuteRuleRequest{State: &ended, EndOn: &endOn}, isValidation},
+		{"an edit of an active rule", domain.PatchAlertMuteRuleRequest{Name: &name}, conflict},
+		{"endOn with another field", domain.PatchAlertMuteRuleRequest{Name: &name, EndOn: &endOn}, conflict},
+	} {
+		repo := &fakeAlertMuteRuleRepo{stored: active, written: active}
+		_, err := newTestAlertMuteRuleService(repo).Update(ctx, alertMuteRuleTestID, tc.patch)
+		if !tc.check(err) {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+		}
+		if repo.calls != 0 {
+			t.Errorf("%s: repository write was called", tc.name)
+		}
 	}
 }

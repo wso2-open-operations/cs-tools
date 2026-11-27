@@ -14370,11 +14370,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /alert-mute-rules/active:
+  /alert-mute-rules:
     get:
       summary: Every alert mute rule muting alerts now.
-      description: Rules not ended early whose window contains now. alert-core polls this through csm-integration-service. Internal callers only.
-      operationId: getActiveAlertMuteRules
+      description: >-
+        With status=active (the only status served here): rules not ended early whose window contains now.
+        alert-core polls this through csm-integration-service. The CSM portal lists rules with
+        POST /alert-mute-rules/search. Internal callers only.
+      operationId: listAlertMuteRules
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [active]
       responses:
         "200":
           description: The active alert mute rules.
@@ -14383,7 +14393,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ActiveAlertMuteRulesResponse'
         "400":
-          description: Alert mute rules are not supported on the ServiceNow data source.
+          description: status is not "active", or alert mute rules are not supported on the ServiceNow data source.
           content:
             application/json:
               schema:
@@ -14406,7 +14416,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /alert-mute-rules:
     post:
       summary: Create an alert mute rule.
       description: >
@@ -14506,11 +14515,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Edit a scheduled alert mute rule.
+      summary: Edit a scheduled alert mute rule, or extend or end an active one.
       description: >-
-        Partial update: only the fields present change; the others keep their stored values. The result is
-        validated as create is (a conditions list, when present, replaces the whole list). Only while the rule is
-        scheduled (409 otherwise). 409 also when another write changed the rule after it was read; reload and retry.
+        Scheduled rule: a partial update; only the fields present change, the others keep their stored values, and
+        the result is validated as create is (a conditions list, when present, replaces the whole list).
+        Active rule: endOn alone extends it (later than the current end, at most 72 hours after the start), and
+        state "ended" alone ends it now (endedOn and endedBy are set). Anything else on an active rule, and any
+        change to an expired or ended rule, is a 409. state takes only "ended" and no other field (400).
+        409 also when another write changed the rule after it was read; reload and retry.
       operationId: updateAlertMuteRule
       parameters:
         - name: id
@@ -14545,7 +14557,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The rule is not scheduled.
+          description: The rule is in the wrong state for this change, or changed after it was read.
           content:
             application/json:
               schema:
@@ -14595,122 +14607,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: The rule is not scheduled.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: No valid token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Not an internal caller.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Unexpected error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /alert-mute-rules/{id}/extend:
-    post:
-      summary: Move a scheduled or active alert mute rule's end later.
-      description: The new end must be later than the current end and at most 72 hours after the start. 409 when the rule is expired or ended.
-      operationId: extendAlertMuteRule
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExtendAlertMuteRuleRequest'
-      responses:
-        "200":
-          description: The alert mute rule.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertMuteRule'
-        "400":
-          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: No alert mute rule with that id.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: The rule is not scheduled or active.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: No valid token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Not an internal caller.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Unexpected error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /alert-mute-rules/{id}/end:
-    post:
-      summary: End an active alert mute rule now.
-      description: Sets endedOn to now and endedBy to the caller. 409 unless the rule is active.
-      operationId: endAlertMuteRule
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: The alert mute rule.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlertMuteRule'
-        "400":
-          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: No alert mute rule with that id.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: The rule is not active.
           content:
             application/json:
               schema:
@@ -35138,7 +35034,9 @@ components:
             $ref: '#/components/schemas/AlertMuteRuleCondition'
     PatchAlertMuteRuleRequest:
       type: object
-      description: The fields to change; at least one is normally sent, and an empty body changes nothing but is still validated.
+      description: >-
+        The fields to change. A scheduled rule takes any of them (an empty body changes nothing but is still
+        validated); an active rule takes endOn alone (extend) or state alone (end).
       properties:
         name:
           type: string
@@ -35159,13 +35057,10 @@ components:
           description: Replaces the whole list.
           items:
             $ref: '#/components/schemas/AlertMuteRuleCondition'
-    ExtendAlertMuteRuleRequest:
-      type: object
-      required: [endOn]
-      properties:
-        endOn:
+        state:
           type: string
-          format: date-time
+          enum: [ended]
+          description: Ends an active rule now. Sent alone.
     SearchAlertMuteRulesRequest:
       type: object
       properties:

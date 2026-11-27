@@ -83,9 +83,11 @@ type SaveAlertMuteRuleRequest struct {
 	Conditions  []AlertMuteRuleCondition `json:"conditions"`
 }
 
-// PatchAlertMuteRuleRequest is the body of PATCH /alert-mute-rules/{id}: only the fields present change, the rest keep
-// the stored rule's values (like PatchOutageRequest). Conditions, when present, replace the whole list. The merged rule
-// is validated as a create would be.
+// PatchAlertMuteRuleRequest is the body of PATCH /alert-mute-rules/{id}. What it may carry depends on the rule's state:
+//   - scheduled: any of the fields; only those present change, the rest keep the stored values (like PatchOutageRequest),
+//     conditions replace the whole list, and the merged rule is validated as a create would be;
+//   - active: endOn alone extends it (later than its current end, within 72 hours of its start), or state "ended" alone
+//     ends it now.
 type PatchAlertMuteRuleRequest struct {
 	Name        *string                   `json:"name"`
 	Description *string                   `json:"description"`
@@ -93,6 +95,19 @@ type PatchAlertMuteRuleRequest struct {
 	StartOn     *string                   `json:"startOn"`
 	EndOn       *string                   `json:"endOn"`
 	Conditions  *[]AlertMuteRuleCondition `json:"conditions"`
+	// State "ended" ends an active rule now; no other value is accepted.
+	State *string `json:"state"`
+}
+
+// HasEdits reports whether the patch carries any field other than state.
+func (p PatchAlertMuteRuleRequest) HasEdits() bool {
+	return p.Name != nil || p.Description != nil || p.TimeZone != nil || p.StartOn != nil || p.EndOn != nil || p.Conditions != nil
+}
+
+// OnlyEndOn reports whether endOn is the patch's only field.
+func (p PatchAlertMuteRuleRequest) OnlyEndOn() bool {
+	return p.EndOn != nil && p.State == nil &&
+		p.Name == nil && p.Description == nil && p.TimeZone == nil && p.StartOn == nil && p.Conditions == nil
 }
 
 // AlertMuteRuleWrite is a validated SaveAlertMuteRuleRequest, as the repository stores it.
@@ -103,11 +118,6 @@ type AlertMuteRuleWrite struct {
 	StartOn     time.Time
 	EndOn       time.Time
 	Conditions  []AlertMuteRuleCondition
-}
-
-// ExtendAlertMuteRuleRequest is the body of POST /alert-mute-rules/{id}/extend.
-type ExtendAlertMuteRuleRequest struct {
-	EndOn string `json:"endOn"`
 }
 
 // SearchAlertMuteRulesFilters are the filters of POST /alert-mute-rules/search; none set means every rule.
@@ -130,7 +140,7 @@ type SearchAlertMuteRulesResponse struct {
 	Limit          int             `json:"limit"`
 }
 
-// ActiveAlertMuteRulesResponse is the body of GET /alert-mute-rules/active: every rule muting alerts now.
+// ActiveAlertMuteRulesResponse is the body of GET /alert-mute-rules?status=active: every rule muting alerts now.
 type ActiveAlertMuteRulesResponse struct {
 	AlertMuteRules []AlertMuteRule `json:"alertMuteRules"`
 }

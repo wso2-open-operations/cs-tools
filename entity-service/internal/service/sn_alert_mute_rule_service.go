@@ -26,7 +26,7 @@ import (
 const alertMuteRulesNotOnServiceNowMsg = "alert mute rules are not supported on the ServiceNow data source"
 
 // snAlertMuteRuleService answers every alert mute rule route with a 400 on the ServiceNow data source: alert mute rules exist only in
-// Postgres (migration 0278). alert-core treats the refused GET /alert-mute-rules/active as "no rules" (it fails open).
+// Postgres (migration 0278). alert-core treats the refused GET /alert-mute-rules?status=active as "no rules" (it fails open).
 type snAlertMuteRuleService struct{}
 
 // NewSNAlertMuteRuleService constructs the ServiceNow-mode AlertMuteRuleService, which refuses every call.
@@ -53,14 +53,6 @@ func (snAlertMuteRuleService) Create(context.Context, domain.SaveAlertMuteRuleRe
 }
 
 func (snAlertMuteRuleService) Update(context.Context, string, domain.PatchAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
-	return domain.AlertMuteRule{}, snAlertMuteRulesUnsupported()
-}
-
-func (snAlertMuteRuleService) Extend(context.Context, string, domain.ExtendAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
-	return domain.AlertMuteRule{}, snAlertMuteRulesUnsupported()
-}
-
-func (snAlertMuteRuleService) End(context.Context, string) (domain.AlertMuteRule, error) {
 	return domain.AlertMuteRule{}, snAlertMuteRulesUnsupported()
 }
 
