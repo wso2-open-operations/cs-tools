@@ -365,3 +365,35 @@ func TestCanClassifyNeedsBothClientsAndAnOwner(t *testing.T) {
 		}
 	}
 }
+
+// A registration is checked against every platform, whatever it entered through, so
+// a Cloud signup (no platform of its own) is validated by its work on any of them.
+func TestCloudRegistrationIsReadAgainstEveryPlatform(t *testing.T) {
+	reg := now.Add(-24 * time.Hour)
+	ent := &fakeEntity{items: []QueueItem{{OrgPlatformID: "p", CompanyID: "c1", RegisteredOn: reg}}, applied: map[string]ApplyRequest{}}
+	var hits []moesif.Hit
+	for i := range 10 {
+		hits = append(hits, moesif.Hit{Source: map[string]any{
+			"company_id": "c1", "request.time": reg.Add(time.Duration(i) * time.Minute).Format("2006-01-02T15:04:05.000"),
+			"action_name": "apip.admin.landing-page-open",
+		}})
+	}
+	src := &fakeMoesif{hits: hits}
+	opts := Options{Products: []string{CloudProduct}, Window: 12 * time.Hour, Grace: 24 * time.Hour,
+		Thresholds: Thresholds{Eligible: 10, Moderate: 5}}
+	if err := Run(src, ent, opts, func() time.Time { return now })(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprint(src.queries[0].Filter)
+	for _, platform := range Platforms {
+		if !strings.Contains(raw, platform) {
+			t.Errorf("filter %s does not select platform %q", raw, platform)
+		}
+	}
+	if got := value(ent.applied["p"], codeOutcome); got != OutcomeEligible {
+		t.Errorf("outcome = %q, want ELIGIBLE from 10 actions on another platform", got)
+	}
+	if !KnownProduct(CloudProduct) || KnownProduct("ENG_PLATFORM") {
+		t.Error("only the four platform products and the Cloud product can be validated")
+	}
+}
