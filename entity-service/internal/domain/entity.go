@@ -1604,10 +1604,15 @@ type ProjectDetailsView struct {
 // wso2ClosureStateRule) — setting one of those and re-fetching the project
 // is how a caller observes the resulting overall status.
 //
-// ClosureState itself is additionally a direct, Postgres-only override (no
-// ServiceNow equivalent — see hasSNMirrorableProjectFields): an admin may set
-// it straight to one of wso2_closure_state_enum's five values, bypassing the
-// derivation rule entirely. This is a deliberately simple mechanism with one
+// ClosureState itself is additionally a direct override of
+// project.wso2_closure_state (no ServiceNow equivalent — see
+// hasSNMirrorableProjectFields): an admin may set it straight to one of
+// wso2_closure_state_enum's five values, bypassing the derivation rule
+// entirely. When the value normalizes to SUSPENDED and a sales-entity client
+// is configured, that write also sets the Salesforce project's State__c to
+// Suspended first (PATCH /projects/{sfId} {"status":"Suspended"}); a
+// Salesforce failure leaves the CSM row unchanged. The other four values
+// stay in Postgres only. This is a deliberately simple mechanism with one
 // documented caveat, not hidden: a later PATCH that touches any of the three
 // sub-state fields recomputes the overall state from them again, silently
 // overwriting a manual override with no memory that one was ever set. Fine-
@@ -1638,7 +1643,8 @@ type ProjectUpdateRequest struct {
 	// data sources only — see this struct's own doc comment). One of
 	// "OPEN"/"READ_ONLY"/"CLOSED"/"RESTRICTED"/"SUSPENDED", case-insensitive
 	// and tolerant of spaces (normalized the same way the three sub-state
-	// fields above already are).
+	// fields above already are). SUSPENDED also sets Salesforce State__c to
+	// Suspended when a sales-entity client is configured.
 	ClosureState *string `json:"closureState,omitempty"`
 	// SuspensionProcessOverridden sets project.suspension_process_overridden
 	// (Postgres data sources only; rejected on the legacy data source). Only a

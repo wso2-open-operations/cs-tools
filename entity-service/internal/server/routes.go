@@ -953,14 +953,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// it). projectRepo/pgProjectSvc were already constructed above for
 	// GetProject/SearchProjects.
 	var activeProjectUpdateSvc service.ProjectUpdateService
+	// A nil *salesentity.Client passed straight into the ProjectStatusWriter
+	// interface is not a nil interface, and UpdateProject would call through
+	// it. Box it only when the client was actually constructed.
+	var projectStatusWriter service.ProjectStatusWriter
+	if salesEntityClient != nil {
+		projectStatusWriter = salesEntityClient
+	}
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
 		activeProjectUpdateSvc = service.NewServiceNowProjectUpdateService(serviceNowIntegrationServiceClient)
 	case config.DataSourcePostgresServiceNowDualWrite:
 		snProjectMirrorSvc := service.NewServiceNowProjectUpdateService(serviceNowIntegrationServiceClient)
-		activeProjectUpdateSvc = service.NewProjectUpdateServiceWithSNWriteback(projectRepo, userRepo, accessSvc, snWritebackDispatcher, snProjectMirrorSvc)
+		activeProjectUpdateSvc = service.NewProjectUpdateServiceWithSNWriteback(projectRepo, userRepo, accessSvc, snWritebackDispatcher, snProjectMirrorSvc, projectStatusWriter)
 	default:
-		activeProjectUpdateSvc = service.NewProjectUpdateService(projectRepo, userRepo, accessSvc)
+		activeProjectUpdateSvc = service.NewProjectUpdateServiceWithSalesEntity(projectRepo, userRepo, accessSvc, projectStatusWriter)
 	}
 	projectUpdateHandler := handler.NewProjectUpdateHandler(activeProjectUpdateSvc)
 

@@ -715,17 +715,66 @@ func absHours(h *float64) *float64 {
 	return &a
 }
 
-// UpdateProject implements ProjectRepository.
-func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error) {
+// SalesforceProjectID returns the project's Salesforce id (project.sf_id).
+// An empty string means the row exists but has no Salesforce id. A missing
+// row is a NotFoundError.
+func (r *projectRepo) SalesforceProjectID(ctx context.Context, id string) (string, error) {
+	ctx = WithSystemIdentity(ctx)
+	var sfID *string
+	err := r.db.QueryRow(ctx, `SELECT sf_id FROM project WHERE id = $1::uuid`, id).Scan(&sfID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", &apierror.NotFoundError{Msg: "project not found"}
+	}
+	if err != nil {
+		return "", fmt.Errorf("project salesforce id: %w", err)
+	}
+	if sfID == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*sfID), nil
+}
+
+// NormalizeClosureLabel maps a closure value to its enum label
+// ("Pending Notified" -> PENDING_NOTIFIED), the same normalization
+// UpdateProject stores. nil in, nil out.
+func NormalizeClosureLabel(v *string) *string {
+	return closureEnumLabel(v)
+}
+
+// ValidateProjectUpdate checks the request fields UpdateProject rejects before
+// it locks the row: closure labels, onboarding status, and onboarding dates.
+// Callers that write Salesforce from this request run it first, so an invalid
+// field never leaves a Salesforce change that the database write then refuses.
+func ValidateProjectUpdate(req domain.ProjectUpdateRequest) error {
 	if err := validateClosureFields(req); err != nil {
-		return domain.ProjectUpdateResult{}, err
+		return err
 	}
 	if req.OnboardingStatus != nil {
 		if _, err := onboardingStatusEnumLabels("onboardingStatus", []string{*req.OnboardingStatus}); err != nil {
-			return domain.ProjectUpdateResult{}, err
+			return err
 		}
 	}
-	if _, err := ParseOnboardingDates(req); err != nil {
+	_, err := ParseOnboardingDates(req)
+	return err
+}
+
+// UpdateProject implements ProjectRepository.
+func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error) {
+	return r.updateProject(ctx, id, req, updatedBy, nil)
+}
+
+// UpdateProjectBeforeCommit is UpdateProject with a call that runs inside the
+// row lock, after the account, onboarding-owner, and stored-date checks, and
+// before the UPDATE. The call receives the project's Salesforce id as read on
+// this transaction's connection. A failure from beforeCommit rolls the
+// transaction back with nothing written. The project update service uses it
+// to set Salesforce State__c only once those checks have passed.
+func (r *projectRepo) UpdateProjectBeforeCommit(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
+	return r.updateProject(ctx, id, req, updatedBy, beforeCommit)
+}
+
+func (r *projectRepo) updateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
+	if err := ValidateProjectUpdate(req); err != nil {
 		return domain.ProjectUpdateResult{}, err
 	}
 	// WithSystemIdentity: this writes only project and account, neither
@@ -735,7 +784,7 @@ func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.P
 	// middleware could not resolve to a scope.
 	ctx = WithSystemIdentity(ctx)
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (domain.ProjectUpdateResult, error) {
-		return updateProjectTx(ctx, tx, id, req, updatedBy)
+		return updateProjectTx(ctx, tx, id, req, updatedBy, beforeCommit)
 	})
 }
 
@@ -748,17 +797,17 @@ func firstDate(a, b *time.Time) *time.Time {
 }
 
 // updateProjectTx is UpdateProject's body, run inside tx.
-func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error) {
+func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.ProjectUpdateRequest, updatedBy string, beforeCommit func(context.Context, string) error) (domain.ProjectUpdateResult, error) {
 	// Lock the row first (mirrors CaseRepository.UpdateCase's own
 	// lock-before-read reasoning) so the account_id this reads is accurate
 	// even under a concurrent update to the same project, and so a
 	// nonexistent id is caught as NotFoundError before either UPDATE below
 	// runs.
-	var accountID *string
+	var accountID, salesforceID *string
 	var stored OnboardingDates
 	err := tx.QueryRow(ctx, `SELECT account_id, onboarding_start_date, onboarding_go_live_plan_date, onboarding_go_live_date, onboarding_expiry_date,
-		onboarding_production_readiness_completion_date
-		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry, &stored.ProductionReadiness)
+		onboarding_production_readiness_completion_date, sf_id
+		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry, &stored.ProductionReadiness, &salesforceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProjectUpdateResult{}, &apierror.NotFoundError{Msg: "project not found"}
 	}
@@ -821,6 +870,20 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		}
 	} else if err := dates.checkOrder(stored.Start); err != nil {
 		return domain.ProjectUpdateResult{}, err
+	}
+
+	// After every check that can reject the request from stored state. The
+	// Salesforce id is the one just read on this transaction's connection, so
+	// the callback does not take a second pool connection while this one is
+	// held. A failure here aborts the transaction with no project row change.
+	if beforeCommit != nil {
+		sfID := ""
+		if salesforceID != nil {
+			sfID = strings.TrimSpace(*salesforceID)
+		}
+		if err := beforeCommit(ctx, sfID); err != nil {
+			return domain.ProjectUpdateResult{}, err
+		}
 	}
 
 	// project.updated_on/updated_by is bumped on every successful call, even one
