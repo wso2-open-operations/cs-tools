@@ -2349,6 +2349,25 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// report names customers' cases, accounts and assignees.
 		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
 	}
+	// Alert mute rules (Operations > Alert mute rules, migration 0278): Postgres only. On the
+	// ServiceNow data source every route answers 400 (alert-core, through
+	// csm-integration-service, then mutes nothing). internalOnly: the rules
+	// name internal services and the staff who muted them.
+	var alertMuteRuleHandler *handler.AlertMuteRuleHandler
+	switch {
+	case cfg.DataSource == config.DataSourceServiceNow:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewSNAlertMuteRuleService())
+	case db != nil:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewAlertMuteRuleService(repository.NewAlertMuteRuleRepository(repository.NewScoped(db))))
+	}
+	if alertMuteRuleHandler != nil {
+		mux.HandleFunc("POST /alert-mute-rules/search", internalOnly(accessSvc, alertMuteRuleHandler.SearchAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules", internalOnly(accessSvc, alertMuteRuleHandler.ListAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.GetAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules", internalOnly(accessSvc, alertMuteRuleHandler.CreateAlertMuteRule))
+		mux.HandleFunc("PATCH /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.UpdateAlertMuteRule))
+		mux.HandleFunc("DELETE /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.DeleteAlertMuteRule))
+	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
 		mux.HandleFunc("GET /runbooks", internalOnly(accessSvc, runbookHandler.ListRunbooks))

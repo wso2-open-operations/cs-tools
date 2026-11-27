@@ -328,3 +328,16 @@ func (m *mockEntityAlertIncidentMappingClient) LookupAlertIncidentMappings(ctx c
 	}
 	return []byte(`{}`), nil
 }
+
+// ----- mock entity alert-mute-rule client -----
+
+type mockEntityAlertMuteRuleClient struct {
+	listActiveAlertMuteRulesFn func(ctx context.Context) ([]byte, error)
+}
+
+func (m *mockEntityAlertMuteRuleClient) ListActiveAlertMuteRules(ctx context.Context) ([]byte, error) {
+	if m.listActiveAlertMuteRulesFn != nil {
+		return m.listActiveAlertMuteRulesFn(ctx)
+	}
+	return []byte(`{"alertMuteRules":[]}`), nil
+}

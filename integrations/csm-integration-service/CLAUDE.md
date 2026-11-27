@@ -214,6 +214,16 @@ check whether the underlying entity-service operation is ServiceNow-backed
 Postgres-only (works fine over M2M unconditionally) before documenting a new
 endpoint one way or the other.
 
+## `GET /alert-mute-rules?status=active` is functional today
+
+It proxies entity-service's Postgres-only `GET /alert-mute-rules?status=active` (the alert
+rules whose window contains now and that were not ended early) for
+`sre-alert-core-service`, which mutes alerts matching them. `active` is the only status
+served (anything else is a 400). No forwarded identity is needed. Alert mute rules are
+created and changed only through the CSM Portal; this service exposes nothing else about
+them. It does not call sre-alert-core-service: alert-core calls this service, and the CSM
+portal backend reads alert-core's muted-alert data directly.
+
 ## Contacts and opportunity reads on `DATA_SOURCE=postgres`
 
 Contacts search and opportunity/invoice/link reads work over M2M only if this service's client id is in entity-service's `AUTH_INTERNAL_CLIENT_IDS`; otherwise 401/403.
@@ -269,7 +279,7 @@ handler so every `slog.*Context(r.Context(), …)` call automatically includes
 
 | Package | Upstream | Notes |
 |---------|----------|-------|
-| `entity` | Entity service | Account/Project + Contacts sub-resource, Case (search + patch + comment create + tag create), Opportunity/Invoice/ProjectOpportunityLink (read-only), incident creation/search/update, alert-incident mapping create/lookup; raw `[]byte` passthrough |
+| `entity` | Entity service | Account/Project + Contacts sub-resource, Case (search + patch + comment create + tag create), Opportunity/Invoice/ProjectOpportunityLink (read-only), incident creation/search/update, alert-incident mapping create/lookup, active alert mute rules; raw `[]byte` passthrough |
 
 A new upstream service would get its own package under `internal/`, following the
 same `Config`/`Client`/`NewClient`/`do()` pattern as `internal/entity`.

@@ -31,19 +31,25 @@ const bearerPrefix = "bearer "
 
 // RequireWakeToken guards /alertz with the shared ALERT_CORE_WAKE_TOKEN, sent as Authorization: Bearer <token>; an empty token rejects every call, so a missing secret never leaves the route open.
 func RequireWakeToken(token string, logger *slog.Logger) func(http.Handler) http.Handler {
+	return RequireToken(token, "wake token", logger)
+}
+
+// RequireToken guards a route with a shared secret sent as Authorization: Bearer <token>; name labels it in logs. An
+// empty token rejects every call, so a missing secret never leaves the route open.
+func RequireToken(token, name string, logger *slog.Logger) func(http.Handler) http.Handler {
 	// Comparing digests keeps the comparison constant-time even when the lengths differ.
 	want := sha256.Sum256([]byte(token))
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got, ok := bearerToken(r)
 			if !ok || token == "" {
-				logger.Warn("auth: missing or malformed wake token", "path", r.URL.Path)
+				logger.Warn("auth: missing or malformed "+name, "path", r.URL.Path)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 			digest := sha256.Sum256([]byte(got))
 			if subtle.ConstantTimeCompare(digest[:], want[:]) != 1 {
-				logger.Warn("auth: wrong wake token", "path", r.URL.Path)
+				logger.Warn("auth: wrong "+name, "path", r.URL.Path)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

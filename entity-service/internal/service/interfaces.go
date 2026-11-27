@@ -229,6 +229,22 @@ type RunbookService interface {
 	Import(ctx context.Context, req domain.ImportRunbooksRequest) (domain.ImportRunbooksResponse, error)
 }
 
+// AlertMuteRuleService manages alert mute rules (Operations > Alert mute rules): one-time windows during which SRE alerts matching every
+// condition are muted. Internal callers only (the routes are internalOnly). A write in the wrong state is a ConflictError.
+type AlertMuteRuleService interface {
+	Search(ctx context.Context, req domain.SearchAlertMuteRulesRequest) (domain.SearchAlertMuteRulesResponse, error)
+	Get(ctx context.Context, id string) (domain.AlertMuteRule, error)
+	// Active is every rule muting alerts now, for alert-core.
+	Active(ctx context.Context) (domain.ActiveAlertMuteRulesResponse, error)
+	Create(ctx context.Context, req domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error)
+	// Update is PATCH: on a scheduled rule a partial edit (only the fields present), validated as create does; on an
+	// active rule endOn alone extends it and state "ended" alone ends it now. A rule changed by another write after it
+	// was read is a 409.
+	Update(ctx context.Context, id string, req domain.PatchAlertMuteRuleRequest) (domain.AlertMuteRule, error)
+	// Delete removes a scheduled rule.
+	Delete(ctx context.Context, id string) error
+}
+
 // SNUserService defines the user operations backed by the ServiceNow data source.
 type SNUserService interface {
 	// SearchUsers returns a paginated list of ServiceNow users that match the

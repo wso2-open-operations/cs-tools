@@ -20,6 +20,7 @@ import {
   ArrowUpRight,
   Award,
   BarChart3,
+  BellOff,
   Briefcase,
   BookOpen,
   Bug,
@@ -202,6 +203,14 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         tab: "incidents",
         routes: ["/operations/incidents", "/operations/incident-tasks"],
         icon: AlertTriangle,
+      },
+      {
+        id: "operations.alert-mute-rules",
+        label: "Alert mute rules",
+        href: "/operations?tab=alert_mute_rules",
+        tab: "alert_mute_rules",
+        routes: ["/operations/alert-mute-rules"],
+        icon: BellOff,
       },
       {
         id: "operations.problems",
