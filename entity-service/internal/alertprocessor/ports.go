@@ -21,15 +21,16 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
 )
 
 // The processor depends only on these ports; the repository and incident writer implement them.
 
-// Store reads a fingerprint's group from its alerts and links each alert to its incident.
+// Store reads a fingerprint's group from its alerts and links each alert to its incident. A fingerprint is the alert's source, service, metric_name, environment and unique_identifier.
 type Store interface {
-	// InGroup runs fn in one transaction that holds the fingerprint's lock, so one fingerprint is decided by one worker at a time.
-	InGroup(ctx context.Context, fingerprint string, fn func(GroupTx) error) error
+	// InGroup runs fn in one transaction that holds the lock of the alert's fingerprint, so one fingerprint is decided by one worker at a time.
+	InGroup(ctx context.Context, alert model.Alert, fn func(GroupTx) error) error
 }
 
 // GroupTx is the transaction InGroup hands to its function.
@@ -38,9 +39,9 @@ type GroupTx interface {
 	Group(ctx context.Context) (*strategy.Group, error)
 	// Unlinked lists the fingerprint's other alerts received in [since, until] that belong to no incident, oldest first.
 	Unlinked(ctx context.Context, since, until time.Time, except string) ([]event.Event, error)
-	// AlertLinked reports whether the alert already belongs to an incident, which makes a redelivered event a no-op.
-	AlertLinked(ctx context.Context, alertID string) (bool, error)
-	LinkAlert(ctx context.Context, alertID, incidentID string) error
+	// AlertLinked reports whether the alert (by its ALT number) already belongs to an incident, which makes a redelivered event a no-op.
+	AlertLinked(ctx context.Context, alertNumber string) (bool, error)
+	LinkAlert(ctx context.Context, alertNumber, incidentID string) error
 }
 
 // IncidentWriter creates incidents and adds alerts to them.

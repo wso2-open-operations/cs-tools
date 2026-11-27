@@ -56,7 +56,7 @@ func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 		if todo.incidentID, err = p.Incidents.Open(ctx, e); err != nil {
 			return fmt.Errorf("open incident for %s: %w", e.AlertID, err)
 		}
-		return p.Store.InGroup(ctx, e.Fingerprint(), func(tx GroupTx) error {
+		return p.Store.InGroup(ctx, e.Alert, func(tx GroupTx) error {
 			if err := tx.LinkAlert(ctx, e.AlertID, todo.incidentID); err != nil {
 				return err
 			}
@@ -67,7 +67,7 @@ func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 			return fmt.Errorf("fold %s into incident %s: %w", e.AlertID, todo.incidentID, err)
 		}
 	}
-	return p.Store.InGroup(ctx, e.Fingerprint(), func(tx GroupTx) error {
+	return p.Store.InGroup(ctx, e.Alert, func(tx GroupTx) error {
 		return tx.LinkAlert(ctx, e.AlertID, todo.incidentID)
 	})
 }
@@ -75,7 +75,7 @@ func (p *Processor) Handle(ctx context.Context, e event.Event) error {
 // decide returns the step to carry out, or nil when there is none: the alert is already linked, the outcome writes nothing, or Apply is off.
 func (p *Processor) decide(ctx context.Context, e event.Event) (*step, error) {
 	var todo *step
-	err := p.Store.InGroup(ctx, e.Fingerprint(), func(tx GroupTx) error {
+	err := p.Store.InGroup(ctx, e.Alert, func(tx GroupTx) error {
 		linked, err := tx.AlertLinked(ctx, e.AlertID)
 		if err != nil || linked {
 			return err

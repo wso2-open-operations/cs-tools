@@ -38,13 +38,10 @@ type Publisher struct {
 	Producer Producer
 }
 
-// Publish sends one event per stored alert row, in order, skipping error rows; it stops at the first failure so the caller leaves the message to be redelivered.
+// Publish sends one event per stored alert row, in order, skipping a row with no alert; it stops at the first failure so the caller leaves the message to be redelivered.
 func (p Publisher) Publish(ctx context.Context, rows []domain.NewAlert) error {
 	for _, row := range rows {
-		e, ok, err := event.FromRow(row)
-		if err != nil {
-			return err
-		}
+		e, ok := event.FromRow(row)
 		if !ok {
 			continue
 		}

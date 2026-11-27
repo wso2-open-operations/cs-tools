@@ -52,9 +52,9 @@ func (s *fakeStore) add(e event.Event) event.Event {
 	return e
 }
 
-func (s *fakeStore) InGroup(_ context.Context, fingerprint string, fn func(GroupTx) error) error {
+func (s *fakeStore) InGroup(_ context.Context, alert model.Alert, fn func(GroupTx) error) error {
 	work := &fakeStore{alerts: maps.Clone(s.alerts), failLinks: s.failLinks}
-	err := fn(fakeTx{s: work, fingerprint: fingerprint})
+	err := fn(fakeTx{s: work, fingerprint: model.Fingerprint(alert)})
 	s.failLinks = work.failLinks
 	if err == nil {
 		s.alerts = work.alerts

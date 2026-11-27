@@ -32,6 +32,7 @@ const Type events.Type = "alert.created"
 
 // Event is one stored alert, as the processor needs it.
 type Event struct {
+	// AlertID is the alert's ALT number.
 	AlertID    string           `json:"alertId"`
 	Tier       domain.AlertTier `json:"tier"`
 	ReceivedOn time.Time        `json:"receivedOn"`
@@ -40,19 +41,15 @@ type Event struct {
 	Attempt int `json:"attempt,omitempty"`
 }
 
-// FromRow is the event for a stored alert row; ok is false for an error row, which has no alert to process.
-func FromRow(row domain.NewAlert) (e Event, ok bool, err error) {
-	if row.ErrorReason != "" || len(row.Alert) == 0 {
-		return Event{}, false, nil
+// FromRow is the event for a stored alert row; ok is false for a row with no alert, such as an error row stored before alerts had columns.
+func FromRow(row domain.NewAlert) (e Event, ok bool) {
+	if row.Alert.UniqueIdentifier == "" {
+		return Event{}, false
 	}
-	e = Event{AlertID: row.ID, Tier: row.Tier, ReceivedOn: row.ReceivedOn}
-	if err := json.Unmarshal(row.Alert, &e.Alert); err != nil {
-		return Event{}, false, fmt.Errorf("decode alert %s: %w", row.ID, err)
-	}
-	return e, true, nil
+	return Event{AlertID: row.Number, Tier: row.Tier, ReceivedOn: row.ReceivedOn, Alert: row.Alert}, true
 }
 
-// Fingerprint is the key an alert folds by; it is computed, never stored on the alert.
+// Fingerprint is the key an alert folds by, computed from its source, service, metric_name, environment and unique_identifier; it is not stored.
 func (e Event) Fingerprint() string {
 	return model.Fingerprint(e.Alert)
 }

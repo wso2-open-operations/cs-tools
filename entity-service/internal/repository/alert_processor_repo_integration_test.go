@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -60,13 +61,14 @@ func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
 		t.Fatalf("find an incident: %v", err)
 	}
 	seen := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
-	fingerprint := "it-group-" + time.Now().Format("150405.000000")
+	// One fingerprint: the same five fields on every alert.
+	key := model.Alert{Source: "it", Service: "it-group-" + time.Now().Format("150405.000000"), MetricName: "cpu", Environment: "prod", UniqueIdentifier: "it-group"}
 	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool)), 3, func(i int, row *domain.NewAlert) {
-		row.Fingerprint, row.ReceivedOn = fingerprint, seen.Add(time.Duration(i)*time.Minute)
+		row.Alert, row.ReceivedOn = key, seen.Add(time.Duration(i)*time.Minute)
 	})
 	groups := NewAlertGroups(NewScoped(pool))
 
-	err = groups.InGroup(ctx, fingerprint, func(tx alertprocessor.GroupTx) error {
+	err = groups.InGroup(ctx, key, func(tx alertprocessor.GroupTx) error {
 		if g, err := tx.Group(ctx); err != nil || g != nil {
 			t.Fatalf("Group = %+v, %v; want none before any alert is linked", g, err)
 		}
@@ -79,7 +81,7 @@ func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
 		t.Fatalf("InGroup: %v", err)
 	}
 
-	err = groups.InGroup(ctx, fingerprint, func(tx alertprocessor.GroupTx) error {
+	err = groups.InGroup(ctx, key, func(tx alertprocessor.GroupTx) error {
 		g, err := tx.Group(ctx)
 		if err != nil || g == nil || g.IncidentID != incidentID || g.AlertCount != 2 || !g.FirstSeenOn.Equal(seen) || !g.LastSeenOn.Equal(seen.Add(time.Minute)) {
 			t.Fatalf("Group = %+v, %v; want the incident with its two alerts", g, err)

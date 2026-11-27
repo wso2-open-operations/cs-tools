@@ -18,12 +18,12 @@ package publisher
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -42,18 +42,19 @@ func (p *fakeProducer) Publish(_ context.Context, key, value []byte) error {
 }
 
 func row(id string) domain.NewAlert {
-	return domain.NewAlert{ID: id, Tier: domain.AlertTierPriority, Fingerprint: "fp",
-		Alert: json.RawMessage(`{"source":"azure","service":"svc","metric_name":"cpu"}`)}
+	return domain.NewAlert{Number: id, Tier: domain.AlertTierPriority,
+		Alert: model.Alert{Source: "azure", Service: "svc", MetricName: "cpu", UniqueIdentifier: id}}
 }
 
-func TestPublishSkipsErrorRowsAndStopsAtTheFirstFailure(t *testing.T) {
-	errorRow := domain.NewAlert{ID: "E1", ErrorReason: "UnknownSource"}
+func TestPublishSkipsRowsWithNoAlertAndStopsAtTheFirstFailure(t *testing.T) {
+	// Such as an error row stored before alerts had columns, returned again for a redelivered message.
+	errorRow := domain.NewAlert{Number: "E1"}
 	producer := &fakeProducer{failAt: -1}
 	if err := (Publisher{Producer: producer}).Publish(context.Background(), []domain.NewAlert{row("A1"), errorRow, row("A2")}); err != nil {
 		t.Fatal(err)
 	}
 	if len(producer.values) != 2 {
-		t.Fatalf("published %d records, want the two alert rows and never the error row", len(producer.values))
+		t.Fatalf("published %d records, want the two alert rows and never the row with no alert", len(producer.values))
 	}
 	e, ok, err := event.Decode(producer.values[0])
 	if err != nil || !ok || e.AlertID != "A1" || producer.keys[0] != e.Fingerprint() {

@@ -21,6 +21,8 @@ package domain
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 )
 
 // UserType classifies a user's role within the system.
@@ -10878,24 +10880,21 @@ const (
 	AlertTierStandard AlertTier = "standard"
 )
 
-// NewAlert is one row the alert consumer stores in the alert table: a normalised alert, or the error for a message that could not be normalised.
+// NewAlert is one row the alert consumer stores in the alert table: one normalised alert.
 type NewAlert struct {
-	ID string
-	// Source is empty only on an error row whose message named no source, and is stored as NULL.
-	Source string
-	// Alert and Fingerprint are empty on an error row; Fingerprint is the key the alert processor folds by.
-	Alert        json.RawMessage
-	Fingerprint  string
+	// ID is the row's UUID, which the database assigns; Number is the ALT id people quote, such as ALT000000042.
+	ID     string
+	Number string
+	// Route is the gateway route the message arrived on, such as azure or prometheus; Alert.Source is the monitoring source the alert names.
+	Route string
+	// Alert is the normalised alert; each of its fields is a column.
+	Alert model.Alert
 	Tier         AlertTier
 	MessageID    string
 	MessageIndex int
-	// RawBody and ContentType are the message's body and content type, set on its first row (MessageIndex 0) only.
-	RawBody     []byte
-	ContentType string
-	// ErrorReason and Error say why the message could not be normalised; both are empty on an alert row.
-	ErrorReason string
-	Error       string
-	ReceivedOn  time.Time
+	// RawBody is the message's body as the source sent it, set on its first row (MessageIndex 0) only.
+	RawBody    []byte
+	ReceivedOn time.Time
 }
 
 // AlertQueueMessage is one message received from an alert queue, on Azure Service Bus or AWS SQS alike.
@@ -10906,8 +10905,6 @@ type AlertQueueMessage struct {
 	Body []byte
 	// Properties are the gateway's message properties, such as source and received_at.
 	Properties map[string]string
-	// ContentType is the Content-Type the source sent the body with, when the gateway passed one on.
-	ContentType string
 	// EnqueuedOn is when the queue stored the message, when the cloud reports it.
 	EnqueuedOn *time.Time
 	// LockedUntil is when the message becomes visible to other receivers again unless it is settled or renewed.

@@ -18,7 +18,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/event"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertprocessor/strategy"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -44,35 +44,43 @@ func NewAlertGroups(db *Scoped) *AlertGroups {
 }
 
 // InGroup implements alertprocessor.Store; the advisory lock on the fingerprint is released when the transaction ends.
-func (g *AlertGroups) InGroup(ctx context.Context, fingerprint string, fn func(alertprocessor.GroupTx) error) error {
+func (g *AlertGroups) InGroup(ctx context.Context, alert model.Alert, fn func(alertprocessor.GroupTx) error) error {
 	return g.db.InTx(WithSystemIdentity(ctx), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, fingerprint); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, model.Fingerprint(alert)); err != nil {
 			return fmt.Errorf("lock alert group: %w", err)
 		}
-		return fn(groupTx{tx: tx, fingerprint: fingerprint})
+		return fn(groupTx{tx: tx, alert: alert})
 	})
 }
 
 type groupTx struct {
-	tx          pgx.Tx
-	fingerprint string
+	tx    pgx.Tx
+	alert model.Alert
+}
+
+// sameFingerprint matches the alerts of one fingerprint by its five columns ($1 to $5), which alert_identity_idx covers.
+const sameFingerprint = `source = $1 AND service = $2 AND metric_name = $3 AND environment = $4 AND unique_identifier = $5`
+
+// key is the arguments sameFingerprint takes.
+func (t groupTx) key() []any {
+	return []any{t.alert.Source, t.alert.Service, t.alert.MetricName, t.alert.Environment, t.alert.UniqueIdentifier}
 }
 
 // groupQuery takes the incident of the fingerprint's latest linked alert, then that incident's alerts of the fingerprint.
 const groupQuery = `WITH current AS (
 	SELECT incident_id FROM alert
-	WHERE fingerprint = $1 AND incident_id IS NOT NULL
-	ORDER BY received_on DESC, id DESC
+	WHERE ` + sameFingerprint + ` AND incident_id IS NOT NULL
+	ORDER BY received_on DESC, number DESC
 	LIMIT 1
 )
 SELECT a.incident_id::text, min(a.received_on), max(a.received_on), count(*)
 FROM alert a JOIN current c ON a.incident_id = c.incident_id
-WHERE a.fingerprint = $1
+WHERE a.source = $1 AND a.service = $2 AND a.metric_name = $3 AND a.environment = $4 AND a.unique_identifier = $5
 GROUP BY a.incident_id`
 
 func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
-	g := strategy.Group{Fingerprint: t.fingerprint}
-	err := t.tx.QueryRow(ctx, groupQuery, t.fingerprint).Scan(&g.IncidentID, &g.FirstSeenOn, &g.LastSeenOn, &g.AlertCount)
+	g := strategy.Group{Fingerprint: model.Fingerprint(t.alert)}
+	err := t.tx.QueryRow(ctx, groupQuery, t.key()...).Scan(&g.IncidentID, &g.FirstSeenOn, &g.LastSeenOn, &g.AlertCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -83,38 +91,34 @@ func (t groupTx) Group(ctx context.Context) (*strategy.Group, error) {
 }
 
 func (t groupTx) Unlinked(ctx context.Context, since, until time.Time, except string) ([]event.Event, error) {
-	rows, err := t.tx.Query(ctx, `SELECT id, tier, received_on, alert FROM alert
-WHERE fingerprint = $1 AND incident_id IS NULL AND received_on BETWEEN $2 AND $3 AND id <> $4
-ORDER BY received_on, id`, t.fingerprint, since, until, except)
+	rows, err := t.tx.Query(ctx, `SELECT number, tier, received_on, `+alertFieldColumns+` FROM alert
+WHERE `+sameFingerprint+` AND incident_id IS NULL AND received_on BETWEEN $6 AND $7 AND number <> $8
+ORDER BY received_on, number`, append(t.key(), since, until, except)...)
 	if err != nil {
 		return nil, fmt.Errorf("read unlinked alerts: %w", err)
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (event.Event, error) {
 		var e event.Event
 		var tier string
-		var body []byte
-		if err := row.Scan(&e.AlertID, &tier, &e.ReceivedOn, &body); err != nil {
+		if err := row.Scan(append([]any{&e.AlertID, &tier, &e.ReceivedOn}, alertFieldDests(&e.Alert)...)...); err != nil {
 			return event.Event{}, err
 		}
 		e.Tier = domain.AlertTier(tier)
-		if err := json.Unmarshal(body, &e.Alert); err != nil {
-			return event.Event{}, fmt.Errorf("decode alert %s: %w", e.AlertID, err)
-		}
 		return e, nil
 	})
 }
 
-func (t groupTx) AlertLinked(ctx context.Context, alertID string) (bool, error) {
+func (t groupTx) AlertLinked(ctx context.Context, alertNumber string) (bool, error) {
 	var linked bool
-	if err := t.tx.QueryRow(ctx, `SELECT incident_id IS NOT NULL FROM alert WHERE id = $1`, alertID).Scan(&linked); err != nil {
-		return false, fmt.Errorf("read alert %s: %w", alertID, err)
+	if err := t.tx.QueryRow(ctx, `SELECT incident_id IS NOT NULL FROM alert WHERE number = $1`, alertNumber).Scan(&linked); err != nil {
+		return false, fmt.Errorf("read alert %s: %w", alertNumber, err)
 	}
 	return linked, nil
 }
 
-func (t groupTx) LinkAlert(ctx context.Context, alertID, incidentID string) error {
-	if _, err := t.tx.Exec(ctx, `UPDATE alert SET incident_id = $2 WHERE id = $1`, alertID, incidentID); err != nil {
-		return fmt.Errorf("link alert %s: %w", alertID, err)
+func (t groupTx) LinkAlert(ctx context.Context, alertNumber, incidentID string) error {
+	if _, err := t.tx.Exec(ctx, `UPDATE alert SET incident_id = $2 WHERE number = $1`, alertNumber, incidentID); err != nil {
+		return fmt.Errorf("link alert %s: %w", alertNumber, err)
 	}
 	return nil
 }
