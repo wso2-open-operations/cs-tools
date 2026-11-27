@@ -141,4 +141,5 @@ failure class turns up during review that isn't on this list, add it here in the
 - [ ] A SQL parameter whose only uses are in `CASE` branches or next to `NULL` has an explicit cast (`$4::timestamptz`);
       Postgres infers `text` and the statement fails at runtime, which a unit test with a fake repository never shows.
 - [ ] A kafka-go producer on a latency path sets `eventbus.Config.BatchTimeout` to a few ms: the default holds a lone
-      record for a second (seen in the alert relay's first build, and still in every `incident.created`).
+      record for a second (seen in the alert relay's first build, and in every `incident.created` until it got
+      `eventbus.PromptBatchTimeout`).

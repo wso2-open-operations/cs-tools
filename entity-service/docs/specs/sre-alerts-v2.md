@@ -37,7 +37,10 @@ gateways ──► priority queues (Service Bus, SQS) ─┐
   polling. The conditions that keep the hop fast and safe:
   - one topic, with relay backpressure, so the backlog stays in the priority-ordered table and no second topic or wait
     gate is needed;
-  - a 5 ms producer batch wait (kafka-go's default holds a lone record for a second);
+  - a 5 ms producer batch wait (`eventbus.PromptBatchTimeout`; kafka-go's default holds a lone record for a second). The
+    producers that carry `incident.created` use it too, since every create publishes it inside the decision: with the
+    default, a consumer raised about one new incident a second and a priority alert waited ~7 s in a 40-alert storm;
+    with it, the whole storm was decided within 0.1 s.
   - no row lock held while publishing: mark and commit, publish, and give back on failure;
   - a stale sweep, because Event Hubs has no per-message acknowledgement or dead letter.
 
@@ -61,10 +64,6 @@ gateways ──► priority queues (Service Bus, SQS) ─┐
 ## Known limits of phase 1
 
 - **No mute rules.** Alert mute rules are not applied; a muted alert in v1 raises an incident here. Phase 2.
-- **Slow incident creates under load.** Each new incident publishes `incident.created` through the main event
-  producer, which keeps kafka-go's one-second batch wait, so a consumer raises about one new incident a second. In a
-  40-alert local storm a priority alert waited about 7 s on its partition behind in-flight creates. Joining an open
-  incident is not slowed. A short `BatchTimeout` on the domain-event producers lifts it.
 - An alert that joins an open incident adds nothing to it: no Duplicate / OK work note, no severity escalation.
 - Nothing pages on a FAILED alert or a dead-lettered message beyond the ERROR log.
 - Alerts of one fingerprint are serialized, not strictly ordered: under retries a later alert can be decided first.

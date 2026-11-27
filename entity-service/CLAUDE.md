@@ -435,7 +435,9 @@ two are kept in sync by hand, same as `csm-notification-service`'s own copy.
 wraps a `kafkaProducer` (satisfied by `*eventbus.Producer`) and publishes a
 domain event via `Publish(ctx, eventType, entityID, payload)`, keyed by
 `entityID` so every event about the same case/incident stays ordered on the
-same partition. If Event Hub doesn't acknowledge the publish, it durably
+same partition. The case/incident producers set `BatchTimeout: eventbus.PromptBatchTimeout`
+(5 ms): `Publish` is synchronous and sits inside requests and the alert processor's decisions, and
+kafka-go's default would hold each lone record for a second. If Event Hub doesn't acknowledge the publish, it durably
 records the failure via `EventPublishFailureService.CreateEventPublishFailure`
 — called directly, in-process, unlike `apps/csm-portal/backend`'s own
 `eventpublisher.Publisher`, which has to reach this same table over HTTP

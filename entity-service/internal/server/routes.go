@@ -181,6 +181,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Broker:           cfg.EventHubBroker,
 				ConnectionString: cfg.EventHubConnectionString,
 				Topic:            cfg.EventHubTopic,
+				// incident.created (and every case event) is published inside the request or the alert processor's
+				// decision; kafka-go's default would hold each one for a second.
+				BatchTimeout: eventbus.PromptBatchTimeout,
 			}),
 			eventPublishFailureSvc,
 		)
@@ -218,6 +221,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Broker:           cfg.EventHubBroker,
 				ConnectionString: cfg.EventHubConnectionString,
 				Topic:            cfg.IncidentEventHubTopic,
+				BatchTimeout:     eventbus.PromptBatchTimeout,
 			}),
 			eventPublishFailureSvc,
 		)

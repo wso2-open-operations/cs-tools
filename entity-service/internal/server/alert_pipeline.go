@@ -41,9 +41,6 @@ import (
 // hold every later alert on the partition.
 var alertTopicRetryPolicy = eventbus.RetryPolicy{Attempts: 3, Delay: time.Second}
 
-// alertProducerBatchTimeout lets the relay's lone records go at once instead of after kafka-go's one-second default.
-const alertProducerBatchTimeout = 5 * time.Millisecond
-
 // startAlertPipeline runs the SRE alert pipeline: the queue consumer (Service Bus and SQS to the alert table), the
 // alert relay (the alert table as the outbox, publishing alert.created), the alert_stored listener that wakes it, and
 // ALERT_PROCESSOR_CONCURRENCY alert.created consumers in one group, each deciding the alerts of its partitions. It
@@ -65,7 +62,7 @@ func startAlertPipeline(cfg *config.Config, db *pgxpool.Pool, incidents service.
 		Broker:           cfg.EventHubBroker,
 		ConnectionString: cfg.EventHubConnectionString,
 		Topic:            cfg.AlertEventHubTopic,
-		BatchTimeout:     alertProducerBatchTimeout,
+		BatchTimeout:     eventbus.PromptBatchTimeout,
 	}
 	producer := eventbus.NewProducer(topicCfg)
 	relay := service.NewAlertRelay(repository.NewAlertRelayRepository(repository.NewScoped(db)), producer, service.AlertRelayConfig{
