@@ -19,6 +19,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/print.css";
 import AppWithConfig from "./AppWithConfig";
+import DirectAccessDisabled from "./DirectAccessDisabled";
+import { directAccessEnabled, hostAppAddressFor } from "@config/directAccessConfig";
 import { POST_LOGIN_REDIRECT_KEY } from "@layouts/postLoginRedirect";
 import { isTopLevelWindow } from "@utils/isTopLevelWindow";
 
@@ -92,11 +94,19 @@ if (typeof window !== "undefined") {
   });
 }
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <AppWithConfig />
-  </React.StrictMode>,
-);
+// This entry is the portal opened at its own address. A deployment that is
+// reached through a host application can turn that off: the person is sent to
+// the same page inside the host, or told so when there is no host address to
+// send them to. The host loads the portal through its own entry
+// (src/remote/RemoteEntry.tsx), which never comes through here.
+const hostAddress = directAccessEnabled() ? null : hostAppAddressFor(window.location);
+if (hostAddress) {
+  window.location.replace(hostAddress);
+} else {
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>{directAccessEnabled() ? <AppWithConfig /> : <DirectAccessDisabled />}</React.StrictMode>,
+  );
+}
 
 // Clear the reload guard once the tab has stayed up long enough to prove this
 // mount is healthy (not the same failure looping). Without this, the guard —
