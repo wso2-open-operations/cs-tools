@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import { useState, useMemo, useEffect, useRef, type JSX } from "react";
 import {
   Box,
@@ -157,6 +158,7 @@ export default function ServiceRequestDetailContent({
   const patchCase = usePatchCase(projectId ?? "", caseId);
   const { showSuccess } = useSuccessBanner();
   const { showError } = useErrorBanner();
+  const { maxInlineImagesTotalBytes } = useAttachmentLimits();
   const [pendingActionLabel, setPendingActionLabel] = useState<string | null>(
     null,
   );
@@ -694,7 +696,7 @@ export default function ServiceRequestDetailContent({
                       ? ERROR_UNSUPPORTED_TYPE
                       : reason === "count"
                         ? imageCountExceededMessage()
-                        : imageSizeExceededMessage(),
+                        : imageSizeExceededMessage(maxInlineImagesTotalBytes),
                   )
                 }
               />

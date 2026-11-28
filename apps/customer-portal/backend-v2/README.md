@@ -108,17 +108,11 @@ differ.
 | `ENTITY_SERVICE_BASE_URL` | Base URL of `cs-tools/entity-service` |
 | `ENTITY_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
-### Attachment storage (Azure Blob Storage)
+### Attachment storage
 
-Work item, comment-image and deployment attachments are stored in Azure Blob Storage. The service exits at startup if the container cannot be reached.
-
-| Variable | Description |
-|---|---|
-| `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_CONTAINER` | Storage account and (existing) container name |
-| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | Entra app that signs in (recommended); needs "Storage Blob Data Contributor" on the container only. Keep the secret in the secret store |
-| `AZURE_STORAGE_KEY` | Account shared key (development only; full control of the account) |
-| `AZURE_STORAGE_CONNECTION_STRING` / `AZURE_STORAGE_ENDPOINT` | Azurite (local development) |
-| `AZURE_STORAGE_CREATE_CONTAINER` | `true` creates the container if missing (Azurite, development only) |
+Work item, comment-image and deployment attachments live in Azure Blob Storage, and entity-service is the only
+service that talks to it. This service forwards a browser's chunks to entity-service and streams its answer back,
+so it has no storage settings of its own: the `AZURE_STORAGE_*` variables belong to entity-service.
 
 ### Updates service
 
@@ -302,7 +296,7 @@ backend-v2/
 │       ├── cases.go             # cases search/get/create/update/comment/activities/feedback/escalations, case attachment list
 │       ├── deployments.go       # POST /projects/{id}/deployments/search, POST /projects/{id}/deployments, PATCH /projects/{projectId}/deployments/{id}, deployment-scoped attachment update
 │       ├── deployed_products.go # deployed-product search/create/update (scoped under /deployments/{deploymentId}/products) + per-deployed-product metrics/usage-counts
-│       ├── attachments.go       # stored attachments (Azure Blob): chunked upload, streamed download, delete
+│       ├── attachments.go       # stored attachments: chunked upload, streamed download, delete (forwarded to entity-service)
 │       ├── products.go          # GET /products, POST /products/search, POST /products/{id}/versions/search
 │       ├── product_vulnerabilities.go # vulnerability search/get
 │       ├── catalogs.go          # catalog search (scoped under /deployments/products/{deployedProductId}), catalog item variables

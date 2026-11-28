@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 )
 
 // Client is the subset of *ledger.Client this package depends on —
@@ -49,6 +51,78 @@ func CleanupResolvedRuns(client Client, retention time.Duration) func(ctx contex
 			return fmt.Errorf("housekeeping: delete resolved runs before %s: %w", cutoff.Format(time.RFC3339), err)
 		}
 		slog.InfoContext(ctx, "housekeeping: deleted resolved scheduled_task_run rows", "cutoff", cutoff.Format(time.RFC3339), "deleted", deleted)
+		return nil
+	}
+}
+
+// AttachmentCleaner asks entity-service to clean up abandoned attachment uploads.
+type AttachmentCleaner interface {
+	CleanupAttachmentUploads(ctx context.Context) (ledger.AttachmentCleanup, error)
+}
+
+// CleanupAttachmentUploads returns a registry.Task.Handler that runs entity-service's
+// attachment upload cleanup. Entity-service does the work; this only triggers it.
+// A file that could not be removed is tried again on the next run, so it is logged
+// as a warning, not failed.
+func CleanupAttachmentUploads(client AttachmentCleaner) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		result, err := client.CleanupAttachmentUploads(ctx)
+		if err != nil {
+			return fmt.Errorf("housekeeping: attachment upload cleanup: %w", err)
+		}
+		slog.InfoContext(ctx, "housekeeping: attachment upload cleanup done",
+			"uploadsCleaned", result.Cleaned, "imagesRemoved", result.ImagesRemoved, "reportDraftsRemoved", result.ReportDraftsRemoved)
+		failed := result.Failed + result.ImagesFailed + result.ReportDraftsFailed
+		if failed > 0 || len(result.Orphans) > 0 {
+			slog.WarnContext(ctx, "housekeeping: some attachment files were not removed and will be tried again",
+				"failed", failed, "orphans", len(result.Orphans))
+		}
+		return nil
+	}
+}
+
+// AttachmentRetentionConfig is how the retention job runs.
+type AttachmentRetentionConfig struct {
+	// ClosedForDays is how long a work item must have been closed before its files go.
+	ClosedForDays int
+	// BatchSize is how many attachments one call handles.
+	BatchSize int
+	// DryRun counts what would be removed and removes nothing.
+	DryRun bool
+}
+
+// maxRetentionPages bounds one run; a larger backlog is worked off over several runs.
+const maxRetentionPages = 20
+
+// AttachmentRetentionClient asks entity-service to remove the files of closed work items.
+type AttachmentRetentionClient interface {
+	ExpireClosedAttachments(ctx context.Context, closedForDays, limit int, dryRun bool) (ledger.AttachmentRetention, error)
+}
+
+// ExpireClosedAttachments returns a registry.Task.Handler that removes the files of
+// work items that have been closed for cfg.ClosedForDays. Entity-service decides what
+// is due and does the removal; this asks for one page at a time until it is done.
+// A file that could not be removed is tried again next run, so it only warns.
+func ExpireClosedAttachments(client AttachmentRetentionClient, cfg AttachmentRetentionConfig) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		var expired, failed int
+		for page := 0; page < maxRetentionPages; page++ {
+			result, err := client.ExpireClosedAttachments(ctx, cfg.ClosedForDays, cfg.BatchSize, cfg.DryRun)
+			if err != nil {
+				return fmt.Errorf("housekeeping: attachment retention: %w", err)
+			}
+			expired += result.Expired
+			failed += result.Failed
+			// A dry run changes nothing, so another page would show the same rows.
+			if !result.More || cfg.DryRun {
+				break
+			}
+		}
+		slog.InfoContext(ctx, "housekeeping: attachment retention done",
+			"closedForDays", cfg.ClosedForDays, "dryRun", cfg.DryRun, "expired", expired, "failed", failed)
+		if failed > 0 {
+			slog.WarnContext(ctx, "housekeeping: some attachment files were not removed and will be tried again", "failed", failed)
+		}
 		return nil
 	}
 }

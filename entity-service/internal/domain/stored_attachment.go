@@ -45,6 +45,9 @@ const (
 	// AttachmentUnavailableDeleted: the attachment was deleted by the person who
 	// uploaded it; its file is gone.
 	AttachmentUnavailableDeleted = "DELETED"
+	// AttachmentUnavailableExpired: the file was removed after its work item had
+	// been closed for the retention period.
+	AttachmentUnavailableExpired = "EXPIRED"
 )
 
 // InitiateAttachmentUploadRequest is the body of POST /attachments/upload.
@@ -72,6 +75,27 @@ type InitiateAttachmentUploadResponse struct {
 	Number       string    `json:"number"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	MaxBytes     int64     `json:"maxBytes"`
+	// DirectUpload says the file may be sent straight to Azure through the links of
+	// POST /attachments/{id}/upload-links instead of chunk by chunk through the
+	// portal backend. It is only true for a file above the direct-transfer size.
+	DirectUpload bool `json:"directUpload"`
+}
+
+// DirectUploadLinks is the answer of POST /attachments/{id}/upload-links: one
+// link per chunk. The client sends chunk i (ChunkBytes long, the last one
+// shorter) with a PUT to Links[i], then confirms the upload as usual.
+type DirectUploadLinks struct {
+	Links      []string  `json:"links"`
+	ChunkBytes int64     `json:"chunkBytes"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+}
+
+// DirectDownloadLink is the answer of POST /attachments/{id}/download-links: a
+// link the client reads the file from, as a download named Name.
+type DirectDownloadLink struct {
+	URL       string    `json:"url"`
+	Name      string    `json:"name"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // ConfirmAttachmentUploadRequest is the body of
@@ -120,6 +144,12 @@ type AttachmentUploadTarget struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 	MaxBytes   int64  `json:"maxBytes"`
 	StorageKey string `json:"storageKey"`
+	// Staged is true when the upload may be sent straight to Azure. Its chunks are
+	// put under a staging key and copied to StorageKey at confirm.
+	Staged bool `json:"-"`
+	// ChunkRouteMaxBytes is the largest file the chunk route sends through this
+	// service: the ordinary limit, whatever MaxBytes is.
+	ChunkRouteMaxBytes int64 `json:"-"`
 }
 
 // LocateAttachmentRequest is the body of POST /attachments/locate.
@@ -162,6 +192,14 @@ type InlineImageRelocatedRequest struct {
 	// StorageKey is the key the backend moved the file to; it must be the one
 	// RelocateTo named.
 	StorageKey string `json:"storageKey"`
+}
+
+// DeletedStoredAttachment is the file a delete leaves to be set aside.
+// Empty when nothing was deleted by this call.
+type DeletedStoredAttachment struct {
+	Number     string
+	Name       string
+	StorageKey string
 }
 
 // DeleteStoredAttachmentRequest is the body of POST /attachments/delete.
@@ -208,6 +246,8 @@ type StoredAttachmentRow struct {
 	// Draft is true for a comment image uploaded to a project before the record
 	// whose description shows it exists (no work item and no comment yet).
 	Draft bool
+	// Staged is true for an upload that may be sent straight to Azure.
+	Staged bool
 }
 
 // StoredAttachmentInsert is a new, not yet stored, attachment.
@@ -219,6 +259,28 @@ type StoredAttachmentInsert struct {
 	CreatedBy   string
 	// Draft: ParentID is a project, and the row is a draft description image.
 	Draft bool
+	// Staged: the upload may be sent straight to Azure (see StoredAttachmentRow.Staged).
+	Staged bool
+	// MaxPendingStaged, when above 0, is how many staged uploads CreatedBy may have
+	// pending (created after PendingSince) once this one is added. It is checked in
+	// the same transaction as the insert.
+	MaxPendingStaged int
+	PendingSince     time.Time
+}
+
+// AttachmentLimits is the answer of GET /attachments/limits: the sizes the portals
+// may offer, so a webapp keeps no copy of them in its own configuration.
+type AttachmentLimits struct {
+	// MaxFileBytes is the largest file that may be uploaded as an attachment: the
+	// direct-upload maximum while direct uploads are on and above the portal limit,
+	// else the portal limit.
+	MaxFileBytes int64 `json:"maxFileBytes"`
+	// MaxInlineImagesTotalBytes is the most image bytes one comment or description
+	// may hold in total (and so the largest single image).
+	MaxInlineImagesTotalBytes int64 `json:"maxInlineImagesTotalBytes"`
+	// DirectTransferThresholdBytes is the size above which a file goes straight between
+	// the browser and Azure. 0 when direct transfers are off.
+	DirectTransferThresholdBytes int64 `json:"directTransferThresholdBytes"`
 }
 
 // AbandonedUpload is an upload that was started and never confirmed.
@@ -272,4 +334,52 @@ type AcknowledgeOrphansRequest struct {
 type AcknowledgeOrphansResult struct {
 	Acknowledged int `json:"acknowledged"`
 	Skipped      int `json:"skipped"`
+}
+
+// CompleteAttachmentUploadRequest is the body of POST /attachments/upload/{id}/confirm:
+// the number of chunks the browser sent. This service assembles them into the file,
+// reads its real size and type, and runs the final checks.
+type CompleteAttachmentUploadRequest struct {
+	Kind   StoredAttachmentKind `json:"type"`
+	ID     string               `json:"-"`
+	Chunks int                  `json:"chunks"`
+}
+
+// UploadChunkList is the chunks already stored for an upload, so an interrupted
+// upload can carry on where it stopped.
+type UploadChunkList struct {
+	ChunkBytes int           `json:"chunkBytes"`
+	Chunks     []UploadChunk `json:"chunks"`
+}
+
+// UploadChunk is one stored chunk of an upload.
+type UploadChunk struct {
+	Index int   `json:"index"`
+	Size  int64 `json:"size"`
+}
+
+// ExpireAttachmentsRequest is the body of POST /attachments/retention/expire.
+type ExpireAttachmentsRequest struct {
+	// ClosedForDays is how long a work item must have been closed before its
+	// attachments are removed. At least MinRetentionDays, so a typo cannot remove
+	// recent files.
+	ClosedForDays int `json:"closedForDays"`
+	// Limit bounds the attachments handled in one call (default 100, at most 500).
+	Limit int `json:"limit,omitempty"`
+	// DryRun lists what would be removed and changes nothing.
+	DryRun bool `json:"dryRun,omitempty"`
+}
+
+// ExpireAttachmentsResult is what one retention run did.
+type ExpireAttachmentsResult struct {
+	DryRun bool `json:"dryRun"`
+	// Found is how many attachments were due, Expired how many were removed (or, in
+	// a dry run, would be), Failed how many could not be (tried again next run).
+	Found   int `json:"found"`
+	Expired int `json:"expired"`
+	Failed  int `json:"failed"`
+	// More is true when the page was full, so another call may find more.
+	More bool `json:"more"`
+	// Attachments are the numbers of the ones removed (or that would be).
+	Attachments []string `json:"attachments,omitempty"`
 }

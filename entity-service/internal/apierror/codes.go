@@ -138,3 +138,7 @@ const (
 // that was deleted or removed after its work item closed. A client shows
 // "removed" for it and a plain "not available" for a 404.
 const CodeAttachmentRemoved = "attachment_removed"
+
+// CodeAttachmentExpired is the 410 for an attachment whose file was removed because
+// its work item stayed closed past the retention period.
+const CodeAttachmentExpired = "attachment_expired"

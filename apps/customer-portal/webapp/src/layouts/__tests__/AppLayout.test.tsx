@@ -33,6 +33,28 @@ const mockShellState = {
   expandedMenus: {},
 };
 
+// AppLayout reads the user details query; stub it so no QueryClient/Logger provider is needed.
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
+vi.mock("@features/settings/api/useGetUserDetails", () => ({
+  default: () => ({ data: undefined, error: null, isLoading: false }),
+}));
+
+vi.mock("@context/error-page/ErrorPageContext", () => ({
+  useErrorPageContext: () => ({ isErrorPageDisplayed: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
   const actual = (await importOriginal()) as any;
   await import("react");

@@ -37,6 +37,7 @@ import {
   ENTITY_ATTACHMENT_RATE_LIMIT_MESSAGE,
   entityAttachmentErrorMessage,
   EntityUploadConfirmError,
+  DIRECT_TRANSFER_MIN_BYTES,
   UPLOAD_CHUNK_BYTES,
   UPLOAD_CANCELLED_MESSAGE,
   fetchEntityAttachmentBlob,
@@ -639,8 +640,8 @@ describe("chunked upload and streamed download", () => {
         downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
       ).rejects.toThrow("The download was interrupted.");
       expect(save).not.toHaveBeenCalled();
-      // The 100 MB ceiling in 8 MiB ranges, plus the one for the refusal, then it stops.
-      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + Math.ceil(100 / 8) + 1 + 8);
+      // The 1024 MB ceiling in 8 MiB ranges, plus the one for the refusal, then it stops.
+      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + Math.ceil(1024 / 8) + 1 + 8);
     });
 
     it("reads a range again, rather than ending the file, when its body is cut short of its Content-Length", async () => {
@@ -875,6 +876,438 @@ describe("chunked upload and streamed download", () => {
       await run(server.getResponse, save);
       expect(disk.picker).not.toHaveBeenCalled();
       expect(save).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe("direct transfers of large files", () => {
+  const CHUNK = UPLOAD_CHUNK_BYTES;
+  const started = {
+    attachmentId: "att-1",
+    number: "WIA0000001",
+    expiresAt: "2026-10-27T10:15:00Z",
+    maxBytes: 100 * 1024 * 1024,
+    directUpload: true,
+  };
+  const confirmed = { id: "att-1", number: "WIA0000001", name: "big.bin", sizeBytes: 0, status: "COMPLETE" };
+  const bigFile = (size: number) =>
+    ({
+      size,
+      name: "big.bin",
+      type: "application/octet-stream",
+      slice: (from: number, to: number) => new Blob([new Uint8Array(to - from)]),
+    }) as unknown as File;
+  const args = (file: File) => ({ type: "work_item" as const, parentId: "wi-1", file });
+  const linksFor = (count: number) => ({
+    links: Array.from({ length: count }, (_, i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`),
+    chunkBytes: CHUNK,
+    expiresAt: "2026-10-27T10:45:00Z",
+  });
+  const apiFor = (over: Partial<Record<"post" | "postEmpty" | "putBinary" | "get" | "getResponse", ReturnType<typeof vi.fn>>>) =>
+    ({ post: vi.fn(), postEmpty: vi.fn(), putBinary: vi.fn().mockResolvedValue(undefined), get: vi.fn(), getResponse: vi.fn(), ...over }) as unknown as BackendApi;
+  const okResponse = () => Promise.resolve(new Response(null, { status: 201 }));
+
+  beforeEach(() => {
+    window.config = {} as typeof window.config;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("sends each chunk to its own signed link without the session's token, then confirms", async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => okResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(3));
+    const putBinary = vi.fn();
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK + 5)));
+    expect(postEmpty).toHaveBeenCalledWith("/attachments/att-1/upload-links?type=work_item");
+    expect(putBinary).not.toHaveBeenCalled();
+    const sent = fetchMock.mock.calls.map((c) => String(c[0])).sort();
+    expect(sent).toEqual([0, 1, 2].map((i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`));
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).method).toBe("PUT");
+      expect((call[1] as RequestInit).headers).toBeUndefined();
+    }
+    expect(post.mock.calls[1][0]).toBe("/attachments/upload/att-1/confirm");
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 3 });
+  });
+
+  it("never asks for links for a file that fits in one chunk, even when the server allows direct", async () => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn();
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(DIRECT_TRANSFER_MIN_BYTES)));
+    expect(postEmpty).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(putBinary).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["no chunk size", { links: ["https://blob.example/x"], expiresAt: "x" }],
+    ["a zero chunk size", { ...linksFor(2), chunkBytes: 0 }],
+    ["a negative chunk size", { ...linksFor(2), chunkBytes: -8 }],
+    ["a fractional chunk size", { ...linksFor(2), chunkBytes: 1.5 }],
+    ["links that are not a list", { ...linksFor(2), links: "https://blob.example/x" }],
+    ["too few links", linksFor(1)],
+  ])("sends the chunks through the backend when the links answer has %s", async (_name, answer) => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(answer);
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    expect(fetchMock).not.toHaveBeenCalled(); // nothing was sent to an address from a bad answer
+    expect(putBinary).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
+  });
+
+  it("sends the chunks through the backend when the links cannot be had", async () => {
+    vi.stubGlobal("fetch", vi.fn(okResponse));
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockRejectedValue(apiError(400, "This upload cannot be sent directly."));
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    expect(putBinary).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
+  });
+
+  it("asks for new links when they expire part-way, and carries on", async () => {
+    // The first links are refused as expired; the new ones work.
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(new Response(null, { status: String(url).includes("fresh") ? 201 : 403 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const fresh = { ...linksFor(3), links: linksFor(3).links.map((l) => `${l}&fresh=1`) };
+    const postEmpty = vi.fn().mockResolvedValueOnce(linksFor(3)).mockResolvedValue(fresh);
+    const putBinary = vi.fn();
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK + 5)));
+    expect(postEmpty).toHaveBeenCalledTimes(2); // one replacement, shared by every chunk in flight
+    expect(putBinary).not.toHaveBeenCalled(); // never fell back
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 3 });
+    const okUrls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("fresh"));
+    expect(okUrls).toHaveLength(3);
+  });
+
+  it("falls back to the backend when Azure keeps refusing, after replacing the links a few times", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 403 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    expect(postEmpty).toHaveBeenCalledTimes(4); // the first links and three replacements
+    expect(putBinary).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
+  });
+
+  it("tries a chunk again when Azure is busy", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockImplementation(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
+    const putBinary = vi.fn();
+    const done = uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toMatchObject({ status: "COMPLETE" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it("stops, and does not fall back, when the upload is cancelled", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        controller.abort();
+        return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      }),
+    );
+    const post = vi.fn().mockResolvedValueOnce(started);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
+    const putBinary = vi.fn();
+    await expect(
+      uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), { ...args(bigFile(2 * CHUNK)), signal: controller.signal }),
+    ).rejects.toThrow(UPLOAD_CANCELLED_MESSAGE);
+    expect(putBinary).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1); // never confirmed
+  });
+
+  describe("download", () => {
+    const click = () => vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    it("hands a large file's signed link to the browser as a download", async () => {
+      const clicked = click();
+      const fetchMock = vi.fn().mockResolvedValue(new Response("0", { status: 206 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const postEmpty = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
+      const getResponse = vi.fn();
+      const onSaved = vi.fn();
+      const done = await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), {
+        type: "work_item",
+        id: ID,
+        name: "big.bin",
+        size: DIRECT_TRANSFER_MIN_BYTES + 1,
+        directTransferThresholdBytes: DIRECT_TRANSFER_MIN_BYTES,
+        onSaved,
+      });
+      expect(done).toBe(true);
+      expect(postEmpty).toHaveBeenCalledWith(`/attachments/${ID}/download-links?type=work_item`, { signal: undefined });
+      // The link is checked with a one-byte read before the browser is handed it.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe("https://blob.example/x?sig=s");
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET", headers: { Range: "bytes=0-0" } });
+      expect(clicked).toHaveBeenCalledTimes(1);
+      expect(onSaved).toHaveBeenCalledWith("started");
+      expect(getResponse).not.toHaveBeenCalled(); // nothing streamed through the backend
+    });
+
+    it("streams through the backend when no link is available", async () => {
+      const clicked = click();
+      const body = () =>
+        new Response("0123456789", {
+          status: 206,
+          headers: { "Content-Range": "bytes 0-9/10", "Content-Disposition": 'attachment; filename="big.bin"' },
+        });
+      for (const postEmpty of [vi.fn().mockResolvedValue(null), vi.fn().mockRejectedValue(apiError(404, "off"))]) {
+        const getResponse = vi.fn().mockResolvedValue(body());
+        const save = vi.fn();
+        const done = await downloadEntityAttachment(
+          apiFor({ postEmpty, getResponse }),
+          { type: "work_item", id: ID, size: 10, directTransferThresholdBytes: 5 },
+          save,
+        );
+        expect(done).toBe(true);
+        expect(getResponse).toHaveBeenCalledTimes(1);
+      }
+      expect(clicked).not.toHaveBeenCalled();
+    });
+
+    it("streams through the backend, and starts no download, when Azure refuses the link", async () => {
+      const clicked = click();
+      const body = () =>
+        new Response("0123456789", {
+          status: 206,
+          headers: { "Content-Range": "bytes 0-9/10", "Content-Disposition": 'attachment; filename="big.bin"' },
+        });
+      const refusals = [() => Promise.resolve(new Response("<Error/>", { status: 403 })), () => Promise.reject(new TypeError("blocked by CORS"))];
+      for (const refuse of refusals) {
+        vi.stubGlobal("fetch", vi.fn(refuse));
+        const postEmpty = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
+        const getResponse = vi.fn().mockResolvedValue(body());
+        const done = await downloadEntityAttachment(
+          apiFor({ postEmpty, getResponse }),
+          { type: "work_item", id: ID, size: 10, directTransferThresholdBytes: 5 },
+          vi.fn(),
+        );
+        expect(done).toBe(true);
+        expect(getResponse).toHaveBeenCalledTimes(1);
+      }
+      expect(clicked).not.toHaveBeenCalled();
+    });
+
+    it("goes direct only above the server's size, never when it is 0 or the size is unknown", async () => {
+      click();
+      const cases = [
+        { size: 5, directTransferThresholdBytes: 5 },
+        { size: 10, directTransferThresholdBytes: 0 },
+        { size: undefined, directTransferThresholdBytes: 5 },
+      ];
+      for (const { size, directTransferThresholdBytes } of cases) {
+        const postEmpty = vi.fn();
+        const getResponse = vi.fn().mockResolvedValue(
+          new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } }),
+        );
+        await downloadEntityAttachment(
+          apiFor({ postEmpty, getResponse }),
+          { type: "work_item", id: ID, size, directTransferThresholdBytes },
+          vi.fn(),
+        );
+        expect(postEmpty).not.toHaveBeenCalled();
+      }
+    });
+
+    describe("a download of a known size read in parallel", () => {
+      const BIG = DOWNLOAD_RANGE_BYTES * 2 + 5;
+
+      it("stops the ranges still running when one is refused, and throws that refusal", async () => {
+        const signals: AbortSignal[] = [];
+        const getResponse = vi.fn((_path: string, init: { headers: Record<string, string>; signal: AbortSignal }) => {
+          if (init.headers.Range.startsWith("bytes=0-")) return Promise.reject(apiError(500, "storage busy"));
+          signals.push(init.signal);
+          return new Promise<Response>((_, reject) =>
+            init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))),
+          );
+        });
+        await expect(
+          downloadEntityAttachment(apiFor({ getResponse }), { type: "work_item", id: ID, name: "big.bin", size: BIG }, vi.fn()),
+        ).rejects.toThrow("storage busy");
+        expect(signals.length).toBeGreaterThan(0);
+        expect(signals.every((signal) => signal.aborted)).toBe(true);
+      });
+
+      it("saves the whole file when the server ignores the range and answers 200", async () => {
+        const getResponse = vi.fn(async () => new Response(new Uint8Array(BIG), { status: 200 }));
+        const save = vi.fn();
+        expect(
+          await downloadEntityAttachment(apiFor({ getResponse }), { type: "work_item", id: ID, name: "big.bin", size: BIG }, save),
+        ).toBe(true);
+        expect(save).toHaveBeenCalledTimes(1);
+        expect((save.mock.calls[0][0] as Blob).size).toBe(BIG);
+        expect(save.mock.calls[0][1]).toBe("big.bin");
+      });
+    });
+
+    describe("into a picked file", () => {
+      const SIZE = DOWNLOAD_RANGE_BYTES * 2 + 5; // above the 16 MiB that skips the dialog
+      const LINK = "https://blob.example/x?sig=";
+      const writable = { write: vi.fn(async () => undefined), close: vi.fn(async () => undefined), abort: vi.fn(async () => undefined) };
+      const picker = vi.fn(async (_options?: unknown) => ({ createWritable: async () => writable }));
+      const dlArgs = (over: Record<string, unknown> = {}) => ({
+        type: "work_item" as const,
+        id: ID,
+        name: "big.bin",
+        size: SIZE,
+        directTransferThresholdBytes: DIRECT_TRANSFER_MIN_BYTES,
+        ...over,
+      });
+      /** The backend answering any range of the SIZE-byte file. */
+      const backendRange = async (_path: string, init?: { headers?: Record<string, string> }) => {
+        const [, a, b] = /bytes=(\d+)-(\d+)/.exec(init!.headers!.Range)!;
+        const end = Math.min(Number(b), SIZE - 1);
+        return new Response(new Uint8Array(end - Number(a) + 1), {
+          status: 206,
+          headers: { "Content-Range": `bytes ${a}-${end}/${SIZE}` },
+        });
+      };
+      /** Serves ranges of a SIZE-byte file; `refuse` decides a response status per call. */
+      const linkFetch = (refuse: (url: string, call: number) => number = () => 0) => {
+        let call = 0;
+        return vi.fn(async (url: string, init?: RequestInit) => {
+          const status = refuse(url, call++);
+          if (status) return new Response("<Error/>", { status });
+          const [, a, b] = /bytes=(\d+)-(\d+)/.exec((init?.headers as Record<string, string>).Range)!;
+          const end = Math.min(Number(b), SIZE - 1);
+          return new Response(new Uint8Array(end - Number(a) + 1), {
+            status: 206,
+            headers: { "Content-Range": `bytes ${a}-${end}/${SIZE}` },
+          });
+        });
+      };
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+        (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = picker;
+      });
+      afterEach(() => {
+        delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+      });
+
+      it("opens the picker before the link request and reads the ranges from the link with no Authorization header", async () => {
+        const fetchMock = linkFetch();
+        vi.stubGlobal("fetch", fetchMock);
+        const postEmpty = vi.fn().mockResolvedValue({ url: `${LINK}1` });
+        const getResponse = vi.fn();
+        const onSaved = vi.fn();
+        const onProgress = vi.fn();
+        expect(
+          await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ onSaved, onProgress }), vi.fn()),
+        ).toBe(true);
+        expect(picker.mock.invocationCallOrder[0]).toBeLessThan(postEmpty.mock.invocationCallOrder[0]);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        for (const call of fetchMock.mock.calls) {
+          expect(call[0]).toBe(`${LINK}1`);
+          expect(Object.keys(call[1]!.headers as object)).toEqual(["Range"]);
+        }
+        expect(getResponse).not.toHaveBeenCalled();
+        expect(writable.write).toHaveBeenCalledTimes(3);
+        expect(writable.close).toHaveBeenCalledTimes(1);
+        expect(onProgress).toHaveBeenLastCalledWith(SIZE, SIZE);
+        expect(onSaved).toHaveBeenCalledExactlyOnceWith("saved");
+      });
+
+      it("requests every range at once, the first included, when the size is known", async () => {
+        const answer = linkFetch();
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+          await held;
+          return answer(url, init);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const postEmpty = vi.fn().mockResolvedValue({ url: `${LINK}1` });
+        const download = downloadEntityAttachment(apiFor({ postEmpty }), dlArgs(), vi.fn());
+        // No response has arrived, yet all three ranges are already asked for.
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+        release();
+        expect(await download).toBe(true);
+      });
+
+      it("asks for a fresh link when the link is refused as expired, and carries on", async () => {
+        const fetchMock = linkFetch((url) => (url === `${LINK}1` ? 403 : 0));
+        vi.stubGlobal("fetch", fetchMock);
+        const postEmpty = vi.fn().mockResolvedValueOnce({ url: `${LINK}1` }).mockResolvedValue({ url: `${LINK}2` });
+        const getResponse = vi.fn();
+        expect(await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs(), vi.fn())).toBe(true);
+        expect(postEmpty).toHaveBeenCalledTimes(2);
+        expect(getResponse).not.toHaveBeenCalled();
+        expect(writable.close).toHaveBeenCalledTimes(1);
+      });
+
+      it("falls back to the backend, into the same file, when the direct download fails", async () => {
+        const onSaved = vi.fn();
+        const refusals = [
+          { fetch: linkFetch(() => 403), postEmpty: vi.fn().mockResolvedValue({ url: `${LINK}1` }) }, // refreshes run out
+          { fetch: vi.fn(() => Promise.reject(new TypeError("blocked by CORS"))), postEmpty: vi.fn().mockResolvedValue({ url: `${LINK}1` }) },
+          { fetch: linkFetch(), postEmpty: vi.fn().mockResolvedValue(null) }, // no link
+        ];
+        for (const { fetch: fetchMock, postEmpty } of refusals) {
+          vi.stubGlobal("fetch", fetchMock);
+          const getResponse = vi.fn(backendRange);
+          await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ onSaved }), vi.fn());
+          expect(getResponse).toHaveBeenCalledTimes(3); // every range, through the backend
+          expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
+        }
+        expect(picker).toHaveBeenCalledTimes(3);
+        expect(writable.abort).not.toHaveBeenCalled();
+        expect(onSaved).toHaveBeenCalledTimes(3);
+      });
+
+      it("stays a cancel, with no fallback, when the download is cancelled", async () => {
+        const controller = new AbortController();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(() => {
+            controller.abort();
+            return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }),
+        );
+        const postEmpty = vi.fn().mockResolvedValue({ url: `${LINK}1` });
+        const getResponse = vi.fn();
+        const onSaved = vi.fn();
+        await expect(
+          downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ signal: controller.signal, onSaved }), vi.fn()),
+        ).rejects.toSatisfy(isDownloadAbort);
+        expect(getResponse).not.toHaveBeenCalled();
+        expect(writable.abort).toHaveBeenCalled();
+        expect(onSaved).not.toHaveBeenCalled();
+      });
+
+      it("makes no request when the picker is closed", async () => {
+        picker.mockRejectedValueOnce(new DOMException("Closed.", "AbortError"));
+        const postEmpty = vi.fn();
+        expect(await downloadEntityAttachment(apiFor({ postEmpty }), dlArgs(), vi.fn())).toBe(true);
+        expect(postEmpty).not.toHaveBeenCalled();
+      });
     });
   });
 });

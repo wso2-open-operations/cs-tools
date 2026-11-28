@@ -18,17 +18,53 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
+const (
+	// attachmentChunkDeadline is how long one chunk may take to arrive and be
+	// stored, beyond the server's global read and write timeouts: 8 MiB over a slow
+	// link.
+	attachmentChunkDeadline = 10 * time.Minute
+	// attachmentStreamDeadline is how long a file download may take to write,
+	// beyond the server's global WriteTimeout: 100 MiB over a slow link.
+	attachmentStreamDeadline = 30 * time.Minute
+	// attachmentImageDeadline is the same for an inline image, which is small but
+	// may be moved to its work item's folder on the way.
+	attachmentImageDeadline = 5 * time.Minute
+)
+
+// storedInlineImageTypes is the only set of types a streamed inline image is
+// sent as; anything else is neutralised to application/octet-stream.
+var storedInlineImageTypes = map[string]bool{
+	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
+}
+
 // StoredAttachmentHandler handles HTTP requests that record and authorize the
 // attachment files the portal backends hold in Azure Blob Storage.
 type StoredAttachmentHandler struct {
-	svc     service.StoredAttachmentService
-	uploads service.AttachmentUploadCleanupService
+	svc       service.StoredAttachmentService
+	files     service.StoredAttachmentFileService
+	uploads   service.AttachmentUploadCleanupService
+	retention service.AttachmentRetentionService
+}
+
+// WithFiles attaches the file service, which backs every route that moves a file
+// (the chunks, confirm, download, inline images and delete).
+func (h *StoredAttachmentHandler) WithFiles(f service.StoredAttachmentFileService) *StoredAttachmentHandler {
+	h.files = f
+	return h
 }
 
 // NewStoredAttachmentHandler constructs a StoredAttachmentHandler.
@@ -40,6 +76,39 @@ func NewStoredAttachmentHandler(svc service.StoredAttachmentService) *StoredAtta
 func (h *StoredAttachmentHandler) WithUploadCleanup(c service.AttachmentUploadCleanupService) *StoredAttachmentHandler {
 	h.uploads = c
 	return h
+}
+
+// WithRetention attaches the closed-work-item file removal, which backs POST /attachments/retention/expire.
+func (h *StoredAttachmentHandler) WithRetention(s service.AttachmentRetentionService) *StoredAttachmentHandler {
+	h.retention = s
+	return h
+}
+
+// Limits handles GET /attachments/limits: the attachment sizes in force. They come
+// from configuration, so the answer may be cached for a few minutes.
+func (h *StoredAttachmentHandler) Limits(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(h.svc.Limits())
+}
+
+// ExpireClosedAttachments handles POST /attachments/retention/expire.
+func (h *StoredAttachmentHandler) ExpireClosedAttachments(w http.ResponseWriter, r *http.Request) {
+	if h.retention == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req domain.ExpireAttachmentsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.retention.ExpireClosedWorkItemFiles(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, res)
 }
 
 // CleanupUploads handles POST /attachments/uploads/cleanup.
@@ -88,14 +157,20 @@ func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.
 	writeStoredAttachmentJSON(w, http.StatusCreated, resp)
 }
 
-// ConfirmUpload handles POST /attachments/upload/{id}/confirm.
+// ConfirmUpload handles POST /attachments/upload/{id}/confirm. The body is
+// {"type": ..., "chunks": N}: this service assembles the N stored chunks into the
+// file, reads what was stored and runs the final checks.
 func (h *StoredAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
-	var req domain.ConfirmAttachmentUploadRequest
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req domain.CompleteAttachmentUploadRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
 	req.ID = r.PathValue("id")
-	resp, err := h.svc.ConfirmUpload(r.Context(), req)
+	resp, err := h.files.CompleteUpload(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -103,13 +178,20 @@ func (h *StoredAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.R
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
-// DeleteAttachment handles POST /attachments/delete.
+// DeleteAttachment handles POST /attachments/delete: the attachment is removed
+// if the caller may (whoever uploaded it, or a portal admin), then its file goes.
 func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	var req domain.DeleteStoredAttachmentRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	if err := h.svc.DeleteAttachment(r.Context(), req); err != nil {
+	var err error
+	if h.files != nil {
+		err = h.files.DeleteAttachment(r.Context(), req)
+	} else {
+		_, err = h.svc.DeleteAttachment(r.Context(), req)
+	}
+	if err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
@@ -117,62 +199,178 @@ func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// AuthorizeUpload handles POST /attachments/upload/{id}/authorize. The response
-// carries an internal storage key for the calling portal backend.
-func (h *StoredAttachmentHandler) AuthorizeUpload(w http.ResponseWriter, r *http.Request) {
-	var req domain.AuthorizeAttachmentUploadRequest
-	if !decodeRequest(w, r, &req) {
-		return
-	}
-	req.ID = r.PathValue("id")
-	resp, err := h.svc.AuthorizeUpload(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+// kindFromQuery reads the ?type= of a route whose body or answer is a file.
+func kindFromQuery(r *http.Request) domain.StoredAttachmentKind {
+	return domain.StoredAttachmentKind(r.URL.Query().Get("type"))
 }
 
-// LocateAttachment handles POST /attachments/locate. The response carries an
-// internal storage key for the calling portal backend.
-func (h *StoredAttachmentHandler) LocateAttachment(w http.ResponseWriter, r *http.Request) {
-	var req domain.LocateAttachmentRequest
-	if !decodeRequest(w, r, &req) {
+// PutChunk handles PUT /attachments/upload/{id}/chunks/{index}?type=: one chunk
+// of up to 8 MiB, as the request body. Chunks may be sent again, in any order,
+// and a few at a time. Nothing is visible until the upload is confirmed.
+func (h *StoredAttachmentHandler) PutChunk(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
 		return
 	}
-	resp, err := h.svc.LocateAttachment(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
+	index, err := strconv.Atoi(r.PathValue("index"))
+	if err != nil || index < 0 {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "Invalid chunk index."})
 		return
 	}
-	writeStoredAttachmentJSON(w, http.StatusOK, resp)
-}
-
-// InlineImageLocation handles GET /attachments/inline/{id}/location: where a
-// comment's inline image is stored, after the service has checked the caller may
-// see it.
-func (h *StoredAttachmentHandler) InlineImageLocation(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.LocateInlineImage(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	writeStoredAttachmentJSON(w, http.StatusOK, resp)
-}
-
-// InlineImageRelocated handles POST /attachments/inline/{id}/relocated: the portal
-// backend moved the file of a description image to the key LocateInlineImage named.
-func (h *StoredAttachmentHandler) InlineImageRelocated(w http.ResponseWriter, r *http.Request) {
-	var req domain.InlineImageRelocatedRequest
-	if !decodeRequest(w, r, &req) {
-		return
-	}
-	if err := h.svc.InlineImageRelocated(r.Context(), r.PathValue("id"), req); err != nil {
+	// A slow link can need longer than the server's global timeouts for one chunk.
+	// Best effort: a ResponseWriter that cannot extend them keeps them.
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(attachmentChunkDeadline)
+	_ = rc.SetReadDeadline(deadline)
+	_ = rc.SetWriteDeadline(deadline)
+	body := http.MaxBytesReader(w, r.Body, service.UploadChunkBytes)
+	if err := h.files.PutChunk(r.Context(), kindFromQuery(r), r.PathValue("id"), index, r.ContentLength, body); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListChunks handles GET /attachments/upload/{id}/chunks?type=: the chunks
+// already stored, so an interrupted upload can carry on where it stopped.
+func (h *StoredAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	resp, err := h.files.ListChunks(r.Context(), kindFromQuery(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// DirectUploadLinks handles POST /attachments/{id}/upload-links?type=: one signed
+// link per chunk, so a large file goes from the browser straight to Azure. The
+// links are credentials, so the answer is never cached.
+func (h *StoredAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	resp, err := h.files.DirectUploadLinks(r.Context(), kindFromQuery(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// DirectDownloadLink handles POST /attachments/{id}/download-links?type=: a signed
+// link the browser downloads the file from, straight from Azure. The answer is
+// never cached.
+func (h *StoredAttachmentHandler) DirectDownloadLink(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	resp, err := h.files.DirectDownloadLink(r.Context(), kindFromQuery(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// DownloadAttachment handles GET /attachments/download/{id}/content?type=: the
+// file as a download, honouring a single Range so a break can resume.
+func (h *StoredAttachmentHandler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := h.files.OpenAttachment(r.Context(), kindFromQuery(r), r.PathValue("id"), r.Header.Get("Range"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	defer f.Object.Body.Close()
+	h.stream(w, f, false, attachmentStreamDeadline)
+}
+
+// InlineImageContent handles GET /attachments/inline/{id}/content: a comment's
+// inline image. With ?workItemId= the image is only returned when it is linked to
+// that record (the notification service reads the images of an email this way).
+func (h *StoredAttachmentHandler) InlineImageContent(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := h.files.OpenInlineImage(r.Context(), r.PathValue("id"), r.URL.Query().Get("workItemId"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	defer f.Object.Body.Close()
+	h.stream(w, f, true, attachmentImageDeadline)
+}
+
+// writeFileError answers a file read that failed: a 416 for a range the file does
+// not have, otherwise the ordinary mapping.
+func (h *StoredAttachmentHandler) writeFileError(w http.ResponseWriter, r *http.Request, err error) {
+	var rng *service.RangeNotSatisfiableError
+	if errors.As(err, &rng) {
+		if rng.Size > 0 {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", rng.Size))
+		}
+		http.Error(w, "Range not satisfiable.", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	writeServiceError(w, r, err)
+}
+
+// stream copies the file to the response, never holding it in memory. A download
+// is always sent as an attachment of an opaque type; only an inline comment image
+// is shown in the page, and then only as one of four image types.
+func (h *StoredAttachmentHandler) stream(w http.ResponseWriter, f *service.FileDownload, inline bool, writeDeadline time.Duration) {
+	obj := f.Object
+	hd := w.Header()
+	hd.Set("X-Content-Type-Options", "nosniff")
+	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	if inline {
+		ct := strings.ToLower(strings.TrimSpace(strings.SplitN(f.ContentType, ";", 2)[0]))
+		if !storedInlineImageTypes[ct] {
+			ct = "application/octet-stream"
+		}
+		hd.Set("Content-Type", ct)
+		hd.Set("Content-Disposition", "inline")
+		hd.Set("Cache-Control", "private, max-age=300")
+	} else {
+		hd.Set("Content-Type", "application/octet-stream")
+		hd.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": downloadName(f.Name)}))
+		hd.Set("Accept-Ranges", "bytes")
+		hd.Set("Cache-Control", "private, no-store")
+	}
+	hd.Set("Content-Length", strconv.FormatInt(obj.ContentLength, 10))
+	status := http.StatusOK
+	if obj.Partial {
+		hd.Set("Content-Range", obj.ContentRange)
+		status = http.StatusPartialContent
+	}
+	// A large file takes longer than the server's global write timeout. Best
+	// effort: a ResponseWriter that cannot extend it keeps the server default.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(writeDeadline))
+	w.WriteHeader(status)
+	_, _ = io.Copy(w, obj.Body) // #nosec G705 -- opaque type or one of four image types, with nosniff and a sandboxing CSP
+}
+
+// downloadName is the name a file is saved under: no path, and nothing that could
+// break out of the header.
+func downloadName(name string) string {
+	name = strings.NewReplacer("\r", "", "\n", "", "\"", "'", "/", "_", "\\", "_").Replace(name)
+	if strings.TrimSpace(name) == "" {
+		return "attachment"
+	}
+	return name
 }
 
 // writeStoredAttachmentJSON writes a response that can carry an internal storage

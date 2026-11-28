@@ -14,12 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  downloadParallelism,
-  entityAttachmentMaxBytes,
-  formatLimit,
-  inlineImageMaxBytes,
-} from "@config/attachmentLimitsConfig";
+import { downloadParallelism, formatLimit } from "@config/attachmentLimitsConfig";
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 import { openDiskTarget, type DiskSink } from "@api/downloadToDisk";
 
@@ -36,12 +31,17 @@ export type DownloadProgress = (received: number, total: number) => void;
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
 
-/** Response of POST /attachments/upload: the file is then sent to the backend in chunks. */
+/**
+ * Response of POST /attachments/upload: the file is then sent to the backend in
+ * chunks, or, when `directUpload` is true (a large file, with direct transfers
+ * on), to Azure through signed links.
+ */
 export interface StoredAttachmentUploadStart {
   attachmentId: string;
   number?: string;
   expiresAt?: string;
   maxBytes: number;
+  directUpload?: boolean;
 }
 
 /** Response of POST /attachments/upload/{id}/confirm. */
@@ -189,6 +189,12 @@ function parseContentRange(
   return end >= start && total > end ? { start, end, total } : null;
 }
 
+/** A server answered a range request with the whole file (200), so ranges cannot be read side by side. */
+class RangeIgnoredError extends Error {}
+
+/** Sends one ranged GET: through the backend, or to a signed link. */
+type RangeRequest = (init: RequestInit) => Promise<Response>;
+
 interface RangeRead {
   response: Response;
   parts: Uint8Array[];
@@ -196,16 +202,15 @@ interface RangeRead {
 
 /**
  * Asks for bytes `start` to `end` of the file and reads them in full. A dropped
- * connection or a short body is tried again, up to three times; a refusal from
- * the backend is thrown at once, and so is a cancelled request.
+ * connection or a short body is tried again, up to three times; a refusal is
+ * thrown at once, and so is a cancelled request.
  *
  * `onBytes` is told of the bytes of each piece as it arrives, with the response
  * it belongs to. What a failed attempt had reported is taken back (a negative
  * number) before the next one starts, so a retried range is never counted twice.
  */
 async function readRange(
-  authFetch: AuthFetch,
-  url: string,
+  request: RangeRequest,
   start: number,
   end: number,
   isWhole: (read: RangeRead) => boolean,
@@ -220,7 +225,7 @@ async function readRange(
       reported = 0;
     };
     try {
-      const response = await authFetch(url, {
+      const response = await request({
         method: "GET",
         headers: { Range: `bytes=${start}-${end}` },
         signal,
@@ -236,7 +241,7 @@ async function readRange(
     } catch (error) {
       takeBackReported();
       if (signal?.aborted) throw downloadCancelledError();
-      if (error instanceof ApiError || isAbortError(error)) throw error;
+      if (error instanceof ApiError || error instanceof RangeIgnoredError || isAbortError(error)) throw error;
     }
     if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) {
       throw new ApiError(0, "Download failed", DOWNLOAD_INTERRUPTED_MESSAGE);
@@ -245,9 +250,10 @@ async function readRange(
 }
 
 /**
- * Downloads one attachment through the portal backend, which checks access and
- * streams the file. The first 8 MiB are asked for with a `Range` header; the
- * answer says how big the file is, and the rest is fetched as 8 MiB ranges,
+ * Downloads one attachment, saving the bytes under the attachment's own name.
+ * The bytes come through the portal backend, which checks access and streams
+ * the file. The first 8 MiB are asked for with a `Range` header; the answer says
+ * how big the file is, and the rest is fetched as 8 MiB ranges,
  * {@link downloadParallelism} at a time.
  *
  * Where the browser can, the file is written straight to a file the person
@@ -258,23 +264,43 @@ async function readRange(
  * `signal` cancels it: the requests in flight are aborted, a half-written picked
  * file is removed, and an AbortError ({@link isAbortError}) is thrown.
  *
+ * A file above `directTransferThresholdBytes` (the server's value, 0 when direct transfers
+ * are off) is read from Azure through a signed link instead, so its bytes do not
+ * pass through the backend: the same ranges into the picked file, or, with no
+ * file to write to, the link handed to the browser. If that does not work for
+ * any reason but a cancel, the backend path above is used from the start.
+ *
  * Throws an ApiError with status 404 when there is no such stored attachment,
  * which a caller still on the older flow can fall back from. `onSaved` runs once
  * the download ends, saying whether it was written to the picked file (`saved`)
  * or handed to the browser (`started`); a closed save dialog or a failure never
  * calls it.
  */
-async function downloadFromBackend(
+export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; directTransferThresholdBytes?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
 ): Promise<void> {
   if (input.signal?.aborted) throw downloadCancelledError();
+  // The save dialog must open inside the person's click, before any request.
   const target = await openDiskTarget(input.name || "attachment", input.size);
   if (target.kind === "cancelled") return;
   const sink = target.kind === "sink" ? target.sink : undefined;
+  const outcome = sink ? "saved" : "started";
   try {
-    await readAndStore(authFetch, input, sink);
-    input.onSaved?.(sink ? "saved" : "started");
+    const direct =
+      input.directTransferThresholdBytes !== undefined &&
+      input.directTransferThresholdBytes > 0 &&
+      input.size !== undefined &&
+      input.size > input.directTransferThresholdBytes;
+    if (direct && (await downloadDirect(authFetch, input, sink))) {
+      input.onSaved?.(outcome);
+      return;
+    }
+    const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
+      toHyphenatedUuid(input.id),
+    )}/content?type=${encodeURIComponent(input.type)}`;
+    await readAndStore((init) => authFetch(url, init), input, sink);
+    input.onSaved?.(outcome);
   } catch (error) {
     await sink?.abort();
     throw error;
@@ -282,13 +308,10 @@ async function downloadFromBackend(
 }
 
 async function readAndStore(
-  authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; onProgress?: DownloadProgress; signal?: AbortSignal },
+  request: RangeRequest,
+  input: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   sink: DiskSink | undefined,
 ): Promise<void> {
-  const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
-    toHyphenatedUuid(input.id),
-  )}/content?type=${encodeURIComponent(input.type)}`;
   // Bytes received so far, counted as each piece arrives; the size of the file
   // is known from the first answer's headers on.
   let received = 0;
@@ -300,9 +323,95 @@ async function readAndStore(
     }
     if (knownTotal !== undefined) input.onProgress?.(Math.max(0, received), knownTotal);
   };
+  const ranges: Uint8Array[][] = [];
+
+  let suggestedName: string | undefined;
+
+  // Reads the ranges from `firstIndex` to the end, `downloadParallelism()` at a time.
+  // The first failure stops the ranges still running and is the one thrown.
+  const readRangesFrom = async (
+    firstIndex: number,
+    total: number,
+    send: RangeRequest = request,
+  ): Promise<void> => {
+    const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
+    let next = firstIndex;
+    let failure: { error: unknown } | undefined;
+    const stop = new AbortController();
+    const stopOnCancel = () => stop.abort();
+    if (input.signal?.aborted) stop.abort();
+    input.signal?.addEventListener("abort", stopOnCancel, { once: true });
+    const worker = async (): Promise<void> => {
+      while (failure === undefined && next < count) {
+        const index = next++;
+        const start = index * DOWNLOAD_RANGE_BYTES;
+        const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
+        try {
+          const { parts } = await readRange(
+            send,
+            start,
+            end,
+            ({ response, parts }) => {
+              const range = parseContentRange(response.headers);
+              const whole =
+                response.status === 206 &&
+                range !== null &&
+                range.start === start &&
+                range.end === end &&
+                range.total === total &&
+                partsLength(parts) === end - start + 1;
+              if (whole) suggestedName ??= fileNameFromDisposition(response.headers);
+              return whole;
+            },
+            report,
+            stop.signal,
+          );
+          if (sink) await sink.write(start, parts);
+          else ranges[index] = parts;
+        } catch (error) {
+          failure ??= { error };
+          stop.abort();
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(downloadParallelism(), count - firstIndex) }, worker),
+    );
+    input.signal?.removeEventListener("abort", stopOnCancel);
+    if (failure) throw failure.error;
+  };
+
+  const finish = async (fileName: string | undefined): Promise<void> => {
+    if (sink) await sink.close();
+    else saveBlobAs(new Blob(ranges.flat() as BlobPart[]), fileName || "attachment");
+  };
+
+  // Azure and the backend both honour a range, so with the size known no first read is needed.
+  if (input.size !== undefined && input.size > DOWNLOAD_RANGE_BYTES) {
+    const rangesOnly: RangeRequest = async (init) => {
+      const response = await request(init);
+      if (response.status === 200) {
+        void response.body?.cancel();
+        throw new RangeIgnoredError();
+      }
+      return response;
+    };
+    knownTotal = input.size;
+    try {
+      await readRangesFrom(0, input.size, rangesOnly);
+      await finish(input.name || suggestedName);
+      return;
+    } catch (error) {
+      if (!(error instanceof RangeIgnoredError)) throw error;
+      // A server that ignores Range sends the whole file: read it with the single request below.
+      ranges.length = 0;
+      received = 0;
+      knownTotal = undefined;
+    }
+  }
+
   const first = await readRange(
-    authFetch,
-    url,
+    request,
     0,
     DOWNLOAD_RANGE_BYTES - 1,
     ({ response, parts }) => {
@@ -321,53 +430,11 @@ async function readAndStore(
   const fileName = input.name || fileNameFromDisposition(first.response.headers);
   const total =
     first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
-  const ranges: Uint8Array[][] = [];
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
 
-  if (total !== undefined && partsLength(first.parts) < total) {
-    const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
-    let next = 1;
-    let failure: { error: unknown } | undefined;
-    const worker = async (): Promise<void> => {
-      while (failure === undefined && next < count) {
-        const index = next++;
-        const start = index * DOWNLOAD_RANGE_BYTES;
-        const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
-        try {
-          const { parts } = await readRange(
-            authFetch,
-            url,
-            start,
-            end,
-            ({ response, parts }) => {
-              const range = parseContentRange(response.headers);
-              return (
-                response.status === 206 &&
-                range !== null &&
-                range.start === start &&
-                range.end === end &&
-                range.total === total &&
-                partsLength(parts) === end - start + 1
-              );
-            },
-            report,
-            input.signal,
-          );
-          if (sink) await sink.write(start, parts);
-          else ranges[index] = parts;
-        } catch (error) {
-          failure ??= { error };
-        }
-      }
-    };
-    await Promise.all(
-      Array.from({ length: Math.min(downloadParallelism(), count - 1) }, worker),
-    );
-    if (failure) throw failure.error;
-  }
-  if (sink) await sink.close();
-  else saveBlobAs(new Blob(ranges.flat() as BlobPart[]), fileName || "attachment");
+  if (total !== undefined && partsLength(first.parts) < total) await readRangesFrom(1, total);
+  await finish(fileName);
 }
 
 /** The file name a download response suggests, if it names one. */
@@ -382,18 +449,118 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
   }
 }
 
-/**
- * Downloads one attachment through the portal backend, saving the bytes under
- * the attachment's own name.
- *
- * Throws an ApiError with status 404 when entity-service has no such stored
- * attachment, which a caller still on the older flow can fall back from.
- */
-export async function downloadStoredAttachment(
+interface DownloadLink {
+  url: string;
+  name?: string;
+}
+
+/** Asks the backend, which checks access, for a signed link to download the file from. */
+async function requestDownloadLink(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
-): Promise<void> {
-  await downloadFromBackend(authFetch, input);
+  input: { type: StoredAttachmentType; id: string; signal?: AbortSignal },
+): Promise<DownloadLink> {
+  const response = await authFetch(
+    `${getBackendBaseUrl()}/attachments/${encodeURIComponent(input.id)}/download-links?type=${encodeURIComponent(input.type)}`,
+    { method: "POST", ...(input.signal ? { signal: input.signal } : {}) },
+  );
+  if (!response.ok) throw await toApiError(response);
+  const link = (await response.json()) as Partial<DownloadLink>;
+  if (!link.url) throw new Error("The download link is missing.");
+  return { url: link.url, name: link.name };
+}
+
+/**
+ * Ranged requests to a signed link. A link that expires part-way (Azure answers
+ * 401 or 403) is replaced by asking again, a few times, and the request is
+ * repeated; the ranges already read stay.
+ */
+function directRangeRequest(
+  authFetch: AuthFetch,
+  input: { type: StoredAttachmentType; id: string; signal?: AbortSignal },
+  first: DownloadLink,
+): RangeRequest {
+  let link = first;
+  let generation = 0;
+  let refreshing: Promise<void> | undefined;
+  // Every range in flight may see the expiry at once; one request replaces the link.
+  const refresh = async (seen: number): Promise<void> => {
+    if (seen !== generation) return; // already replaced
+    if (generation >= MAX_LINK_REFRESHES) {
+      throw new ApiError(0, "Download failed", DOWNLOAD_INTERRUPTED_MESSAGE);
+    }
+    refreshing ??= requestDownloadLink(authFetch, input)
+      .then((fresh) => {
+        link = fresh;
+        generation += 1;
+      })
+      .finally(() => {
+        refreshing = undefined;
+      });
+    await refreshing;
+  };
+  return async (init) => {
+    for (;;) {
+      const seen = generation;
+      // No Authorization header: the link itself is the credential.
+      const response = await fetch(link.url, init);
+      if (response.status !== 401 && response.status !== 403) return response;
+      void response.body?.cancel();
+      await refresh(seen);
+    }
+  };
+}
+
+/**
+ * Downloads a large file straight from Azure through a signed link: the ranged
+ * download into `sink`, or, with no file to write to, the link handed to the
+ * browser (it shows and saves the file itself, no in-page progress). Resolves
+ * `false` when that did not work, for any reason but a cancel, so the caller
+ * streams the file through the backend, which reports any real refusal (a
+ * removed file) itself. A cancel throws.
+ */
+async function downloadDirect(
+  authFetch: AuthFetch,
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
+  sink: DiskSink | undefined,
+): Promise<boolean> {
+  try {
+    const link = await requestDownloadLink(authFetch, input);
+    if (sink) {
+      await readAndStore(directRangeRequest(authFetch, input, link), input, sink);
+    } else {
+      if (!(await linkWorks(link.url, input.signal))) return false;
+      startBrowserDownload(link.url, input.name || link.name || "attachment");
+    }
+    return true;
+  } catch (error) {
+    if (input.signal?.aborted || isAbortError(error)) throw downloadCancelledError();
+    return false;
+  }
+}
+
+/**
+ * Reads the first byte of a download link. A link Azure refuses would make the
+ * browser save Azure's error page as the file, so the backend stream is used instead.
+ */
+async function linkWorks(url: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" }, ...(signal ? { signal } : {}) });
+    void response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Hands a signed link to the browser as a download; the link itself says it is an attachment. */
+function startBrowserDownload(url: string, name: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 /** Step 1 of an upload: records the attachment and returns its id and the size limit. */
@@ -529,6 +696,44 @@ async function sendChunk(
 }
 
 /**
+ * Cuts `file` into `count` chunks of `chunkBytes` and sends them a few at a time
+ * with `send`. The first failure is kept so it is the one thrown, and so the
+ * other workers stop taking new chunks; a chunk already in flight is left to finish.
+ */
+async function sendChunksInParallel(input: {
+  file: File;
+  chunkBytes: number;
+  count: number;
+  send: (index: number, body: Blob) => Promise<void>;
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
+}): Promise<void> {
+  const { file, chunkBytes, count, send, onProgress } = input;
+  let next = 0;
+  let sent = 0;
+  let failure: { error: unknown } | undefined;
+  const worker = async () => {
+    while (!failure) {
+      const index = next++;
+      if (index >= count) return;
+      const from = index * chunkBytes;
+      const body = file.slice(from, Math.min(from + chunkBytes, file.size));
+      try {
+        await send(index, body);
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
+      sent += body.size;
+      onProgress?.(sent, file.size);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) }, worker),
+  );
+  if (failure) throw failure.error;
+}
+
+/**
  * Step 2: the file is cut into
  * {@link UPLOAD_CHUNK_BYTES} chunks, sent a few at a time (each one retried on
  * a passing failure), and its confirm step names how many there were. Returns
@@ -544,33 +749,145 @@ export async function sendFileInChunks(
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = input;
   const count = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
-  let next = 0;
-  let sent = 0;
-  // The first failure, kept so it is the one thrown, and so the other workers
-  // stop taking new chunks. A chunk already in flight is left to finish.
-  let failure: { error: unknown } | undefined;
-  const worker = async () => {
-    while (!failure) {
-      const index = next++;
-      if (index >= count) return;
-      const from = index * UPLOAD_CHUNK_BYTES;
-      const body = file.slice(from, Math.min(from + UPLOAD_CHUNK_BYTES, file.size));
-      try {
-        await sendChunk(authFetch, { type, attachmentId, index, body, signal });
-      } catch (error) {
-        failure ??= { error };
-        return;
-      }
-      sent += body.size;
-      onProgress?.(sent, file.size);
-    }
-  };
-  const workers = Array.from(
-    { length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) },
-    worker,
+  await sendChunksInParallel({
+    file,
+    chunkBytes: UPLOAD_CHUNK_BYTES,
+    count,
+    onProgress,
+    send: (index, body) =>
+      sendChunk(authFetch, { type, attachmentId, index, body, signal }),
+  });
+  return count;
+}
+
+/**
+ * Files above this size are uploaded to Azure through signed links (when the
+ * backend says they may), so their bytes do not pass through the portal backend.
+ * It is one chunk: smaller files, and every inline image, keep the backend path.
+ * Downloads use the server's `directTransferThresholdBytes` instead.
+ */
+export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
+
+/** The links `POST /attachments/{id}/upload-links` returns: one per chunk. */
+interface DirectUploadLinks {
+  links: string[];
+  chunkBytes: number;
+  expiresAt?: string;
+}
+
+/** How many times the links of one upload are replaced when they expire. */
+const MAX_LINK_REFRESHES = 3;
+
+/** True when `links` is a usable answer: a positive whole chunk size and a link for every chunk of `fileSize`. */
+function linksCoverFile(
+  links: DirectUploadLinks | null | undefined,
+  fileSize: number,
+): links is DirectUploadLinks {
+  return (
+    !!links &&
+    Number.isSafeInteger(links.chunkBytes) &&
+    links.chunkBytes > 0 &&
+    Array.isArray(links.links) &&
+    links.links.length >= Math.max(1, Math.ceil(fileSize / links.chunkBytes))
   );
-  await Promise.all(workers);
-  if (failure) throw failure.error;
+}
+
+/**
+ * Sends one chunk to its signed link, trying again with a short pause when it
+ * fails in passing. A 403 means the link expired (they last a few minutes): the
+ * links are asked for again and the chunk goes to its new one.
+ */
+async function sendChunkToLink(
+  source: () => { url: string; generation: number },
+  onExpired: (generation: number) => Promise<void>,
+  body: Blob,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    if (signal?.aborted) throw abortError();
+    const { url, generation } = source();
+    try {
+      // No Authorization header: the link itself is the credential.
+      const response = await fetch(url, { method: "PUT", body, signal });
+      if (response.ok) return;
+      if (response.status === 403) {
+        await onExpired(generation); // throws once the links were replaced too often
+        attempt--; // a new link is not a failed try
+        continue;
+      }
+      // Azure answers 500/503 when it is busy; any other refusal will not change.
+      if (
+        attempt >= UPLOAD_CHUNK_ATTEMPTS ||
+        ![408, 429, 500, 503].includes(response.status)
+      ) {
+        throw new ApiError(0, "Upload failed", UPLOAD_INTERRUPTED_MESSAGE);
+      }
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw abortError();
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || error instanceof ApiError) {
+        throw new ApiError(0, "Upload failed", UPLOAD_INTERRUPTED_MESSAGE);
+      }
+    }
+    await pause(500 * 2 ** (attempt - 1), signal);
+  }
+}
+
+/**
+ * Sends `file` straight to Azure through signed links the backend makes (one per
+ * chunk), a few at a time. Returns the number of chunks, which the confirm step
+ * needs. The links last a few minutes, longer for a bigger file; one that expires
+ * part-way is replaced by asking again, and the chunks already sent stay.
+ * Throws when the links cannot be had or a chunk cannot be sent (for example a
+ * storage account that does not allow this site); the caller then sends the file
+ * through the backend instead, which stages the same chunks.
+ */
+export async function sendFileDirect(
+  authFetch: AuthFetch,
+  input: {
+    type: StoredAttachmentType;
+    attachmentId: string;
+    file: File;
+  } & ChunkUploadOptions,
+): Promise<number> {
+  const { type, attachmentId, file, signal, onProgress } = input;
+  const path = `/attachments/${encodeURIComponent(attachmentId)}/upload-links?type=${encodeURIComponent(type)}`;
+  const requestLinks = async (): Promise<DirectUploadLinks> =>
+    (await (await postJson(authFetch, path, {}, signal)).json()) as DirectUploadLinks;
+  let direct = await requestLinks();
+  // An answer that does not make sense is refused here, so the caller falls back to the backend.
+  if (!linksCoverFile(direct, file.size)) {
+    throw new Error("The upload links do not cover the file.");
+  }
+  const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
+  // Every chunk in flight may see the expiry at once; one request replaces the links.
+  let generation = 0;
+  let refreshing: Promise<void> | undefined;
+  const onExpired = async (seen: number): Promise<void> => {
+    if (seen !== generation) return; // already replaced
+    if (generation >= MAX_LINK_REFRESHES) {
+      throw new ApiError(0, "Upload failed", UPLOAD_INTERRUPTED_MESSAGE);
+    }
+    refreshing ??= requestLinks()
+      .then((fresh) => {
+        if (!linksCoverFile(fresh, file.size) || fresh.chunkBytes !== direct.chunkBytes) {
+          throw new Error("The upload links do not cover the file.");
+        }
+        direct = fresh;
+        generation += 1;
+      })
+      .finally(() => {
+        refreshing = undefined;
+      });
+    await refreshing;
+  };
+  await sendChunksInParallel({
+    file,
+    chunkBytes: direct.chunkBytes,
+    count,
+    onProgress,
+    send: (index, body) =>
+      sendChunkToLink(() => ({ url: direct.links[index], generation }), onExpired, body, signal),
+  });
   return count;
 }
 
@@ -592,21 +909,19 @@ export async function uploadStoredAttachment(
     file: File;
     name: string;
     onStep?: (step: StoredUploadStep) => void;
+    /** Largest file to start; a bigger one is refused before any request. Left out, only the server checks. */
+    maxBytes?: number;
     /** Cancels the upload. */
     signal?: AbortSignal;
     /** Bytes stored so far. */
     onProgress?: (bytesSent: number, bytesTotal: number) => void;
   },
 ): Promise<StoredAttachmentConfirmed> {
-  const { type, parentId, projectId, file, name, onStep, signal, onProgress } = input;
+  const { type, parentId, projectId, file, name, maxBytes, onStep, signal, onProgress } = input;
   // Only an early refusal: entity-service enforces its own limit, and the
   // `maxBytes` of the upload response is checked below too.
-  const localMaxBytes =
-    type === "comment" ? inlineImageMaxBytes() : entityAttachmentMaxBytes();
-  if (file.size > localMaxBytes) {
-    throw new Error(
-      `File size exceeds ${formatLimit(localMaxBytes)} limit.`,
-    );
+  if (maxBytes !== undefined && file.size > maxBytes) {
+    throw new Error(`File size exceeds ${formatLimit(maxBytes)} limit.`);
   }
   onStep?.("preparing");
   let start: StoredAttachmentUploadStart;
@@ -631,13 +946,19 @@ export async function uploadStoredAttachment(
   }
   if (signal?.aborted) throw abortError();
   onStep?.("uploading");
-  const chunks = await sendFileInChunks(authFetch, {
-    type,
-    attachmentId: start.attachmentId,
-    file,
-    signal,
-    onProgress,
-  });
+  const send = { type, attachmentId: start.attachmentId, file, signal, onProgress };
+  let chunks: number | undefined;
+  if (start.directUpload && file.size > DIRECT_TRANSFER_MIN_BYTES) {
+    // A large file goes straight to Azure. If that does not work for any reason,
+    // the same chunks go through the backend; only a cancel stops the upload.
+    try {
+      chunks = await sendFileDirect(authFetch, send);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw abortError();
+      onProgress?.(0, file.size);
+    }
+  }
+  chunks ??= await sendFileInChunks(authFetch, send);
   onStep?.("finishing");
   try {
     return await confirmStoredUpload(authFetch, {

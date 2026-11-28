@@ -113,6 +113,21 @@ a low-traffic hour); override via `SUB_CRON_SCHEDULES` like any other task. `env
 (`cmd/server/main.go`) parses the retention setting as a plain integer number of days rather than
 requiring Go duration syntax (`"720h"`) — friendlier for a "how many days of history" knob.
 
+`housekeeping.CleanupAttachmentUploads`, registered as `"attachment_upload_cleanup"` (daily at 03:30), is a
+trigger only: it calls entity-service's `POST /attachments/uploads/cleanup`, which marks uploads that were never
+confirmed `FAILED` and removes unlinked comment images and report drafts from Azure itself. This component's
+client id must be in entity-service's `M2M_CLIENT_IDS` (the endpoint is internal-only). A file that could not be
+removed is logged as a warning and tried again next run; only a failed call fails the run.
+
+`housekeeping.ExpireClosedAttachments`, registered as `"attachment_retention_expire"` (daily at 04:00), removes the
+files of work items that have been closed for `ATTACHMENT_RETENTION_DAYS` (default 90, at least 30). It is a trigger
+only: it calls entity-service's `POST /attachments/retention/expire`, which removes the files from Azure and marks
+the rows `EXPIRED`. It deletes customers' files, so it is **off unless `ATTACHMENT_RETENTION_ENABLED=true`** and it
+**starts as a dry run** (`ATTACHMENT_RETENTION_DRY_RUN` defaults to `true`): read the `expired` count in the log,
+then set it to `false`. It asks for `ATTACHMENT_RETENTION_BATCH_SIZE` (default 100) at a time while entity-service
+says there are more, at most 20 pages a run. A value below 30 days refuses to start. A `TRYOUT_TASK=attachment_retention_expire` is always forced to a dry run. Deploy entity-service with
+migrations 0284 and 0285 first, and this component's client id must be in its `M2M_CLIENT_IDS`.
+
 Cron expressions have no timezone of their own — `internal/schedule.PeriodKey` interprets every
 schedule (this one included) in whatever `time.Time.Location()` the process's clock returns, i.e.
 the container's local time. "03:00" only means 03:00 UTC if the deployment actually runs with
@@ -1165,6 +1180,7 @@ a light logo for `internal/notify` and a navy logo for `internal/acp/notify`.
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
+| `ATTACHMENT_RETENTION_ENABLED` / `ATTACHMENT_RETENTION_DAYS` / `ATTACHMENT_RETENTION_DRY_RUN` / `ATTACHMENT_RETENTION_BATCH_SIZE` | No (defaults `false` / `90` / `true` / `100`) | Registers and tunes the `attachment_retention_expire` sub-cron — see "Housekeeping" above |
 | `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset uses `CSM_PORTAL_WEB_BASE_URL`; with neither set, plain text |
 | `DEPRECATED_USAGE_REPORT_ALLOWED_RECIPIENT_DOMAINS` | No | Comma-separated email domains (e.g. `wso2.com`); the deprecated product usage report adds an account's manager or technical owner to To only when the address is in one of them. Unset applies no domain check; malformed addresses are always left out |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |

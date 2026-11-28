@@ -18,6 +18,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import VariableFormFields from "@features/operations/components/service-requests/VariableFormFields";
 
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: vi.fn() }),
 }));

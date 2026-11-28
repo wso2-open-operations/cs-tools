@@ -19,6 +19,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import {
   confirmStoredUpload,
   deleteStoredAttachment,
@@ -58,6 +59,7 @@ export function useStoredAttachmentDownload(): {
   cancelDownload: (id: string) => void;
 } {
   const authFetch = useAuthApiClient();
+  const { directTransferThresholdBytes } = useAttachmentLimits();
   // The controller of each running download, so one can be cancelled on its own.
   const controllers = useRef(new Map<string, AbortController>());
   // One entry per running download, so two at once do not overwrite each other.
@@ -73,6 +75,7 @@ export function useStoredAttachmentDownload(): {
       try {
         await downloadStoredAttachment(authFetch, {
           ...input,
+          directTransferThresholdBytes: directTransferThresholdBytes,
           signal: controller.signal,
           onProgress: (received, total) =>
             setProgress(
@@ -131,6 +134,7 @@ export interface StoredUploadVariables {
 export function useStoredAttachmentUpload() {
   const authFetch = useAuthApiClient();
   const queryClient = useQueryClient();
+  const limits = useAttachmentLimits();
 
   const invalidate = (vars: { caseId?: string; deploymentId?: string }) => {
     if (vars.caseId) {
@@ -168,6 +172,7 @@ export function useStoredAttachmentUpload() {
           parentId,
           file,
           name: body.name,
+          maxBytes: type === "comment" ? limits.maxInlineImagesTotalBytes : limits.maxFileBytes,
           onStep: (step) => {
             // Once the file is sent, the upload is being finished: too late to cancel.
             if (step === "finishing") tracked?.lockCancel();

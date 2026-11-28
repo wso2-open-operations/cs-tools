@@ -36,7 +36,8 @@ import {
   type JSX,
 } from "react";
 import { formatBytes } from "@utils/formatBytes";
-import { entityAttachmentMaxBytes, formatSizeLimit } from "@config/attachmentLimitsConfig";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
+import { formatSizeLimit } from "@config/attachmentLimitsConfig";
 
 interface CsmUploadAttachmentModalProps {
   open: boolean;
@@ -76,7 +77,7 @@ export default function CsmUploadAttachmentModal({
   const [name, setName] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
-  const maxBytes = entityAttachmentMaxBytes();
+  const { maxFileBytes: maxBytes } = useAttachmentLimits();
   const tooLarge = !!file && file.size > maxBytes;
   const displayName = name.trim() || (file ? baseFileName(file.name) : "");
   const canAdd = !!file && !tooLarge && !!displayName;

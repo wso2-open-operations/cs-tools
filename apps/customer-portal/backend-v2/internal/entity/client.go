@@ -107,8 +107,12 @@ const DefaultTimeout = 60 * time.Second
 // gateway/deployment fronting entity-service, mirroring the pattern used by
 // apps/csm-portal/backend's entity client.
 type Client struct {
-	http    *http.Client
-	baseURL string
+	http *http.Client
+	// fileHTTP carries the attachment files. It has no total timeout (a 100 MiB
+	// download on a slow link outlasts any fixed one); each file call is bounded by
+	// a deadline its caller puts on the context. It shares the token source of http.
+	fileHTTP *http.Client
+	baseURL  string
 }
 
 // NewClient constructs a Client that authenticates against entity-service
@@ -146,9 +150,15 @@ func NewClient(cfg Config) *Client {
 		CheckRedirect: noRedirect,
 	}
 
+	fileClient := &http.Client{
+		Transport:     oauthClient.Transport,
+		CheckRedirect: noRedirect,
+	}
+
 	return &Client{
-		http:    httpClient,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
+		http:     httpClient,
+		fileHTTP: fileClient,
+		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
 	}
 }
 

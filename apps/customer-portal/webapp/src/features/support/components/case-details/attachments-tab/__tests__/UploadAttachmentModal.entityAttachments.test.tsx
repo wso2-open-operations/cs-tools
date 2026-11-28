@@ -20,6 +20,9 @@ import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import { UploadConfirmPendingError } from "@api/storedAttachments";
 
+const limits = vi.hoisted(() => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }));
+vi.mock("@api/useAttachmentLimits", () => ({ default: () => limits }));
+
 const uploadMutate = vi.fn();
 const confirmMutate = vi.fn();
 
@@ -47,6 +50,7 @@ function renderModal(props: { caseId?: string; deploymentId?: string } = {}) {
 describe("UploadAttachmentModal (chunked upload to Azure Blob through the backend)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    limits.maxFileBytes = 10 * 1024 * 1024;
     (window as unknown as { config: unknown }).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
@@ -86,7 +90,7 @@ describe("UploadAttachmentModal (chunked upload to Azure Blob through the backen
     expect(screen.queryByLabelText(/description/i)).not.toBeInTheDocument();
   });
 
-  it("allows a file up to the 10 MB default and refuses one over it", () => {
+  it("allows a file up to the 10 MB default (before the limits load) and refuses one over it", () => {
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
     Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
@@ -98,21 +102,17 @@ describe("UploadAttachmentModal (chunked upload to Azure Blob through the backen
     expect(screen.getByText(/exceeds 10 MB limit/i)).toBeInTheDocument();
   });
 
-  it("uses the configured file size limit in the check and the message", () => {
-    (window as unknown as { config?: unknown }).config = { CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 };
-    try {
-      const { pick } = renderModal({ caseId: "case-1" });
-      const ok = new File(["x"], "ok.bin");
-      Object.defineProperty(ok, "size", { value: 24 * 1024 * 1024 });
-      pick(ok);
-      expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
-      const tooBig = new File(["x"], "big.bin");
-      Object.defineProperty(tooBig, "size", { value: 26 * 1024 * 1024 });
-      pick(tooBig);
-      expect(screen.getByText(/exceeds 25 MB limit/i)).toBeInTheDocument();
-    } finally {
-      (window as unknown as { config?: unknown }).config = undefined;
-    }
+  it("uses the server's file size limit in the check and the message", () => {
+    limits.maxFileBytes = 25 * 1024 * 1024;
+    const { pick } = renderModal({ caseId: "case-1" });
+    const ok = new File(["x"], "ok.bin");
+    Object.defineProperty(ok, "size", { value: 24 * 1024 * 1024 });
+    pick(ok);
+    expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
+    const tooBig = new File(["x"], "big.bin");
+    Object.defineProperty(tooBig, "size", { value: 26 * 1024 * 1024 });
+    pick(tooBig);
+    expect(screen.getByText(/exceeds 25 MB limit/i)).toBeInTheDocument();
   });
 
   it("shows the server's message and retries only the confirm step", async () => {
@@ -143,9 +143,7 @@ describe("UploadAttachmentModal (chunked upload to Azure Blob through the backen
   });
 
   it("passes an abort signal and a progress callback, and shows the largest allowed limit", () => {
-    (window as unknown as { config?: unknown }).config = {
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
-    };
+    limits.maxFileBytes = 100 * 1024 * 1024;
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
     Object.defineProperty(big, "size", { value: 101 * 1024 * 1024 });

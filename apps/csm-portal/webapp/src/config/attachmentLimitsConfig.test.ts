@@ -21,10 +21,8 @@ import {
   downloadParallelism,
   attachmentLimitMessage,
   downloadToDiskEnabled,
-  entityAttachmentMaxBytes,
   formatMegabytes,
   formatSizeLimit,
-  inlineImageMaxBytes,
 } from "@config/attachmentLimitsConfig";
 
 const MB = 1024 * 1024;
@@ -35,45 +33,6 @@ function setConfig(config: Record<string, unknown>): void {
 
 afterEach(() => {
   window.config = {} as typeof window.config;
-});
-
-describe("entityAttachmentMaxBytes", () => {
-  it("defaults to 10 MB", () => {
-    setConfig({});
-    expect(entityAttachmentMaxBytes()).toBe(10 * MB);
-  });
-
-  it("reads a number or a numeric string of megabytes", () => {
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 });
-    expect(entityAttachmentMaxBytes()).toBe(25 * MB);
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: " 25 " });
-    expect(entityAttachmentMaxBytes()).toBe(25 * MB);
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: "0.5" });
-    expect(entityAttachmentMaxBytes()).toBe(0.5 * MB);
-  });
-
-  it("falls back to the default for anything unusable", () => {
-    for (const raw of ["abc", "", "  ", 0, -5, "-5", "0", NaN, Infinity, null, true, {}]) {
-      setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: raw });
-      expect(entityAttachmentMaxBytes()).toBe(10 * MB);
-    }
-  });
-});
-
-describe("inlineImageMaxBytes", () => {
-  it("defaults to 1 MB and reads its own key", () => {
-    setConfig({});
-    expect(inlineImageMaxBytes()).toBe(1 * MB);
-    setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: "5", CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 });
-    expect(inlineImageMaxBytes()).toBe(5 * MB);
-  });
-
-  it("falls back to the default for anything unusable", () => {
-    for (const raw of ["x", 0, -1]) {
-      setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: raw });
-      expect(inlineImageMaxBytes()).toBe(1 * MB);
-    }
-  });
 });
 
 describe("formatMegabytes", () => {
@@ -90,17 +49,6 @@ describe("formatSizeLimit", () => {
     expect(formatSizeLimit(1024 * MB)).toBe("1 GB");
     expect(formatSizeLimit(10 * 1024 * MB)).toBe("10 GB");
     expect(formatSizeLimit(1536 * MB)).toBe("1.5 GB");
-  });
-
-  it("ignores a configured limit above the 100 MB ceiling", () => {
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240 });
-    expect(entityAttachmentMaxBytes()).toBe(10 * MB);
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100 });
-    expect(entityAttachmentMaxBytes()).toBe(100 * MB);
-    setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: 26 });
-    expect(inlineImageMaxBytes()).toBe(1 * MB);
-    setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25 });
-    expect(inlineImageMaxBytes()).toBe(25 * MB);
   });
 });
 

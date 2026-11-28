@@ -40,6 +40,8 @@ var (
 	ErrBlockCount = errors.New("azblobstore: invalid block count")
 	// ErrMissingBlocks: a commit names a block that was never put.
 	ErrMissingBlocks = errors.New("azblobstore: blocks are missing")
+	// ErrSourceChanged: the source of a Copy is no longer the blob it was asked to copy.
+	ErrSourceChanged = errors.New("azblobstore: the source changed")
 	// ErrRangeNotSatisfiable: the requested byte range is outside the blob.
 	ErrRangeNotSatisfiable = errors.New("azblobstore: range not satisfiable")
 )

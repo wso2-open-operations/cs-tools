@@ -70,3 +70,12 @@ func TestKey_HostileNamesStayInsideTheAttachmentFolder(t *testing.T) {
 		t.Errorf("Key escaped its folder: %q", k)
 	}
 }
+
+func TestArchiveKey_IsBuiltFromTheNumberAndName(t *testing.T) {
+	if got, want := ArchiveKey("WIA0000042", "Log.PDF"), "csm/archive/wia0000042_Log.PDF"; got != want {
+		t.Errorf("ArchiveKey = %q, want %q", got, want)
+	}
+	if got := ArchiveKey("WIA1", "../../etc/passwd"); !strings.HasPrefix(got, "csm/archive/wia1_") || strings.Contains(got, "..") {
+		t.Errorf("a hostile name left the archive folder: %q", got)
+	}
+}

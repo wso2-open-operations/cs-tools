@@ -82,10 +82,8 @@ import {
   ALLOWED_INLINE_IMAGE_TYPES,
   RICH_TEXT_BLOCK_TAGS,
 } from "@features/support/constants/supportConstants";
-import {
-  formatLimitMb,
-  inlineImageMaxBytes,
-} from "@config/attachmentLimitsConfig";
+import { formatLimitMb } from "@config/attachmentLimitsConfig";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   INSERT_IMAGE_COMMAND,
@@ -138,6 +136,7 @@ const Toolbar = ({
   const [editor] = useLexicalComposerContext();
   const theme = useTheme();
   const { showError } = useErrorBanner();
+  const { maxInlineImagesTotalBytes } = useAttachmentLimits();
 
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
@@ -287,23 +286,22 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      const maxImageBytes = inlineImageMaxBytes();
-      if (file.size > maxImageBytes) {
+      if (file.size > maxInlineImagesTotalBytes) {
         showError(
-          `Image "${file.name}" exceeds the maximum allowed size of ${formatLimitMb(maxImageBytes)}MB. Please choose a smaller file.`,
+          `Image "${file.name}" exceeds the maximum allowed size of ${formatLimitMb(maxInlineImagesTotalBytes)}MB. Please choose a smaller file.`,
         );
         resetInput();
         return;
       }
       if (onImageUpload) {
-        const refusal = imageRefusal(editor, file.size);
+        const refusal = imageRefusal(editor, file.size, maxInlineImagesTotalBytes);
         if (refusal) {
           if (onPasteError) onPasteError(refusal);
           else
             showError(
               refusal === "count"
                 ? imageCountExceededMessage()
-                : imageTotalSizeExceededMessage(),
+                : imageTotalSizeExceededMessage(maxInlineImagesTotalBytes),
             );
           resetInput();
           return;

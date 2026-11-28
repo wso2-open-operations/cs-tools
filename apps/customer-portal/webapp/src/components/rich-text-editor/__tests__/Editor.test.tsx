@@ -18,6 +18,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import Editor from "@components/rich-text-editor/Editor";
 
+const limits = vi.hoisted(() => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }));
+vi.mock("@api/useAttachmentLimits", () => ({ default: () => limits }));
+
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({
     error: vi.fn(),
@@ -297,12 +300,10 @@ describe("Editor", () => {
           return f;
         };
         beforeEach(() => {
-          (window as unknown as { config?: unknown }).config = {
-            CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 10,
-          };
+          limits.maxInlineImagesTotalBytes = 10 * 1024 * 1024;
         });
         afterEach(() => {
-          (window as unknown as { config?: unknown }).config = undefined;
+          limits.maxInlineImagesTotalBytes = 1024 * 1024;
         });
 
         it("refuses an image that takes the draft over the total", async () => {

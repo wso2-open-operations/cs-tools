@@ -35,3 +35,20 @@ func Timeout(d time.Duration) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// TimeoutWith is Timeout with a longer limit for the requests longer says so
+// about (a file chunk or download, which takes as long as the link does). Every
+// other request gets d.
+func TimeoutWith(d time.Duration, longer func(*http.Request) (time.Duration, bool)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			limit := d
+			if l, ok := longer(r); ok {
+				limit = l
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), limit)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}

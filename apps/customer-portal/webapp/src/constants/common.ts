@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { formatLimitMb, inlineImagesTotalMaxBytes } from "@config/attachmentLimitsConfig";
+import { formatLimitMb } from "@config/attachmentLimitsConfig";
 
 /** Max height for Select menu lists backed by paginated APIs (~10 rows visible, scrollbar when more). */
 export const PAGINATED_SELECT_MENU_MAX_HEIGHT_PX = 320;
@@ -57,10 +57,10 @@ export function imageCountExceededMessage(): string {
   return `A comment or description can have at most ${INLINE_IMAGE_MAX_COUNT} images.`;
 }
 /** The refusal for adding an image that takes the draft's images over the total limit. */
-export function imageTotalSizeExceededMessage(): string {
-  return `Images in one comment or description can't exceed ${formatLimitMb(inlineImagesTotalMaxBytes())} MB in total.`;
+export function imageTotalSizeExceededMessage(totalMaxBytes: number): string {
+  return `Images in one comment or description can't exceed ${formatLimitMb(totalMaxBytes)} MB in total.`;
 }
 /** The refusal for an image over the configured inline image limit. */
-export function imageSizeExceededMessage(): string {
-  return imageTotalSizeExceededMessage();
+export function imageSizeExceededMessage(totalMaxBytes: number): string {
+  return imageTotalSizeExceededMessage(totalMaxBytes);
 }

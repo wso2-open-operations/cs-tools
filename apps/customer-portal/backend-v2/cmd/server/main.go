@@ -250,12 +250,6 @@ func main() {
 			return middleware.CheckPermission(w, r, roleResolver, m, a)
 		})
 
-	attachmentStore, err := newAttachmentStore(os.Getenv)
-	if err != nil {
-		slog.Error("could not set up attachment storage", "err", err)
-		os.Exit(1)
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -344,7 +338,7 @@ func main() {
 
 	// Stored attachments (entity-service owns the access checks). The module
 	// permission depends on the attachment type, so the handler applies it.
-	registerBlobAttachmentRoutes(mux, storedAttachmentHandler, handler.NewBlobAttachmentHandler(storedAttachmentHandler, entityClient, attachmentStore))
+	registerBlobAttachmentRoutes(mux, storedAttachmentHandler, handler.NewBlobAttachmentHandler(storedAttachmentHandler, entityClient))
 
 	mux.HandleFunc("GET /products", productHandler.GetProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)

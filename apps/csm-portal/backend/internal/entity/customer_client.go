@@ -91,8 +91,13 @@ const defaultCustomerEntityTimeout = 60 * time.Second
 // authenticated via the OAuth2 client credentials grant. Tokens are acquired
 // and refreshed automatically; callers need not manage them.
 type CustomerEntityClient struct {
-	http    *http.Client
-	baseURL string
+	http *http.Client
+	// fileHTTP carries the attachment files. It has no total timeout (a 100 MiB
+	// download on a slow link outlasts any fixed one); each file call is bounded by
+	// a deadline its caller puts on the context. It signs in with the same token
+	// source as http.
+	fileHTTP *http.Client
+	baseURL  string
 }
 
 // NewCustomerEntityClient constructs a CustomerEntityClient that authenticates
@@ -118,9 +123,16 @@ func NewCustomerEntityClient(cfg CustomerEntityConfig) *CustomerEntityClient {
 		httpClient.Timeout = defaultCustomerEntityTimeout
 	}
 
+	// The OAuth2 helper copies the token fetch's own short timeout onto the client it
+	// returns, so it is cleared here: it must not cut off a large file. (The token
+	// fetch keeps it: that client is the one the token source was built with.)
+	fileClient := cc.Client(tokenCtx)
+	fileClient.Timeout = 0
+
 	return &CustomerEntityClient{
-		http:    httpClient,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
+		http:     httpClient,
+		fileHTTP: fileClient,
+		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
 	}
 }
 

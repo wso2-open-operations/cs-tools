@@ -90,7 +90,8 @@ import {
   inlineImagesTotalMessage,
   rememberInlineImageSize,
 } from "@components/rich-text-editor/inlineImageLimits";
-import { formatMegabytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
+import { formatMegabytes } from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   INSERT_IMAGE_COMMAND,
@@ -131,6 +132,7 @@ const Toolbar = ({
   imageUploader?: ImageUploadHandler;
 }) => {
   const isDescribeIssue = variant === "describeIssue";
+  const { maxInlineImagesBytes } = useAttachmentLimits();
   const [editor] = useLexicalComposerContext();
   const theme = useTheme();
   const { showError } = useErrorBanner();
@@ -281,7 +283,7 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      const maxImageBytes = inlineImageMaxBytes();
+      const maxImageBytes = maxInlineImagesBytes;
       if (file.size > maxImageBytes) {
         showError(
           `Image "${file.name}" exceeds the maximum allowed size of ${formatMegabytes(maxImageBytes)}. Please choose a smaller file.`,
@@ -290,13 +292,13 @@ const Toolbar = ({
         return;
       }
       if (!imageUploader) {
-        showError(imagePasteRefusalMessage("disabled"));
+        showError(imagePasteRefusalMessage("disabled", maxImageBytes));
         resetInput();
         return;
       }
-      const refusal = inlineImageRefusal(inlineImagesInEditor(editor), file.size);
+      const refusal = inlineImageRefusal(inlineImagesInEditor(editor), file.size, maxImageBytes);
       if (refusal) {
-        showError(refusal === "count" ? MAX_COMMENT_IMAGES_MESSAGE : inlineImagesTotalMessage());
+        showError(refusal === "count" ? MAX_COMMENT_IMAGES_MESSAGE : inlineImagesTotalMessage(maxImageBytes));
         resetInput();
         return;
       }

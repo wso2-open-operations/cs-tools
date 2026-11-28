@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -60,6 +61,14 @@ type StoredAttachmentRepository interface {
 	// and when. It reports false when the row is no longer COMPLETE (already
 	// deleted by another request). Meant for repository.WithSystemIdentity.
 	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
+	// ListClosedWorkItemFiles returns up to limit COMPLETE work item attachments whose
+	// work item was closed before closedBefore, oldest closure first. Meant for
+	// repository.WithSystemIdentity.
+	ListClosedWorkItemFiles(ctx context.Context, closedBefore time.Time, limit int) ([]domain.StoredAttachmentRow, error)
+	// MarkExpired records that a COMPLETE work item attachment's file was removed after
+	// its work item stayed closed: status EXPIRED, with when. It reports false when
+	// the row is no longer COMPLETE. Meant for repository.WithSystemIdentity.
+	MarkExpired(ctx context.Context, id string) (bool, error)
 	// UpdateStorageKey changes the stored key of a COMPLETE attachment from `from`
 	// to `to`, and reports whether it did (false when the row no longer has the key
 	// `from`, so a repeated call is harmless). Meant for repository.WithSystemIdentity.
@@ -214,12 +223,12 @@ func (r *storedAttachmentRepo) GetParent(ctx context.Context, kind domain.Stored
 // storedAttachmentColumns is the column list every query returning a row uses,
 // kept next to scanStoredAttachment so the two cannot drift apart.
 func storedAttachmentColumns(t storedAttachmentTable) string {
-	return `id::TEXT, number, name, content_type, size_bytes, status::TEXT, storage_key, created_by, ` + t.parentExpr + `, ` + t.draftExpr
+	return `id::TEXT, number, name, content_type, size_bytes, status::TEXT, storage_key, created_by, ` + t.parentExpr + `, ` + t.draftExpr + `, staged`
 }
 
 func scanStoredAttachment(row pgx.Row) (domain.StoredAttachmentRow, error) {
 	var a domain.StoredAttachmentRow
-	err := row.Scan(&a.ID, &a.Number, &a.Name, &a.ContentType, &a.SizeBytes, &a.Status, &a.StorageKey, &a.CreatedBy, &a.ParentID, &a.Draft)
+	err := row.Scan(&a.ID, &a.Number, &a.Name, &a.ContentType, &a.SizeBytes, &a.Status, &a.StorageKey, &a.CreatedBy, &a.ParentID, &a.Draft, &a.Staged)
 	return a, err
 }
 
@@ -241,12 +250,19 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		// A draft description image or report has a project and no work item yet.
 		parentCol = "project_id"
 	}
-	row := r.db.QueryRow(ctx, `
-		INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`)
-		VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5)
-		RETURNING `+storedAttachmentColumns(t),
-		in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID)
-	a, err := scanStoredAttachment(row)
+	insert := func(q querier) (domain.StoredAttachmentRow, error) {
+		return scanStoredAttachment(q.QueryRow(ctx, `
+			INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`, staged)
+			VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5, $6)
+			RETURNING `+storedAttachmentColumns(t),
+			in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID, in.Staged))
+	}
+	var a domain.StoredAttachmentRow
+	if in.Staged && in.MaxPendingStaged > 0 {
+		a, err = r.insertWithinPendingLimit(ctx, in, insert)
+	} else {
+		a, err = insert(r.db)
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		// 42501: a row-level-security policy refused the insert, which is what a
@@ -262,6 +278,31 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		return domain.StoredAttachmentRow{}, callerError(fmt.Errorf("insert pending attachment: %w", err))
 	}
 	return a, nil
+}
+
+// ErrTooManyPendingUploads: the caller already has as many unfinished staged uploads as allowed.
+var ErrTooManyPendingUploads = errors.New("too many pending staged uploads")
+
+// insertWithinPendingLimit counts the caller's pending staged uploads and inserts
+// in one transaction. The per-caller lock makes two requests at once take turns,
+// so they cannot both pass the count.
+func (r *storedAttachmentRepo) insertWithinPendingLimit(ctx context.Context, in domain.StoredAttachmentInsert, insert func(querier) (domain.StoredAttachmentRow, error)) (domain.StoredAttachmentRow, error) {
+	var row domain.StoredAttachmentRow
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "staged-uploads:"+strings.ToLower(in.CreatedBy)); err != nil {
+			return fmt.Errorf("lock staged uploads: %w", err)
+		}
+		n, err := countPendingStaged(ctx, tx, in.CreatedBy, in.PendingSince)
+		if err != nil {
+			return err
+		}
+		if n >= in.MaxPendingStaged {
+			return ErrTooManyPendingUploads
+		}
+		row, err = insert(tx)
+		return err
+	})
+	return row, err
 }
 
 // GetProject implements StoredAttachmentRepository.
@@ -504,6 +545,55 @@ func (r *storedAttachmentRepo) MarkDeleted(ctx context.Context, kind domain.Stor
 	return ct.RowsAffected() == 1, nil
 }
 
+// ListClosedWorkItemFiles implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListClosedWorkItemFiles(ctx context.Context, closedBefore time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentWorkItem)
+	if err != nil {
+		return nil, err
+	}
+	// The inner query picks the oldest due rows; the outer one reads their columns
+	// without the joined tables' names getting in the way.
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM work_item_attachment
+		WHERE id IN (
+			SELECT wa.id
+			FROM work_item_attachment wa
+			JOIN work_item wi ON wi.id = wa.work_item_id
+			LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
+			WHERE wa.status = 'COMPLETE' AND wa.storage_key IS NOT NULL
+			  AND `+caseLikeOwnStateColumn+` = 'CLOSED'
+			  AND `+caseLikeOwnClosedOnColumn+` < $1
+			ORDER BY `+caseLikeOwnClosedOnColumn+`, wa.created_on
+			LIMIT $2)`, closedBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list closed work item files: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan closed work item file: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate closed work item files: %w", err)
+	}
+	return out, nil
+}
+
+// MarkExpired implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) MarkExpired(ctx context.Context, id string) (bool, error) {
+	ct, err := r.db.Exec(ctx, `
+		UPDATE work_item_attachment
+		SET status = 'EXPIRED', expired_on = now(), updated_on = now(), updated_by = 'attachment-retention'
+		WHERE id = $1 AND status = 'COMPLETE'`, id)
+	if err != nil {
+		return false, fmt.Errorf("mark attachment expired: %w", err)
+	}
+	return ct.RowsAffected() == 1, nil
+}
+
 // UpdateStorageKey implements StoredAttachmentRepository.
 func (r *storedAttachmentRepo) UpdateStorageKey(ctx context.Context, kind domain.StoredAttachmentKind, id, from, to string) (bool, error) {
 	t, err := storedAttachmentTableFor(kind)
@@ -549,6 +639,26 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 		}
 	}
 	return out, nil
+}
+
+// countPendingStaged returns how many staged uploads by email, across the three
+// tables, are still PENDING and were created after since.
+func countPendingStaged(ctx context.Context, q querier, email string, since time.Time) (int, error) {
+	total := 0
+	for _, kind := range []domain.StoredAttachmentKind{domain.StoredAttachmentWorkItem, domain.StoredAttachmentComment, domain.StoredAttachmentDeployment} {
+		t, err := storedAttachmentTableFor(kind)
+		if err != nil {
+			return 0, err
+		}
+		var n int
+		if err := q.QueryRow(ctx, `SELECT count(*) FROM `+t.table+`
+			WHERE status = 'PENDING' AND staged AND lower(created_by) = lower($1) AND created_on > $2`,
+			email, since).Scan(&n); err != nil {
+			return 0, fmt.Errorf("count pending staged uploads: %w", err)
+		}
+		total += n
+	}
+	return total, nil
 }
 
 // LinkInlineImages implements StoredAttachmentRepository.

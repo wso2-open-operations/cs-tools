@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import {
   COMMENT_MAX_ATTACHMENTS,
   CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
@@ -84,6 +85,7 @@ export default function ActivityCommentInput({
     useCustomerPermissions();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { showError } = useErrorBanner();
+  const { maxInlineImagesTotalBytes } = useAttachmentLimits();
   const piiGuard = usePiiGuard();
 
   // Attachment state
@@ -201,6 +203,7 @@ export default function ActivityCommentInput({
           parentId: caseId,
           file,
           name: file.name || "image",
+          maxBytes: maxInlineImagesTotalBytes,
         };
         let id: string;
         try {
@@ -487,7 +490,7 @@ export default function ActivityCommentInput({
                   ? ERROR_UNSUPPORTED_TYPE
                   : reason === "count"
                     ? imageCountExceededMessage()
-                    : imageSizeExceededMessage(),
+                    : imageSizeExceededMessage(maxInlineImagesTotalBytes),
               )
             }
             overlayElement={

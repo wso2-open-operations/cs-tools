@@ -243,3 +243,60 @@ func (c *Client) DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (in
 	}
 	return resp.DeletedCount, nil
 }
+
+// AttachmentCleanup is what one upload cleanup run did, as entity-service counts it.
+type AttachmentCleanup struct {
+	Found               int `json:"found"`
+	Cleaned             int `json:"cleaned"`
+	Failed              int `json:"failed"`
+	ImagesRemoved       int `json:"imagesRemoved"`
+	ImagesFailed        int `json:"imagesFailed"`
+	ReportDraftsRemoved int `json:"reportDraftsRemoved"`
+	ReportDraftsFailed  int `json:"reportDraftsFailed"`
+	// Orphans are files entity-service could not remove itself (it has no storage).
+	Orphans []json.RawMessage `json:"orphans"`
+}
+
+// CleanupAttachmentUploads calls POST /attachments/uploads/cleanup: entity-service
+// marks uploads that were never confirmed FAILED and removes unlinked comment
+// images and report drafts from storage.
+func (c *Client) CleanupAttachmentUploads(ctx context.Context) (AttachmentCleanup, error) {
+	respBody, err := c.do(ctx, http.MethodPost, "/attachments/uploads/cleanup", nil)
+	if err != nil {
+		return AttachmentCleanup{}, err
+	}
+	var result AttachmentCleanup
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return AttachmentCleanup{}, fmt.Errorf("ledger: decode CleanupAttachmentUploads response: %w", err)
+	}
+	return result, nil
+}
+
+// AttachmentRetention is what one retention call did.
+type AttachmentRetention struct {
+	DryRun  bool `json:"dryRun"`
+	Found   int  `json:"found"`
+	Expired int  `json:"expired"`
+	Failed  int  `json:"failed"`
+	// More is true when the page was full, so another call may find more.
+	More bool `json:"more"`
+}
+
+// ExpireClosedAttachments calls POST /attachments/retention/expire: entity-service
+// removes the files of work items closed for at least closedForDays and marks the
+// rows EXPIRED. A dry run only counts them.
+func (c *Client) ExpireClosedAttachments(ctx context.Context, closedForDays, limit int, dryRun bool) (AttachmentRetention, error) {
+	body, err := json.Marshal(map[string]any{"closedForDays": closedForDays, "limit": limit, "dryRun": dryRun})
+	if err != nil {
+		return AttachmentRetention{}, fmt.Errorf("ledger: encode ExpireClosedAttachments request: %w", err)
+	}
+	respBody, err := c.do(ctx, http.MethodPost, "/attachments/retention/expire", body)
+	if err != nil {
+		return AttachmentRetention{}, err
+	}
+	var result AttachmentRetention
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return AttachmentRetention{}, fmt.Errorf("ledger: decode ExpireClosedAttachments response: %w", err)
+	}
+	return result, nil
+}

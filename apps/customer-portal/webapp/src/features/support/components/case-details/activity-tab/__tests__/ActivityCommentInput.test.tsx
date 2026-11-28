@@ -26,6 +26,10 @@ const mockUpload = vi.fn();
 const mockConfirm = vi.fn();
 const mockAttachmentUpload = vi.fn();
 
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => vi.fn(),
 }));

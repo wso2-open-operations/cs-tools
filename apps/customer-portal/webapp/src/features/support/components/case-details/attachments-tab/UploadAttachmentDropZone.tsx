@@ -14,10 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  entityAttachmentMaxBytes,
-  formatLimit,
-} from "@config/attachmentLimitsConfig";
+import { formatLimit } from "@config/attachmentLimitsConfig";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import type { UploadAttachmentDropZoneProps } from "@features/support/types/supportComponents";
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { Upload } from "@wso2/oxygen-ui-icons-react";
@@ -36,6 +34,7 @@ export default function UploadAttachmentDropZone({
   onDragLeave,
   onChooseFile,
 }: UploadAttachmentDropZoneProps): JSX.Element {
+  const { maxFileBytes } = useAttachmentLimits();
   return (
     <Box
       onDrop={onDrop}
@@ -74,7 +73,7 @@ export default function UploadAttachmentDropZone({
         Choose file
       </Button>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
-        Maximum file size: {formatLimit(entityAttachmentMaxBytes())}.
+        Maximum file size: {formatLimit(maxFileBytes)}.
       </Typography>
     </Box>
   );

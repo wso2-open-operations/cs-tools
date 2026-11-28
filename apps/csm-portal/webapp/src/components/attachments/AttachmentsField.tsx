@@ -18,9 +18,9 @@ import { Box, Button, IconButton, Typography } from "@wso2/oxygen-ui";
 import { Paperclip, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useRef, type ChangeEvent, type JSX } from "react";
 import { formatBytes } from "@utils/formatBytes";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
 import {
   attachmentLimitMessage,
-  entityAttachmentMaxBytes,
   formatSizeLimit,
 } from "@config/attachmentLimitsConfig";
 import type { PendingAttachment } from "@components/attachments/pendingAttachment";
@@ -53,7 +53,7 @@ export default function AttachmentsField({
 }: AttachmentsFieldProps): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const maxBytes = entityAttachmentMaxBytes();
+  const { maxFileBytes: maxBytes } = useAttachmentLimits();
   const full = maxFiles !== undefined && attachments.length >= maxFiles;
 
   const onAddFiles = (e: ChangeEvent<HTMLInputElement>): void => {

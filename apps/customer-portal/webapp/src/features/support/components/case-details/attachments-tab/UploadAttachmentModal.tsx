@@ -31,10 +31,8 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
-import {
-  entityAttachmentMaxBytes,
-  formatLimit,
-} from "@config/attachmentLimitsConfig";
+import { formatLimit } from "@config/attachmentLimitsConfig";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import {
   isAbortError,
@@ -98,7 +96,7 @@ export default function UploadAttachmentModal({
     chunks: number;
   } | null>(null);
   const isDeploymentMode = !!deploymentId && !caseId;
-  const maxBytes = entityAttachmentMaxBytes();
+  const { maxFileBytes: maxBytes } = useAttachmentLimits();
   const maxLabel = formatLimit(maxBytes);
   const isPending = storedUpload.isPending || storedConfirm.isPending;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,9 +104,10 @@ export default function UploadAttachmentModal({
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [fileSizeErrorVisible, setFileSizeErrorVisible] = useState(false);
+  const [fileSizeErrorDismissed, setFileSizeErrorDismissed] = useState(false);
 
   const fileTooLarge = file ? file.size > maxBytes : false;
+  const fileSizeErrorVisible = fileTooLarge && !fileSizeErrorDismissed;
   const displayName = name.trim() || (file ? getBaseFileName(file.name) : "");
   const canUpload =
     !!file &&
@@ -119,7 +118,7 @@ export default function UploadAttachmentModal({
   const reset = useCallback(() => {
     setFile(null);
     setName("");
-    setFileSizeErrorVisible(false);
+    setFileSizeErrorDismissed(false);
     setUploadStep(null);
     setProgress(null);
     setStoredError(null);
@@ -138,16 +137,12 @@ export default function UploadAttachmentModal({
   const setFileWithValidation = useCallback(
     (selected: File | null) => {
       setFile(selected);
-      if (selected && selected.size > maxBytes) {
-        setFileSizeErrorVisible(true);
-      } else {
-        setFileSizeErrorVisible(false);
-      }
+      setFileSizeErrorDismissed(false);
       if (selected && !name.trim()) {
         setName(getBaseFileName(selected.name));
       }
     },
-    [name, maxBytes],
+    [name],
   );
 
   const handleDrop = useCallback(
@@ -302,7 +297,7 @@ export default function UploadAttachmentModal({
         {fileSizeErrorVisible && (
           <Alert
             severity="error"
-            onClose={() => setFileSizeErrorVisible(false)}
+            onClose={() => setFileSizeErrorDismissed(true)}
             sx={{ mb: 2 }}
           >
             File size exceeds {maxLabel} limit.

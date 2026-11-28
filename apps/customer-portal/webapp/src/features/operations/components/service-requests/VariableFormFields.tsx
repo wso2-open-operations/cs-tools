@@ -13,6 +13,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import {
   Box,
   Button,
@@ -227,6 +228,7 @@ export default function VariableFormFields({
   userTimeZone,
 }: VariableFormFieldsProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { maxInlineImagesTotalBytes } = useAttachmentLimits();
   const effectiveTimeZone = userTimeZone ?? resolveDisplayTimeZone();
   const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, effectiveTimeZone);
   const sortedVariables = useMemo(
@@ -412,7 +414,7 @@ export default function VariableFormFields({
                   ? ERROR_UNSUPPORTED_TYPE
                   : reason === "count"
                     ? imageCountExceededMessage()
-                    : imageSizeExceededMessage(),
+                    : imageSizeExceededMessage(maxInlineImagesTotalBytes),
               )
             }
           />

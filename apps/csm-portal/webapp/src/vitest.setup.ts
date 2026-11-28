@@ -13,22 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-package main
 
-import "testing"
+import { vi } from "vitest";
 
-func TestIsLoopbackEndpoint(t *testing.T) {
-	for endpoint, want := range map[string]bool{
-		"http://127.0.0.1:10000/devstoreaccount1": true,
-		"http://localhost:10000":                  true,
-		"http://[::1]:10000":                      true,
-		"":                                        false,
-		"https://acct.blob.core.windows.net":      false,
-		"http://10.0.0.5:10000":                   false,
-		"not a url":                               false,
-	} {
-		if got := isLoopbackEndpoint(endpoint); got != want {
-			t.Errorf("isLoopbackEndpoint(%q) = %v, want %v", endpoint, got, want)
-		}
-	}
-}
+// The attachment limits come from the server through a query. Most tests render
+// components that read them without a QueryClientProvider or backend mock, so
+// they get the built-in defaults here. A test that needs other limits mocks
+// this module itself; the hook's own test calls `vi.unmock` to use the real one.
+vi.mock("@api/useGetAttachmentLimits", () => ({
+  useGetAttachmentLimits: () => ({ data: undefined }),
+  useAttachmentLimits: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesBytes: 1024 * 1024, directTransferThresholdBytes: 0 }),
+}));
