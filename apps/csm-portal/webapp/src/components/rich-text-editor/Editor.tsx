@@ -582,6 +582,7 @@ const Editor = ({
   enterToSubmit = false,
   placeholder = "Enter description...",
   id,
+  ariaLabelledBy,
   showKeyboardHint = false,
   maxHeight = "300px",
   autoFocus = false,
@@ -611,6 +612,11 @@ const Editor = ({
   enterToSubmit?: boolean;
   placeholder?: string;
   id?: string;
+  /**
+   * Id of the element that names the editable area. A `<label for>` cannot
+   * name it (it is not a form control), so a field's label goes here.
+   */
+  ariaLabelledBy?: string;
   showKeyboardHint?: boolean;
   maxHeight?: string | number;
   /** Focus the editor on mount (e.g. when a reply composer opens). */
@@ -849,6 +855,7 @@ const Editor = ({
             contentEditable={
               <ContentEditable
                 id={id}
+                ariaLabelledBy={ariaLabelledBy}
                 className="editor-input"
                 data-testid="case-description-editor"
               />

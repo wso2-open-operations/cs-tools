@@ -24,6 +24,25 @@ import type { BeCaseUpdateRequestTemplates } from "@api/backend/types";
 vi.mock("@features/csm-cases/api/useRequestCaseUpdate", () => ({
   useGetCaseUpdateRequestTemplates: vi.fn(),
 }));
+// The Lexical editor has its own tests; stub it down to a textarea that takes
+// and emits HTML, and is named the way the editor names its editable area.
+vi.mock("@components/rich-text-editor/Editor", () => ({
+  default: ({
+    value,
+    onChange,
+    ariaLabelledBy,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabelledBy?: string;
+  }) => (
+    <textarea
+      aria-labelledby={ariaLabelledBy}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
 
 const mockedUseGetTemplates = vi.mocked(useGetCaseUpdateRequestTemplates);
 
@@ -53,6 +72,13 @@ function mockTemplatesLoaded(
 function selectStage(label: RegExp): void {
   fireEvent.mouseDown(screen.getByRole("combobox", { name: /message/i }));
   fireEvent.click(within(screen.getByRole("listbox")).getByText(label));
+}
+
+function typeCustomMessage(html: string): void {
+  fireEvent.change(
+    screen.getByRole("textbox", { name: /^custom message$/i }),
+    { target: { value: html } },
+  );
 }
 
 describe("RequestUpdateDialog", () => {
@@ -117,7 +143,7 @@ describe("RequestUpdateDialog", () => {
     expect(onSave).toHaveBeenCalledWith({ stage: "first" });
   });
 
-  it("shows a text field instead of a preview for a custom message, and blocks Send until non-empty", () => {
+  it("shows a labelled rich-text editor instead of a preview for a custom message", () => {
     mockTemplatesLoaded();
     render(
       <RequestUpdateDialog
@@ -129,15 +155,39 @@ describe("RequestUpdateDialog", () => {
     );
     selectStage(/custom message/i);
     expect(screen.queryByTestId("request-update-preview")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText(/custom message/i), {
-      target: { value: "Any update on your side?" },
-    });
-    expect(screen.getByRole("button", { name: /^send$/i })).toBeEnabled();
+    expect(
+      screen.getByRole("textbox", { name: /^custom message$/i }),
+    ).toBeInTheDocument();
   });
 
-  it("wraps the custom message in an escaped paragraph before saving", () => {
+  it("blocks Send until the custom message has text", () => {
+    mockTemplatesLoaded();
+    render(
+      <RequestUpdateDialog
+        category="generic"
+        isSaving={false}
+        onClose={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    selectStage(/custom message/i);
+    const send = screen.getByRole("button", { name: /^send$/i });
+    expect(send).toBeDisabled();
+    for (const blank of [
+      "<p><br></p>",
+      "<p>&nbsp;</p>",
+      "<p>   </p><ul><li></li></ul>",
+      "<script>alert(1)</script>",
+    ]) {
+      typeCustomMessage(blank);
+      expect(send).toBeDisabled();
+    }
+
+    typeCustomMessage("<p>Any update on your side?</p>");
+    expect(send).toBeEnabled();
+  });
+
+  it("sends the custom message's formatting", () => {
     mockTemplatesLoaded();
     const onSave = vi.fn();
     render(
@@ -149,13 +199,40 @@ describe("RequestUpdateDialog", () => {
       />,
     );
     selectStage(/custom message/i);
-    fireEvent.change(screen.getByLabelText(/custom message/i), {
-      target: { value: "Any update <on> your side?" },
-    });
+    const html =
+      "<p>Hi Team,</p>" +
+      "<p><strong>Still needed</strong> to <em>reproduce</em> the error:</p>" +
+      "<ol><li>The server log</li><li>The <code>deployment.toml</code> file</li></ol>" +
+      "<ul><li>Product version</li><li>Update level</li></ul>" +
+      '<pre spellcheck="false">sh bin/server.sh --debug</pre>' +
+      '<p>See <a href="https://example.com/docs/logs">the guide</a>.</p>';
+    typeCustomMessage(html);
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(onSave).toHaveBeenCalledWith({ stage: "custom", customContent: html });
+  });
+
+  it("strips scripts, event handlers and javascript: links from the custom message", () => {
+    mockTemplatesLoaded();
+    const onSave = vi.fn();
+    render(
+      <RequestUpdateDialog
+        category="generic"
+        isSaving={false}
+        onClose={() => {}}
+        onSave={onSave}
+      />,
+    );
+    selectStage(/custom message/i);
+    typeCustomMessage(
+      '<p onclick="alert(1)">Any <strong onmouseover="alert(1)">update</strong>?</p>' +
+        "<script>alert(1)</script>" +
+        '<ol><li><a href="javascript:alert(1)">Open</a></li></ol>',
+    );
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
     expect(onSave).toHaveBeenCalledWith({
       stage: "custom",
-      customContent: "<p>Any update &lt;on&gt; your side?</p>",
+      customContent:
+        "<p>Any <strong>update</strong>?</p><ol><li><a>Open</a></li></ol>",
     });
   });
 
@@ -195,9 +272,7 @@ describe("RequestUpdateDialog", () => {
     expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
 
     selectStage(/custom message/i);
-    fireEvent.change(screen.getByLabelText(/custom message/i), {
-      target: { value: "Checking in." },
-    });
+    typeCustomMessage("<p>Checking in.</p>");
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
     expect(onSave).toHaveBeenCalledWith({
       stage: "custom",

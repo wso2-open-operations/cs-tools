@@ -184,7 +184,8 @@ gated this way.
 
 **Request update…**, in the case's **More** menu, posts a customer-visible comment nudging the
 customer for a response — pick a first, second, or final reminder (each shown as a read-only
-preview of the exact wording that will be posted) or write a custom message instead. It's only
+preview of the exact wording that will be posted) or write a custom message instead, formatted
+the same way as a reply (images can't be uploaded and files can't be attached here). It's only
 offered while the case is **Awaiting info** or has a **Solution proposed**, since those are the
 states where a reply from the customer is actually expected.
 
