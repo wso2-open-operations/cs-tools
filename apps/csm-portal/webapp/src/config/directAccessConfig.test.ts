@@ -74,6 +74,27 @@ describe("hostAppAddressFor", () => {
     );
   });
 
+  it("puts the page on the path of a host address that has its own query", () => {
+    setConfig({ CSM_PORTAL_HOST_APP_URL: "https://host.example/csm?tenant=demo" });
+    expect(hostAppAddressFor({ ...page, pathname: "/cases/123", search: "?tab=activity", hash: "#description" })).toBe(
+      "https://host.example/csm/cases/123?tenant=demo&tab=activity#description",
+    );
+    expect(hostAppAddressFor(page)).toBe("https://host.example/csm?tenant=demo");
+  });
+
+  it("puts the page on the path of a host address that has its own anchor", () => {
+    setConfig({ CSM_PORTAL_HOST_APP_URL: "https://host.example/csm#top" });
+    expect(hostAppAddressFor({ ...page, pathname: "/cases/123" })).toBe("https://host.example/csm/cases/123#top");
+    expect(hostAppAddressFor({ ...page, pathname: "/cases/123", hash: "#description" })).toBe(
+      "https://host.example/csm/cases/123#description",
+    );
+  });
+
+  it("works for a host that mounts the portal at its root", () => {
+    setConfig({ CSM_PORTAL_HOST_APP_URL: "https://host.example/" });
+    expect(hostAppAddressFor({ ...page, pathname: "/cases/123" })).toBe("https://host.example/cases/123");
+  });
+
   it("has nowhere to send anyone without a usable host address", () => {
     setConfig({});
     expect(hostAppAddressFor(page)).toBeNull();

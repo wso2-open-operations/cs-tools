@@ -30,21 +30,27 @@ export function directAccessEnabled(): boolean {
   return raw !== false;
 }
 
+/** The configured host address as a URL, or null when it is unusable. */
+function parseHostAppUrl(): URL | null {
+  const raw = window.config?.CSM_PORTAL_HOST_APP_URL;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Where the portal is mounted in the host application, e.g.
  * "https://host.example/csm", from `window.config.CSM_PORTAL_HOST_APP_URL`.
  * Returns "" when it is unset or not an absolute http(s) URL. Read at call time.
  */
 export function hostAppUrl(): string {
-  const raw = window.config?.CSM_PORTAL_HOST_APP_URL;
-  if (typeof raw !== "string" || !raw.trim()) return "";
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
-    return url.href.replace(/\/+$/, "");
-  } catch {
-    return "";
-  }
+  return parseHostAppUrl()?.href ?? "";
 }
 
 /** The parts of the current address that say which page is open. */
@@ -62,8 +68,15 @@ export interface PageAddress {
  * lead back here.
  */
 export function hostAppAddressFor(page: PageAddress): string | null {
-  const base = hostAppUrl();
-  if (!base || new URL(base).origin === page.origin) return null;
-  const path = page.pathname === "/" ? "" : page.pathname;
-  return `${base}${path}${page.search}${page.hash}`;
+  const target = parseHostAppUrl();
+  if (!target || target.origin === page.origin) return null;
+  // The page goes onto the path, never onto the address as text: a host
+  // address may carry a query or an anchor of its own, and the page's path
+  // would otherwise land inside them.
+  const mount = target.pathname.replace(/\/+$/, "");
+  target.pathname = `${mount}${page.pathname === "/" ? "" : page.pathname}`;
+  // The host address keeps its own query; the page's is added after it.
+  new URLSearchParams(page.search).forEach((value, key) => target.searchParams.append(key, value));
+  if (page.hash) target.hash = page.hash;
+  return target.href;
 }
