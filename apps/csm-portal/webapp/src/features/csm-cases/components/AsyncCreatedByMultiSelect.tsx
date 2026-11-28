@@ -14,7 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Box, Checkbox, ListItemText, TextField, Tooltip } from "@wso2/oxygen-ui";
+import {
+  Autocomplete,
+  Box,
+  Checkbox,
+  Chip,
+  ListItemText,
+  TextField,
+  Tooltip,
+  alpha,
+} from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
@@ -38,6 +47,16 @@ interface AsyncCreatedByMultiSelectProps {
   roleIds?: string[];
   /** See {@link roleIds}; restrict to active accounts only. */
   active?: boolean;
+  /** Defaults suit the advanced-filter row; a form field passes its own. */
+  id?: string;
+  label?: string;
+  required?: boolean;
+  disabled?: boolean;
+  /**
+   * True (the default, for the narrow filter row): the picked names as one
+   * comma-separated line. False: one removable chip per person.
+   */
+  compactSelectedValues?: boolean;
 }
 
 /**
@@ -54,6 +73,11 @@ export default function AsyncCreatedByMultiSelect({
   onChange,
   roleIds,
   active,
+  id = "advanced-filter-created-by",
+  label = "Value(s)",
+  required = false,
+  disabled = false,
+  compactSelectedValues = true,
 }: AsyncCreatedByMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -100,7 +124,7 @@ export default function AsyncCreatedByMultiSelect({
     <Autocomplete<CreatedByOption, true>
       multiple
       size="small"
-      id="advanced-filter-created-by"
+      id={id}
       options={options}
       value={selectedOptions}
       open={open}
@@ -108,6 +132,7 @@ export default function AsyncCreatedByMultiSelect({
       onClose={() => setOpen(false)}
       loading={isFetching && users.length === 0}
       disableCloseOnSelect
+      disabled={disabled}
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.name}
       isOptionEqualToValue={(opt, val) => opt.email === val.email}
@@ -131,7 +156,32 @@ export default function AsyncCreatedByMultiSelect({
             ? "Loading…"
             : "No matches"
       }
-      renderTags={(value) => {
+      renderTags={(value, getTagProps) => {
+        if (!compactSelectedValues) {
+          return value.map((option, index) => {
+            const { key, ...tagProps } = getTagProps({ index });
+            return (
+              <Chip
+                key={key}
+                size="small"
+                label={option.name}
+                title={option.email}
+                {...tagProps}
+                // The theme's main colour, so the chips match whichever theme
+                // the user picked.
+                sx={(theme) => ({
+                  borderRadius: "10px",
+                  bgcolor: alpha(theme.palette.primary.main, 0.14),
+                  border: `1px solid ${alpha(theme.palette.primary.main, 0.5)}`,
+                  "& .MuiChip-deleteIcon": {
+                    color: theme.palette.primary.main,
+                    "&:hover": { color: alpha(theme.palette.primary.main, 0.7) },
+                  },
+                })}
+              />
+            );
+          });
+        }
         const displayText = value.map((o) => o.name).join(", ");
         const content = (
           <Box
@@ -166,7 +216,8 @@ export default function AsyncCreatedByMultiSelect({
       renderInput={(params) => (
         <TextField
           {...params}
-          label="Value(s)"
+          label={label}
+          required={required}
           placeholder={values.length ? undefined : "Search people…"}
         />
       )}
