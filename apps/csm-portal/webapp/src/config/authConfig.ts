@@ -174,6 +174,19 @@ declare global {
        * `attachmentLimitsConfig.ts`.
        */
       CSM_PORTAL_DOWNLOAD_TO_DISK?: boolean | string;
+      /**
+       * Optional. Whether the portal may be opened at its own address. On
+       * unless `false` (boolean or "false"). Turn it off where the portal is
+       * reached through a host application. See `directAccessConfig.ts`.
+       */
+      CSM_PORTAL_DIRECT_ACCESS_ENABLED?: boolean | string;
+      /**
+       * Optional. Where the portal is mounted in the host application, e.g.
+       * "https://host.example/csm". With direct access off, someone who opens
+       * the portal directly is sent to the same page there. See
+       * `directAccessConfig.ts`.
+       */
+      CSM_PORTAL_HOST_APP_URL?: string;
     };
   }
 }

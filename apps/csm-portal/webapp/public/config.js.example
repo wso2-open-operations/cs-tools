@@ -271,6 +271,19 @@ window.config = {
   // turns it off; true (or leaving it unset) keeps it on.
   // CSM_PORTAL_DOWNLOAD_TO_DISK: true,
 
+  // Whether the portal can be opened at its own address. Optional: only the
+  // boolean false or the string "false" turns it off; true (or leaving it
+  // unset) keeps it on. Turn it off where people reach the portal through a
+  // host application, and back on when they need it directly, e.g. while the
+  // host is unavailable. Inside the host the portal works either way. This
+  // steers people to the host; it is not an access control, since the host
+  // loads the portal's files from this same deployment.
+  // CSM_PORTAL_DIRECT_ACCESS_ENABLED: true,
+  // Where the portal is mounted in the host application. With direct access
+  // off, someone who opens the portal directly is sent to the same page there.
+  // Unset, they see a short notice instead.
+  // CSM_PORTAL_HOST_APP_URL: "https://<your-host-app>/csm",
+
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded
   // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when
