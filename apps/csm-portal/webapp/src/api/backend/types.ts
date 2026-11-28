@@ -5461,3 +5461,31 @@ export interface BeSpecialistHandoffSummary {
   githubIssueExpected?: boolean;
 }
 
+
+/** Which comment box entry a saved comment template is offered for. */
+export type BeCommentTemplateAppliesTo = "COMMENT" | "WORK_NOTE" | "BOTH";
+
+/**
+ * A saved comment template (`GET /users/me/case-comment-templates`). `shared`
+ * is true for a template every engineer sees (admins write those), false for
+ * one of the caller's own. `body` is comment box HTML.
+ */
+export interface BeCommentTemplate {
+  id: string;
+  name: string;
+  body: string;
+  appliesTo: BeCommentTemplateAppliesTo;
+  shared: boolean;
+  createdOn: string;
+  updatedOn: string;
+}
+
+export interface BeCommentTemplateList {
+  templates: BeCommentTemplate[];
+}
+
+export interface BeCommentTemplatePayload {
+  name: string;
+  body: string;
+  appliesTo: BeCommentTemplateAppliesTo;
+}

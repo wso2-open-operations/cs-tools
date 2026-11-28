@@ -202,6 +202,7 @@ func main() {
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
 	commentHandler := handler.NewCommentHandler(customerEntityClient)
+	commentTemplateHandler := handler.NewCommentTemplateHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
 	// are read with os.Getenv (never mustEnv) — a missing or malformed value
@@ -482,6 +483,17 @@ func main() {
 	route("POST /cases/{id}/comments", handler.PermCreateWorkNote, caseHandler.CreateCaseComment)
 	route("POST /cases/{id}/request-update", handler.PermWrite, caseHandler.RequestCaseUpdate)
 	route("GET /case-update-request-templates", handler.PermView, caseHandler.GetCaseUpdateRequestTemplates)
+	// Saved case comment templates for the comment box. Anyone who can post a
+	// comment or a work note (PermCreateWorkNote, the floor of POST
+	// /cases/{id}/comments above) lists them and manages their own; only an
+	// admin writes the shared ones.
+	route("GET /users/me/case-comment-templates", handler.PermCreateWorkNote, commentTemplateHandler.ListCommentTemplates)
+	route("POST /users/me/case-comment-templates", handler.PermCreateWorkNote, commentTemplateHandler.CreatePersonalCommentTemplate)
+	route("PATCH /users/me/case-comment-templates/{id}", handler.PermCreateWorkNote, commentTemplateHandler.UpdatePersonalCommentTemplate)
+	route("DELETE /users/me/case-comment-templates/{id}", handler.PermCreateWorkNote, commentTemplateHandler.DeletePersonalCommentTemplate)
+	route("POST /case-comment-templates", handler.PermAdmin, commentTemplateHandler.CreateSharedCommentTemplate)
+	route("PATCH /case-comment-templates/{id}", handler.PermAdmin, commentTemplateHandler.UpdateSharedCommentTemplate)
+	route("DELETE /case-comment-templates/{id}", handler.PermAdmin, commentTemplateHandler.DeleteSharedCommentTemplate)
 	route("POST /cases/{id}/comments/search", handler.PermViewSharedEntity, caseHandler.SearchCaseComments)
 	// Generic comment edit/delete — applies to a comment by id regardless of
 	// which aggregate (case, change request, incident, ...) it was created

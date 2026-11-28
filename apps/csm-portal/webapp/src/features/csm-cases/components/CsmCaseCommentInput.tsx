@@ -69,6 +69,7 @@ import {
 import { PartialSendError } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
+import CommentTemplatesMenu from "@features/comment-templates/components/CommentTemplatesMenu";
 
 /** A file staged for upload, with the display name chosen in the modal. */
 export interface CommentAttachmentDraft {
@@ -449,6 +450,23 @@ export default function CsmCaseCommentInput({
   // per mount).
   const [editorMountKey, setEditorMountKey] = useState(0);
 
+  // A picked comment template waiting to be inserted at the editor's cursor.
+  // Cleared once the editor has inserted it, so a later remount (source
+  // toggle, send) never inserts it a second time.
+  const [templateInsert, setTemplateInsert] = useState<{ html: string; nonce: number } | undefined>();
+  const clearTemplateInsert = useCallback(() => setTemplateInsert(undefined), []);
+  const insertTemplate = useCallback(
+    (templateHtml: string) => {
+      if (sourceMode) {
+        // Raw HTML mode has no cursor of ours to insert at: append it.
+        setHtml(isBlank(html) ? templateHtml : `${html}\n${templateHtml}`);
+        return;
+      }
+      setTemplateInsert({ html: templateHtml, nonce: Date.now() });
+    },
+    [sourceMode, html, setHtml],
+  );
+
   // The editor refuses an image that would pass the limit, but a draft can still
   // hold too many (HTML source mode), so Send checks the draft itself too.
   const overImageLimit = (html.match(IMG_TAG)?.length ?? 0) > MAX_COMMENT_IMAGES;
@@ -687,6 +705,12 @@ export default function CsmCaseCommentInput({
               : "Reply to this case…"}
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <CommentTemplatesMenu
+            internal={internal}
+            draftHtml={html}
+            disabled={disabled || submitting}
+            onInsert={insertTemplate}
+          />
           <FormControlLabel
             control={
               <Switch
@@ -816,6 +840,8 @@ export default function CsmCaseCommentInput({
           }}
           onPasteError={onPasteError}
           onImageUpload={onImageUpload}
+          insertHtml={templateInsert}
+          onHtmlInserted={clearTemplateInsert}
         />
       )}
 

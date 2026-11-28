@@ -102,6 +102,13 @@ func TestPostgresOnlyRoutesAreUnregisteredWithoutADatabase(t *testing.T) {
 		{"list custom dashboard team shares", http.MethodGet, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares", ""},
 		{"add custom dashboard team share", http.MethodPut, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
 		{"remove custom dashboard team share", http.MethodDelete, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
+		{"list case comment templates", http.MethodGet, "/users/me/case-comment-templates", ""},
+		{"create personal case comment template", http.MethodPost, "/users/me/case-comment-templates", `{}`},
+		{"update personal case comment template", http.MethodPatch, "/users/me/case-comment-templates/5e636a12-0000-4000-8000-000000000001", `{}`},
+		{"delete personal case comment template", http.MethodDelete, "/users/me/case-comment-templates/5e636a12-0000-4000-8000-000000000001", ""},
+		{"create shared case comment template", http.MethodPost, "/case-comment-templates", `{}`},
+		{"update shared case comment template", http.MethodPatch, "/case-comment-templates/5e636a12-0000-4000-8000-000000000001", `{}`},
+		{"delete shared case comment template", http.MethodDelete, "/case-comment-templates/5e636a12-0000-4000-8000-000000000001", ""},
 	}
 
 	for _, tt := range tests {

@@ -176,6 +176,7 @@ export const ApiQueryKeys = {
   CSM_ADMIN_CASE_DEESCALATORS: "csm-admin-case-deescalators",
   CSM_PRODUCT_REPO_MAPPING: "csm-product-repo-mapping",
   SAVED_FILTER_VIEWS: "saved-filter-views",
+  COMMENT_TEMPLATES: "comment-templates",
   // Product catalogue (Products section). Each hook's key is
   // [PRODUCT_CATALOG, <one of the keys below>, ...], so a saved change can refresh
   // them all by the shared first segment.

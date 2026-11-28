@@ -36,6 +36,8 @@ failure class turns up during review that isn't on this list, add it here in the
 
 ## API design and naming
 
+- [ ] After editing `openapi.yaml`, it still parses (`.github/scripts/check-openapi-specs.py`, needs
+      PyYAML) — response blocks pasted under the next path key instead of the operation broke it.
 - [ ] New endpoint: name/shape checked against GitHub's REST API conventions
       (https://docs.github.com/en/rest) — plural-noun resources, nesting for ownership, the HTTP
       verb carries the action (no verbs in paths), consistent query-param names.

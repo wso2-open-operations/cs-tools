@@ -12303,6 +12303,30 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
 
+## Saved case comment templates (`/users/me/case-comment-templates`, `/case-comment-templates`)
+
+Reusable comment and work note text for the CSM portal comment box (migration 0293,
+`case_comment_template`). A row with `owner_user_id` set is that user's personal template; NULL is a
+shared one. `applies_to` is `COMMENT`, `WORK_NOTE` or `BOTH`; the body is the comment box's HTML,
+stored as sent (at most 20000 bytes) and never rendered here.
+
+- **Every route is `internalOnly`**: the customer portal never reaches them. Postgres-only (not registered without a pool).
+- **The owner is the validated `x-user-id-token`'s user** (`auth.IdentityFromContext(...).UserEmail`, then
+  `GetUserByEmail`), never a body field, and every single-template query matches `owner_user_id IS NOT
+  DISTINCT FROM` the owner as well as the id. So the personal routes can only reach the caller's own
+  templates and the shared routes only the shared ones; anything else is a 404, never a 403, so an id
+  reveals nothing.
+- **Shared writes only through the CSM portal backend** (`sharedWriter`): a signed-in person AND the
+  `CSM_PORTAL_BACKEND_CLIENT_ID` client, the same rule as the portal banners and de-escalator grants. That backend
+  admits admins only (`PermAdmin`); this service holds no portal role vocabulary to check the role itself. An
+  internal person calling directly with their own token, another app, or any caller when the client id is unset
+  is refused with 403. The local compose stack leaves that id unset on purpose, so shared writes are refused
+  there unless it is set.
+- **The cap is race-safe**: `Create` takes a per-owner `pg_advisory_xact_lock`, counts and inserts in one
+  transaction.
+- Names are unique per owner ignoring case (index `case_comment_template_owner_name`, mapped to 409); the
+  shared set counts as one owner. Caps: 200 personal per user, 500 shared.
+
 ## Product catalogue (products API, Postgres only)
 
 The product and EOL data the wso2.com Support Matrix and Release Matrix publish (it used to come from the

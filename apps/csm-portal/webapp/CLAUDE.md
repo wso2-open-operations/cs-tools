@@ -719,6 +719,29 @@ In `ChangeRequestApprovals`, each row's **Assignment group** is a link-button (`
 - Under 68px per stage the row scrolls **inside its own container** (centred on the current stage), never the page. Test helpers that read a stage's label must drop the hidden status suffix (`stepLabel` in `CsmChangeRequestDetailPage.test.tsx`; the e2e specs match `^<label>, `).
 - e2e: `change-request-lifecycle.spec.ts` asserts the stepper through the page object's `stage(label)` and the spec's `expectStages(detail, columns, flags)`, which takes the eleven columns as one letter each (`d` done, `c` current, `p` upcoming, `n` not taken, `u` history not recorded, `r` rejected by the customer) and compares them with the words the stepper reads (", done", ", current", ", upcoming", ", not taken", ", history not recorded", ", rejected by the customer"), dropping Customer Approval / Customer Review when their checkbox is off. "the stepper and the action bar in every state" (fake API) walks a Normal change through every state with the customer checkboxes on and off, asserting all eleven stages *and* the action bar (primary button, Re-schedule, "Change state" entries in order) at each; the Rollback and Canceled screens (rolled back from Review with and without customer contacts, from the customer's rejection; canceled with no approvals, in Review after Peer / CAB, in Review after the Review stage was approved, at Customer Approval, after the customer's approval (their APPROVED stage and `hasCustomerApproved`), and by the customer's rejection) and the checkbox-off line are separate tests; the seeded-fixture describes assert CHG-FIXED-007 / -008 and the stage statuses after each customer answer.
 
+## Comment templates (the comment box's Templates menu)
+
+`features/comment-templates/` holds saved comment and work note text (`/users/me/case-comment-templates` for the
+user's own, `/case-comment-templates` for shared ones, which only admins write; the backend's 403 is the real gate,
+`isAdmin` only hides the controls). `CommentTemplatesMenu` sits in `CsmCaseCommentInput`'s header: it offers only the
+templates for the box's mode (`templatesForMode`: a public reply never gets a WORK_NOTE template), searches name and
+text, saves the draft as a template and opens the Manage dialog. The list is fetched the first time the menu opens.
+
+- **Inserting.** A picked template goes to the editor as `Editor`'s `insertHtml` (`InsertHtmlPlugin` calls
+  `$insertHtmlAsBlocks`, `insertHtmlBlocks.ts`: at the selection, else at the end, through Lexical's DOM import,
+  never innerHTML). Mid-paragraph it splits the paragraph and puts the template between the halves, so no text
+  on either side is merged into it. With the cursor in a list or a code block it goes after that whole block
+  instead (a paragraph can't sit inside a list, and a code block is not split). The parent clears the request in
+  `onHtmlInserted`: the editor is remounted on some toggles, and a request left set would be inserted again. In
+  HTML-source mode the template is appended to the source text.
+- **Previews are text only** (`templatePlainText`, an inert `DOMParser` document read as `textContent`, with a
+  space after each block and `<br>`), so a template's HTML is never rendered in the list.
+- **No images in a template**: a draft's image is a local `blob:` preview until its comment is sent, so the save
+  dialog refuses a body with an `<img>`. The dialog cannot be closed while its save is in flight, so a pending
+  save never closes a newer draft.
+- Tests that render `CsmCaseCommentInput` (or a page holding it) mock `CommentTemplatesMenu` to `() => null`: it needs a
+  query client and the current user. Its own behaviour is in `CommentTemplatesMenu.test.tsx`.
+
 ## Comment bodies: laid-out HTML source vs. `white-space: pre-wrap`
 
 `CsmCaseCommentBubble.tsx`'s body container is `white-space: pre-wrap` on purpose: comments authored in the rich-text editor no longer carry a per-run `pre-wrap` (see `stripWhitespaceStyleAndUnwrapSpans` in `richTextEditor.tsx`), and plain-text notes rely on it for their line breaks. The catch is HTML *source* that was laid out for reading — the shape ServiceNow stores and an engineer pastes, with a newline and indentation between every `<ul>`/`<li>`/`<p>`/`<br>` and hard wraps inside the text. `pre-wrap` prints every one of those newlines (reported live: blank gaps between bullets, ragged indented continuation lines), where a browser and ServiceNow treat them as a space.
